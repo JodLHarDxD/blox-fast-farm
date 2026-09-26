@@ -69,8 +69,13 @@ local CFG = {
 
     -- ---------- MAGNET ----------
     Magnet             = true,
-    GrabRadius         = 300,    -- spawned this close to the camp = pulled
-    GrabMax            = 12,     -- most enemies in one pile
+    -- Every loaded one of the quest species goes in the pile, however far it
+    -- is, and one that spawns while the pile is being hit joins it at once.
+    -- The pile sits at the middle of the camp's spawn points: the one spot
+    -- where the farthest pull is shortest, so every one stays in its area.
+    PullAll            = true,
+    GrabRadius         = 300,    -- PullAll off: spawned this close to the camp = pulled
+    GrabMax            = 30,     -- most enemies in one pile
     PileSpread         = 3,      -- the pile is a ring this wide, not one point
     -- Other species on your circuit that spawn IN THIS CAMP go in the pile
     -- too: free kills, and the hit call names them anyway. Only the quest
@@ -105,11 +110,12 @@ local CFG = {
     M1Between          = 4,      -- M1 swings between skills; 0 = skills whenever ready
     CastWait           = 0.45,   -- after a skill, before the next action
     EquipWait          = 0.12,   -- after a weapon swap, before using it
-    -- Fruit skills fire where the cursor points. On: the camera is turned at
-    -- the pile and the cursor parked on it for every cast.
+    -- Skills and clicks fire where the cursor points. On: while the pile is
+    -- being hit, the camera is turned every frame so the line through YOUR
+    -- cursor -- wherever it is -- goes through the pile. The cursor stays free.
     AimSkills          = true,
-    CamBack            = 14,
-    CamUp              = 6,
+    CamDistance        = 30,     -- the camera this far from the pile
+    CamPitch           = 55,     -- looking down at most this steeply (degrees)
 
     -- ---------- WEAPONS ----------
     -- [tool name] = { use, M1, Z, X, C, V, F, hold = { Z = seconds, ... } }
@@ -724,6 +730,7 @@ P.rowOf = rowOf
 -- =========================================================
 local stats = {
     kills = 0, piles = 0, quests = 0, questsDone = 0, m1 = 0, casts = 0,
+    castsTook = 0, castsMissed = 0,
     swaps = 0, flights = 0, hops = 0, pulledBack = 0, putBack = 0,
     escapes = 0, abandons = 0, probes = 0, hakiPresses = 0, startedAt = 0,
 }
@@ -998,44 +1005,98 @@ end
 -- =========================================================
 -- THE CAMERA, BORROWED FOR A CAST AND GIVEN BACK
 -- =========================================================
-local camHeld = false
-local function releaseCamera()
-    if not camHeld then return end
-    camHeld = false
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    pcall(function()
-        local _, _, hum = parts()
-        if hum then cam.CameraSubject = hum end
-        cam.CameraType = Enum.CameraType.Custom
-    end)
-end
-P.releaseCamera = releaseCamera
-
--- The camera behind and above you, looking at the pile; the cursor at the
--- centre of the screen, which is now the pile. A fruit skill cast down the
--- cursor's ray lands on it.
-local function aimCamera(targetPos)
-    local cam = workspace.CurrentCamera
-    local _, r = parts()
-    if not cam or not r then return end
-    local eye  = r.Position + Vector3.new(0, 2, 0)
-    local flat = targetPos - eye
-    flat = Vector3.new(flat.X, 0, flat.Z)
-    if flat.Magnitude < 1 then
-        -- Straight above the pile: stand the camera off along its own facing.
-        local lv = cam.CFrame.LookVector
-        flat = Vector3.new(lv.X, 0, lv.Z)
-        if flat.Magnitude < 0.1 then flat = Vector3.new(0, 0, -1) end
+local aimPixel = nil         -- a synthetic click's own point; nil = where the mouse is
+local releaseCamera, aimCamera
+do
+    local InputService = game:GetService("UserInputService")
+    local camHeld  = false
+    local camBack  = nil         -- which side of the pile the camera stands, fixed while borrowed
+    function releaseCamera()
+        camBack = nil
+        if not camHeld then return end
+        camHeld = false
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        pcall(function()
+            local _, _, hum = parts()
+            if hum then cam.CameraSubject = hum end
+            cam.CameraType = Enum.CameraType.Custom
+        end)
     end
-    local at = eye - flat.Unit * (CFG.CamBack or 14) + Vector3.new(0, CFG.CamUp or 6, 0)
-    pcall(function()
-        cam.CameraType = Enum.CameraType.Scriptable
-        camHeld = true
-        cam.CFrame = CFrame.lookAt(at, targetPos)
-        local vs = cam.ViewportSize
-        VIM:SendMouseMoveEvent(vs.X * 0.5, vs.Y * 0.5, game)
-    end)
+    P.releaseCamera = releaseCamera
+
+    -- A skill fires down the line from the camera through the cursor. Instead of
+    -- moving the cursor, the camera is turned so that line goes through the pile:
+    -- the cursor can be anywhere, the pile is under it. Yaw and pitch only (no
+    -- roll), solved exactly:
+    --   d = the cursor's direction in the camera's own frame (it depends only on
+    --       the cursor's pixel and the field of view, not on where the camera is)
+    --   t = the direction from the camera to the pile
+    --   find pitch th, yaw psi with  Ry(psi) * Rx(th) * d = t
+    --   height first (yaw leaves it alone): d.Y cos th - d.Z sin th = t.Y
+    --   then yaw turns the flat part of Rx(th)*d onto the flat part of t.
+    local function rayAim(at, target, dl)
+        local t = target - at
+        if t.Magnitude < 0.01 or dl.Magnitude < 0.01 then return CFrame.new(at) end
+        t, dl = t.Unit, dl.Unit
+        local amp = math.sqrt(dl.Y * dl.Y + dl.Z * dl.Z)
+        if amp < 1e-4 then return CFrame.lookAt(at, target) end
+        local phi = math.atan2(dl.Z, dl.Y)
+        local ac = math.acos(math.clamp(t.Y / amp, -1, 1))
+        local function wrap(x) return (x + math.pi) % (2 * math.pi) - math.pi end
+        local th1, th2 = wrap(ac - phi), wrap(-ac - phi)
+        local th = (math.abs(th1) <= math.abs(th2)) and th1 or th2
+        local z1 = dl.Y * math.sin(th) + dl.Z * math.cos(th)
+        local psi = math.atan2(t.X, t.Z) - math.atan2(dl.X, z1)
+        return CFrame.new(at) * CFrame.Angles(0, psi, 0) * CFrame.Angles(th, 0, 0)
+    end
+
+    -- Where the camera stands. Looking down at an angle e, the pile can only
+    -- be put under the cursor without rolling the view if
+    --   sin(e) <= sqrt(d.Y^2 + d.Z^2)
+    -- -- a cursor near a side edge cannot be pointed steeply down. So the
+    -- camera stands CamDistance from the pile, on `away`'s side, as high as
+    -- CamPitch, and lower when the cursor is near a side edge: the solve is
+    -- then always exact, wherever the cursor is.
+    local function aimFrame(target, away, dl)
+        local d = dl.Unit
+        local amp = math.sqrt(d.Y * d.Y + d.Z * d.Z)
+        local e = math.min(math.rad(CFG.CamPitch or 55), math.asin(math.min(amp, 1)) * 0.95)
+        local at = target + (away * math.cos(e) + Vector3.new(0, math.sin(e), 0)) * (CFG.CamDistance or 30)
+        return rayAim(at, target, d)
+    end
+
+    -- Turn the camera so the line through the cursor (or through aimPixel, for
+    -- a synthetic click) lands on targetPos. Called every frame while the pile
+    -- is being hit, and right before each cast. centre = the pile's middle.
+    function aimCamera(targetPos, centre)
+        local cam = workspace.CurrentCamera
+        local _, r = parts()
+        if not cam or not r then return end
+        -- The camera stands on your side of the pile's MIDDLE (not of the body
+        -- aimed at: that one sits on the ring, and when it dies the next one
+        -- is on another side -- the view would jump). Straight above the
+        -- middle: on the side it stood when it was borrowed -- never worked
+        -- out from its CURRENT facing, which this turns every frame.
+        local c = centre or targetPos
+        local away = Vector3.new(r.Position.X - c.X, 0, r.Position.Z - c.Z)
+        if away.Magnitude < 1 then
+            if not camBack then
+                local lv = cam.CFrame.LookVector
+                local f = Vector3.new(-lv.X, 0, -lv.Z)
+                camBack = (f.Magnitude > 0.1) and f.Unit or Vector3.new(0, 0, 1)
+            end
+            away = camBack
+        end
+        pcall(function()
+            local px = aimPixel or InputService:GetMouseLocation()
+            local ray = cam:ViewportPointToRay(px.X, px.Y)
+            local dl = cam.CFrame:VectorToObjectSpace(ray.Direction)
+            cam.CameraType = Enum.CameraType.Scriptable
+            camHeld = true
+            cam.CFrame = aimFrame(targetPos, away.Unit, dl)
+        end)
+    end
 end
 
 -- =========================================================
@@ -1326,13 +1387,161 @@ local simAt      = 0
 P.pileHeld, P.pileOwned = 0, 0
 P.simNote = sethiddenproperty and "SimulationRadius: settable" or "SimulationRadius: this executor cannot set it"
 
-local function homeOf(e)
-    local h = homePos[e.model]
-    if not h then
-        h = e.root.Position
-        homePos[e.model] = h
+local homeOf, campFor
+do
+    -- Every spawn spot seen, per species (8 studs apart): the camp's middle can
+    -- be found even when the game gives no spawn points, and it does not move
+    -- when one of them dies.
+    local seenHomes = {}
+    local function noteHome(name, h)
+        local l = seenHomes[name]
+        if not l then l = {} seenHomes[name] = l end
+        for _, p in ipairs(l) do
+            if (p - h).Magnitude < 8 then return end
+        end
+        if #l < 80 then table.insert(l, h) end
     end
-    return h
+
+    function homeOf(e)
+        local h = homePos[e.model]
+        if not h then
+            h = e.root.Position
+            homePos[e.model] = h
+            if e.name then noteHome(e.name, h) end
+        end
+        return h
+    end
+
+    -- THE CAMP'S MIDDLE. Spawn points linked when under CAMP_LINK apart are one
+    -- camp. Its middle is the centre of the smallest circle round them (flat),
+    -- at half their height span: the spot where the farthest pull is shortest --
+    -- the best chance that every one of them is still inside its own area.
+    local CAMP_LINK = 400
+
+    local function circle2(a, b)
+        local cx, cz = (a[1] + b[1]) / 2, (a[2] + b[2]) / 2
+        return cx, cz, math.sqrt((a[1] - cx) ^ 2 + (a[2] - cz) ^ 2)
+    end
+
+    local function circle3(a, b, c)
+        local bx, bz = b[1] - a[1], b[2] - a[2]
+        local cx, cz = c[1] - a[1], c[2] - a[2]
+        local d = 2 * (bx * cz - bz * cx)
+        if math.abs(d) < 1e-9 then
+            -- In a line: the widest pair holds the third.
+            local best = { circle2(a, b) }
+            for _, pr in ipairs({ { a, c }, { b, c } }) do
+                local x, z, r = circle2(pr[1], pr[2])
+                if r > best[3] then best = { x, z, r } end
+            end
+            return best[1], best[2], best[3]
+        end
+        local b2, c2 = bx * bx + bz * bz, cx * cx + cz * cz
+        local ux = (cz * b2 - bz * c2) / d
+        local uz = (bx * c2 - cx * b2) / d
+        return a[1] + ux, a[2] + uz, math.sqrt(ux * ux + uz * uz)
+    end
+
+    -- Smallest circle round flat points { {x, z}, ... } (Welzl, incremental).
+    local function enclosingCircle(pts)
+        local cx, cz, r = pts[1][1], pts[1][2], 0
+        local function inside(p)
+            return (p[1] - cx) ^ 2 + (p[2] - cz) ^ 2 <= r * r + 1e-3
+        end
+        for i = 2, #pts do
+            if not inside(pts[i]) then
+                cx, cz, r = pts[i][1], pts[i][2], 0
+                for j = 1, i - 1 do
+                    if not inside(pts[j]) then
+                        cx, cz, r = circle2(pts[i], pts[j])
+                        for k = 1, j - 1 do
+                            if not inside(pts[k]) then
+                                cx, cz, r = circle3(pts[i], pts[j], pts[k])
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return cx, cz, r
+    end
+
+    local function campsFrom(pts)
+        local n, taken, camps = #pts, {}, {}
+        for i = 1, n do
+            if not taken[i] then
+                taken[i] = true
+                local members, queue = {}, { i }
+                while #queue > 0 do
+                    local a = table.remove(queue)
+                    table.insert(members, pts[a])
+                    for b = 1, n do
+                        if not taken[b] and (pts[a] - pts[b]).Magnitude <= CAMP_LINK then
+                            taken[b] = true
+                            table.insert(queue, b)
+                        end
+                    end
+                end
+                local flat, lo, hi = {}, math.huge, -math.huge
+                for _, p in ipairs(members) do
+                    table.insert(flat, { p.X, p.Z })
+                    lo, hi = math.min(lo, p.Y), math.max(hi, p.Y)
+                end
+                local cx, cz, rad = enclosingCircle(flat)
+                local half = (hi - lo) / 2
+                table.insert(camps, {
+                    pts    = members,
+                    centre = Vector3.new(cx, lo + half, cz),
+                    reach  = math.sqrt(rad * rad + half * half),
+                })
+            end
+        end
+        return camps
+    end
+
+    local ptsCache, campsCache = {}, {}
+    local function gamePointsCached(name)
+        local c = ptsCache[name]
+        if c and os.clock() - c.at < 30 then return c.pts end
+        local pts = gamePoints(name)
+        ptsCache[name] = { pts = pts, at = os.clock() }
+        return pts
+    end
+
+    local function campsCached(key, pts)
+        local c = campsCache[key]
+        if c and c.n == #pts and os.clock() - c.at < 30 then return c.camps end
+        local camps = campsFrom(pts)
+        campsCache[key] = { n = #pts, at = os.clock(), camps = camps }
+        return camps
+    end
+
+    local function nearestCamp(camps, near)
+        local best, bd = nil, math.huge
+        for _, c in ipairs(camps) do
+            for _, p in ipairs(c.pts) do
+                local d = (p - near).Magnitude
+                if d < bd then best, bd = c, d end
+            end
+        end
+        return best, bd
+    end
+
+    -- The camp that `near` (a spawn spot) belongs to: the game's spawn points
+    -- first, the spots seen here if the game's are not near it.
+    function campFor(name, near)
+        local g = gamePointsCached(name)
+        if #g > 0 then
+            local c, d = nearestCamp(campsCached(name .. "|game", g), near)
+            if c and d <= CAMP_LINK then return c end
+        end
+        local seen = seenHomes[name]
+        if seen and #seen > 0 then
+            return (nearestCamp(campsCached(name .. "|seen", seen), near))
+        end
+        return nil
+    end
+    P.pileReach = nil
 end
 
 local function isPutBack(model)
@@ -1343,17 +1552,25 @@ local function isPutBack(model)
 end
 
 local pileFor                -- declared here, set by buildPile's caller
+local pileCur, pileNames     -- what the pile is being kept for (set by the fight)
+local pileWatch  = {}        -- model -> Humanoid of every one that was in the pile
+local pileScanAt = 0
 local function releasePile()
     releaseCamera()          -- the view must not stay on a pile being left
     pileActive, attacking = false, false
     pile, pileCentre, pileSide, pileFor = {}, nil, nil, nil
+    pileCur, pileNames = nil, nil
+    P.pileReach = nil
     P.pileHeld, P.pileOwned = 0, 0
 end
 
 -- Who goes in the pile, and where its centre is.
 -- farm_pro's rule: every LOADED one of the species counts, wherever it stands.
--- The one nearest you picks the camp; the pile is every one of the species
--- that spawned within GrabRadius of it. The table point plays no part here.
+-- PullAll (default): every one of them goes in, however far, and the pile
+-- sits at the middle of the camp (campFor). Off: only the ones that spawned
+-- within GrabRadius of the anchor, piled at the middle of their spawns.
+-- The anchor -- the one nearest the pile already standing, else nearest you --
+-- says which camp. The table point plays no part here.
 -- cur = { name, spot }; names = every species on the circuit.
 local function buildPile(cur, names)
     local _, r = parts()
@@ -1371,6 +1588,7 @@ local function buildPile(cur, names)
     end
     if #quest == 0 then return {}, nil end
 
+    if pileFor == cur.name and pileCentre then from = pileCentre end
     local anchor, ad = nil, math.huge
     for _, e in ipairs(quest) do
         local d = (e.root.Position - from).Magnitude
@@ -1385,7 +1603,7 @@ local function buildPile(cur, names)
     local home = homeOf(anchor)
     local group = {}
     for _, e in ipairs(quest) do
-        if (homeOf(e) - home).Magnitude <= (CFG.GrabRadius or 300) then
+        if CFG.PullAll or (homeOf(e) - home).Magnitude <= (CFG.GrabRadius or 300) then
             table.insert(group, e)
         end
     end
@@ -1395,9 +1613,17 @@ local function buildPile(cur, names)
     local cap = math.max(1, math.floor(CFG.GrabMax or 12))
     while #group > cap do table.remove(group) end
 
-    local sum = Vector3.zero
-    for _, e in ipairs(group) do sum += homeOf(e) end
-    local centre = sum / #group
+    local centre
+    local camp = CFG.PullAll and campFor(cur.name, home) or nil
+    if camp then
+        centre = camp.centre
+        P.pileReach = camp.reach
+    else
+        local sum = Vector3.zero
+        for _, e in ipairs(group) do sum += homeOf(e) end
+        centre = sum / #group
+        P.pileReach = nil
+    end
 
     for _, e in ipairs(others) do
         if #group >= cap then break end
@@ -1408,10 +1634,29 @@ local function buildPile(cur, names)
     return group, centre
 end
 
+-- Look again who is loaded: a new spawn joins the pile within a tenth of a
+-- second. Called from the fight AND from the frame loop below, because the
+-- fight is busy for most of a second on every cast and every M1 probe.
+local function refreshPile()
+    if not pileCur then return end
+    pileScanAt = os.clock()
+    local list, centre = buildPile(pileCur, pileNames)
+    pile = list
+    if centre and (not pileCentre or pileFor ~= pileCur.name
+        or (centre - pileCentre).Magnitude > 2) then
+        pileCentre, pileFor = centre, pileCur.name
+    end
+    for _, e in ipairs(list) do
+        pileWatch[e.model] = e.hum
+        countedDead[e.model] = nil   -- alive: a death on record was an earlier life
+    end
+end
+
 -- Every frame, after physics.
 local function magnetTick()
     if not (P.running and pileActive and CFG.Magnet and pileCentre) then return end
     local now = os.clock()
+    if now - pileScanAt > 0.1 then refreshPile() end
     if now - simAt > 1 then
         simAt = now
         if sethiddenproperty then
@@ -1463,6 +1708,16 @@ local function checkPutBack()
             if h then pcall(function() e.root.CFrame = CFrame.new(h) end) end
         end
     end
+end
+
+-- Where skills are aimed: a body in the pile, not its middle. The ring leaves
+-- the middle empty, and a line through empty air lands on whatever is behind
+-- the pile instead -- the ground, or the sky over a floating camp.
+local function aimPoint()
+    for _, e in ipairs(pile) do
+        if e.model.Parent and e.hum.Health > 0 then return e.root.Position end
+    end
+    return pileCentre
 end
 
 -- =========================================================
@@ -1720,74 +1975,81 @@ end
 -- Any of these can stop working with a game update, so none is trusted:
 -- each is fired at the pile for a moment and the first that takes HP off is
 -- kept, per weapon. The panel says which.
-local HIT_TAG = "078da341"
 local m1Plan  = {}           -- [weapon] = chosen way, or false (nothing landed)
 P.m1Notes     = {}
 local lastProbeMethod = CFG.M1Method
 
-local function hitTargets()
-    local _, r = parts()
-    if not r then return {} end
-    local out = {}
-    local range = CFG.HitRange or 60
-    for _, e in ipairs(pile) do
-        if e.model.Parent and e.hum.Health > 0
-            and (e.root.Position - r.Position).Magnitude <= range then
-            table.insert(out, e)
+local fireM1
+do
+    local HIT_TAG = "078da341"
+    local function hitTargets()
+        local _, r = parts()
+        if not r then return {} end
+        local out = {}
+        local range = CFG.HitRange or 60
+        for _, e in ipairs(pile) do
+            if e.model.Parent and e.hum.Health > 0
+                and (e.root.Position - r.Position).Magnitude <= range then
+                table.insert(out, e)
+            end
         end
+        return out
     end
-    return out
-end
 
-local function m1Remote(variant, list)
-    local ra = netRemote("RE", "RegisterAttack")
-    local rh = netRemote("RE", "RegisterHit")
-    if not (ra and rh) or #list == 0 then return false end
-    local head = list[1].model:FindFirstChild("Head") or list[1].root
-    local hits = {}
-    for _, e in ipairs(list) do
+    local function m1Remote(variant, list)
+        local ra = netRemote("RE", "RegisterAttack")
+        local rh = netRemote("RE", "RegisterHit")
+        if not (ra and rh) or #list == 0 then return false end
+        local head = list[1].model:FindFirstChild("Head") or list[1].root
+        local hits = {}
+        for _, e in ipairs(list) do
+            if variant == "new" then
+                table.insert(hits, { e.model, e.root })
+                table.insert(hits, e.model)
+            else
+                table.insert(hits, { e.model, e.model:FindFirstChild("Head") or e.root })
+            end
+        end
+        pcall(function() ra:FireServer(0) end)
         if variant == "new" then
-            table.insert(hits, { e.model, e.root })
-            table.insert(hits, e.model)
+            pcall(function() rh:FireServer(head, hits, nil, HIT_TAG) end)
         else
-            table.insert(hits, { e.model, e.model:FindFirstChild("Head") or e.root })
+            pcall(function() rh:FireServer(head, hits) end)
         end
+        return true
     end
-    pcall(function() ra:FireServer(0) end)
-    if variant == "new" then
-        pcall(function() rh:FireServer(head, hits, nil, HIT_TAG) end)
-    else
-        pcall(function() rh:FireServer(head, hits) end)
-    end
-    return true
-end
 
-local function m1Click(tool, list)
-    local rem = tool and tool:FindFirstChild("LeftClickRemote")
-    local _, r = parts()
-    if not rem or not r or #list == 0 then return false end
-    for _, e in ipairs(list) do
-        local d = e.root.Position - r.Position
-        if d.Magnitude > 0.1 then pcall(function() rem:FireServer(d.Unit, 1) end) end
+    local function m1Click(tool, list)
+        local rem = tool and tool:FindFirstChild("LeftClickRemote")
+        local _, r = parts()
+        if not rem or not r or #list == 0 then return false end
+        for _, e in ipairs(list) do
+            local d = e.root.Position - r.Position
+            if d.Magnitude > 0.1 then pcall(function() rem:FireServer(d.Unit, 1) end) end
+        end
+        return true
     end
-    return true
-end
 
-local function fireM1(way, tool)
-    local list = hitTargets()
-    if way.path == "remote" then
-        m1Remote(way.variant, list)
-    elseif way.path == "click" then
-        m1Click(tool, list)
-    else
-        -- A click lands where the cursor points. The cursor sits at the centre
-        -- of the screen, so the centre of the screen has to be the pile, not
-        -- whatever the free camera happens to be looking at.
-        if CFG.AimSkills and pileCentre then aimCamera(pileCentre) end
-        pressM1()
+    function fireM1(way, tool)
+        local list = hitTargets()
+        if way.path == "remote" then
+            m1Remote(way.variant, list)
+        elseif way.path == "click" then
+            m1Click(tool, list)
+        else
+            -- The click is sent at the middle of the screen, so for this click the
+            -- line through the middle has to be the one that lands on the pile.
+            local cam = workspace.CurrentCamera
+            if CFG.AimSkills and pileCentre and cam then
+                aimPixel = cam.ViewportSize * 0.5
+                aimCamera(aimPoint(), pileCentre)
+            end
+            pressM1()
+            aimPixel = nil
+        end
+        stats.m1 += 1
+        actions += 1
     end
-    stats.m1 += 1
-    actions += 1
 end
 
 local function describeWay(way)
@@ -1886,6 +2148,7 @@ end
 -- just keeps going. Nothing ready and no M1 on anywhere: wait.
 local m1Count    = 0
 P.nextNote = ""
+P.lastCast = "none yet"
 
 local function castSkill(u, k)
     if not equip(u.name) then return false end
@@ -1896,7 +2159,7 @@ local function castSkill(u, k)
         setPose((t == "Melee" or t == "Sword") and "melee" or "safe")
     end
     if CFG.AimSkills and pileCentre then
-        aimCamera(pileCentre)
+        aimCamera(aimPoint(), pileCentre)
         task.wait()
     end
     holdKey(KEYCODE[k], (u.cfg.hold and u.cfg.hold[k]) or 0.05)
@@ -1905,6 +2168,17 @@ local function castSkill(u, k)
     stats.casts += 1
     actions += 1
     task.wait(CFG.CastWait or 0.45)
+    -- Did it really fire? A skill that fired has its bar cooling now.
+    local b = barReady(u.name, k)
+    if b == false then
+        stats.castsTook += 1
+        P.lastCast = u.name .. " " .. k .. ": fired (its bar is cooling)"
+    elseif b == true then
+        stats.castsMissed += 1
+        P.lastCast = u.name .. " " .. k .. ": key sent, the skill did NOT fire"
+    else
+        P.lastCast = u.name .. " " .. k .. ": key sent (no bar to check)"
+    end
     return true
 end
 
@@ -2215,144 +2489,147 @@ end
 -- For the last two an invisible floor is kept at the surface, under your
 -- feet, following you every frame; if you are already under the surface you
 -- are lifted onto it. The panel says which one it found.
-local DEEP_Y = -1000
-local deepNote = "not down there"
-local deepSurf, deepSurfAt, deepLiftAt = nil, 0, 0
-local slabOrig = {}
-P.deepLifts = 0
-P.deepNote = function() return deepNote end
+local parkFloor, deepTick
+do
+    local DEEP_Y = -1000
+    local deepNote = "not down there"
+    local deepSurf, deepSurfAt, deepLiftAt = nil, 0, 0
+    local slabOrig = {}
+    P.deepLifts = 0
+    P.deepNote = function() return deepNote end
 
-local function deepExcl()
-    local excl = {}
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl.Character then table.insert(excl, pl.Character) end
+    local function deepExcl()
+        local excl = {}
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Character then table.insert(excl, pl.Character) end
+        end
+        local enemies = workspace:FindFirstChild("Enemies")
+        if enemies then table.insert(excl, enemies) end
+        if waterFloor then table.insert(excl, waterFloor) end
+        return excl
     end
-    local enemies = workspace:FindFirstChild("Enemies")
-    if enemies then table.insert(excl, enemies) end
-    if waterFloor then table.insert(excl, waterFloor) end
-    return excl
-end
 
--- The highest terrain water in this column between yLo and yHi, or nil; and
--- whether it reached the very top of the window (the surface is higher).
-local function terrainWaterTop(x, z, yLo, yHi)
-    local region = Region3.new(Vector3.new(x - 2, yLo, z - 2),
-        Vector3.new(x + 2, yHi, z + 2)):ExpandToGrid(4)
-    local mats, occs = workspace.Terrain:ReadVoxels(region, 4)
-    local sz = mats.Size
-    local minY = region.CFrame.Position.Y - region.Size.Y / 2
-    for iy = sz.Y, 1, -1 do
-        for ix = 1, sz.X do
-            for iz = 1, sz.Z do
-                if mats[ix][iy][iz] == Enum.Material.Water then
-                    return minY + (iy - 1) * 4 + 4 * math.min(1, occs[ix][iy][iz] or 1),
-                        iy == sz.Y
+    -- The highest terrain water in this column between yLo and yHi, or nil; and
+    -- whether it reached the very top of the window (the surface is higher).
+    local function terrainWaterTop(x, z, yLo, yHi)
+        local region = Region3.new(Vector3.new(x - 2, yLo, z - 2),
+            Vector3.new(x + 2, yHi, z + 2)):ExpandToGrid(4)
+        local mats, occs = workspace.Terrain:ReadVoxels(region, 4)
+        local sz = mats.Size
+        local minY = region.CFrame.Position.Y - region.Size.Y / 2
+        for iy = sz.Y, 1, -1 do
+            for ix = 1, sz.X do
+                for iz = 1, sz.Z do
+                    if mats[ix][iy][iz] == Enum.Material.Water then
+                        return minY + (iy - 1) * 4 + 4 * math.min(1, occs[ix][iy][iz] or 1),
+                            iy == sz.Y
+                    end
                 end
             end
         end
-    end
-    return nil
-end
-
--- Water parts in this column: the top of the highest one you would sink into
--- (not collidable, named water or made of water), and any floor slab named
--- WaterBase.
-local function partWater(pos, yLo, yHi)
-    local op = OverlapParams.new()
-    op.FilterType = Enum.RaycastFilterType.Exclude
-    op.FilterDescendantsInstances = deepExcl()
-    op.RespectCanCollide = false
-    local hits = workspace:GetPartBoundsInBox(CFrame.new(pos.X, (yLo + yHi) / 2, pos.Z),
-        Vector3.new(4, yHi - yLo, 4), op)
-    local top, slab = nil, nil
-    for _, part in ipairs(hits) do
-        local n = string.lower(part.Name)
-        if string.find(n, "waterbase", 1, true) then
-            slab = slab or part
-        elseif not part.CanCollide and (string.find(n, "water", 1, true)
-            or part.Material == Enum.Material.Water) then
-            local t = part.Position.Y + part.Size.Y / 2
-            if t <= yHi and (not top or t > top) then top = t end
-        end
-    end
-    return top, slab
-end
-
-local function parkFloor()
-    if waterFloor and waterFloor.Parent then waterFloor.Parent = nil end
-end
-
-local function deepTick()
-    -- While the farm runs the body is held by the lock; a lift here
-    -- would fight it. Manual play still gets the deep-sea floor.
-    if P.running then parkFloor() return end
-    local _, r, h = parts()
-    if not r or not h then parkFloor() return end
-    local pos, now = r.Position, os.clock()
-    if pos.Y > DEEP_Y then
-        parkFloor()
-        deepSurf, deepNote = nil, "not down there"
-        return
+        return nil
     end
 
-    -- Read the surface ten times a second; follow it every frame.
-    if now - deepSurfAt > 0.1 then
-        deepSurfAt = now
-        local yLo, yHi = pos.Y - 60, pos.Y + 12
-        local okT, tw, capped = pcall(terrainWaterTop, pos.X, pos.Z, yLo, yHi)
-        if not okT then tw, capped = nil, false end
-        -- Deep under: the water fills the window to its top, so the surface
-        -- is higher still. Look further up, 64 studs at a time. Still water
-        -- 256 up is the ocean itself, not a sea to stand on: no floor.
-        local climbs = 0
-        while tw and capped and climbs < 4 do
-            climbs += 1
-            local ok2, t2, c2 = pcall(terrainWaterTop, pos.X, pos.Z, tw - 4, tw + 64)
-            if not ok2 or not t2 then break end
-            tw, capped = t2, c2
-        end
-        if tw and capped then tw = nil end
-        local okP, pw, slab = pcall(partWater, pos, yLo, yHi)
-        if not okP then pw, slab = nil, nil end
-        if slab then
-            local o = slabOrig[slab] or slab.Size.Y
-            slabOrig[slab] = o
-            if math.abs(slab.Size.Y - (o + 32)) > 0.5 then
-                slab.Size = Vector3.new(slab.Size.X, o + 32, slab.Size.Z)
+    -- Water parts in this column: the top of the highest one you would sink into
+    -- (not collidable, named water or made of water), and any floor slab named
+    -- WaterBase.
+    local function partWater(pos, yLo, yHi)
+        local op = OverlapParams.new()
+        op.FilterType = Enum.RaycastFilterType.Exclude
+        op.FilterDescendantsInstances = deepExcl()
+        op.RespectCanCollide = false
+        local hits = workspace:GetPartBoundsInBox(CFrame.new(pos.X, (yLo + yHi) / 2, pos.Z),
+            Vector3.new(4, yHi - yLo, 4), op)
+        local top, slab = nil, nil
+        for _, part in ipairs(hits) do
+            local n = string.lower(part.Name)
+            if string.find(n, "waterbase", 1, true) then
+                slab = slab or part
+            elseif not part.CanCollide and (string.find(n, "water", 1, true)
+                or part.Material == Enum.Material.Water) then
+                local t = part.Position.Y + part.Size.Y / 2
+                if t <= yHi and (not top or t > top) then top = t end
             end
         end
-        deepSurf = tw or pw
-        if tw and pw then deepSurf = math.max(tw, pw) end
-        if deepSurf then
-            deepNote = string.format("%s at Y %.0f - standing on it",
-                tw and "terrain water" or ("water part"), deepSurf)
-        elseif slab then
-            deepNote = "deep floor slab '" .. slab.Name .. "' raised"
-        else
-            deepNote = "no water under you here"
+        return top, slab
+    end
+
+    function parkFloor()
+        if waterFloor and waterFloor.Parent then waterFloor.Parent = nil end
+    end
+
+    function deepTick()
+        -- While the farm runs the body is held by the lock; a lift here
+        -- would fight it. Manual play still gets the deep-sea floor.
+        if P.running then parkFloor() return end
+        local _, r, h = parts()
+        if not r or not h then parkFloor() return end
+        local pos, now = r.Position, os.clock()
+        if pos.Y > DEEP_Y then
+            parkFloor()
+            deepSurf, deepNote = nil, "not down there"
+            return
         end
-    end
-    if not deepSurf then parkFloor() return end
 
-    if not waterFloor then
-        local f = Instance.new("Part")
-        f.Name = "BFP_WaterFloor"
-        f.Anchored, f.CanCollide, f.CanTouch = true, true, false
-        f.Transparency = 1
-        f.Size = Vector3.new(24, 1, 24)
-        waterFloor = f
-    end
-    waterFloor.CFrame = CFrame.new(pos.X, deepSurf - 0.5, pos.Z)
-    if waterFloor.Parent ~= workspace then waterFloor.Parent = workspace end
+        -- Read the surface ten times a second; follow it every frame.
+        if now - deepSurfAt > 0.1 then
+            deepSurfAt = now
+            local yLo, yHi = pos.Y - 60, pos.Y + 12
+            local okT, tw, capped = pcall(terrainWaterTop, pos.X, pos.Z, yLo, yHi)
+            if not okT then tw, capped = nil, false end
+            -- Deep under: the water fills the window to its top, so the surface
+            -- is higher still. Look further up, 64 studs at a time. Still water
+            -- 256 up is the ocean itself, not a sea to stand on: no floor.
+            local climbs = 0
+            while tw and capped and climbs < 4 do
+                climbs += 1
+                local ok2, t2, c2 = pcall(terrainWaterTop, pos.X, pos.Z, tw - 4, tw + 64)
+                if not ok2 or not t2 then break end
+                tw, capped = t2, c2
+            end
+            if tw and capped then tw = nil end
+            local okP, pw, slab = pcall(partWater, pos, yLo, yHi)
+            if not okP then pw, slab = nil, nil end
+            if slab then
+                local o = slabOrig[slab] or slab.Size.Y
+                slabOrig[slab] = o
+                if math.abs(slab.Size.Y - (o + 32)) > 0.5 then
+                    slab.Size = Vector3.new(slab.Size.X, o + 32, slab.Size.Z)
+                end
+            end
+            deepSurf = tw or pw
+            if tw and pw then deepSurf = math.max(tw, pw) end
+            if deepSurf then
+                deepNote = string.format("%s at Y %.0f - standing on it",
+                    tw and "terrain water" or ("water part"), deepSurf)
+            elseif slab then
+                deepNote = "deep floor slab '" .. slab.Name .. "' raised"
+            else
+                deepNote = "no water under you here"
+            end
+        end
+        if not deepSurf then parkFloor() return end
 
-    -- Under the surface already: up onto it.
-    local feet = pos.Y - (h.HipHeight + r.Size.Y / 2)
-    if feet < deepSurf - 0.75 and deepSurf - feet < 300 and now - deepLiftAt > 0.4 then
-        deepLiftAt = now
-        r.CFrame = r.CFrame + Vector3.new(0, deepSurf - feet + 0.2, 0)
-        local v = r.AssemblyLinearVelocity
-        r.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 0), v.Z)
-        P.deepLifts += 1
+        if not waterFloor then
+            local f = Instance.new("Part")
+            f.Name = "BFP_WaterFloor"
+            f.Anchored, f.CanCollide, f.CanTouch = true, true, false
+            f.Transparency = 1
+            f.Size = Vector3.new(24, 1, 24)
+            waterFloor = f
+        end
+        waterFloor.CFrame = CFrame.new(pos.X, deepSurf - 0.5, pos.Z)
+        if waterFloor.Parent ~= workspace then waterFloor.Parent = workspace end
+
+        -- Under the surface already: up onto it.
+        local feet = pos.Y - (h.HipHeight + r.Size.Y / 2)
+        if feet < deepSurf - 0.75 and deepSurf - feet < 300 and now - deepLiftAt > 0.4 then
+            deepLiftAt = now
+            r.CFrame = r.CFrame + Vector3.new(0, deepSurf - feet + 0.2, 0)
+            local v = r.AssemblyLinearVelocity
+            r.AssemblyLinearVelocity = Vector3.new(v.X, math.max(v.Y, 0), v.Z)
+            P.deepLifts += 1
+        end
     end
 end
 
@@ -2362,99 +2639,102 @@ end
 -- =========================================================
 -- Finding a giver, reading the tracker and clicking the quest dialog: all
 -- farm_pro's, unchanged.
-local function npcSources()
-    local out = {}
-    for _, n in ipairs({ "NPCs", "Npcs", "Characters", "Map" }) do
-        local f = workspace:FindFirstChild(n)
-        if f then table.insert(out, f) end
-    end
-    table.insert(out, workspace)
-    return out
-end
-
-local function anchorPart(model)
-    return model.PrimaryPart
-        or model:FindFirstChild("HumanoidRootPart")
-        or model:FindFirstChild("Head")
-        or model:FindFirstChild("Torso")
-        or model:FindFirstChildWhichIsA("BasePart")
-end
-
--- Blox Fruits puts no ClickDetector and no ProximityPrompt on a quest giver.
--- The "E Interact" ring is the game's own client-side UI. What a giver DOES
--- have is the "?" billboard reading QUEST above its head, so that is the
--- signal used here.
-local function questMarker(model)
-    local ok, hit = pcall(function()
-        for _, d in ipairs(model:GetDescendants()) do
-            if d:IsA("BillboardGui") then
-                for _, t in ipairs(d:GetDescendants()) do
-                    if (t:IsA("TextLabel") or t:IsA("TextButton"))
-                        and type(t.Text) == "string"
-                        and string.find(string.lower(t.Text), "quest", 1, true) then
-                        return true
-                    end
-                end
-            end
+local findQuestGiver
+do
+    local function npcSources()
+        local out = {}
+        for _, n in ipairs({ "NPCs", "Npcs", "Characters", "Map" }) do
+            local f = workspace:FindFirstChild(n)
+            if f then table.insert(out, f) end
         end
-        return false
-    end)
-    return ok and hit or false
-end
+        table.insert(out, workspace)
+        return out
+    end
 
-local function findQuestGiver(maxRange, wantName, markerOnly)
-    local _, root = parts()
-    if not root then return nil end
-    maxRange = maxRange or 300
-    local want = wantName and string.lower(wantName) or nil
+    local function anchorPart(model)
+        return model.PrimaryPart
+            or model:FindFirstChild("HumanoidRootPart")
+            or model:FindFirstChild("Head")
+            or model:FindFirstChild("Torso")
+            or model:FindFirstChildWhichIsA("BasePart")
+    end
 
-    local cands, seen = {}, {}
-    for _, src in ipairs(npcSources()) do
-        for _, m in ipairs(src:GetChildren()) do
-            if m:IsA("Model") and not seen[m] then
-                seen[m] = true
-                local part = anchorPart(m)
-                if part then
-                    local d = (part.Position - root.Position).Magnitude
-                    if d <= maxRange then
-                        local low   = string.lower(m.Name)
-                        local named = string.find(low, "quest", 1, true)
-                                   or string.find(low, "giver", 1, true)
-                        local known  = KNOWN_GIVERS[low] ~= nil
-                        local marker = questMarker(m)
-                        local exact  = want and (low == want)
-                        local score = d
-                            - (exact and 50000 or 0)
-                            - (known and 20000 or 0)
-                            - (marker and 5000 or 0)
-                            - (named and 1000 or 0)
-                        local accept = exact or known or marker or named
-                            or m:FindFirstChildOfClass("Humanoid")
-                        if markerOnly then
-                            accept = (exact or known or marker) and true or false
-                        end
-                        if accept then
-                            table.insert(cands, {
-                                model = m, part = part, dist = d, name = m.Name,
-                                score = score,
-                                signal = (exact and "exact name")
-                                      or (known and "known giver")
-                                      or (marker and "QUEST marker")
-                                      or (named and "name") or "npc",
-                            })
+    -- Blox Fruits puts no ClickDetector and no ProximityPrompt on a quest giver.
+    -- The "E Interact" ring is the game's own client-side UI. What a giver DOES
+    -- have is the "?" billboard reading QUEST above its head, so that is the
+    -- signal used here.
+    local function questMarker(model)
+        local ok, hit = pcall(function()
+            for _, d in ipairs(model:GetDescendants()) do
+                if d:IsA("BillboardGui") then
+                    for _, t in ipairs(d:GetDescendants()) do
+                        if (t:IsA("TextLabel") or t:IsA("TextButton"))
+                            and type(t.Text) == "string"
+                            and string.find(string.lower(t.Text), "quest", 1, true) then
+                            return true
                         end
                     end
                 end
             end
-        end
+            return false
+        end)
+        return ok and hit or false
     end
 
-    table.sort(cands, function(a, b) return a.score < b.score end)
-    P.questCandidates = cands
-    local best = cands[1]
-    return best, best and best.dist or nil
+    function findQuestGiver(maxRange, wantName, markerOnly)
+        local _, root = parts()
+        if not root then return nil end
+        maxRange = maxRange or 300
+        local want = wantName and string.lower(wantName) or nil
+
+        local cands, seen = {}, {}
+        for _, src in ipairs(npcSources()) do
+            for _, m in ipairs(src:GetChildren()) do
+                if m:IsA("Model") and not seen[m] then
+                    seen[m] = true
+                    local part = anchorPart(m)
+                    if part then
+                        local d = (part.Position - root.Position).Magnitude
+                        if d <= maxRange then
+                            local low   = string.lower(m.Name)
+                            local named = string.find(low, "quest", 1, true)
+                                       or string.find(low, "giver", 1, true)
+                            local known  = KNOWN_GIVERS[low] ~= nil
+                            local marker = questMarker(m)
+                            local exact  = want and (low == want)
+                            local score = d
+                                - (exact and 50000 or 0)
+                                - (known and 20000 or 0)
+                                - (marker and 5000 or 0)
+                                - (named and 1000 or 0)
+                            local accept = exact or known or marker or named
+                                or m:FindFirstChildOfClass("Humanoid")
+                            if markerOnly then
+                                accept = (exact or known or marker) and true or false
+                            end
+                            if accept then
+                                table.insert(cands, {
+                                    model = m, part = part, dist = d, name = m.Name,
+                                    score = score,
+                                    signal = (exact and "exact name")
+                                          or (known and "known giver")
+                                          or (marker and "QUEST marker")
+                                          or (named and "name") or "npc",
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        table.sort(cands, function(a, b) return a.score < b.score end)
+        P.questCandidates = cands
+        local best = cands[1]
+        return best, best and best.dist or nil
+    end
+    P.findQuestGiver = findQuestGiver
 end
-P.findQuestGiver = findQuestGiver
 
 function P.questScan(range)
     findQuestGiver(range or 400)
@@ -2475,91 +2755,93 @@ end
 -- standing in front of you, which is why the old check reported a quest as
 -- active whenever the board was on screen. The tracker has one thing nothing
 -- else has: a live have/need counter beside the word Defeat.
-local function shownOnScreen(g)
-    local o = g
-    while o and o:IsA("GuiObject") do
-        if not o.Visible then return false end
-        o = o.Parent
-    end
-    return true
-end
-
-local function blockText(frame)
-    local acc = {}
-    for _, d in ipairs(frame:GetDescendants()) do
-        if (d:IsA("TextLabel") or d:IsA("TextButton")) and type(d.Text) == "string" then
-            table.insert(acc, d.Text)
+do
+    local function shownOnScreen(g)
+        local o = g
+        while o and o:IsA("GuiObject") do
+            if not o.Visible then return false end
+            o = o.Parent
         end
+        return true
     end
-    return string.lower(table.concat(acc, " "))
-end
 
-local questCache, questCacheAt = nil, 0
--- The exact label the counter lives in, once we have found it once.
-local questLabel = nil
-P.questScans = 0        -- how many full tree walks this run has cost
-
--- Read one label. This is the whole job once you know WHICH label.
-local function parseCounter(d)
-    if not d or not d.Parent then return nil end
-    local txt = d.Text
-    if type(txt) ~= "string" or #txt == 0 then return nil end
-    local have, need = string.match(txt, "(%d+)%s*/%s*(%d+)")
-    if not (have and need) then return nil end
-    if not shownOnScreen(d) then return nil end
-    local blob = d.Parent and blockText(d.Parent) or string.lower(txt)
-    if not (string.find(blob, "defeat", 1, true)
-        or string.find(blob, "eliminate", 1, true)
-        or string.find(blob, "kill", 1, true)) then return nil end
-    local enemy = string.match(blob, "defeat%s+%d+%s+([%a%s\'%-]+)")
-    if enemy then enemy = (enemy:gsub("%s+$", "")) end
-    return {
-        have = tonumber(have) or 0, need = tonumber(need) or 0,
-        enemy = enemy, text = txt,
-    }
-end
-
--- WHY THIS USED TO STALL THE FARM.
--- The counter lives in one TextLabel, and that label does not move. The old
--- version walked EVERY descendant of PlayerGui to find it again on every
--- single call -- and Blox Fruits' PlayerGui is thousands of instances, each
--- TextLabel of which then cost an ancestor walk and a subtree walk on top.
--- Called once every few seconds that is invisible. Called after every kill it
--- is the pause you can watch from outside.
---
--- So the label is remembered. The fast path re-reads the one we hold, which is
--- a text compare and a pattern match. The tree is only walked again when that
--- label has actually gone -- a respawn, a UI reset, a new quest panel.
-function P.readQuest(force)
-    if not force and (os.clock() - questCacheAt) < 0.5 then return questCache end
-    questCacheAt = os.clock()
-
-    local fast
-    pcall(function() fast = parseCounter(questLabel) end)
-    if fast then
-        questCache = (fast.need > 0) and fast or nil
-        return questCache
-    end
-    questLabel = nil
-
-    local pg = player:FindFirstChild("PlayerGui")
-    if not pg then questCache = nil return nil end
-    local found
-    P.questScans += 1
-    pcall(function()
-        for _, d in ipairs(pg:GetDescendants()) do
-            if d:IsA("TextLabel") and not d:FindFirstAncestor("BFFHUD") then
-                local parsed = parseCounter(d)
-                if parsed then
-                    questLabel = d
-                    found = parsed
-                    return
-                end
+    local function blockText(frame)
+        local acc = {}
+        for _, d in ipairs(frame:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and type(d.Text) == "string" then
+                table.insert(acc, d.Text)
             end
         end
-    end)
-    questCache = (found and found.need > 0) and found or nil
-    return questCache
+        return string.lower(table.concat(acc, " "))
+    end
+
+    local questCache, questCacheAt = nil, 0
+    -- The exact label the counter lives in, once we have found it once.
+    local questLabel = nil
+    P.questScans = 0        -- how many full tree walks this run has cost
+
+    -- Read one label. This is the whole job once you know WHICH label.
+    local function parseCounter(d)
+        if not d or not d.Parent then return nil end
+        local txt = d.Text
+        if type(txt) ~= "string" or #txt == 0 then return nil end
+        local have, need = string.match(txt, "(%d+)%s*/%s*(%d+)")
+        if not (have and need) then return nil end
+        if not shownOnScreen(d) then return nil end
+        local blob = d.Parent and blockText(d.Parent) or string.lower(txt)
+        if not (string.find(blob, "defeat", 1, true)
+            or string.find(blob, "eliminate", 1, true)
+            or string.find(blob, "kill", 1, true)) then return nil end
+        local enemy = string.match(blob, "defeat%s+%d+%s+([%a%s\'%-]+)")
+        if enemy then enemy = (enemy:gsub("%s+$", "")) end
+        return {
+            have = tonumber(have) or 0, need = tonumber(need) or 0,
+            enemy = enemy, text = txt,
+        }
+    end
+
+    -- WHY THIS USED TO STALL THE FARM.
+    -- The counter lives in one TextLabel, and that label does not move. The old
+    -- version walked EVERY descendant of PlayerGui to find it again on every
+    -- single call -- and Blox Fruits' PlayerGui is thousands of instances, each
+    -- TextLabel of which then cost an ancestor walk and a subtree walk on top.
+    -- Called once every few seconds that is invisible. Called after every kill it
+    -- is the pause you can watch from outside.
+    --
+    -- So the label is remembered. The fast path re-reads the one we hold, which is
+    -- a text compare and a pattern match. The tree is only walked again when that
+    -- label has actually gone -- a respawn, a UI reset, a new quest panel.
+    function P.readQuest(force)
+        if not force and (os.clock() - questCacheAt) < 0.5 then return questCache end
+        questCacheAt = os.clock()
+
+        local fast
+        pcall(function() fast = parseCounter(questLabel) end)
+        if fast then
+            questCache = (fast.need > 0) and fast or nil
+            return questCache
+        end
+        questLabel = nil
+
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then questCache = nil return nil end
+        local found
+        P.questScans += 1
+        pcall(function()
+            for _, d in ipairs(pg:GetDescendants()) do
+                if d:IsA("TextLabel") and not d:FindFirstAncestor("BFFHUD") then
+                    local parsed = parseCounter(d)
+                    if parsed then
+                        questLabel = d
+                        found = parsed
+                        return
+                    end
+                end
+            end
+        end)
+        questCache = (found and found.need > 0) and found or nil
+        return questCache
+    end
 end
 
 function P.questActive() return P.readQuest() ~= nil end
@@ -3050,9 +3332,9 @@ end
 local function fight(cur, names)
     local myEpoch = epoch
     setState("FIGHT")
-    local watch = {}
+    pileCur, pileNames = cur, names
     local pileStart = nil
-    local lastBuild, lastHaki = 0, 0
+    local lastHaki = 0
     local sweepEnd = os.clock() + 30
     m1Count = (CFG.StartWith == "M1") and 0 or (CFG.M1Between or 0)
 
@@ -3063,14 +3345,17 @@ local function fight(cur, names)
         end
         local now = os.clock()
 
-        for m, hum in pairs(watch) do
+        for m, hum in pairs(pileWatch) do
             local dead = hum.Health <= 0
             if dead or not m.Parent then
                 if dead and not countedDead[m] then
                     countedDead[m] = now
                     onKill(cleanName(m))
                 end
-                watch[m] = nil
+                pileWatch[m] = nil
+                -- If the game re-uses this model for the next spawn, it starts
+                -- fresh: its own spawn spot, and a new no-damage clock.
+                homePos[m], pileJoin[m], lastDest[m] = nil, nil, nil
             end
         end
 
@@ -3080,16 +3365,7 @@ local function fight(cur, names)
             return "done"
         end
 
-        if now - lastBuild > 0.25 then
-            lastBuild = now
-            local list, centre = buildPile(cur, names)
-            pile = list
-            if centre and (not pileCentre or pileFor ~= cur.name
-                or (centre - pileCentre).Magnitude > 2) then
-                pileCentre, pileFor = centre, cur.name
-            end
-            for _, e in ipairs(list) do watch[e.model] = e.hum end
-        end
+        if now - pileScanAt > 0.1 then refreshPile() end
 
         if #pile == 0 then
             if pileStart then recordPile(now - pileStart) end
@@ -3901,7 +4177,16 @@ local function buildUI()
             return #list .. " on the circuit"
         end, "target")
         hairline(v)
-        navRow(v, "Attack", function() return setupKey() end, "attack")
+        navRow(v, "Attack", function()
+            local s = setupKey()
+            for _, n in ipairs(CFG.WeaponOrder) do
+                local w = CFG.Weapons[n]
+                if w and w.use then
+                    for _, k in ipairs(KEYS) do if w[k] then return s end end
+                end
+            end
+            return s .. "  ·  no skills on"
+        end, "attack")
         hairline(v)
         navRow(v, "Magnet", function()
             if not CFG.Magnet then return "Off" end
@@ -4097,11 +4382,16 @@ local function buildUI()
         sliderRow(v, "Wait after a swap", 0.02, 0.5, 0.02,
             function() return CFG.EquipWait end,
             function(x) CFG.EquipWait = x end, " s")
-        switchRow(v, "Aim the camera for skills",
-            "Fruit skills fire where the cursor points",
+        switchRow(v, "Lock the aim on the pile",
+            "Skills land on the pile wherever your cursor is",
             function() return CFG.AimSkills end,
             function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
-        readout(v, function() return "now  " .. tostring(P.nextNote) end)
+        caption(v, "The view turns so the pile is always under your cursor: move "
+            .. "it anywhere, every skill still goes into the pile. Keep it near "
+            .. "the middle for a steady view.")
+        readout(v, function()
+            return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
+        end)
 
         heading2(v, "how M1 lands")
         radio(v, 164, {
@@ -4209,7 +4499,16 @@ local function buildUI()
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
         heading2(v, "the pile")
-        sliderRow(v, "Pull from within", 50, 600, 10,
+        switchRow(v, "Pull every one loaded",
+            "Any distance - a new spawn joins the pile at once",
+            function() return CFG.PullAll end,
+            function(x) CFG.PullAll = x end)
+        readout(v, function()
+            if not CFG.PullAll then return "off: only ones spawned within the distance below" end
+            return P.pileReach and string.format("pile at the camp's middle  ·  farthest pull %.0f studs",
+                P.pileReach) or "pile at the camp's middle (found on the first pile)"
+        end)
+        sliderRow(v, "When that is off: within", 50, 600, 10,
             function() return CFG.GrabRadius end,
             function(x) CFG.GrabRadius = x end, " studs")
         sliderRow(v, "Most in one pile", 1, 30, 1,
@@ -4226,9 +4525,9 @@ local function buildUI()
             function() return CFG.OthersRadius end,
             function(x) CFG.OthersRadius = x end, " studs")
         heading2(v, "keeping them hittable")
-        caption(v, "The pile sits at the middle of where they spawned, inside "
-            .. "every one's own area - an enemy dragged out of its area takes "
-            .. "no damage. One that is held and hit with no HP change goes back "
+        caption(v, "The pile sits at the middle of the camp's spawn points - the "
+            .. "spot where the farthest pull is shortest, so every one stays "
+            .. "inside its own area (an enemy dragged out of it takes no damage). One that is held and hit with no HP change goes back "
             .. "where it came from and is left alone for 30 s. 'Staying put' is "
             .. "how many are really yours to move.")
         sliderRow(v, "Put back after no damage for", 1, 10, 0.5,
@@ -4520,7 +4819,9 @@ local function buildUI()
                 "piles       " .. stats.piles,
                 "quests      " .. stats.quests .. " taken   " .. stats.questsDone .. " done   "
                     .. stats.abandons .. " dropped",
-                "M1          " .. stats.m1 .. "   skills " .. stats.casts .. "   swaps " .. stats.swaps,
+                "M1          " .. stats.m1 .. "   skills " .. stats.casts
+                    .. string.format(" (%d fired, %d did not)", stats.castsTook, stats.castsMissed)
+                    .. "   swaps " .. stats.swaps,
                 "probes      " .. stats.probes .. "   (M1 ways tried)",
                 "travel      " .. stats.flights .. " flights   " .. stats.hops .. " hops   "
                     .. stats.pulledBack .. " pulled back",
@@ -4573,6 +4874,7 @@ function P.start()
     table.clear(stalled)
     questTakenAt, questLastHave, questMovedAt = 0, -1, 0
     releasePile()
+    table.clear(pileWatch)
     lockCF, lastWritten, flying = nil, nil, false
     wantPose = "safe"
     P.running   = true
@@ -4598,6 +4900,15 @@ function P.start()
         pcall(magnetTick)
         if attacking and meas then meas.fight += dt end
     end))
+    -- The aim lock: after the camera scripts, every frame the pile is hit.
+    pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
+    pcall(function()
+        RunService:BindToRenderStep("BFFAim", Enum.RenderPriority.Camera.Value + 1, function()
+            if P.running and attacking and CFG.AimSkills and pileCentre then
+                aimCamera(aimPoint(), pileCentre)
+            end
+        end)
+    end)
     track(player.Idled:Connect(function()
         pcall(function()
             VirtualUser:CaptureController()
@@ -4624,6 +4935,7 @@ function P.stop()
     releasePile()
     attacking, flying = false, false
     lockCF, lastWritten = nil, nil
+    pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
     pcall(releaseCamera)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     table.clear(conns)

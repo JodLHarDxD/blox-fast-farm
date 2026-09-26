@@ -5,7 +5,7 @@ local task = { wait = function(t) clock += (t or 0.016) end }
 local LOG = {}
 local function ev(s) table.insert(LOG, s) end
 local P = {}
-local stats = { casts = 0, m1 = 0 }
+local stats = { casts = 0, m1 = 0, castsTook = 0, castsMissed = 0 }
 local actions = 0
 local pileCentre = Vector3 and nil or {}
 local KEYS = { "Z", "X", "C", "V", "F" }

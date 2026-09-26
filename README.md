@@ -31,12 +31,13 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 | part | how |
 |---|---|
 | Finding the camp | farm_pro's rule: every LOADED enemy of the species counts, wherever it stands; the one nearest you picks the camp. Travel goes to a loaded one, else the game's own spawn points (`_WorldOrigin.EnemySpawns`), else enemies the game parked in ReplicatedStorage, and only then the level table (12 of its points were corrected against three hubs). The Targets page says which source each camp came from. |
-| Magnet | SimulationRadius raised, then every frame each enemy is written to a ring at the middle of where the camp SPAWNED (inside every one's own area, so they stay damageable), velocity zeroed, knockback forces removed. Held + hit with no HP change for 3 s = put back, left alone 30 s. |
+| Magnet | **Every loaded enemy of the quest species, any distance** ("Pull every one loaded", on by default). Looked for again 10×/s from the frame loop, so one that spawns mid-fight joins the pile at once, even during a cast. The pile sits at the camp's middle: the centre of the smallest circle round its spawn points (game's `EnemySpawns`, else spots seen) — the spot where the farthest pull is shortest, so every one stays inside its own area. SimulationRadius raised; every frame each is written to a ring there, velocity zeroed, knockback removed. Held + hit with no HP change for 3 s = put back, left alone 30 s. |
 | Lock | your body is written to a spot over the pile every frame: high (default 20 up) when the hit reaches from there, close beside it when it does not. A Kitsune lunge is undone the same frame. |
 | Noclip | every part stops colliding before each physics step while running. The body is always held, so it never falls through anything. |
 | Travel | under 150 studs: one jump. Further: a straight flight at 330 studs/s (slider). "Pulled back" on the Travel page counts server corrections. Submerged Island: the Tiki submarine. |
 | M1 | tried against the pile, kept per weapon if it takes HP off: remote hit (`RE/RegisterAttack` + `RE/RegisterHit` naming the whole pile), fruit click (`tool.LeftClickRemote`), key press. |
-| Combo | per-weapon switches M1 Z X C V F + hold time per key. Ready skills read off `PlayerGui.Main.Skills[weapon][key].Cooldown`. "M1 swings between skills" and "Start with" set the rhythm. Skill cooldowns themselves live on the server and cannot be removed; the rotation just never lets one go to waste. |
+| Combo | per-weapon switches M1 Z X C V F + hold time per key (**all skills are off until you switch them on**). Ready skills read off `PlayerGui.Main.Skills[weapon][key].Cooldown`. "M1 swings between skills" and "Start with" set the rhythm. After each cast the bar is read again: "fired" or "key sent, the skill did NOT fire" (Attack page, Stats). Skill cooldowns live on the server and cannot be removed. |
+| Aim lock | Skills fire down the line from the camera through the cursor. While the pile is hit, every frame the camera is solved (yaw + pitch, no roll, exact) so that line through YOUR cursor, wherever it is, lands on a body in the pile. The cursor is never moved; the view turns instead. Near a side edge the camera drops lower, the only way it stays exact. |
 | Quest circuit | farm_pro's engine and farm_pro's giver switch — **Never (default): you are never moved for a quest.** The circuit flies to the camp, then asks from there (tier probed + locked, tracker read, never re-ask during a running count). Tracker unreadable = the quest is still running, its kills are counted here with the exact count from the game's quest data. Auto / Always go to the giver (First Sea giver spots included). One quest at a time; A → B → … and back. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
@@ -44,7 +45,8 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 ## First in-game test (each answer decides the next fix)
 
 1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
-2. **Magnet** page: "held N · staying put N". Are they really one pile on your screen, and do they stay put when Kitsune hits them?
+2. **Magnet** page: "held N · staying put N" and "farthest pull N studs". When new ones spawn mid-fight, do they fly into the pile at once? Does "put back" climb (= some were dragged out of their area)?
+2b. **Attack** page: switch on Z/X/C for a weapon, then read "last skill" — "fired" or "did NOT fire"? Move your cursor around while it casts: does every skill still land in the pile?
 3. **Travel** page: does a long flight arrive? Any "pulled back"? (lower the speed if so)
 4. **Quest** page: what does the "last" line say after the first ask (ACTIVE / sent, tracker unreadable / refused)? Does the circuit go A → B → A without stopping?
 5. **Attack** → a weapon: do the skill states (ready / 3.1s) match your hotbar?
@@ -58,7 +60,8 @@ luau-analyze.exe fast_farm.lua                   # filter "Unknown global", "Sam
 python tools/checks.py fast_farm.lua             # every CFG/stats/P field defined; no local used above its declaration
 python tools/rhythm_test.py                      # the combo rhythm, real code, 9 scenarios
 python tools/quest_test.py                       # the quest engine, real code, 16 scenarios (never mode never moves you)
-python tools/locate_test.py                      # where a species is + the pile, real code, 11 scenarios (incl. the Sky Bandit case)
+python tools/locate_test.py                      # where a species is + the pile, real code, 20 scenarios (Sky Bandit case, new spawns joining)
+python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 ```
 
 The Luau tools live in `blox-scripts/tools/luau-0.735/`.

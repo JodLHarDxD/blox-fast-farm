@@ -11,7 +11,7 @@ local function reset()
     table.clear(campCache)
     for k in pairs(homePos) do homePos[k] = nil end
     ME.Position = v3(0, 0, 0)
-    CFG.Magnet, CFG.PullOthers = true, true
+    CFG.Magnet, CFG.PullOthers, CFG.PullAll = true, true, false
 end
 
 -- The Sky Bandit case: table point = the quest giver's island, 490 studs off.
@@ -95,5 +95,74 @@ reset()
 table.insert(WORLD.loaded, enemy("Sky Bandit", CAMP_SKY))
 local e = nearestLoaded("Sky Bandit")
 check("nearestLoaded at any distance", e ~= nil and near(e.root.Position, CAMP_SKY))
+
+-- ---------------------------------------------------------------- PullAll
+-- (each case its own species: the spots seen per species are remembered)
+
+-- 12. THE USER'S CASE: 3 in the pile, 3 more spawn 450 studs off in the same
+--     camp -> all 6 pulled, the pile at the camp's middle
+reset()
+CFG.PullAll = true
+for _, x in ipairs({ 0, 150, 300, 450 }) do table.insert(WORLD.spawns, part("Pirate", v3(x, 0, 0))) end
+ME.Position = v3(0, 20, 0)
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Pirate", v3(i * 4, 0, 0))) end
+pl, centre = buildPile({ name = "Pirate" }, { Pirate = true })
+check("PullAll: first three pulled", #pl == 3, "held " .. #pl)
+local first = centre
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Pirate", v3(450 - i * 4, 0, 0))) end
+pl, centre = buildPile({ name = "Pirate" }, { Pirate = true })
+check("PullAll: 3 new spawns 450 away join at once (was: after the first 3 died)", #pl == 6, "held " .. #pl)
+check("PullAll: pile centre does not move when they join", near(first, centre) and near(centre, v3(225, 0, 0)),
+    centre and centre.X)
+check("PullAll: farthest pull reported", P.pileReach and math.abs(P.pileReach - 225) < 1, P.pileReach)
+
+-- 13. the middle is the one where the FARTHEST pull is shortest, not the mean
+reset()
+CFG.PullAll = true
+for i = 0, 4 do table.insert(WORLD.spawns, part("Brute", v3(i * 5, 0, 0))) end
+table.insert(WORLD.spawns, part("Brute", v3(380, 0, 0)))
+table.insert(WORLD.loaded, enemy("Brute", v3(2, 0, 0)))
+pl, centre = buildPile({ name = "Brute" }, { Brute = true })
+check("camp middle = smallest circle (190), not the mean (70)", near(centre, v3(190, 0, 0)), centre and centre.X)
+
+-- 14. three corners: the circle through them
+reset()
+CFG.PullAll = true
+for _, p in ipairs({ v3(0, 0, 0), v3(100, 0, 0), v3(50, 0, 80) }) do
+    table.insert(WORLD.spawns, part("Chief", p))
+end
+table.insert(WORLD.loaded, enemy("Chief", v3(1, 0, 1)))
+pl, centre = buildPile({ name = "Chief" }, { Chief = true })
+check("acute triangle: circumcentre (50, 24.4)", near(centre, v3(50, 0, 24.375), 0.1),
+    centre and (centre.X .. "," .. centre.Z))
+
+-- 15. no spawn points from the game: the spots seen are the camp
+reset()
+CFG.PullAll = true
+for _, x in ipairs({ 0, 100, 300 }) do table.insert(WORLD.loaded, enemy("Toga", v3(x, 0, 0))) end
+pl, centre = buildPile({ name = "Toga" }, { Toga = true })
+check("no game spawn points: middle of the spots seen", #pl == 3 and near(centre, v3(150, 0, 0)),
+    centre and centre.X)
+
+-- 16. two camps loaded: every one pulled, to the middle of the camp you are at
+reset()
+CFG.PullAll = true
+for i = 0, 2 do table.insert(WORLD.spawns, part("Sniper", v3(i * 10, 0, 0))) end
+for i = 0, 2 do table.insert(WORLD.spawns, part("Sniper", v3(3000 + i * 10, 0, 0))) end
+ME.Position = v3(0, 20, 0)
+for i = 0, 1 do table.insert(WORLD.loaded, enemy("Sniper", v3(i * 10, 0, 0))) end
+for i = 0, 1 do table.insert(WORLD.loaded, enemy("Sniper", v3(3000 + i * 10, 0, 0))) end
+pl, centre = buildPile({ name = "Sniper" }, { Sniper = true })
+check("two camps: all 4 pulled, centre at YOUR camp", #pl == 4 and near(centre, v3(10, 0, 0)),
+    "held " .. #pl .. " at " .. tostring(centre and centre.X))
+
+-- 17. heights: the middle height of the camp
+reset()
+CFG.PullAll = true
+table.insert(WORLD.spawns, part("Sky", v3(0, 280, 0)))
+table.insert(WORLD.spawns, part("Sky", v3(40, 300, 0)))
+table.insert(WORLD.loaded, enemy("Sky", v3(0, 280, 0)))
+pl, centre = buildPile({ name = "Sky" }, { Sky = true })
+check("middle height of the camp", near(centre, v3(20, 290, 0)), centre and centre.Y)
 
 print(all and "ALL PASS" or "SOME FAILED")
