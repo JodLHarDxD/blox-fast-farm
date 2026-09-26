@@ -30,6 +30,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 
 | part | how |
 |---|---|
+| Finding the camp | farm_pro's rule: every LOADED enemy of the species counts, wherever it stands; the one nearest you picks the camp. Travel goes to a loaded one, else the game's own spawn points (`_WorldOrigin.EnemySpawns`), else enemies the game parked in ReplicatedStorage, and only then the level table (12 of its points were corrected against three hubs). The Targets page says which source each camp came from. |
 | Magnet | SimulationRadius raised, then every frame each enemy is written to a ring at the middle of where the camp SPAWNED (inside every one's own area, so they stay damageable), velocity zeroed, knockback forces removed. Held + hit with no HP change for 3 s = put back, left alone 30 s. |
 | Lock | your body is written to a spot over the pile every frame: high (default 20 up) when the hit reaches from there, close beside it when it does not. A Kitsune lunge is undone the same frame. |
 | Noclip | every part stops colliding before each physics step while running. The body is always held, so it never falls through anything. |
@@ -57,6 +58,7 @@ luau-analyze.exe fast_farm.lua                   # filter "Unknown global", "Sam
 python tools/checks.py fast_farm.lua             # every CFG/stats/P field defined; no local used above its declaration
 python tools/rhythm_test.py                      # the combo rhythm, real code, 9 scenarios
 python tools/quest_test.py                       # the quest engine, real code, 16 scenarios (never mode never moves you)
+python tools/locate_test.py                      # where a species is + the pile, real code, 11 scenarios (incl. the Sky Bandit case)
 ```
 
 The Luau tools live in `blox-scripts/tools/luau-0.735/`.

@@ -165,10 +165,14 @@ _G.BFF = P
 -- wiki. The rows that were here before had Third Sea enemies filed at Second
 -- Sea levels, so "by my level" resolved to a species that does not live where
 -- it then sent you.
+-- 2026-09-26: the points below that were off by 250+ studs from where three
+-- public hubs (which agree with each other within 150) put the camp were
+-- replaced with the hubs' average: Gorilla, Sky Bandit, Dark Master, Toga Warrior, Military Soldier, Military Spy, Royal Squad, Raider, Vampire, Lab Subordinate, Horned Warrior, Arctic Warrior.
+-- They are only the LAST way of finding a camp now -- see WHERE A SPECIES IS.
 local LEVELS = {
     {1,9,"Bandit",Vector3.new(1059.4,16.5,1546.6)},
     {10,14,"Monkey",Vector3.new(-1445.1,23.5,-48.8)},
-    {15,29,"Gorilla",Vector3.new(-1119.8,40.5,1839.0)},
+    {15,29,"Gorilla",Vector3.new(-1169.8,29.0,-508.9)},
     {30,39,"Pirate",Vector3.new(-1181.3,4.5,3803.5)},
     {40,59,"Brute",Vector3.new(-1145.2,14.8,4321.7)},
     {60,74,"Desert Bandit",Vector3.new(932.2,6.5,4482.0)},
@@ -176,43 +180,43 @@ local LEVELS = {
     {90,99,"Snow Bandit",Vector3.new(1386.8,87.3,-1297.1)},
     {100,119,"Snowman",Vector3.new(1198.2,105.5,-1237.0)},
     {120,149,"Chief Petty Officer",Vector3.new(-4881.1,4.5,4257.4)},
-    {150,174,"Sky Bandit",Vector3.new(-4841.7,717.8,-2666.9)},
-    {175,189,"Dark Master",Vector3.new(-5217.1,12.5,-4836.7)},
+    {150,174,"Sky Bandit",Vector3.new(-4968.3,289.4,-2873.1)},
+    {175,189,"Dark Master",Vector3.new(-5243.5,403.7,-2259.7)},
     {190,209,"Prisoner",Vector3.new(5309.8,0.5,475.5)},
     {210,249,"Dangerous Prisoner",Vector3.new(5086.1,2,466.4)},
-    {250,274,"Toga Warrior",Vector3.new(-3625.0,7.5,-3003.7)},
+    {250,274,"Toga Warrior",Vector3.new(-1808.1,48.8,-2740.0)},
     {275,299,"Gladiator",Vector3.new(-1309.9,7.5,-3251.6)},
-    {300,324,"Military Soldier",Vector3.new(-5316.2,12.5,-2842.5)},
-    {325,374,"Military Spy",Vector3.new(-5815.4,84.5,-8972.3)},
+    {300,324,"Military Soldier",Vector3.new(-5394.1,21.2,8483.3)},
+    {325,374,"Military Spy",Vector3.new(-5802.0,97.0,8803.7)},
     {375,399,"Fishman Warrior",Vector3.new(61122.7,18.5,1569.1)},
     {400,449,"Fishman Commando",Vector3.new(61922.6,18.5,1493.9)},
     {450,474,"God's Guard",Vector3.new(-4721.9,845.3,-1954.4)},
     {475,524,"Shanda",Vector3.new(-7685.1,5567.8,-502.1)},
-    {525,549,"Royal Squad",Vector3.new(-7665.2,5839.5,-1818.8)},
+    {525,549,"Royal Squad",Vector3.new(-7659.8,5624.0,-1456.7)},
     {550,624,"Royal Soldier",Vector3.new(-7836.8,5607.8,-1540.5)},
     {625,649,"Galley Pirate",Vector3.new(5551.0,42.5,3946.3)},
     {650,699,"Galley Captain",Vector3.new(5436.0,38.5,4757.8)},
 
     -- SECOND SEA
-    {700,724,"Raider",Vector3.new(68.9,93.6,2429.7)},
+    {700,724,"Raider",Vector3.new(-741.5,39.1,2391.3)},
     {725,774,"Mercenary",Vector3.new(-864.9,122.5,1453.2)},
     {775,799,"Swan Pirate",Vector3.new(1065.4,137.6,1324.4)},
     {800,874,"Factory Staff",Vector3.new(533.2,128.5,355.6)},
     {875,899,"Marine Lieutenant",Vector3.new(-2489.3,84.6,-3151.9)},
     {900,949,"Marine Captain",Vector3.new(-2335.2,79.8,-3245.9)},
     {950,974,"Zombie",Vector3.new(-5536.5,101.1,-835.6)},
-    {975,999,"Vampire",Vector3.new(-5806.1,16.7,-1164.4)},
+    {975,999,"Vampire",Vector3.new(-6031.7,6.7,-1315.3)},
     {1000,1049,"Snow Trooper",Vector3.new(535.2,432.7,-5484.9)},
     {1050,1099,"Winter Warrior",Vector3.new(1234.5,457.0,-5174.1)},
-    {1100,1124,"Lab Subordinate",Vector3.new(-5720.6,63.3,-4784.6)},
-    {1125,1174,"Horned Warrior",Vector3.new(-6292.8,91.2,-5502.7)},
+    {1100,1124,"Lab Subordinate",Vector3.new(-5775.6,40.0,-4476.2)},
+    {1125,1174,"Horned Warrior",Vector3.new(-6403.4,24.4,-5811.8)},
     {1175,1199,"Magma Ninja",Vector3.new(-5461.8,130.4,-5836.5)},
     {1200,1249,"Lava Pirate",Vector3.new(-5251.2,55.2,-4774.4)},
     {1250,1274,"Ship Deckhand",Vector3.new(921.1,126.0,33088.3)},
     {1275,1299,"Ship Engineer",Vector3.new(886.3,40.5,32800.8)},
     {1300,1324,"Ship Steward",Vector3.new(943.9,129.6,33444.4)},
     {1325,1349,"Ship Officer",Vector3.new(955.4,181.1,33331.9)},
-    {1350,1374,"Arctic Warrior",Vector3.new(5935.5,77.3,-6472.8)},
+    {1350,1374,"Arctic Warrior",Vector3.new(6016.5,43.2,-6207.2)},
     {1375,1424,"Snow Lurker",Vector3.new(5628.5,57.6,-6618.4)},
     {1425,1449,"Sea Soldier",Vector3.new(-3185.0,58.8,-9663.6)},
     {1450,1499,"Water Fighter",Vector3.new(-3262.9,298.7,-10552.5)},
@@ -1200,6 +1204,102 @@ function P.nearbyNames()
 end
 
 -- =========================================================
+-- WHERE A SPECIES IS
+-- =========================================================
+-- The level table's points are hints, and many were wrong -- Sky Bandit's was
+-- its quest giver's island, 420 studs above the camp, which is why the farm
+-- hung in the open sky with nothing to pull. farm_pro never trusted them: it
+-- fights whatever of the species is loaded, wherever it stands, and only walks
+-- toward the point when none are. Same here, and the game is asked before the
+-- table, three ways:
+--   1. workspace.Enemies                  the ones loaded near you, alive
+--   2. workspace._WorldOrigin.EnemySpawns a part at every spawn point, named
+--                                         after its enemy -- any distance
+--   3. ReplicatedStorage                  where the game parks enemies too far
+--                                         away to load, positions intact
+local function speciesKey(n)
+    n = string.gsub(n, "%s*%b[]", "")
+    return string.lower((string.gsub(n, "[^%a]", "")))
+end
+
+-- The nearest loaded, living one of this species, anywhere.
+local function nearestLoaded(name)
+    local _, r = parts()
+    if not r then return nil end
+    local best, bd = nil, math.huge
+    for _, e in ipairs(liveEnemies({ [name] = true })) do
+        local d = (e.root.Position - r.Position).Magnitude
+        if d < bd then best, bd = e, d end
+    end
+    return best, bd
+end
+
+-- Every point the game says this species spawns at or is parked at.
+local function gamePoints(name)
+    local key = speciesKey(name)
+    local pts, src = {}, nil
+    local wo = workspace:FindFirstChild("_WorldOrigin")
+    local sp = wo and wo:FindFirstChild("EnemySpawns")
+    if sp then
+        for _, p in ipairs(sp:GetChildren()) do
+            if p:IsA("BasePart") and speciesKey(p.Name) == key then
+                table.insert(pts, p.Position)
+            end
+        end
+        if #pts > 0 then src = "spawn points" end
+    end
+    if #pts == 0 then
+        for _, m in ipairs(RS:GetChildren()) do
+            if m:IsA("Model") and speciesKey(m.Name) == key then
+                local hrp = m:FindFirstChild("HumanoidRootPart")
+                if hrp then table.insert(pts, hrp.Position) end
+            end
+        end
+        if #pts > 0 then src = "parked enemies" end
+    end
+    return pts, src
+end
+
+-- The centre of the biggest group of those points (a species can have more
+-- than one camp); ties go to the one nearest you. Cached: spawn points do
+-- not move.
+local campCache = {}
+P.campNotes = {}
+local function campOf(name, fallback)
+    local c = campCache[name]
+    if c and os.clock() - c.at < 30 then return c.pos, c.src end
+    local pts, src = gamePoints(name)
+    local pos
+    if #pts > 0 then
+        local _, r = parts()
+        local here = r and r.Position
+        local best, bestN, bestD = nil, -1, math.huge
+        for _, a in ipairs(pts) do
+            local n = 0
+            for _, b in ipairs(pts) do
+                if (a - b).Magnitude <= 250 then n += 1 end
+            end
+            local d = here and (a - here).Magnitude or 0
+            if n > bestN or (n == bestN and d < bestD) then best, bestN, bestD = a, n, d end
+        end
+        local sum, n = Vector3.zero, 0
+        for _, b in ipairs(pts) do
+            if (b - best).Magnitude <= 250 then sum += b n += 1 end
+        end
+        pos = sum / n
+        P.campNotes[name] = string.format("%s: %d %s (the game's own)", name, #pts, src)
+    elseif fallback then
+        pos, src = fallback, "table"
+        P.campNotes[name] = name .. ": from the table (the game gave no spawn points)"
+    else
+        P.campNotes[name] = name .. ": nowhere known"
+    end
+    campCache[name] = { pos = pos, src = src, at = os.clock() }
+    return pos, src
+end
+P.campOf = campOf
+
+-- =========================================================
 -- MAGNET
 -- =========================================================
 -- A client can only move an NPC whose physics it owns. SimulationRadius
@@ -1242,68 +1342,70 @@ local function isPutBack(model)
     return true
 end
 
+local pileFor                -- declared here, set by buildPile's caller
 local function releasePile()
     releaseCamera()          -- the view must not stay on a pile being left
     pileActive, attacking = false, false
-    pile, pileCentre, pileSide = {}, nil, nil
+    pile, pileCentre, pileSide, pileFor = {}, nil, nil, nil
     P.pileHeld, P.pileOwned = 0, 0
 end
 
 -- Who goes in the pile, and where its centre is.
+-- farm_pro's rule: every LOADED one of the species counts, wherever it stands.
+-- The one nearest you picks the camp; the pile is every one of the species
+-- that spawned within GrabRadius of it. The table point plays no part here.
 -- cur = { name, spot }; names = every species on the circuit.
 local function buildPile(cur, names)
     local _, r = parts()
-    local around = cur.spot or (r and r.Position)
-    if not around then return {}, nil end
-    local list = liveEnemies(names)
-
-    if not CFG.Magnet then
-        -- No magnet: fight the nearest one where it stands.
-        local best, bd = nil, math.huge
-        local from = r and r.Position or around
-        for _, e in ipairs(list) do
-            if e.name == cur.name and not isPutBack(e.model) then
-                local d = (e.root.Position - from).Magnitude
-                if d < bd and (homeOf(e) - around).Magnitude <= CFG.GrabRadius then
-                    best, bd = e, d
-                end
-            end
-        end
-        if not best then return {}, nil end
-        return { best }, best.root.Position
-    end
-
+    if not r then return {}, nil end
+    local from = r.Position
     local quest, others = {}, {}
-    for _, e in ipairs(list) do
+    for _, e in ipairs(liveEnemies(names)) do
         if not isPutBack(e.model) then
-            local h = homeOf(e)
-            if (h - around).Magnitude <= CFG.GrabRadius then
-                if e.name == cur.name then
-                    table.insert(quest, e)
-                elseif CFG.PullOthers then
-                    table.insert(others, e)
-                end
+            if e.name == cur.name then
+                table.insert(quest, e)
+            elseif CFG.PullOthers then
+                table.insert(others, e)
             end
         end
     end
     if #quest == 0 then return {}, nil end
-    table.sort(quest, function(a, b)
-        return (homeOf(a) - around).Magnitude < (homeOf(b) - around).Magnitude
-    end)
-    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
-    while #quest > cap do table.remove(quest) end
 
-    local sum = Vector3.zero
-    for _, e in ipairs(quest) do sum += homeOf(e) end
-    local centre = sum / #quest
+    local anchor, ad = nil, math.huge
+    for _, e in ipairs(quest) do
+        local d = (e.root.Position - from).Magnitude
+        if d < ad then anchor, ad = e, d end
+    end
 
-    for _, e in ipairs(others) do
-        if #quest >= cap then break end
-        if (homeOf(e) - centre).Magnitude <= (CFG.OthersRadius or 100) then
-            table.insert(quest, e)
+    if not CFG.Magnet then
+        -- No magnet: fight the nearest one where it stands.
+        return { anchor }, anchor.root.Position
+    end
+
+    local home = homeOf(anchor)
+    local group = {}
+    for _, e in ipairs(quest) do
+        if (homeOf(e) - home).Magnitude <= (CFG.GrabRadius or 300) then
+            table.insert(group, e)
         end
     end
-    return quest, centre
+    table.sort(group, function(a, b)
+        return (homeOf(a) - home).Magnitude < (homeOf(b) - home).Magnitude
+    end)
+    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
+    while #group > cap do table.remove(group) end
+
+    local sum = Vector3.zero
+    for _, e in ipairs(group) do sum += homeOf(e) end
+    local centre = sum / #group
+
+    for _, e in ipairs(others) do
+        if #group >= cap then break end
+        if (homeOf(e) - centre).Magnitude <= (CFG.OthersRadius or 100) then
+            table.insert(group, e)
+        end
+    end
+    return group, centre
 end
 
 -- Every frame, after physics.
@@ -1678,6 +1780,10 @@ local function fireM1(way, tool)
     elseif way.path == "click" then
         m1Click(tool, list)
     else
+        -- A click lands where the cursor points. The cursor sits at the centre
+        -- of the screen, so the centre of the screen has to be the pile, not
+        -- whatever the free camera happens to be looking at.
+        if CFG.AimSkills and pileCentre then aimCamera(pileCentre) end
         pressM1()
     end
     stats.m1 += 1
@@ -2978,8 +3084,9 @@ local function fight(cur, names)
             lastBuild = now
             local list, centre = buildPile(cur, names)
             pile = list
-            if centre and (not pileCentre or (centre - pileCentre).Magnitude > 2) then
-                pileCentre = centre
+            if centre and (not pileCentre or pileFor ~= cur.name
+                or (centre - pileCentre).Magnitude > 2) then
+                pileCentre, pileFor = centre, cur.name
             end
             for _, e in ipairs(list) do watch[e.model] = e.hum end
         end
@@ -3078,16 +3185,27 @@ local function step()
     local cur = list[circuitIdx]
     activeName = cur.name
 
-    -- To the camp, unless already fighting at it.
-    if cur.spot then
+    -- To where the species IS, unless already fighting it. A loaded one is the
+    -- truth (its own spawn spot); otherwise the game's spawn points; the
+    -- table only if the game says nothing.
+    do
         local _, r = parts()
-        local camp = cur.spot + Vector3.new(0, CFG.HeightSafe or 20, 0)
-        local atPile = pileCentre and (pileCentre - cur.spot).Magnitude <= (CFG.GrabRadius or 300)
-        if r and (r.Position - camp).Magnitude > 120 and not atPile then
+        local e = nearestLoaded(cur.name)
+        local dest, src
+        if e then
+            dest, src = homeOf(e), "loaded"
+        else
+            dest, src = campOf(cur.name, cur.spot)
+        end
+        local atPile = pileCentre ~= nil and pileFor == cur.name
+        if r and dest and not atPile
+            and (r.Position - (dest + Vector3.new(0, CFG.HeightSafe or 20, 0))).Magnitude > 150 then
             releasePile()
             setState("FLY")
-            say("flying to " .. cur.name)
-            flyTo(camp, { stream = cur.name })
+            say(string.format("flying to %s  (%s)", cur.name, src))
+            flyTo(dest + Vector3.new(0, CFG.HeightSafe or 20, 0), { stream = cur.name })
+        elseif not dest then
+            say("cannot find where " .. cur.name .. " lives - go near it once")
         end
     end
 
@@ -3840,6 +3958,9 @@ local function buildUI()
             if #CFG.Targets == 0 then s = s .. "   (by level)" end
             if P.circuitSkipped and #P.circuitSkipped > 0 then
                 s = s .. "\nanother sea, skipped: " .. table.concat(P.circuitSkipped, ", ")
+            end
+            for _, t in ipairs(list) do
+                if P.campNotes[t.name] then s = s .. "\n" .. P.campNotes[t.name] end
             end
             return s
         end)
