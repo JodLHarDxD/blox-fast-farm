@@ -37,7 +37,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 | Travel | under 150 studs: one jump. Further: a straight flight at 330 studs/s (slider). "Pulled back" on the Travel page counts server corrections. Submerged Island: the Tiki submarine. |
 | M1 | tried against the pile, kept per weapon if it takes HP off: remote hit (`RE/RegisterAttack` + `RE/RegisterHit` naming the whole pile), fruit click (`tool.LeftClickRemote`), key press. |
 | Combo | per-weapon switches M1 Z X C V F + hold time per key (**all skills are off until you switch them on**). Ready skills read off `PlayerGui.Main.Skills[weapon][key].Cooldown`. "M1 swings between skills" and "Start with" set the rhythm. After each cast the bar is read again: "fired" or "key sent, the skill did NOT fire" (Attack page, Stats). Skill cooldowns live on the server and cannot be removed. |
-| Aim lock | Skills fire down the line from the camera through the cursor. While the pile is hit, every frame the camera is solved (yaw + pitch, no roll, exact) so that line through YOUR cursor, wherever it is, lands on a body in the pile. The cursor is never moved; the view turns instead. Near a side edge the camera drops lower, the only way it stays exact. |
+| Aim lock | Skills fire down the line from the camera through the cursor. **Camera free (default):** a frame goes input → camera update → drawn → physics → Heartbeat → next input; the camera between Heartbeat and the next camera update is never drawn, but a key sent then is read in it. So at Heartbeat the camera is solved onto the pile (yaw + pitch, exact, for your cursor's pixel) and just before the camera update your saved view goes back — your screen and the camera script only ever see your own view. Every cast reports **hit or MISSED** (pile HP before/after) per skill. **Camera free off:** the view itself turns so the pile is under your cursor. |
 | Quest circuit | farm_pro's engine and farm_pro's giver switch — **Never (default): you are never moved for a quest.** The circuit flies to the camp, then asks from there (tier probed + locked, tracker read, never re-ask during a running count). Tracker unreadable = the quest is still running, its kills are counted here with the exact count from the game's quest data. Auto / Always go to the giver (First Sea giver spots included). One quest at a time; A → B → … and back. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
@@ -46,7 +46,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 
 1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
 2. **Magnet** page: "held N · staying put N" and "farthest pull N studs". When new ones spawn mid-fight, do they fly into the pile at once? Does "put back" climb (= some were dragged out of their area)?
-2b. **Attack** page: switch on Z/X/C for a weapon, then read "last skill" — "fired" or "did NOT fire"? Move your cursor around while it casts: does every skill still land in the pile?
+2b. **Attack** page: switch on Z/X/C for a weapon. Under "last skill" each skill shows "hit N of M". Look around and move your cursor freely while it casts — do the counts say hit? A skill that keeps saying MISSED reads the aim at a moment the hidden swap does not cover: switch "Keep my camera free" off and compare.
 3. **Travel** page: does a long flight arrive? Any "pulled back"? (lower the speed if so)
 4. **Quest** page: what does the "last" line say after the first ask (ACTIVE / sent, tracker unreadable / refused)? Does the circuit go A → B → A without stopping?
 5. **Attack** → a weapon: do the skill states (ready / 3.1s) match your hotbar?
@@ -62,6 +62,7 @@ python tools/rhythm_test.py                      # the combo rhythm, real code, 
 python tools/quest_test.py                       # the quest engine, real code, 16 scenarios (never mode never moves you)
 python tools/locate_test.py                      # where a species is + the pile, real code, 20 scenarios (Sky Bandit case, new spawns joining)
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
+python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
 ```
 
 The Luau tools live in `blox-scripts/tools/luau-0.735/`.

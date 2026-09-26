@@ -114,6 +114,11 @@ local CFG = {
     -- being hit, the camera is turned every frame so the line through YOUR
     -- cursor -- wherever it is -- goes through the pile. The cursor stays free.
     AimSkills          = true,
+    -- On: your camera and cursor are never moved. The aim is put on the
+    -- camera only in the part of a frame that is never drawn, right when the
+    -- key is read, and your view is back before the frame is drawn.
+    -- Off: the view itself turns so the pile is under your cursor.
+    AimHidden          = true,
     CamDistance        = 30,     -- the camera this far from the pile
     CamPitch           = 55,     -- looking down at most this steeply (degrees)
 
@@ -730,7 +735,7 @@ P.rowOf = rowOf
 -- =========================================================
 local stats = {
     kills = 0, piles = 0, quests = 0, questsDone = 0, m1 = 0, casts = 0,
-    castsTook = 0, castsMissed = 0,
+    castsTook = 0, castsMissed = 0, castsHit = 0,
     swaps = 0, flights = 0, hops = 0, pulledBack = 0, putBack = 0,
     escapes = 0, abandons = 0, probes = 0, hakiPresses = 0, startedAt = 0,
 }
@@ -858,9 +863,13 @@ local function pressKey(code)
 end
 
 -- Some skills fire on release after a hold; the hold is yours, per key.
-local function holdKey(code, secs)
+-- `before`, if given, runs right before each of the two key events (the
+-- hidden aim puts the camera on the pile for exactly that instant).
+local function holdKey(code, secs, before)
+    if before then before() end
     pcall(function() VIM:SendKeyEvent(true, code, false, game) end)
     task.wait(math.max(secs or 0.05, 0.03))
+    if before then before() end
     pcall(function() VIM:SendKeyEvent(false, code, false, game) end)
 end
 
@@ -1006,7 +1015,8 @@ end
 -- THE CAMERA, BORROWED FOR A CAST AND GIVEN BACK
 -- =========================================================
 local aimPixel = nil         -- a synthetic click's own point; nil = where the mouse is
-local releaseCamera, aimCamera
+local aimUntil = 0           -- the hidden aim is put in every frame until this time
+local releaseCamera, aimCamera, aimSwapIn, hiddenAim
 do
     local InputService = game:GetService("UserInputService")
     local camHeld  = false
@@ -1095,6 +1105,52 @@ do
             cam.CameraType = Enum.CameraType.Scriptable
             camHeld = true
             cam.CFrame = aimFrame(targetPos, away.Unit, dl)
+        end)
+    end
+
+    -- THE HIDDEN AIM: your camera stays yours. One frame goes
+    --   input (keys are read) -> camera update (render step "Camera") ->
+    --   drawn -> physics -> Heartbeat -> the next frame's input
+    -- Whatever the camera is between Heartbeat and the next camera update is
+    -- never drawn -- yet a key sent then is read inside that window. So: just
+    -- after the camera updates, your view is saved; at Heartbeat the aim goes
+    -- in; just before the next camera update your view goes back. The camera
+    -- script and your screen only ever see your own view; the key sees the aim.
+    local savedCF, swapped = nil, false
+    function aimSwapIn(targetPos, centre)
+        local cam = workspace.CurrentCamera
+        if not cam or not savedCF then return end
+        local c = centre or targetPos
+        local away = Vector3.new(savedCF.Position.X - c.X, 0, savedCF.Position.Z - c.Z)
+        if away.Magnitude < 1 then away = Vector3.new(0, 0, 1) end
+        pcall(function()
+            local px = aimPixel or InputService:GetMouseLocation()
+            local ray = cam:ViewportPointToRay(px.X, px.Y)
+            local dl = cam.CFrame:VectorToObjectSpace(ray.Direction)
+            cam.CFrame = aimFrame(targetPos, away.Unit, dl)
+            swapped = true
+        end)
+    end
+
+    -- Bound while the farm runs (on) and removed at stop (off).
+    function hiddenAim(on)
+        pcall(function() RunService:UnbindFromRenderStep("BFFAimOut") end)
+        pcall(function() RunService:UnbindFromRenderStep("BFFAimSave") end)
+        local cam = workspace.CurrentCamera
+        if swapped and cam and savedCF then pcall(function() cam.CFrame = savedCF end) end
+        swapped, savedCF = false, nil
+        if not on then return end
+        pcall(function()
+            RunService:BindToRenderStep("BFFAimOut", Enum.RenderPriority.Camera.Value - 1, function()
+                if not swapped then return end
+                swapped = false
+                local c = workspace.CurrentCamera
+                if c and savedCF then c.CFrame = savedCF end
+            end)
+            RunService:BindToRenderStep("BFFAimSave", Enum.RenderPriority.Camera.Value + 1, function()
+                local c = workspace.CurrentCamera
+                if c and not swapped then savedCF = c.CFrame end
+            end)
         end)
     end
 end
@@ -2042,7 +2098,12 @@ do
             local cam = workspace.CurrentCamera
             if CFG.AimSkills and pileCentre and cam then
                 aimPixel = cam.ViewportSize * 0.5
-                aimCamera(aimPoint(), pileCentre)
+                if CFG.AimHidden then
+                    RunService.Heartbeat:Wait()
+                    aimSwapIn(aimPoint(), pileCentre)
+                else
+                    aimCamera(aimPoint(), pileCentre)
+                end
             end
             pressM1()
             aimPixel = nil
@@ -2149,6 +2210,7 @@ end
 local m1Count    = 0
 P.nextNote = ""
 P.lastCast = "none yet"
+P.skillTally = {}            -- ["weapon key"] = { cast, fired, hit }
 
 local function castSkill(u, k)
     if not equip(u.name) then return false end
@@ -2158,26 +2220,56 @@ local function castSkill(u, k)
     if CFG.HeightMode ~= "fixed" then
         setPose((t == "Melee" or t == "Sword") and "melee" or "safe")
     end
-    if CFG.AimSkills and pileCentre then
+    local hold = (u.cfg.hold and u.cfg.hold[k]) or 0.05
+    local hidden = CFG.AimSkills and CFG.AimHidden and pileCentre ~= nil
+    if CFG.AimSkills and pileCentre and not CFG.AimHidden then
         aimCamera(aimPoint(), pileCentre)
         task.wait()
     end
-    holdKey(KEYCODE[k], (u.cfg.hold and u.cfg.hold[k]) or 0.05)
+    -- The pile's HP now, to tell a hit from a miss afterwards.
+    local snap = {}
+    for _, e in ipairs(pile) do snap[e] = e.hum.Health end
+    local before = nil
+    if hidden then
+        -- Held in every frame of the cast (a skill may read the aim on the
+        -- press, on the release, or while it plays), and put in right before
+        -- each key event.
+        aimUntil = os.clock() + hold + (CFG.CastWait or 0.45) + 0.5
+        before = function()
+            RunService.Heartbeat:Wait()
+            if pileCentre then aimSwapIn(aimPoint(), pileCentre) end
+        end
+    end
+    holdKey(KEYCODE[k], hold, before)
     local c = cdOf(u.name, k)
     c.lastCast = os.clock()
     stats.casts += 1
     actions += 1
     task.wait(CFG.CastWait or 0.45)
-    -- Did it really fire? A skill that fired has its bar cooling now.
+    aimUntil = 0
+    -- Did it fire (its bar is cooling now)? Did it hit (the pile lost HP)?
+    local lost = 0
+    for e, hp in pairs(snap) do
+        local now = e.hum.Parent and math.max(e.hum.Health, 0) or 0
+        lost += math.max(hp - now, 0)
+    end
+    local hit = lost > 0.5
+    local key = u.name .. " " .. k
+    local tally = P.skillTally[key] or { cast = 0, fired = 0, hit = 0 }
+    P.skillTally[key] = tally
+    tally.cast += 1
+    if hit then stats.castsHit += 1 tally.hit += 1 end
     local b = barReady(u.name, k)
+    local tail = hit and string.format(", hit the pile (-%.0f HP)", lost) or ", MISSED the pile"
     if b == false then
         stats.castsTook += 1
-        P.lastCast = u.name .. " " .. k .. ": fired (its bar is cooling)"
+        tally.fired += 1
+        P.lastCast = key .. ": fired" .. tail
     elseif b == true then
         stats.castsMissed += 1
-        P.lastCast = u.name .. " " .. k .. ": key sent, the skill did NOT fire"
+        P.lastCast = key .. ": key sent, the skill did NOT fire"
     else
-        P.lastCast = u.name .. " " .. k .. ": key sent (no bar to check)"
+        P.lastCast = key .. ": key sent (no bar to check)" .. tail
     end
     return true
 end
@@ -4386,12 +4478,26 @@ local function buildUI()
             "Skills land on the pile wherever your cursor is",
             function() return CFG.AimSkills end,
             function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
-        caption(v, "The view turns so the pile is always under your cursor: move "
-            .. "it anywhere, every skill still goes into the pile. Keep it near "
-            .. "the middle for a steady view.")
+        switchRow(v, "Keep my camera free",
+            "Your view and cursor are never moved",
+            function() return CFG.AimHidden end,
+            function(x) CFG.AimHidden = x if x then releaseCamera() end end)
+        caption(v, "Camera free: at the instant a key is read, the camera is put "
+            .. "on the pile and back before the frame is drawn - you never see "
+            .. "it. If the list below keeps saying MISSED for a skill, switch "
+            .. "this off: then the view turns so the pile is under your cursor.")
         readout(v, function()
-            return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
+            local lines = { "now  " .. tostring(P.nextNote), "last skill  " .. tostring(P.lastCast) }
+            local keys = {}
+            for key in pairs(P.skillTally) do table.insert(keys, key) end
+            table.sort(keys)
+            for _, key in ipairs(keys) do
+                local t = P.skillTally[key]
+                table.insert(lines, string.format("%s   hit %d of %d  (fired %d)", tostring(key), t.hit, t.cast, t.fired))
+            end
+            return table.concat(lines, "\n")
         end)
+        actionRow(v, "Clear the hit counts", nil, function() table.clear(P.skillTally) end)
 
         heading2(v, "how M1 lands")
         radio(v, 164, {
@@ -4820,7 +4926,8 @@ local function buildUI()
                 "quests      " .. stats.quests .. " taken   " .. stats.questsDone .. " done   "
                     .. stats.abandons .. " dropped",
                 "M1          " .. stats.m1 .. "   skills " .. stats.casts
-                    .. string.format(" (%d fired, %d did not)", stats.castsTook, stats.castsMissed)
+                    .. string.format(" (%d fired, %d hit, %d did not fire)", stats.castsTook,
+                        stats.castsHit, stats.castsMissed)
                     .. "   swaps " .. stats.swaps,
                 "probes      " .. stats.probes .. "   (M1 ways tried)",
                 "travel      " .. stats.flights .. " flights   " .. stats.hops .. " hops   "
@@ -4898,13 +5005,17 @@ function P.start()
     track(RunService.Heartbeat:Connect(function(dt)
         pcall(bodyHeartbeat)
         pcall(magnetTick)
+        if P.running and CFG.AimSkills and CFG.AimHidden and pileCentre and os.clock() < aimUntil then
+            pcall(aimSwapIn, aimPoint(), pileCentre)
+        end
         if attacking and meas then meas.fight += dt end
     end))
     -- The aim lock: after the camera scripts, every frame the pile is hit.
+    pcall(hiddenAim, true)
     pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
     pcall(function()
         RunService:BindToRenderStep("BFFAim", Enum.RenderPriority.Camera.Value + 1, function()
-            if P.running and attacking and CFG.AimSkills and pileCentre then
+            if P.running and attacking and CFG.AimSkills and not CFG.AimHidden and pileCentre then
                 aimCamera(aimPoint(), pileCentre)
             end
         end)
@@ -4936,6 +5047,8 @@ function P.stop()
     attacking, flying = false, false
     lockCF, lastWritten = nil, nil
     pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
+    aimUntil = 0
+    pcall(hiddenAim, false)
     pcall(releaseCamera)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     table.clear(conns)
