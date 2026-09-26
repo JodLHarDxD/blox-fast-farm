@@ -36,7 +36,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 | Travel | under 150 studs: one jump. Further: a straight flight at 330 studs/s (slider). "Pulled back" on the Travel page counts server corrections. Submerged Island: the Tiki submarine. |
 | M1 | tried against the pile, kept per weapon if it takes HP off: remote hit (`RE/RegisterAttack` + `RE/RegisterHit` naming the whole pile), fruit click (`tool.LeftClickRemote`), key press. |
 | Combo | per-weapon switches M1 Z X C V F + hold time per key. Ready skills read off `PlayerGui.Main.Skills[weapon][key].Cooldown`. "M1 swings between skills" and "Start with" set the rhythm. Skill cooldowns themselves live on the server and cannot be removed; the rotation just never lets one go to waste. |
-| Quest circuit | farm_pro's engine (range first, tier probe + lock, tracker read, never re-ask during a running count). Refused from range = fly to the giver. One quest at a time; the circuit moves A → B → … and back. |
+| Quest circuit | farm_pro's engine and farm_pro's giver switch — **Never (default): you are never moved for a quest.** The circuit flies to the camp, then asks from there (tier probed + locked, tracker read, never re-ask during a running count). Tracker unreadable = the quest is still running, its kills are counted here with the exact count from the game's quest data. Auto / Always go to the giver (First Sea giver spots included). One quest at a time; A → B → … and back. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
 
@@ -45,7 +45,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
 2. **Magnet** page: "held N · staying put N". Are they really one pile on your screen, and do they stay put when Kitsune hits them?
 3. **Travel** page: does a long flight arrive? Any "pulled back"? (lower the speed if so)
-4. **Quest** page: does the circuit go A → B → A without stopping?
+4. **Quest** page: what does the "last" line say after the first ask (ACTIVE / sent, tracker unreadable / refused)? Does the circuit go A → B → A without stopping?
 5. **Attack** → a weapon: do the skill states (ready / 3.1s) match your hotbar?
 6. **Stats**: three setups a few minutes each on one camp — do the kills/min differ?
 
@@ -56,6 +56,7 @@ luau-compile.exe --binary fast_farm.lua          # parses
 luau-analyze.exe fast_farm.lua                   # filter "Unknown global", "SameLineStatement", "Unknown type 'Instance'"
 python tools/checks.py fast_farm.lua             # every CFG/stats/P field defined; no local used above its declaration
 python tools/rhythm_test.py                      # the combo rhythm, real code, 9 scenarios
+python tools/quest_test.py                       # the quest engine, real code, 16 scenarios (never mode never moves you)
 ```
 
 The Luau tools live in `blox-scripts/tools/luau-0.735/`.

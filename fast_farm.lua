@@ -128,8 +128,20 @@ local CFG = {
     -- respawn (the count is kept). Off: drop the quest and go to the next.
     WaitRespawn        = true,
     RespawnMax         = 45,     -- seconds; nothing back by then = move on
-    QuestRetrySeconds  = 6,
-    QuestKillsFallback = 8,      -- tracker unreadable: count this many here
+    -- WHO GOES TO THE GIVER -- farm_pro's switch, the same three answers.
+    --   "never"  : never go. Asked from where you stand (the circuit flies to
+    --              the camp first, then asks). A clean ask whose tracker cannot
+    --              be read is not a failure: the kills are counted here.
+    --   "auto"   : go only when the giver is near (GiverWalkRadius); asked from
+    --              range and refused, it goes up and asks once more.
+    --   "always" : go to the giver every time.
+    GiverMode          = "never",
+    GiverWalkRadius    = 250,
+    QuestRetrySeconds  = 8,
+    QuestStallSeconds  = 240,    -- a count that never moves = take a fresh one
+    QuestKillsFallback = 10,     -- tracker unreadable, count unknown: this many
+    QuestName          = nil,    -- exact server quest id; blank = the table
+    QuestTier          = nil,    -- 1..3; blank = work it out and lock it
 
     -- ---------- SAFETY ----------
     -- There is no real god mode: health lives on the server. What keeps you
@@ -273,7 +285,9 @@ local QUESTS = {
     -- MEASURED: MarineQuest tier 1 handed back "Defeat 5 Trainees", so the
     -- Trainee is tier 1 and the Officer is tier 2.
     ["Trainee"]               = { "MarineQuest", 1 },
-    ["Chief Petty Officer"]   = { "MarineQuest", 2 },
+    -- The game's own quest data says MarineQuest2 tier 1 (farm_pro had
+    -- MarineQuest tier 2; kept below as the fallback id).
+    ["Chief Petty Officer"]   = { "MarineQuest2", 1 },
     ["Sky Bandit"]            = { "SkyQuest", 1 },
     ["Dark Master"]           = { "SkyQuest", 2 },
     ["Prisoner"]              = { "PrisonerQuest", 1 },
@@ -317,8 +331,9 @@ local QUESTS = {
     -- THIRD SEA
     ["Pirate Millionaire"]    = { "PiratePortQuest", 1 },
     ["Pistol Billionaire"]    = { "PiratePortQuest", 2 },
-    ["Dragon Crew Warrior"]   = { "AmazonQuest", 1 },
-    ["Dragon Crew Archer"]    = { "AmazonQuest", 2 },
+    -- Game quest data: DragonCrewQuest. farm_pro's AmazonQuest is the fallback.
+    ["Dragon Crew Warrior"]   = { "DragonCrewQuest", 1 },
+    ["Dragon Crew Archer"]    = { "DragonCrewQuest", 2 },
     ["Female Islander"]       = { "AmazonQuest2", 1 },
     ["Giant Islander"]        = { "AmazonQuest2", 2 },
     ["Marine Commodore"]      = { "MarineTreeIsland", 1 },
@@ -366,10 +381,138 @@ local QUESTS = {
 }
 P.quests = QUESTS
 
+-- A second quest id to try when the first one's tracker asks for someone else
+-- (or is refused while trackers ARE readable). Where public tables and the
+-- game's own quest data disagree, both are tried.
+local QUEST_ALT = {
+    ["Chief Petty Officer"]   = { "MarineQuest", 2 },
+    ["Dragon Crew Warrior"]   = { "AmazonQuest", 1 },
+    ["Dragon Crew Archer"]    = { "AmazonQuest", 2 },
+}
+
+-- How many kills each quest asks for, from the game's own quest data. Used
+-- only when the tracker cannot be read, so the count here is exact instead of
+-- a guess.
+local QUEST_NEED = {
+    ["Bandit"] = 5,
+    ["Monkey"] = 6,
+    ["Gorilla"] = 8,
+    ["Pirate"] = 8,
+    ["Brute"] = 8,
+    ["Desert Bandit"] = 8,
+    ["Desert Officer"] = 6,
+    ["Snow Bandit"] = 7,
+    ["Snowman"] = 8,
+    ["Chief Petty Officer"] = 8,
+    ["Sky Bandit"] = 7,
+    ["Dark Master"] = 8,
+    ["Prisoner"] = 8,
+    ["Dangerous Prisoner"] = 8,
+    ["Toga Warrior"] = 7,
+    ["Gladiator"] = 8,
+    ["Military Soldier"] = 7,
+    ["Military Spy"] = 8,
+    ["Fishman Warrior"] = 8,
+    ["Fishman Commando"] = 7,
+    ["God's Guard"] = 7,
+    ["Shanda"] = 9,
+    ["Royal Squad"] = 8,
+    ["Royal Soldier"] = 8,
+    ["Galley Pirate"] = 8,
+    ["Galley Captain"] = 9,
+    ["Raider"] = 8,
+    ["Mercenary"] = 8,
+    ["Swan Pirate"] = 8,
+    ["Factory Staff"] = 8,
+    ["Marine Lieutenant"] = 8,
+    ["Marine Captain"] = 9,
+    ["Zombie"] = 8,
+    ["Vampire"] = 8,
+    ["Snow Trooper"] = 8,
+    ["Winter Warrior"] = 9,
+    ["Lab Subordinate"] = 8,
+    ["Horned Warrior"] = 9,
+    ["Magma Ninja"] = 8,
+    ["Lava Pirate"] = 8,
+    ["Ship Deckhand"] = 8,
+    ["Ship Engineer"] = 8,
+    ["Ship Steward"] = 8,
+    ["Ship Officer"] = 8,
+    ["Arctic Warrior"] = 8,
+    ["Snow Lurker"] = 8,
+    ["Sea Soldier"] = 8,
+    ["Water Fighter"] = 8,
+    ["Pirate Millionaire"] = 8,
+    ["Pistol Billionaire"] = 8,
+    ["Dragon Crew Warrior"] = 8,
+    ["Dragon Crew Archer"] = 8,
+    ["Marine Commodore"] = 8,
+    ["Marine Rear Admiral"] = 8,
+    ["Fishman Raider"] = 8,
+    ["Fishman Captain"] = 8,
+    ["Forest Pirate"] = 8,
+    ["Mythological Pirate"] = 8,
+    ["Jungle Pirate"] = 8,
+    ["Musketeer Pirate"] = 8,
+    ["Reborn Skeleton"] = 8,
+    ["Living Zombie"] = 8,
+    ["Demonic Soul"] = 8,
+    ["Posessed Mummy"] = 8,
+    ["Peanut Scout"] = 8,
+    ["Peanut President"] = 8,
+    ["Ice Cream Chef"] = 8,
+    ["Ice Cream Commander"] = 8,
+    ["Cookie Crafter"] = 8,
+    ["Cake Guard"] = 8,
+    ["Baking Staff"] = 8,
+    ["Head Baker"] = 8,
+    ["Cocoa Warrior"] = 8,
+    ["Chocolate Bar Battler"] = 8,
+    ["Sweet Thief"] = 8,
+    ["Candy Rebel"] = 8,
+    ["Candy Pirate"] = 8,
+    ["Snow Demon"] = 8,
+    ["Isle Outlaw"] = 8,
+    ["Island Boy"] = 8,
+    ["Sun-kissed Warrior"] = 8,
+    ["Isle Champion"] = 8,
+    ["Serpent Hunter"] = 8,
+    ["Skull Slayer"] = 8,
+}
+
 -- The giver's NAME is a hint. The giver's POSITION is the thing that works:
 -- the server refuses StartQuest unless you are standing near it, and a
 -- coordinate cannot be misspelled or fail to stream in.
 local GIVER_POS = {
+    -- FIRST SEA (public hub tables; farm_pro had none, so "auto"/"always"
+    -- had to scan for the giver by name there).
+    ["Bandit"]                = Vector3.new(1059.4, 15.4, 1550.4),
+    ["Monkey"]                = Vector3.new(-1598.1, 35.6, 153.4),
+    ["Gorilla"]               = Vector3.new(-1598.1, 35.6, 153.4),
+    ["Pirate"]                = Vector3.new(-1141.1, 4.1, 3831.5),
+    ["Brute"]                 = Vector3.new(-1141.1, 4.1, 3831.5),
+    ["Desert Bandit"]         = Vector3.new(894.5, 5.1, 4392.4),
+    ["Desert Officer"]        = Vector3.new(894.5, 5.1, 4392.4),
+    ["Snow Bandit"]           = Vector3.new(1389.7, 88.2, -1298.9),
+    ["Snowman"]               = Vector3.new(1389.7, 88.2, -1298.9),
+    ["Chief Petty Officer"]   = Vector3.new(-5039.6, 27.4, 4324.7),
+    ["Sky Bandit"]            = Vector3.new(-4839.5, 716.4, -2619.4),
+    ["Dark Master"]           = Vector3.new(-4839.5, 716.4, -2619.4),
+    ["Prisoner"]              = Vector3.new(5308.9, 1.7, 475.1),
+    ["Dangerous Prisoner"]    = Vector3.new(5308.9, 1.7, 475.1),
+    ["Toga Warrior"]          = Vector3.new(-1580.0, 6.4, -2986.5),
+    ["Gladiator"]             = Vector3.new(-1580.0, 6.4, -2986.5),
+    ["Military Soldier"]      = Vector3.new(-5313.4, 11.0, 8515.3),
+    ["Military Spy"]          = Vector3.new(-5313.4, 11.0, 8515.3),
+    ["Fishman Warrior"]       = Vector3.new(61122.7, 18.5, 1569.4),
+    ["Fishman Commando"]      = Vector3.new(61122.7, 18.5, 1569.4),
+    ["God's Guard"]           = Vector3.new(-4721.9, 843.9, -1950.0),
+    ["Shanda"]                = Vector3.new(-7859.1, 5544.2, -381.5),
+    ["Royal Squad"]           = Vector3.new(-7906.8, 5634.7, -1412.0),
+    ["Royal Soldier"]         = Vector3.new(-7906.8, 5634.7, -1412.0),
+    ["Galley Pirate"]         = Vector3.new(5259.8, 37.4, 4050.0),
+    ["Galley Captain"]        = Vector3.new(5259.8, 37.4, 4050.0),
+
     ["Raider"]                = Vector3.new(-427.7, 73.0, 1835.9),
     ["Mercenary"]             = Vector3.new(-427.7, 73.0, 1835.9),
     ["Swan Pirate"]           = Vector3.new(635.6, 73.1, 917.8),
@@ -2397,12 +2540,14 @@ end
 -- ---------------------------------------------------------
 -- TAKING A QUEST: FROM WHERE YOU STAND
 -- ---------------------------------------------------------
--- farm_pro's engine: ask with the server's own quest id, read the tracker,
--- and only keep a quest whose tracker names the enemy it was taken for; an
--- unknown tier is probed 1-2-3 and the one that matches is remembered. Asked
--- from range first -- on your server that works. Refused from range, it flies
--- to the giver (a second, not a walk) and asks again, talking to the NPC if
--- the remote still says no.
+-- farm_pro's engine and farm_pro's switch for the giver (Quest page). The
+-- default, "never", is what you run farm_pro on: you are never moved to take
+-- a quest. The circuit flies to the camp FIRST and asks from there, with the
+-- server's own quest id. The tracker is read back; only a quest whose tracker
+-- names the enemy it was taken for is kept, and an unknown tier is probed
+-- 1-2-3 and the one that matches is locked. A clean ask whose tracker cannot
+-- be read is NOT a failure -- the quest is running and its kills are counted
+-- here instead (exact count from the game's quest data where known).
 --
 -- One quest runs at a time; that is the game's rule. Asking again while one
 -- is running resets its count, so nothing here ever asks while one is.
@@ -2410,6 +2555,9 @@ local questSpecies = nil     -- whose quest is running
 local questNeed    = nil
 local questKills   = 0       -- kills of questSpecies since it was taken
 local questBlind   = false   -- sent cleanly, tracker unreadable: counted here
+local questTakenAt = 0
+local questLastHave, questMovedAt = -1, 0
+local trackerSeen  = false   -- a tracker was read this session: it IS readable
 local lastAskAt    = {}
 local stalled      = {}      -- species whose camp stopped respawning -> until
 local lastPeek     = 0
@@ -2424,18 +2572,50 @@ local function wanted(trackerEnemy, enemy)
     return string.find(a, b, 1, true) ~= nil or string.find(b, a, 1, true) ~= nil
 end
 
-local function questFor(enemy)
+-- The quest ids to try for a species, in order: typed by hand > learned (a
+-- tier that already worked, locked) > the table > the fallback id.
+-- Each is { id, tier, lockedTier }.
+local function questIds(enemy)
+    local out = {}
+    if CFG.QuestName and #tostring(CFG.QuestName) > 0 then
+        table.insert(out, { CFG.QuestName, CFG.QuestTier or 1, CFG.QuestTier ~= nil })
+        return out
+    end
     local learned = P.learnedQuests[enemy]
-    if learned then return learned.name, learned.tier, true end
+    if learned then
+        table.insert(out, { learned.name, learned.tier, true })
+        return out
+    end
     local q = QUESTS[enemy]
-    if q then return q[1], q[2], false end
-    return nil, nil, false
+    if q then table.insert(out, { q[1], q[2], false }) end
+    local alt = QUEST_ALT[enemy]
+    if alt then table.insert(out, { alt[1], alt[2], false }) end
+    return out
 end
+P.questIds = questIds
 
 function P.giverFor(enemy)
     local name = P.learnedGivers[enemy] or GIVER_NAMES[enemy]
     local pos  = P.giverSpots[enemy] or GIVER_POS[enemy]
     return name, pos
+end
+
+function P.setGiverHere()
+    local e = activeName
+    local _, r = parts()
+    if not e or not r then say("start the farm on a target first") return false end
+    P.giverSpots[e] = r.Position
+    say("giver for " .. e .. " = where you stand")
+    return true
+end
+
+function P.clearGiver()
+    local e = activeName
+    if e then
+        P.giverSpots[e] = nil
+        P.learnedGivers[e] = nil
+    end
+    say("giver back to the table")
 end
 
 local function abandonQuest(why)
@@ -2448,34 +2628,65 @@ local function abandonQuest(why)
 end
 P.abandonQuest = function() abandonQuest("by hand") end
 
-local function acceptFor(enemy, spot)
+local function acceptFor(enemy)
     local cf = commF()
     if not cf then
         P.lastQuestResult = "no CommF_ remote"
+        say(P.lastQuestResult)
         return false
     end
-    if lastAskAt[enemy] and os.clock() - lastAskAt[enemy] < (CFG.QuestRetrySeconds or 6) then
+    if lastAskAt[enemy] and os.clock() - lastAskAt[enemy] < (CFG.QuestRetrySeconds or 8) then
         return false
     end
     lastAskAt[enemy] = os.clock()
 
-    local qname, tier, learned = questFor(enemy)
-    if not qname then
+    local ids = questIds(enemy)
+    if #ids == 0 then
         P.lastQuestResult = "no quest id known for " .. enemy .. " - farming it without one"
         say(P.lastQuestResult)
         return false
     end
-    tier = tier or 1
-    local tiers = { tier }
-    if not learned then
-        for _, t in ipairs({ 1, 2, 3 }) do
-            if t ~= tier then table.insert(tiers, t) end
-        end
-    end
     local myEpoch = epoch
+    local mode    = CFG.GiverMode or "never"
+    local atGiver = false
 
-    local function attempt(atGiver)
-        local gotQ, gotOk, gotRes
+    -- Only "auto" and "always" ever come here.
+    local function goToGiver()
+        local wantName, dest = P.giverFor(enemy)
+        if not dest then
+            -- Bounded: an unbounded search finds a giver with the right name
+            -- on a DIFFERENT island and flies you off to it.
+            local g = (wantName and (findQuestGiver(500, wantName) or findQuestGiver(1200, wantName)))
+                or findQuestGiver(500, nil, true) or findQuestGiver(1200, nil, true)
+            if g then
+                dest = g.part.Position
+                P.learnedGivers[enemy] = g.name
+            end
+        end
+        if not dest or stale(myEpoch) then return false end
+        releasePile()
+        setState("TO GIVER")
+        say("flying to the quest giver")
+        flyTo(dest + Vector3.new(0, 3, 0))
+        atGiver = true
+        task.wait(0.3)
+        return not stale(myEpoch)
+    end
+
+    local function attemptId(id)
+        local qname, tier, locked = id[1], id[2] or 1, id[3]
+        local tiers
+        if CFG.QuestTier then
+            tiers = { CFG.QuestTier }
+        elseif locked then
+            tiers = { tier }
+        else
+            tiers = { tier }
+            for _, t in ipairs({ 1, 2, 3 }) do
+                if t ~= tier then table.insert(tiers, t) end
+            end
+        end
+        local gotQ, gotOk, gotRes, used = nil, nil, nil, tier
         for i, t in ipairs(tiers) do
             if stale(myEpoch) then break end
             gotOk, gotRes = pcall(function()
@@ -2497,7 +2708,8 @@ local function acceptFor(enemy, spot)
                 task.wait(0.5)
                 gotQ = P.readQuest(true)
             end
-            tier = t
+            used = t
+            if gotQ then trackerSeen = true end
             if not gotQ then break end
             if wanted(gotQ.enemy, enemy) then break end
             if i < #tiers then
@@ -2505,54 +2717,70 @@ local function acceptFor(enemy, spot)
                     tostring(gotQ.enemy), tiers[i + 1]))
             end
         end
-        return gotQ, gotOk, gotRes
+        return gotQ, gotOk, gotRes, qname, used
+    end
+
+    local function attempt()
+        local q, ok, res, qname, tier
+        for n, id in ipairs(ids) do
+            q, ok, res, qname, tier = attemptId(id)
+            if stale(myEpoch) then break end
+            if q and wanted(q.enemy, enemy) then break end
+            -- A tracker that cannot be read gives no way to tell a refusal
+            -- from a success, so a second id is only tried when trackers are
+            -- readable (or the first id's tracker named someone else).
+            if not q and not trackerSeen then break end
+            if n < #ids then say("trying the other quest id: " .. ids[n + 1][1]) end
+        end
+        return q, ok, res, qname, tier
+    end
+
+    -- Does anyone have to move? A distance question, asked from HERE -- and
+    -- the circuit only asks once it is at the camp.
+    local _, root = parts()
+    local _, gpos = P.giverFor(enemy)
+    local giverDist = (gpos and root) and (gpos - root.Position).Magnitude or nil
+    local mustGo = (mode == "always")
+        or (mode == "auto" and (giverDist == nil or giverDist <= (CFG.GiverWalkRadius or 250)))
+    if mustGo then goToGiver() end
+    if stale(myEpoch) then
+        P.lastQuestResult = "stopped before asking - no quest taken"
+        return false
     end
 
     setState("QUEST")
-    say("taking the " .. enemy .. " quest from here")
-    local q, ok, res = attempt(false)
+    if not atGiver then say("taking the " .. enemy .. " quest from here") end
+    local q, ok, res, qname, tier = attempt()
 
-    if not q and not stale(myEpoch) then
-        local wantName, gpos = P.giverFor(enemy)
-        if not gpos then
-            -- No position on file (First Sea): go to the camp and look for it.
-            if spot then
-                flyTo(spot + Vector3.new(0, CFG.HeightSafe or 20, 0), { stream = enemy })
-            end
-            local g = (wantName and findQuestGiver(900, wantName)) or findQuestGiver(900, nil, true)
-            if g then
-                gpos = g.part.Position
-                P.learnedGivers[enemy] = g.name
-            end
-        end
-        if gpos and not stale(myEpoch) then
-            releasePile()
-            say("refused from here - flying to the giver")
-            flyTo(gpos + Vector3.new(0, 3, 0))
-            task.wait(0.3)
-            q, ok, res = attempt(true)
-            if q then P.giverSpots[enemy] = gpos end
-        end
+    -- Asked from range and nothing came back: auto goes up and asks once more,
+    -- so a server that does check distance still works. "never" means never.
+    if not q and mode == "auto" and not atGiver and not stale(myEpoch) then
+        say("nothing from here - going up and asking again")
+        if goToGiver() then q, ok, res, qname, tier = attempt() end
     end
 
     local matched = (q ~= nil) and wanted(q.enemy, enemy)
     if q and matched then
         stats.quests += 1
         P.learnedQuests[enemy] = { name = qname, tier = tier }
+        if atGiver and root then P.giverSpots[enemy] = P.giverSpots[enemy] or gpos end
         questSpecies, questNeed, questKills, questBlind = enemy, q.need, q.have, false
+        questTakenAt, questLastHave, questMovedAt = os.clock(), q.have, os.clock()
         nilPeeks = 0
     elseif q then
-        -- Every tier asked for someone else: this one would never move.
-        abandonQuest("no tier of " .. qname .. " asks for " .. enemy)
+        -- Every tier and id asked for someone else: this one would never move.
+        abandonQuest("no tier of " .. tostring(qname) .. " asks for " .. enemy)
     elseif ok then
         questSpecies, questNeed, questKills, questBlind =
-            enemy, CFG.QuestKillsFallback or 8, 0, true
+            enemy, QUEST_NEED[enemy] or CFG.QuestKillsFallback or 10, 0, true
+        questTakenAt = os.clock()
     end
-    P.lastQuestResult = string.format("%s t%d -> %s", qname, tier,
+    P.lastQuestResult = string.format("%s t%d -> %s", tostring(qname), tier or 0,
         q and string.format("%s  %d/%d",
                 matched and "ACTIVE" or ("WRONG ENEMY, it wants " .. tostring(q.enemy)),
                 q.have, q.need)
-          or (ok and "sent, tracker unreadable - counting kills here"
+          or (ok and string.format("sent, tracker unreadable - counting %d kills here",
+                    questNeed or 0)
                   or ("refused (" .. tostring(res) .. ")")))
     say(P.lastQuestResult)
     return (q ~= nil and matched) or questBlind
@@ -2613,11 +2841,13 @@ function P.clearTargets()
     say("circuit cleared - the species for your level")
 end
 
--- Make sure the quest running is one the circuit wants; take one if none is.
--- A quest already running for a species on the circuit moves the circuit TO
--- that species, so a running count is never thrown away.
-local function ensureQuest(list)
+-- Follow the quest already running. A quest for a species on the circuit
+-- moves the circuit TO that species, so a running count is never thrown away;
+-- one for something else is dropped. Returns true while a circuit quest runs.
+-- Never asks for a quest -- step() does that once it is at the camp.
+local function syncQuest(list)
     local q = P.readQuest(true)
+    if q then trackerSeen = true end
     if q and q.have < q.need then
         local idx
         if q.enemy then
@@ -2640,20 +2870,30 @@ local function ensureQuest(list)
             end
             questNeed  = q.need
             questKills = math.max(questKills, q.have)
+            -- A count that never moves is a count for an enemy we are not
+            -- fighting (farm_pro's way out of it): take a fresh one.
+            if q.have ~= questLastHave then
+                questLastHave, questMovedAt = q.have, os.clock()
+            elseif os.clock() - questMovedAt > (CFG.QuestStallSeconds or 240) then
+                questMovedAt = os.clock()
+                abandonQuest(string.format("its count has not moved in %d s",
+                    math.floor(CFG.QuestStallSeconds or 240)))
+                return false
+            end
             return true
         end
         abandonQuest(idx and "its camp stopped respawning"
             or ("it is for " .. tostring(q.enemy) .. ", not on the circuit"))
+        return false
     elseif questBlind and questSpecies then
-        if questKills < (questNeed or 8) then
+        if questKills < (questNeed or 10) and os.clock() - questTakenAt < 900 then
             for i, t in ipairs(list) do
                 if t.name == questSpecies then circuitIdx = i return true end
             end
         end
         questBlind, questSpecies = false, nil
     end
-    local cur = list[circuitIdx]
-    return acceptFor(cur.name, cur.spot)
+    return false
 end
 
 function P.takeQuestNow()
@@ -2661,7 +2901,7 @@ function P.takeQuestNow()
     if #list == 0 then say(P.circuitNote) return false end
     local cur = list[math.min(circuitIdx, #list)]
     lastAskAt[cur.name] = nil
-    return acceptFor(cur.name, cur.spot)
+    return acceptFor(cur.name)
 end
 
 -- Is the running quest's count full? Our own kill count says when to look;
@@ -2672,7 +2912,7 @@ end
 -- next quest taken would replace a running count.
 local function questFull()
     if not CFG.QuestLoop or not questSpecies then return false end
-    if questBlind then return questKills >= (questNeed or CFG.QuestKillsFallback or 8) end
+    if questBlind then return questKills >= (questNeed or CFG.QuestKillsFallback or 10) end
     local now = os.clock()
     local counted = questNeed ~= nil and questKills >= questNeed
     if not counted and now - lastPeek <= 2 then return false end
@@ -2832,7 +3072,8 @@ local function step()
     local names = {}
     for _, t in ipairs(list) do names[t.name] = true end
 
-    if CFG.QuestLoop then ensureQuest(list) end
+    -- A quest already running decides which species this is.
+    local running = CFG.QuestLoop and syncQuest(list)
     if circuitIdx > #list then circuitIdx = 1 end
     local cur = list[circuitIdx]
     activeName = cur.name
@@ -2849,6 +3090,10 @@ local function step()
             flyTo(camp, { stream = cur.name })
         end
     end
+
+    -- At the camp now: ask for its quest from HERE (farm_pro asks from where
+    -- you stand). With the giver on "never" nothing moves you for it.
+    if CFG.QuestLoop and not running then acceptFor(cur.name) end
 
     local why = fight(cur, names)
     if why == "done" then
@@ -3948,17 +4193,75 @@ local function buildUI()
             function(x) CFG.QuestLoop = x end)
         readout(v, function()
             local q = P.readQuest()
+            local e = activeName
+            local ids = e and P.questIds(e) or {}
             local running = (q and string.format("%s  %d/%d", tostring(q.enemy or "?"), q.have, q.need))
                 or (questBlind and string.format("counting here  %d/%d", questKills, questNeed or 0))
                 or "none"
+            local idLine = (#ids > 0) and (ids[1][1] .. "  tier " .. tostring(ids[1][2])
+                .. (ids[1][3] and "  [locked]" or "")
+                .. ((#ids > 1) and ("   then " .. ids[2][1] .. " t" .. ids[2][2]) or ""))
+                or "no quest id known"
             return table.concat({
                 "running  " .. running,
-                "for      " .. tostring(questSpecies or "-"),
+                "target   " .. tostring(e or "-") .. "   ->  " .. idLine,
                 "last     " .. tostring(P.lastQuestResult),
                 string.format("taken %d   ·   done %d   ·   dropped %d",
                     stats.quests, stats.questsDone, stats.abandons),
             }, "\n")
         end)
+
+        heading2(v, "does it go to the giver")
+        local modeBox = chooser(v, 128)
+        local modeSig = nil
+        local MODES = {
+            { "never",  "Never go, ask from here", "the default" },
+            { "auto",   "Go only if it is near",   "by distance" },
+            { "always", "Always go to it",         "the slow one" },
+        }
+        local function modeRefresh()
+            local e = activeName
+            local gp = nil
+            if e then
+                local _, pos = P.giverFor(e)
+                gp = pos
+            end
+            local _, rr = parts()
+            local gd = (gp and rr) and math.floor((gp - rr.Position).Magnitude) or nil
+            local sig = tostring(CFG.GiverMode) .. "|" .. tostring(e) .. "|"
+                .. tostring(gd and math.floor(gd / 25))
+            if sig == modeSig then return end
+            modeSig = sig
+            for _, c in ipairs(modeBox:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            for i, m in ipairs(MODES) do
+                local tag = m[3]
+                if m[1] == "auto" and gd then
+                    tag = (gd <= (CFG.GiverWalkRadius or 250))
+                        and ("giver " .. gd .. " away: goes")
+                        or  ("giver " .. gd .. " away: asks")
+                end
+                chooserRow(modeBox, i, m[2], tag, CFG.GiverMode == m[1], function()
+                    CFG.GiverMode = m[1]
+                    say("giver: " .. m[2])
+                    modeSig = nil
+                end)
+            end
+        end
+        modeRefresh()
+        addLive(modeRefresh)
+        sliderRow(v, "Near means within", 30, 800, 10,
+            function() return CFG.GiverWalkRadius end,
+            function(x) CFG.GiverWalkRadius = x end, " studs")
+        caption(v, "Never: the quest is asked for from the camp, nothing moves "
+            .. "you. If the game's quest tracker cannot be read back, the quest "
+            .. "is still running - its kills are counted here, with the exact "
+            .. "count from the game's quest data. Auto: goes only when the giver "
+            .. "is near, and goes up to ask again if asking from range came back "
+            .. "empty.")
+
+        heading2(v, "when the camp runs out")
         switchRow(v, "Wait for the respawn",
             "Off: drop the quest and go to the next species",
             function() return CFG.WaitRespawn end,
@@ -3966,14 +4269,36 @@ local function buildUI()
         sliderRow(v, "Wait at most", 10, 120, 5,
             function() return CFG.RespawnMax end,
             function(x) CFG.RespawnMax = x end, " s")
+
+        heading2(v, "by hand")
         actionRow(v, "Take the quest now", nil, function() P.takeQuestNow() end)
         actionRow(v, "Drop the running quest", nil, function() P.abandonQuest() end)
+        hairline(v)
+        actionRow(v, "Use where I stand as the giver", nil, function() P.setGiverHere() end)
+        actionRow(v, "Giver back to the table", nil, function() P.clearGiver() end)
+        actionRow(v, "Unlock the quest and work it out again", nil, function()
+            local e = activeName
+            if e then P.learnedQuests[e] = nil end
+            say("quest unlocked - the next ask works it out")
+        end)
         actionRow(v, "Forget learned quests and givers", nil, function()
             table.clear(P.learnedQuests)
             table.clear(P.learnedGivers)
             table.clear(P.giverSpots)
             say("learned quests and givers forgotten")
         end)
+
+        heading2(v, "override the lookup")
+        textRow(v, "quest id, e.g. MarineQuest2", function(val)
+            CFG.QuestName = (#val > 0) and val or nil
+            say("quest id: " .. tostring(CFG.QuestName or "from the table"))
+        end)
+        sliderRow(v, "Tier   0 = work it out", 0, 3, 1,
+            function() return CFG.QuestTier or 0 end,
+            function(x) CFG.QuestTier = (x > 0) and x or nil end)
+        caption(v, "Leave the tier at 0 and the first ask tries each one, reads "
+            .. "the tracker back, and keeps whichever asks for your species. "
+            .. "That is locked, and every later cycle repeats exactly it.")
     end
 
     -- =====================================================
@@ -4125,6 +4450,7 @@ function P.start()
     questSpecies, questNeed, questKills, questBlind = nil, nil, 0, false
     table.clear(lastAskAt)
     table.clear(stalled)
+    questTakenAt, questLastHave, questMovedAt = 0, -1, 0
     releasePile()
     lockCF, lastWritten, flying = nil, nil, false
     wantPose = "safe"
