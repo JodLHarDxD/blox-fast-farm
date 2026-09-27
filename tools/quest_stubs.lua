@@ -64,6 +64,10 @@ local function levelRow() return nil end
 local function mySea() return nil end
 local function seaOfLevel() return 1 end
 local function rowOf() return nil end
+local BOSS = {}
+local PLAYER_LV = nil
+local function playerLevel() return PLAYER_LV end
+local function levelOf(n) return BOSS[n] and BOSS[n].lv or nil end
 local activeName = nil
 local circuitIdx = 1
 

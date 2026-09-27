@@ -139,6 +139,9 @@ local CFG = {
     -- respawn (the count is kept). Off: drop the quest and go to the next.
     WaitRespawn        = true,
     RespawnMax         = 45,     -- seconds; nothing back by then = move on
+    -- A quest boss that is up goes before the rest of the circuit (only
+    -- between quests: a running count is never thrown away for it).
+    BossFirst          = true,
     -- WHO GOES TO THE GIVER -- farm_pro's switch, the same three answers.
     --   "never"  : never go. Asked from where you stand (the circuit flies to
     --              the camp first, then asks). A clean ask whose tracker cannot
@@ -495,6 +498,61 @@ local QUEST_NEED = {
     ["Skull Slayer"] = 8,
 }
 
+-- QUEST BOSSES. Ids, tiers and levels from the game's own quest module (dump
+-- of 2025-05, tlredz/Scripts GameModules/Quests.lua). Three were renamed since
+-- (the 2025-10 and 2026-09 public tables): Fajita -> Orbitus, Bobby -> Chef,
+-- Island Empress -> Hydra Leader. Every name of one boss maps to its quest;
+-- the Targets page shows the one the game has. Spawn = where the 2025-10
+-- table sends you; only the LAST way of finding one (see WHERE A SPECIES IS).
+-- A boss quest is always one kill.
+local BOSS = {}          -- name -> { id, tier, lv, spot, names }
+do
+    local rows: { any } = {   -- plain data: typed so, the checker skips inferring each row
+        { { "The Gorilla King" },               "JungleQuest",         3,   20, Vector3.new(-1128, 6, -451) },
+        { { "Chef", "Chief", "Bobby" },         "BuggyQuest1",         3,   55, Vector3.new(-1131, 14, 4080) },
+        { { "Yeti" },                           "SnowQuest",           3,  105, Vector3.new(1185, 106, -1518) },
+        { { "Vice Admiral" },                   "MarineQuest2",        2,  130, Vector3.new(-4807, 21, 4360) },
+        { { "Warden" },                         "ImpelQuest",          1,  220, Vector3.new(5230, 4, 749) },
+        { { "Chief Warden" },                   "ImpelQuest",          2,  230, Vector3.new(5230, 4, 749) },
+        { { "Swan" },                           "ImpelQuest",          3,  240, Vector3.new(5230, 4, 749) },
+        { { "Magma Admiral" },                  "MagmaQuest",          3,  350, Vector3.new(-5694, 18, 8735) },
+        { { "Fishman Lord" },                   "FishmanQuest",        3,  425, Vector3.new(61350, 31, 1095) },
+        { { "Wysper" },                         "SkyExp1Quest",        3,  500, Vector3.new(-7927, 5551, -637) },
+        { { "Thunder God" },                    "SkyExp2Quest",        3,  575, Vector3.new(-7751, 5607, -2315) },
+        { { "Cyborg" },                         "FountainQuest",       3,  675, Vector3.new(6138, 10, 3939) },
+        -- Second Sea
+        { { "Diamond" },                        "Area1Quest",          3,  750, Vector3.new(-1569, 199, -31) },
+        { { "Jeremy" },                         "Area2Quest",          3,  850, Vector3.new(2316, 449, 787) },
+        { { "Orbitus", "Fajita" },              "MarineQuest3",        3,  925, Vector3.new(-2086, 73, -4208) },
+        { { "Smoke Admiral" },                  "IceSideQuest",        3, 1150, Vector3.new(-5078, 24, -5352) },
+        { { "Awakened Ice Admiral" },           "FrostQuest",          3, 1400, Vector3.new(6473, 297, -6944) },
+        { { "Tide Keeper" },                    "ForgottenQuest",      3, 1475, Vector3.new(-3711, 77, -11469) },
+        -- Third Sea
+        { { "Stone" },                          "PiratePortQuest",     3, 1550, Vector3.new(-1049, 40, 6791) },
+        { { "Hydra Leader", "Island Empress" }, "VenomCrewQuest",      3, 1675, Vector3.new(5836, 1019, -83) },
+        { { "Kilo Admiral" },                   "MarineTreeIsland",    3, 1750, Vector3.new(2904, 509, -7349) },
+        { { "Captain Elephant" },               "DeepForestIsland",    3, 1875, Vector3.new(-13393, 319, -8423) },
+        { { "Beautiful Pirate" },               "DeepForestIsland2",   3, 1950, Vector3.new(5370, 22, -89) },
+        { { "Cake Queen" },                     "IceCreamIslandQuest", 3, 2175, Vector3.new(-710, 382, -11150) },
+    }
+    P.bosses = {}
+    for _, b in ipairs(rows) do
+        local rec = { names = b[1], id = b[2], tier = b[3], lv = b[4], spot = b[5] }
+        table.insert(P.bosses, rec)
+        for _, n in ipairs(b[1]) do
+            BOSS[n] = rec
+            QUESTS[n] = QUESTS[n] or { b[2], b[3] }
+            QUEST_NEED[n] = 1
+        end
+    end
+    -- Hydra Island's two ordinary species (the game's quest data, and the
+    -- 2026-09 table): the island the old Female / Giant Islander rows were on.
+    QUESTS["Hydra Enforcer"]     = QUESTS["Hydra Enforcer"] or { "VenomCrewQuest", 1 }
+    QUESTS["Venomous Assailant"] = QUESTS["Venomous Assailant"] or { "VenomCrewQuest", 2 }
+    QUEST_NEED["Hydra Enforcer"], QUEST_NEED["Venomous Assailant"] = 8, 8
+end
+P.BOSS = BOSS
+
 -- The giver's NAME is a hint. The giver's POSITION is the thing that works:
 -- the server refuses StartQuest unless you are standing near it, and a
 -- coordinate cannot be misspelled or fail to stream in.
@@ -713,6 +771,17 @@ for _, n in ipairs({
 }) do KNOWN_GIVERS[string.lower(n)] = n end
 P.knownGivers = KNOWN_GIVERS
 
+-- A boss's quest giver is the one who gives the ordinary quests of the same
+-- id: borrow that giver's spot and name (for Auto / Always).
+for name, rec in pairs(BOSS) do
+    for enemy, q in pairs(QUESTS) do
+        if q[1] == rec.id and not BOSS[enemy] then
+            GIVER_POS[name]   = GIVER_POS[name] or GIVER_POS[enemy]
+            GIVER_NAMES[name] = GIVER_NAMES[name] or GIVER_NAMES[enemy]
+        end
+    end
+end
+
 
 -- Seas are separate servers. A species from another sea cannot be reached
 -- from this one, so the circuit skips it and says so.
@@ -729,6 +798,13 @@ local function rowOf(name)
     return nil
 end
 P.rowOf = rowOf
+
+-- The level a species belongs to: its level-table row, or its boss quest.
+local function levelOf(name)
+    local row = rowOf(name)
+    if row then return row[1] end
+    return BOSS[name] and BOSS[name].lv or nil
+end
 
 -- =========================================================
 -- STATE
@@ -1380,6 +1456,40 @@ end
 -- The centre of the biggest group of those points (a species can have more
 -- than one camp); ties go to the one nearest you. Cached: spawn points do
 -- not move.
+-- IS A BOSS UP? Loaded near you: here. Alive but far from every player: the
+-- game parks it in ReplicatedStorage (the public hubs look there for exactly
+-- this). In neither: not spawned. The parked list is read once a second.
+-- bossUp: the same, except a parked entry that did not turn up when you were
+-- standing on it is not believed for a minute (P.bossStale).
+local bossWhere, bossUp
+P.bossStale, P.bossMiss = {}, {}
+do
+    local parkedAt, parked = 0, {}
+    function bossWhere(name)
+        local e = nearestLoaded(name)
+        if e then return e.root.Position, "here" end
+        if os.clock() - parkedAt > 1 then
+            parkedAt, parked = os.clock(), {}
+            for _, m in ipairs(RS:GetChildren()) do
+                if m:IsA("Model") then
+                    local hum = m:FindFirstChildOfClass("Humanoid")
+                    local hrp = m:FindFirstChild("HumanoidRootPart")
+                    if hrp and (not hum or hum.Health > 0) then parked[speciesKey(m.Name)] = hrp.Position end
+                end
+            end
+        end
+        local p = parked[speciesKey(name)]
+        if p then return p, "parked" end
+        return nil, nil
+    end
+    function bossUp(name)
+        local at, where = bossWhere(name)
+        if where == "parked" and os.clock() < (P.bossStale[name] or 0) then return nil, nil end
+        return at, where
+    end
+end
+P.bossWhere = bossWhere
+
 local campCache = {}
 P.campNotes = {}
 local function campOf(name, fallback)
@@ -3048,8 +3158,12 @@ P.circuitNote      = ""
 local function wanted(trackerEnemy, enemy)
     if not trackerEnemy or not enemy then return true end
     local a = string.lower(tostring(trackerEnemy))
-    local b = string.lower(tostring(enemy))
-    return string.find(a, b, 1, true) ~= nil or string.find(b, a, 1, true) ~= nil
+    local names = BOSS[enemy] and BOSS[enemy].names or { enemy }
+    for _, n in ipairs(names) do
+        local b = string.lower(n)
+        if string.find(a, b, 1, true) ~= nil or string.find(b, a, 1, true) ~= nil then return true end
+    end
+    return false
 end
 
 -- The quest ids to try for a species, in order: typed by hand > learned (a
@@ -3119,6 +3233,15 @@ local function acceptFor(enemy)
         return false
     end
     lastAskAt[enemy] = os.clock()
+
+    -- A boss quest below its level is refused by the game: say so, do not ask.
+    local boss, lv = BOSS[enemy], playerLevel()
+    if boss and lv and lv < boss.lv and not (CFG.QuestName and #tostring(CFG.QuestName) > 0) then
+        P.lastQuestResult = string.format("%s quest needs level %d (you are %d) - fighting it without one",
+            enemy, boss.lv, lv)
+        say(P.lastQuestResult)
+        return false
+    end
 
     local ids = questIds(enemy)
     if #ids == 0 then
@@ -3278,11 +3401,11 @@ local function circuit()
     local sea = mySea()
     local out, skipped = {}, {}
     for _, n in ipairs(names) do
-        local row = rowOf(n)
-        if row and sea and seaOfLevel(row[1]) ~= sea then
+        local row, lv = rowOf(n), levelOf(n)
+        if lv and sea and seaOfLevel(lv) ~= sea then
             table.insert(skipped, n)
         else
-            table.insert(out, { name = n, spot = row and row[4] or nil })
+            table.insert(out, { name = n, spot = row and row[4] or (BOSS[n] and BOSS[n].spot) or nil })
         end
     end
     P.circuitSkipped = skipped
@@ -3550,8 +3673,56 @@ local function step()
     -- A quest already running decides which species this is.
     local running = CFG.QuestLoop and syncQuest(list)
     if circuitIdx > #list then circuitIdx = 1 end
+    -- Between quests, a quest boss that is up goes first.
+    if CFG.BossFirst and not running then
+        for i, t in ipairs(list) do
+            if BOSS[t.name] and bossUp(t.name) then circuitIdx = i break end
+        end
+    end
     local cur = list[circuitIdx]
     activeName = cur.name
+
+    -- A QUEST BOSS is one enemy on a long respawn. Its quest is taken only
+    -- while it is up. While it is not: the rest of the circuit (its quest, if
+    -- one is held, is dropped so the others can have theirs), or -- when
+    -- nothing else on the circuit can be fought (it is alone, or every other
+    -- one is a boss that is not up either) -- wait over its spawn, however
+    -- long, quest kept.
+    if not BOSS[cur.name] then P.bossWaitSince = nil end
+    if BOSS[cur.name] then
+        local other = false
+        for i, t in ipairs(list) do
+            if i ~= circuitIdx and (not BOSS[t.name] or bossUp(t.name)) then other = true break end
+        end
+        if bossUp(cur.name) then
+            P.bossWaitSince = nil
+        elseif other then
+            if running and questSpecies == cur.name then
+                abandonQuest(cur.name .. " is not up - doing the rest meanwhile")
+            end
+            say(cur.name .. " has not spawned - next on the circuit")
+            advance(list)
+            releasePile()
+            task.wait(0.2)
+            return
+        else
+            local spot = campOf(cur.name, cur.spot)
+            local _, r = parts()
+            local over = spot and (spot + Vector3.new(0, CFG.HeightSafe or 20, 0))
+            if r and over and (r.Position - over).Magnitude > 150 then
+                releasePile()
+                setState("FLY")
+                say("flying to where " .. cur.name .. " spawns")
+                flyTo(over, { stream = cur.name })
+            end
+            setState("WAIT")
+            P.bossWaitSince = P.bossWaitSince or os.clock()
+            say(string.format("waiting for %s to spawn  %ds", cur.name,
+                math.floor(os.clock() - P.bossWaitSince)))
+            task.wait(0.5)
+            return
+        end
+    end
 
     -- To where the species IS, unless already fighting it. A loaded one is the
     -- truth (its own spawn spot); otherwise the game's spawn points; the
@@ -3588,6 +3759,27 @@ local function step()
         advance(list)
         if list[circuitIdx].name ~= cur.name then releasePile() end
         say("quest done - next: " .. list[circuitIdx].name)
+    elseif why == "empty" and BOSS[cur.name] then
+        -- Down (someone else's kill, or it left): the next step sees it is not
+        -- up and does the rest of the circuit, or waits for it. Still listed
+        -- as parked while you stand at it for 10 s: that entry is not believed
+        -- for a minute, so the farm cannot hover over nothing for ever.
+        local at, where = bossWhere(cur.name)
+        local _, r = parts()
+        if where == "parked" and r and (at - r.Position).Magnitude < 300 then
+            local miss = P.bossMiss[cur.name]
+            if not miss then
+                P.bossMiss[cur.name] = os.clock()
+            elseif os.clock() - miss > 10 then
+                P.bossMiss[cur.name] = nil
+                P.bossStale[cur.name] = os.clock() + 60
+            end
+            say(cur.name .. " is listed as up but is not here yet")
+        else
+            P.bossMiss[cur.name] = nil
+            say(cur.name .. " is down")
+        end
+        task.wait(0.5)
     elseif why == "empty" then
         if not (CFG.QuestLoop and questSpecies == cur.name) then
             -- No quest holding us here: the next camp while this one respawns.
@@ -4369,6 +4561,35 @@ local function buildUI()
             end
             local lr = levelRow()
             if lr then add(lr[3]) end
+            -- The quest bosses of this sea, under the name the game has now.
+            local lv = playerLevel()
+            local bossTag = {}
+            for _, rec in ipairs(P.bosses) do
+                if not sea or seaOfLevel(rec.lv) == sea then
+                    -- Which of its names the game has now: looked up every 10 s.
+                    if #rec.names > 1 and os.clock() - (rec.shownAt or -99) > 10 then
+                        rec.shownAt, rec.shown = os.clock(), nil
+                        for _, n in ipairs(rec.names) do
+                            if counts[n] or bossWhere(n) or #gamePoints(n) > 0 then rec.shown = n break end
+                        end
+                    end
+                    local shown = rec.shown or rec.names[1]
+                    if counts[shown] == nil then
+                        for _, n in ipairs(rec.names) do if counts[n] then shown = n end end
+                    end
+                    local at, where = bossUp(shown)
+                    bossTag[shown] = "boss  ·  " .. ((where == "here" and "up, here")
+                        or (where == "parked" and "up") or "not spawned")
+                        .. ((lv and lv < rec.lv) and ("  ·  Lv " .. rec.lv .. " for the quest") or "")
+                    add(shown)
+                    for _, c in ipairs(cand) do
+                        if c.name == shown and not counts[shown] then
+                            c.d = at and (here and (at - here).Magnitude or 5e7) + 1e7 or 1e8
+                            c.far = at and here and (at - here).Magnitude or nil
+                        end
+                    end
+                end
+            end
 
             local order = {}
             for i, n in ipairs(CFG.Targets) do order[n] = i end
@@ -4381,7 +4602,9 @@ local function buildUI()
             end)
 
             local sig = table.concat(CFG.Targets, ",") .. "|"
-            for _, c in ipairs(cand) do sig = sig .. c.name .. (counts[c.name] or 0) .. "," end
+            for _, c in ipairs(cand) do
+                sig = sig .. c.name .. (counts[c.name] or 0) .. (bossTag[c.name] or "") .. ","
+            end
             if sig == signature then return end
             signature = sig
 
@@ -4392,8 +4615,8 @@ local function buildUI()
                 local o = order[c.name]
                 local n = counts[c.name]
                 local tag = (o and ("#" .. o .. "  ") or "")
-                    .. (n and (n .. " alive")
-                        or (c.far and string.format("%.0f studs", c.far) or "not loaded"))
+                    .. (bossTag[c.name] or (n and (n .. " alive")
+                        or (c.far and string.format("%.0f studs", c.far) or "not loaded")))
                 chooserRow(box, i, c.name, tag, o ~= nil, function()
                     P.toggleTarget(c.name)
                     signature = nil
@@ -4795,6 +5018,20 @@ local function buildUI()
         sliderRow(v, "Wait at most", 10, 120, 5,
             function() return CFG.RespawnMax end,
             function(x) CFG.RespawnMax = x end, " s")
+
+        heading2(v, "quest bosses")
+        switchRow(v, "Bosses first",
+            "A boss that is up goes before the rest, between quests",
+            function() return CFG.BossFirst end,
+            function(x) CFG.BossFirst = x end)
+        caption(v, "A boss's quest is taken only while it is up - it is found "
+            .. "near you, or parked by the game far away. Not up: the rest of "
+            .. "the circuit, or, if it is alone on the circuit, a wait over its "
+            .. "spawn for as long as it takes.")
+        readout(v, function()
+            if not P.bossWaitSince then return "no boss wait" end
+            return string.format("waiting for a boss  %ds", math.floor(os.clock() - P.bossWaitSince))
+        end)
 
         heading2(v, "by hand")
         actionRow(v, "Take the quest now", nil, function() P.takeQuestNow() end)

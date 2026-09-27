@@ -39,6 +39,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 | Combo | per-weapon switches M1 Z X C V F + hold time per key (**all skills are off until you switch them on**). Ready skills read off `PlayerGui.Main.Skills[weapon][key].Cooldown`. "M1 swings between skills" and "Start with" set the rhythm. After each cast the bar is read again: "fired" or "key sent, the skill did NOT fire" (Attack page, Stats). Skill cooldowns live on the server and cannot be removed. |
 | Aim lock | Skills fire down the line from the camera through the cursor. **Camera free (default):** a frame goes input → camera update → drawn → physics → Heartbeat → next input; the camera between Heartbeat and the next camera update is never drawn, but a key sent then is read in it. So at Heartbeat the camera is solved onto the pile (yaw + pitch, exact, for your cursor's pixel) and just before the camera update your saved view goes back — your screen and the camera script only ever see your own view. Every cast reports **hit or MISSED** (pile HP before/after) per skill. **Camera free off:** the view itself turns so the pile is under your cursor. |
 | Quest circuit | farm_pro's engine and farm_pro's giver switch — **Never (default): you are never moved for a quest.** The circuit flies to the camp, then asks from there (tier probed + locked, tracker read, never re-ask during a running count). Tracker unreadable = the quest is still running, its kills are counted here with the exact count from the game's quest data. Auto / Always go to the giver (First Sea giver spots included). One quest at a time; A → B → … and back. |
+| Quest bosses | 24 quest bosses from the game's own quest data (ids, tiers, levels), all three seas; renamed ones (Fajita→Orbitus, Bobby→Chef, Island Empress→Hydra Leader) accept either name. **Up** = loaded near you, or parked by the game in ReplicatedStorage while far from players (how the hubs check); neither = not spawned. The quest is taken only while it is up (tier 3 mostly, one kill, from where you stand). Not up: the rest of the circuit (a held boss quest is dropped so the others can run), or — nothing else to fight — a wait over its spawn for as long as it takes. "Bosses first" (Quest page): a boss that is up goes next, between quests. Under its level: fought without the quest, and the panel says the level. Targets page lists this sea's bosses: up / up, here / not spawned. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
 
@@ -56,10 +57,11 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 
 ```
 luau-compile.exe --binary fast_farm.lua          # parses
-luau-analyze.exe fast_farm.lua                   # filter "Unknown global", "SameLineStatement", "Unknown type 'Instance'"
+luau-analyze.exe fast_farm.lua                   # filter "Unknown global", "SameLineStatement", "Unknown type 'Instance'"; the new solver now hits its budget ("inference failed to complete") - lints still run
+luau-analyze.exe --solver=old fast_farm.lua      # the full type check; only "Key 'start' not found in table 'P'" (P.start is set before the panel is built)
 python tools/checks.py fast_farm.lua             # every CFG/stats/P field defined; no local used above its declaration
 python tools/rhythm_test.py                      # the combo rhythm, real code, 9 scenarios
-python tools/quest_test.py                       # the quest engine, real code, 16 scenarios (never mode never moves you)
+python tools/quest_test.py                       # the quest engine, real code, 22 scenarios (never mode never moves you; boss quests, level gate, renamed boss, sea skip)
 python tools/locate_test.py                      # where a species is + the pile, real code, 20 scenarios (Sky Bandit case, new spawns joining)
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim

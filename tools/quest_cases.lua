@@ -134,4 +134,72 @@ questKills = 5
 running = syncQuest({ { name = "Bandit" } })
 check("blind quest released when the count is reached", not running)
 
+-- ---------------------------------------------------------------- quest bosses
+BOSS["Diamond"] = { id = "Area1Quest", tier = 3, lv = 750, names = { "Diamond" } }
+BOSS["Orbitus"] = { id = "MarineQuest3", tier = 3, lv = 925, names = { "Orbitus", "Fajita" } }
+BOSS["Fajita"]  = BOSS["Orbitus"]
+BOSS["Stone"]   = { id = "PiratePortQuest", tier = 3, lv = 1550, names = { "Stone" } }
+QUESTS["Diamond"] = { "Area1Quest", 3 }
+QUESTS["Orbitus"] = { "MarineQuest3", 3 }
+QUESTS["Stone"]   = { "PiratePortQuest", 3 }
+QUEST_NEED["Diamond"], QUEST_NEED["Orbitus"], QUEST_NEED["Stone"] = 1, 1, 1
+local BOSS_DB = {
+    Area1Quest   = { { "Raider", 8 }, { "Mercenary", 8 }, { "Diamond", 1 } },
+    MarineQuest3 = { { "Marine Lieutenant", 8 }, { "Marine Captain", 8 }, { "Fajita", 1 } },
+}
+
+-- B1. a Second Sea boss quest: tier 3, asked from here, one kill, never moves you
+reset({ db = BOSS_DB })
+PLAYER_LV = 900
+local okB = acceptFor("Diamond")
+check("boss quest taken from here: Area1Quest t3, 1 kill, no flight",
+    okB and questSpecies == "Diamond" and questNeed == 1 and LOG[1] == "ask Area1Quest t3" and not flew(),
+    P.lastQuestResult)
+
+-- B2. below the boss's level: not asked at all, and it says why
+reset({ db = BOSS_DB })
+PLAYER_LV = 700
+local okL = acceptFor("Diamond")
+check("under level 750: the game is not asked, the panel says the level",
+    not okL and SERVER.asks == 0 and string.find(P.lastQuestResult, "level 750", 1, true) ~= nil,
+    P.lastQuestResult)
+
+-- B3. renamed boss: picked as Orbitus, the game's tracker still says Fajita
+reset({ db = BOSS_DB })
+PLAYER_LV = 1000
+local ab0 = stats.abandons
+local okR = acceptFor("Orbitus")
+check("renamed boss (Orbitus = Fajita): the tracker's old name is accepted, no abandon",
+    okR and questSpecies == "Orbitus" and stats.abandons == ab0 and #LOG == 1,
+    P.lastQuestResult)
+
+-- B4. level unreadable: asked anyway (the game decides)
+reset({ db = BOSS_DB })
+PLAYER_LV = nil
+check("level unreadable: still asks", acceptFor("Diamond") and SERVER.asks == 1, P.lastQuestResult)
+
+-- B5. a Third Sea boss on the circuit while in the Second Sea: skipped, and said
+reset()
+PLAYER_LV = 900
+local oldSea, oldSOL = mySea, seaOfLevel
+mySea = function() return 2 end
+seaOfLevel = function(lv) if lv < 700 then return 1 elseif lv < 1500 then return 2 end return 3 end
+CFG.Targets = { "Diamond", "Stone" }
+local lst = circuit()
+check("circuit: Stone (Third Sea) skipped in the Second Sea, Diamond kept",
+    #lst == 1 and lst[1].name == "Diamond" and P.circuitSkipped[1] == "Stone",
+    #lst .. " " .. tostring(P.circuitSkipped[1]))
+mySea, seaOfLevel = oldSea, oldSOL
+CFG.Targets = {}
+
+-- B6. syncQuest: a running boss quest keeps the circuit on the boss
+reset({ db = BOSS_DB })
+PLAYER_LV = 900
+CFG.Targets = { "Bandit", "Diamond" }
+acceptFor("Diamond")
+circuitIdx = 1
+local keep = syncQuest(circuit())
+check("running boss quest: the circuit stays on the boss", keep and circuitIdx == 2, circuitIdx)
+CFG.Targets = {}
+
 print(all and "ALL PASS" or "SOME FAILED")
