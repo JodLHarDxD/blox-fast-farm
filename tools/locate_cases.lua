@@ -165,4 +165,51 @@ table.insert(WORLD.loaded, enemy("Sky", v3(0, 280, 0)))
 pl, centre = buildPile({ name = "Sky" }, { Sky = true })
 check("middle height of the camp", near(centre, v3(20, 290, 0)), centre and centre.Y)
 
+-- ---------------------------------------------------------------- RAID MODE
+-- 18. every kind of enemy near the raid island goes in; one far off does not
+reset()
+CFG.RaidRadius = 450
+P.raidAt = v3(1000, 0, 1000)
+ME.Position = v3(1000, 45, 1000)
+table.insert(WORLD.loaded, enemy("Raid Brute", v3(1010, 0, 1000)))
+table.insert(WORLD.loaded, enemy("Raid Archer", v3(990, 0, 1020)))
+table.insert(WORLD.loaded, enemy("Order", v3(1100, 0, 900)))
+table.insert(WORLD.loaded, enemy("Bandit", v3(3000, 0, 3000)))     -- another island
+pl, centre = buildRaidPile()
+local kinds = {}
+for _, e in ipairs(pl) do kinds[e.name] = true end
+check("raid: every kind on the island pulled (3 kinds), the far one not",
+    #pl == 3 and kinds["Raid Brute"] and kinds["Raid Archer"] and kinds["Order"] and not kinds["Bandit"],
+    "held " .. #pl)
+check("raid: piled at the middle of where they spawned",
+    near(centre, v3(1045, 0, 960), 1), centre and (centre.X .. "," .. centre.Z))
+
+-- 19. outside a raid: everything within the radius of YOU
+reset()
+CFG.RaidRadius = 450
+P.raidAt = nil
+ME.Position = v3(0, 20, 0)
+table.insert(WORLD.loaded, enemy("Pirate", v3(100, 0, 0)))
+table.insert(WORLD.loaded, enemy("Brute", v3(-200, 0, 50)))
+table.insert(WORLD.loaded, enemy("Sea Beast", v3(900, 0, 0)))
+pl = buildRaidPile()
+check("outside a raid: everything near you, any kind (2), not the far one", #pl == 2, "held " .. #pl)
+
+-- 20. nobody near: empty
+reset()
+P.raidAt = v3(5000, 0, 5000)
+table.insert(WORLD.loaded, enemy("Pirate", v3(0, 0, 0)))
+pl = buildRaidPile()
+check("raid: no enemy near the island = empty (the step waits over it)", #pl == 0, "held " .. #pl)
+
+-- 21. more than GrabMax: the nearest ones
+reset()
+CFG.RaidRadius, CFG.GrabMax = 450, 5
+P.raidAt = v3(0, 0, 0)
+for i = 1, 9 do table.insert(WORLD.loaded, enemy("Raider " .. i, v3(i * 20, 0, 0))) end
+pl = buildRaidPile()
+check("raid: capped at Most in one pile, nearest first", #pl == 5 and pl[5].name == "Raider 5", "held " .. #pl)
+CFG.GrabMax = 12
+P.raidAt = nil
+
 print(all and "ALL PASS" or "SOME FAILED")

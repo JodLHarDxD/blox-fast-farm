@@ -133,6 +133,13 @@ local CFG = {
     TravelSpeed        = 330,    -- studs/s. The public hubs all settled on 330.
     InstantHop         = 150,    -- shorter than this: one write, no flight
 
+    -- ---------- RAID MODE ----------
+    -- Species and quests forgotten: every living enemy, any kind, within
+    -- RaidRadius of the newest raid island (of you, outside a raid) goes in
+    -- one pile. Observation is not pressed (raids switch it off).
+    RaidMode           = false,
+    RaidRadius         = 450,    -- the public raid scripts' "on this island"
+
     -- ---------- QUEST ----------
     QuestLoop          = true,
     -- The camp runs out before the quest is full. On: wait there for the
@@ -785,7 +792,13 @@ end
 
 -- Seas are separate servers. A species from another sea cannot be reached
 -- from this one, so the circuit skips it and says so.
-local SEA_OF_PLACE = { [2753915549] = 1, [4442272183] = 2, [7449423635] = 3 }
+-- Each sea runs under an old and a newer place id (the newer ones from the
+-- 2025-10 and 2026-08 public scripts); an unknown id = sea unknown.
+local SEA_OF_PLACE = {
+    [2753915549] = 1, [85211729168715] = 1,
+    [4442272183] = 2, [79091703265657] = 2,
+    [7449423635] = 3, [100117331123089] = 3,
+}
 local function mySea() return SEA_OF_PLACE[game.PlaceId] end
 local function seaOfLevel(lv)
     if lv < 700 then return 1 elseif lv < 1500 then return 2 end
@@ -1553,7 +1566,7 @@ local simAt      = 0
 P.pileHeld, P.pileOwned = 0, 0
 P.simNote = sethiddenproperty and "SimulationRadius: settable" or "SimulationRadius: this executor cannot set it"
 
-local homeOf, campFor
+local homeOf, campFor, middleOf
 do
     -- Every spawn spot seen, per species (8 studs apart): the camp's middle can
     -- be found even when the game gives no spawn points, and it does not move
@@ -1632,6 +1645,19 @@ do
         return cx, cz, r
     end
 
+    -- The middle of any set of points (the smallest circle round them, flat,
+    -- at half their height span), and the farthest pull from it.
+    function middleOf(pts)
+        local flat, lo, hi = {}, math.huge, -math.huge
+        for _, p in ipairs(pts) do
+            table.insert(flat, { p.X, p.Z })
+            lo, hi = math.min(lo, p.Y), math.max(hi, p.Y)
+        end
+        local cx, cz, rad = enclosingCircle(flat)
+        local half = (hi - lo) / 2
+        return Vector3.new(cx, lo + half, cz), math.sqrt(rad * rad + half * half)
+    end
+
     local function campsFrom(pts)
         local n, taken, camps = #pts, {}, {}
         for i = 1, n do
@@ -1648,18 +1674,8 @@ do
                         end
                     end
                 end
-                local flat, lo, hi = {}, math.huge, -math.huge
-                for _, p in ipairs(members) do
-                    table.insert(flat, { p.X, p.Z })
-                    lo, hi = math.min(lo, p.Y), math.max(hi, p.Y)
-                end
-                local cx, cz, rad = enclosingCircle(flat)
-                local half = (hi - lo) / 2
-                table.insert(camps, {
-                    pts    = members,
-                    centre = Vector3.new(cx, lo + half, cz),
-                    reach  = math.sqrt(rad * rad + half * half),
-                })
+                local centre, reach = middleOf(members)
+                table.insert(camps, { pts = members, centre = centre, reach = reach })
             end
         end
         return camps
@@ -1800,13 +1816,46 @@ local function buildPile(cur, names)
     return group, centre
 end
 
+-- RAID MODE's pile: every living enemy, any kind, within RaidRadius of the
+-- newest raid island (P.raidAt), or of you outside a raid. Piled at the
+-- middle of where they spawned.
+P.raidAt, P.raidNote = nil, "raid mode: starting"
+local function buildRaidPile()
+    local _, r = parts()
+    if not r then return {}, nil end
+    local around = P.raidAt or r.Position
+    local list = {}
+    for _, e in ipairs(liveEnemies(nil)) do
+        if not isPutBack(e.model) and (e.root.Position - around).Magnitude <= (CFG.RaidRadius or 450) then
+            table.insert(list, e)
+        end
+    end
+    if #list == 0 then return {}, nil end
+    table.sort(list, function(a, b)
+        return (a.root.Position - around).Magnitude < (b.root.Position - around).Magnitude
+    end)
+    if not CFG.Magnet then return { list[1] }, list[1].root.Position end
+    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
+    while #list > cap do table.remove(list) end
+    local homes = {}
+    for _, e in ipairs(list) do table.insert(homes, homeOf(e)) end
+    local centre, reach = middleOf(homes)
+    P.pileReach = reach
+    return list, centre
+end
+
 -- Look again who is loaded: a new spawn joins the pile within a tenth of a
 -- second. Called from the fight AND from the frame loop below, because the
 -- fight is busy for most of a second on every cast and every M1 probe.
 local function refreshPile()
     if not pileCur then return end
     pileScanAt = os.clock()
-    local list, centre = buildPile(pileCur, pileNames)
+    local list, centre
+    if pileCur.raid then
+        list, centre = buildRaidPile()
+    else
+        list, centre = buildPile(pileCur, pileNames)
+    end
     pile = list
     if centre and (not pileCentre or pileFor ~= pileCur.name
         or (centre - pileCentre).Magnitude > 2) then
@@ -2577,7 +2626,7 @@ local function keepHaki()
         end
     end
 
-    if not CFG.AutoKen then return end
+    if not CFG.AutoKen or CFG.RaidMode then return end   -- raids switch Observation off
     local now = os.clock()
     local on  = kenOn()
     if on then kenSeen, kenBlind, kenMisses = true, false, 0 end
@@ -3574,7 +3623,7 @@ local function fight(cur, names)
             end
         end
 
-        if questFull() then
+        if not cur.raid and questFull() then
             if pileStart then recordPile(now - pileStart) end
             attacking = false
             return "done"
@@ -3645,6 +3694,73 @@ local function escape()
 end
 
 -- =========================================================
+-- RAID MODE
+-- =========================================================
+-- A fruit raid: five islands, each a wave of enemies of every kind; clear one
+-- and the next opens. The game shows it (the public raid scripts, 2025-07 and
+-- 2026-08): a raid timer on screen -- PlayerGui.Main.TopHUDList.RaidTimer,
+-- older builds Main.Timer -- and each island that has opened is a part in
+-- workspace._WorldOrigin.Locations named "Island 1" .. "Island 5". So: the
+-- newest island there is where the fight is; nobody left near it = wait over
+-- it for the wave, or for the next island to open.
+local function raidState()
+    local pg   = player:FindFirstChild("PlayerGui")
+    local main = pg and pg:FindFirstChild("Main")
+    local hud  = main and main:FindFirstChild("TopHUDList")
+    local t = (hud and hud:FindFirstChild("RaidTimer")) or (main and main:FindFirstChild("Timer"))
+    local on = t ~= nil and t:IsA("GuiObject") and t.Visible
+    local text
+    if on then
+        local l = t:IsA("TextLabel") and t or t:FindFirstChildWhichIsA("TextLabel", true)
+        text = l and l.Text or nil
+    end
+    local wo  = workspace:FindFirstChild("_WorldOrigin")
+    local loc = wo and wo:FindFirstChild("Locations")
+    if loc then
+        for i = 5, 1, -1 do
+            local p = loc:FindFirstChild("Island " .. i)
+            local pos = p and ((p:IsA("BasePart") and p.Position) or (p:IsA("Model") and p:GetPivot().Position))
+            if pos then return on, pos, i, text end
+        end
+    end
+    return on, nil, 0, text
+end
+P.raidState = raidState
+
+local function raidStep()
+    local on, islandPos, n, text = raidState()
+    P.raidAt = islandPos
+    local list = buildRaidPile()
+    if islandPos or on then
+        P.raidNote = string.format("in a raid  ·  Island %d%s  ·  %d enemies here", n,
+            text and ("  ·  " .. text) or "", #list)
+    else
+        P.raidNote = string.format("not in a raid  ·  everything within %d studs of you  ·  %d enemies",
+            math.floor(CFG.RaidRadius or 450), #list)
+    end
+    if #list > 0 then
+        activeName = "raid"
+        fight({ name = "raid", raid = true }, nil)
+        return
+    end
+    -- Nobody here: over the newest island, and wait for its wave.
+    local _, r = parts()
+    if islandPos and r then
+        local over = islandPos + Vector3.new(0, 45, 0)
+        if (r.Position - over).Magnitude > 60 then
+            releasePile()
+            setState("FLY")
+            say("raid: to Island " .. n)
+            flyTo(over)
+        end
+    end
+    setState("WAIT")
+    say(islandPos and ("raid: Island " .. n .. " - waiting for enemies")
+        or "raid mode: no enemy near you")
+    task.wait(0.25)
+end
+
+-- =========================================================
 -- MAIN LOOP
 -- =========================================================
 local function step()
@@ -3659,6 +3775,8 @@ local function step()
         return
     end
     pcall(keepHaki)
+
+    if CFG.RaidMode then raidStep() return end
 
     local list = circuit()
     if #list == 0 then
@@ -4451,6 +4569,18 @@ local function buildUI()
                 CFG.QuestLoop = x
                 say(x and "quest circuit on" or "quest circuit off - farming without quests")
             end)
+        switchRow(v, "Raid mode",
+            "Every enemy near you, any kind - no quests, no Observation",
+            function() return CFG.RaidMode end,
+            function(x)
+                CFG.RaidMode = x
+                releasePile()
+                say(x and "raid mode on" or "raid mode off - back to the circuit")
+            end)
+        readout(v, function()
+            if not CFG.RaidMode then return "raid mode off" end
+            return tostring(P.raidNote)
+        end)
 
         gap(v, 8)
 
@@ -4853,6 +4983,12 @@ local function buildUI()
         sliderRow(v, "This camp means within", 20, 300, 10,
             function() return CFG.OthersRadius end,
             function(x) CFG.OthersRadius = x end, " studs")
+        heading2(v, "raid mode")
+        sliderRow(v, "Raid mode pulls within", 100, 1500, 50,
+            function() return CFG.RaidRadius end,
+            function(x) CFG.RaidRadius = x end, " studs")
+        caption(v, "Of the newest raid island (Island 1 to 5), or of you outside "
+            .. "a raid. Every kind of enemy in that circle goes in the pile.")
         heading2(v, "keeping them hittable")
         caption(v, "The pile sits at the middle of the camp's spawn points - the "
             .. "spot where the farthest pull is shortest, so every one stays "
