@@ -14,7 +14,7 @@ local CFG = { Magnet = true, PutBackAfter = 3, LearnLeash = true }
 local pile, pileCentre = {}, v3(0, 0, 0)
 local pileJoin, putBack, homePos = {}, {}, {}
 local stats = { putBack = 0 }
-local P = { leash = {} }
+local P = { leash = {}, pileInPlace = false, forceClose = false, randomSkip = {}, randomCant = 0 }
 local function enemy(name, home)
     local m = {}
     homePos[m] = home

@@ -57,4 +57,24 @@ pile = { e1, e2 }
 run(4, { e1 })
 check("learning off: put back, no limit recorded", putBack[e2.model] ~= nil and (P.leash["Pirate"] or {}).bad == nil)
 
+-- ---------------------------------------------------------------- FOUGHT IN PLACE (random mode)
+-- 5. no damage from high for 6 s: come close; never teleported home
+reset()
+P.pileInPlace, P.forceClose, P.randomCant = true, false, 0
+local st = enemy("Pirate", v3(200, 0, 0))
+pile = { st }
+run(7, {})
+check("in place, no damage 6 s from high: comes close", P.forceClose == true and putBack[st.model] == nil)
+-- 6. damage once close: stays, the clock resets, not skipped
+run(3, { st })
+check("close now and it takes damage: kept, not skipped", P.randomSkip[st.model] == nil)
+-- 7. none for 15 s even close: skipped a minute, counted
+local st2 = enemy("Brute", v3(0, 0, 0))
+pile = { st2 }
+P.forceClose = true
+run(16, {})
+check("in place, no damage 15 s even close: skipped for a minute and counted",
+    P.randomSkip[st2.model] ~= nil and P.randomCant == 1 and putBack[st2.model] == nil)
+P.pileInPlace, P.forceClose = false, false
+
 print(all and "ALL PASS" or "SOME FAILED")

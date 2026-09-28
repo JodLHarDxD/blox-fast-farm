@@ -151,6 +151,15 @@ local CFG = {
     RaidMode           = false,
     RaidRadius         = 450,    -- the public raid scripts' "on this island"
 
+    -- ---------- RANDOM MODE ----------
+    -- Quests forgotten: every living enemy within RandomRadius of you -- at
+    -- the Castle on the Sea, of the pirate raid's area -- and EVERY one of
+    -- them damaged. Pulled only within its pull limit (a far or diagonal one
+    -- gets its own pile after); one that takes no damage when pulled is fought
+    -- where it stands, from close if high does not hurt it.
+    RandomMode         = false,
+    RandomRadius       = 750,
+
     -- ---------- QUEST ----------
     QuestLoop          = true,
     -- The camp runs out before the quest is full. On: wait there for the
@@ -1764,7 +1773,7 @@ local function releasePile()
     pileActive, attacking = false, false
     pile, pileCentre, pileSide, pileFor = {}, nil, nil, nil
     pileCur, pileNames = nil, nil
-    P.pileReach = nil
+    P.pileReach, P.pileInPlace, P.inPlaceTarget, P.forceClose = nil, false, nil, false
     P.pileHeld, P.pileOwned = 0, 0
 end
 
@@ -1891,6 +1900,69 @@ local function buildRaidPile()
     return list, centre
 end
 
+-- RANDOM MODE's pile. Every living enemy, any kind, within RandomRadius of
+-- P.randomAt (the Castle on the Sea raid area there, else you).
+--   pile   : the nearest free one picks the spot; only the ones whose spawn is
+--            within THEIR OWN kind's pull limit of it are pulled -- a far or
+--            diagonal one is its own pile, in turn. So everyone pulled is
+--            pulled only as far as it can be and still take damage.
+--   in place: one that was pulled and took no damage (put back) is not left
+--            alone: once no free one is left it is fought where it stands
+--            (third return value true = do not move it).
+P.randomAt, P.randomNote, P.randomSkip, P.randomCant = nil, "random mode: starting", {}, 0
+local function buildRandomPile()
+    local _, r = parts()
+    if not r then return {}, nil, false end
+    local around = P.randomAt or r.Position
+    local radius = CFG.RandomRadius or 750
+    if P.randomAt then radius = math.max(radius, 800) end   -- the raid area is 750 round its centre
+    local now = os.clock()
+    local free, solo = {}, {}
+    for _, e in ipairs(liveEnemies(nil)) do
+        if (e.root.Position - around).Magnitude <= radius and not (P.randomSkip[e.model] and now < P.randomSkip[e.model]) then
+            if isPutBack(e.model) then table.insert(solo, e) else table.insert(free, e) end
+        end
+    end
+    local from = pileCentre or r.Position
+    local function nearest(list)
+        local best, bd = nil, math.huge
+        for _, e in ipairs(list) do
+            local d = (e.root.Position - from).Magnitude
+            if d < bd then best, bd = e, d end
+        end
+        return best
+    end
+    if #free > 0 then
+        local anchor = nearest(free)
+        if not CFG.Magnet then return { anchor }, anchor.root.Position, true end
+        local home = homeOf(anchor)
+        local lim = pullLimit(anchor.name)
+        local pts = {}
+        for _, e in ipairs(free) do
+            local h = homeOf(e)
+            if (h - home).Magnitude <= lim then table.insert(pts, h) end
+        end
+        local centre, reach = middleOf(pts)
+        local list = {}
+        for _, e in ipairs(free) do
+            if (homeOf(e) - centre).Magnitude <= pullLimit(e.name) then table.insert(list, e) end
+        end
+        if #list == 0 then list = { anchor } end
+        table.sort(list, function(a, b)
+            return (homeOf(a) - centre).Magnitude < (homeOf(b) - centre).Magnitude
+        end)
+        local cap = math.max(1, math.floor(CFG.GrabMax or 12))
+        while #list > cap do table.remove(list) end
+        P.pileReach = reach
+        return list, centre, false
+    end
+    if #solo > 0 then
+        local e = nearest(solo)
+        return { e }, e.root.Position, true
+    end
+    return {}, nil, false
+end
+
 -- Look again who is loaded: a new spawn joins the pile within a tenth of a
 -- second. Called from the fight AND from the frame loop below, because the
 -- fight is busy for most of a second on every cast and every M1 probe.
@@ -1898,9 +1970,19 @@ local function refreshPile()
     if not pileCur then return end
     pileScanAt = os.clock()
     local list, centre
-    if pileCur.raid then
+    if pileCur.random then
+        local inPlace
+        list, centre, inPlace = buildRandomPile()
+        -- A new in-place target starts from the height you set again.
+        local model = inPlace and list[1] and list[1].model or nil
+        if model ~= P.inPlaceTarget then P.forceClose = false end
+        P.pileInPlace = inPlace
+        P.inPlaceTarget = model
+    elseif pileCur.raid then
+        P.pileInPlace = false
         list, centre = buildRaidPile()
     else
+        P.pileInPlace = false
         list, centre = buildPile(pileCur, pileNames)
     end
     pile = list
@@ -1919,6 +2001,7 @@ local function magnetTick()
     if not (P.running and pileActive and CFG.Magnet and pileCentre) then return end
     local now = os.clock()
     if now - pileScanAt > 0.1 then refreshPile() end
+    if P.pileInPlace then P.pileHeld = 0 return end   -- fought where it stands
     if now - simAt > 1 then
         simAt = now
         if sethiddenproperty then
@@ -1954,8 +2037,29 @@ end
 
 -- Held, hit, and not losing HP: out of its area, or not ours to move.
 local function checkPutBack()
-    if not attacking or probing or not CFG.Magnet then return end
+    if not attacking or probing then return end
     local now = os.clock()
+    -- FOUGHT IN PLACE (random mode): never moved or put back. No damage from
+    -- the height you set for 6 s: down close for it. None for 15 s even
+    -- close: it cannot be hurt by this setup -- left for a minute, counted.
+    if P.pileInPlace then
+        local e = pile[1]
+        if not e then return end
+        local j = pileJoin[e.model]
+        if not j then
+            pileJoin[e.model] = { at = now, hp = e.hum.Health, act = actions }
+        elseif e.hum.Health < j.hp - 0.5 then
+            j.at, j.hp, j.act, j.hit = now, e.hum.Health, actions, true
+        elseif now - j.at > 6 and actions - j.act >= 6 and not P.forceClose then
+            P.forceClose = true          -- poseTarget takes you close from the next frame
+        elseif now - j.at > 15 and actions - j.act >= 15 then
+            P.randomSkip[e.model] = now + 60
+            P.randomCant += 1
+            pileJoin[e.model] = nil
+        end
+        return
+    end
+    if not CFG.Magnet then return end
     for _, e in ipairs(pile) do
         local j = pileJoin[e.model]
         if not j then
@@ -2030,7 +2134,7 @@ local function poseTarget()
     end
     if CFG.HeightMode == "fixed" then
         return c + Vector3.new(0, CFG.HeightFixed or 12, 0) + pileSide * (CFG.SideFixed or 0)
-    elseif wantPose == "melee" then
+    elseif wantPose == "melee" or P.forceClose then
         return c + Vector3.new(0, CFG.HeightMelee or 3, 0) + pileSide * (CFG.MeleeDistance or 5)
     end
     return c + Vector3.new(0, CFG.HeightSafe or 20, 0)
@@ -2053,7 +2157,9 @@ local function applyPose()
 end
 
 local function setPose(p)
-    if CFG.StayHigh then p = "safe" end     -- never down to the close spot
+    -- Never down to the close spot -- unless random mode found high does not
+    -- hurt the one it is fighting in place (P.forceClose).
+    if P.forceClose then p = "melee" elseif CFG.StayHigh then p = "safe" end
     if wantPose ~= p then
         wantPose = p
         applyPose()
@@ -2070,7 +2176,6 @@ local KEYCODE = {
     V = Enum.KeyCode.V, F = Enum.KeyCode.F,
 }
 P.keys = KEYS
-local TYPE_RANK = { ["Blox Fruit"] = 1, Melee = 2, Sword = 3, Gun = 4 }
 
 local function wcfg(name)
     local w = CFG.Weapons[name]
@@ -2100,37 +2205,41 @@ P.wSummary = wSummary
 -- this runs, M1 of the one in your hand is switched on, so the first run is
 -- plain fast M1 and you add the rest yourself. Fruit first, then fighting
 -- style, sword, gun.
-local seeded = false
-local function syncWeapons()
-    local tools = toolNames()
-    local fresh = {}
-    for _, t in ipairs(tools) do
-        if not CFG.Weapons[t.Name] then table.insert(fresh, t) end
-    end
-    table.sort(fresh, function(a, b)
-        local ra, rb = TYPE_RANK[toolType(a)] or 9, TYPE_RANK[toolType(b)] or 9
-        if ra ~= rb then return ra < rb end
-        return a.Name < b.Name
-    end)
-    for _, t in ipairs(fresh) do wcfg(t.Name) end
-    if not seeded then
-        local held = heldTool()
-        if held then
-            seeded = true
-            -- Only if you have not switched anything on yourself already.
-            local anyOn = false
-            for _, w in pairs(CFG.Weapons) do
-                if w.M1 then anyOn = true end
-                for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do if w[k] then anyOn = true end end
-            end
-            if not anyOn then
-                local w = wcfg(held.Name)
-                w.use, w.M1 = true, true
+local syncWeapons
+do
+    local TYPE_RANK = { ["Blox Fruit"] = 1, Melee = 2, Sword = 3, Gun = 4 }
+    local seeded = false
+    function syncWeapons()
+        local tools = toolNames()
+        local fresh = {}
+        for _, t in ipairs(tools) do
+            if not CFG.Weapons[t.Name] then table.insert(fresh, t) end
+        end
+        table.sort(fresh, function(a, b)
+            local ra, rb = TYPE_RANK[toolType(a)] or 9, TYPE_RANK[toolType(b)] or 9
+            if ra ~= rb then return ra < rb end
+            return a.Name < b.Name
+        end)
+        for _, t in ipairs(fresh) do wcfg(t.Name) end
+        if not seeded then
+            local held = heldTool()
+            if held then
+                seeded = true
+                -- Only if you have not switched anything on yourself already.
+                local anyOn = false
+                for _, w in pairs(CFG.Weapons) do
+                    if w.M1 then anyOn = true end
+                    for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do if w[k] then anyOn = true end end
+                end
+                if not anyOn then
+                    local w = wcfg(held.Name)
+                    w.use, w.M1 = true, true
+                end
             end
         end
     end
+    P.syncWeapons = syncWeapons
 end
-P.syncWeapons = syncWeapons
 
 function P.moveWeaponUp(name)
     local o = CFG.WeaponOrder
@@ -2190,22 +2299,25 @@ local function cdOf(w, k)
     return c
 end
 
-local function skillBar(w, k)
-    local pg = player:FindFirstChild("PlayerGui")
-    local main = pg and pg:FindFirstChild("Main")
-    local sk = main and main:FindFirstChild("Skills")
-    local wf = sk and sk:FindFirstChild(w)
-    local kf = wf and wf:FindFirstChild(k)
-    local bar = kf and kf:FindFirstChild("Cooldown")
-    if bar and bar:IsA("GuiObject") then return bar end
-    return nil
-end
+local barReady
+do
+    local function skillBar(w, k)
+        local pg = player:FindFirstChild("PlayerGui")
+        local main = pg and pg:FindFirstChild("Main")
+        local sk = main and main:FindFirstChild("Skills")
+        local wf = sk and sk:FindFirstChild(w)
+        local kf = wf and wf:FindFirstChild(k)
+        local bar = kf and kf:FindFirstChild("Cooldown")
+        if bar and bar:IsA("GuiObject") then return bar end
+        return nil
+    end
 
--- true ready, false cooling, nil no bar to read.
-local function barReady(w, k)
-    local bar = skillBar(w, k)
-    if not bar then return nil end
-    return bar.AbsoluteSize.X <= 0
+    -- true ready, false cooling, nil no bar to read.
+    function barReady(w, k)
+        local bar = skillBar(w, k)
+        if not bar then return nil end
+        return bar.AbsoluteSize.X <= 0
+    end
 end
 
 -- Ten times a second: learn how long each switched-on skill cools.
@@ -2368,88 +2480,91 @@ local function describeWay(way)
 end
 P.describeWay = describeWay
 
-local function waysFor(tool)
-    local t = toolType(tool)
-    local all = {}
-    if t == "Melee" or t == "Sword" then
-        table.insert(all, { path = "remote", variant = "new", pose = "safe" })
-        table.insert(all, { path = "remote", variant = "old", pose = "safe" })
-        table.insert(all, { path = "keys", pose = "melee" })
-    elseif t == "Blox Fruit" then
-        if tool:FindFirstChild("LeftClickRemote") then
-            table.insert(all, { path = "click", pose = "safe" })
-            table.insert(all, { path = "click", pose = "melee" })
-        end
-        table.insert(all, { path = "remote", variant = "new", pose = "safe" })
-        table.insert(all, { path = "keys", pose = "melee" })
-    else
-        table.insert(all, { path = "keys", pose = "melee" })
-    end
-    if CFG.StayHigh then
-        -- Every way tried from up there; a way listed twice (high and close)
-        -- is tried once.
-        local out, seen = {}, {}
-        for _, w in ipairs(all) do
-            local key = w.path .. (w.variant or "")
-            if not seen[key] then
-                seen[key] = true
-                table.insert(out, { path = w.path, variant = w.variant, pose = "safe" })
+local probeM1
+do
+    local function waysFor(tool)
+        local t = toolType(tool)
+        local all = {}
+        if t == "Melee" or t == "Sword" then
+            table.insert(all, { path = "remote", variant = "new", pose = "safe" })
+            table.insert(all, { path = "remote", variant = "old", pose = "safe" })
+            table.insert(all, { path = "keys", pose = "melee" })
+        elseif t == "Blox Fruit" then
+            if tool:FindFirstChild("LeftClickRemote") then
+                table.insert(all, { path = "click", pose = "safe" })
+                table.insert(all, { path = "click", pose = "melee" })
             end
+            table.insert(all, { path = "remote", variant = "new", pose = "safe" })
+            table.insert(all, { path = "keys", pose = "melee" })
+        else
+            table.insert(all, { path = "keys", pose = "melee" })
         end
-        all = out
-    end
-    local force = CFG.M1Method
-    if force and force ~= "auto" then
-        local out = {}
-        for _, w in ipairs(all) do if w.path == force then table.insert(out, w) end end
-        if #out == 0 then
-            table.insert(out, { path = force, variant = "new",
-                pose = (force == "keys") and "melee" or "safe" })
+        if CFG.StayHigh then
+            -- Every way tried from up there; a way listed twice (high and close)
+            -- is tried once.
+            local out, seen = {}, {}
+            for _, w in ipairs(all) do
+                local key = w.path .. (w.variant or "")
+                if not seen[key] then
+                    seen[key] = true
+                    table.insert(out, { path = w.path, variant = w.variant, pose = "safe" })
+                end
+            end
+            all = out
         end
-        return out
+        local force = CFG.M1Method
+        if force and force ~= "auto" then
+            local out = {}
+            for _, w in ipairs(all) do if w.path == force then table.insert(out, w) end end
+            if #out == 0 then
+                table.insert(out, { path = force, variant = "new",
+                    pose = (force == "keys") and "melee" or "safe" })
+            end
+            return out
+        end
+        return all
     end
-    return all
-end
 
-local function probeM1(name, tool)
-    stats.probes += 1
-    probing = true
-    local tried = {}
-    for _, way in ipairs(waysFor(tool)) do
-        if not P.running or #pile == 0 then break end
-        say("trying M1: " .. describeWay(way))
-        setPose(way.pose)
-        task.wait(0.12)
-        local snap = {}
-        for _, e in ipairs(pile) do table.insert(snap, e) end
-        local function sumHP()
-            local s = 0
-            for _, e in ipairs(snap) do
-                if e.model.Parent and e.hum.Parent then s += math.max(e.hum.Health, 0) end
+    function probeM1(name, tool)
+        stats.probes += 1
+        probing = true
+        local tried = {}
+        for _, way in ipairs(waysFor(tool)) do
+            if not P.running or #pile == 0 then break end
+            say("trying M1: " .. describeWay(way))
+            setPose(way.pose)
+            task.wait(0.12)
+            local snap = {}
+            for _, e in ipairs(pile) do table.insert(snap, e) end
+            local function sumHP()
+                local s = 0
+                for _, e in ipairs(snap) do
+                    if e.model.Parent and e.hum.Parent then s += math.max(e.hum.Health, 0) end
+                end
+                return s
             end
-            return s
+            local hp0, t0 = sumHP(), os.clock()
+            while os.clock() - t0 < 1.6 and P.running and #pile > 0 do
+                fireM1(way, tool)
+                task.wait(math.max(CFG.M1Every or 0.12, 0.06))
+            end
+            task.wait(0.2)
+            local landed = (hp0 - sumHP()) > 0.5
+            table.insert(tried, describeWay(way) .. (landed and ": landed" or ": nothing"))
+            if landed then
+                probing = false
+                m1Plan[name] = way
+                P.m1Notes[name] = describeWay(way)
+                say(name .. " M1: " .. describeWay(way))
+                return way
+            end
         end
-        local hp0, t0 = sumHP(), os.clock()
-        while os.clock() - t0 < 1.6 and P.running and #pile > 0 do
-            fireM1(way, tool)
-            task.wait(math.max(CFG.M1Every or 0.12, 0.06))
-        end
-        task.wait(0.2)
-        local landed = (hp0 - sumHP()) > 0.5
-        table.insert(tried, describeWay(way) .. (landed and ": landed" or ": nothing"))
-        if landed then
-            probing = false
-            m1Plan[name] = way
-            P.m1Notes[name] = describeWay(way)
-            say(name .. " M1: " .. describeWay(way))
-            return way
-        end
+        probing = false
+        if #tried == 0 then return nil end              -- interrupted: try again later
+        m1Plan[name] = false
+        P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. ")"
+        return false
     end
-    probing = false
-    if #tried == 0 then return nil end              -- interrupted: try again later
-    m1Plan[name] = false
-    P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. ")"
-    return false
 end
 
 function P.reprobe()
@@ -2803,43 +2918,47 @@ end
 -- second, so the game evidently puts it back; it is kept here the same way.
 -- It is your client's copy of the slab. Nobody else's sea changes.
 -- ALWAYS ON, no switch: you never want water damage, so water is land.
-local WATER_Y = 112          -- raised: the top is at the surface (the game's is 80)
-P.waterNote = "not looked yet"
-P.waterSets = 0
+local keepWater
+do
+    local WATER_Y = 112          -- raised: the top is at the surface (the game's is 80)
+    P.waterNote = "not looked yet"
+    P.waterSets = 0
 
-local function keepWater()
-    local map = workspace:FindFirstChild("Map")
-    local wp = map and map:FindFirstChild("WaterBase-Plane")
-    if not (wp and wp:IsA("BasePart")) then
-        P.waterNote = "no WaterBase-Plane in workspace.Map here"
-        return
+    function keepWater()
+        local map = workspace:FindFirstChild("Map")
+        local wp = map and map:FindFirstChild("WaterBase-Plane")
+        if not (wp and wp:IsA("BasePart")) then
+            P.waterNote = "no WaterBase-Plane in workspace.Map here"
+            return
+        end
+        if math.abs(wp.Size.Y - WATER_Y) > 0.5 then
+            wp.Size = Vector3.new(wp.Size.X, WATER_Y, wp.Size.Z)
+            P.waterSets += 1
+        end
+        P.waterNote = "solid - standing on the surface"
     end
-    if math.abs(wp.Size.Y - WATER_Y) > 0.5 then
-        wp.Size = Vector3.new(wp.Size.X, WATER_Y, wp.Size.Z)
-        P.waterSets += 1
-    end
-    P.waterNote = "solid - standing on the surface"
+
+    -- ---------------------------------------------------------
+    -- THE DEEP SEA: SUBMERGED ISLAND
+    -- ---------------------------------------------------------
+    -- Submerged Island is not ON the sea, it is at the BOTTOM of it: about
+    -- 1900-2200 studs below sea level, reached only by the submarine at Tiki
+    -- Outpost, with a sea of its own round it. The slab raised above is the one
+    -- at sea level, nowhere near there -- which is why water was land on every
+    -- island from Port Town to the Sea of Treats and not on this one.
+    --
+    -- Nothing public says what that deep sea is made of, so all three things a
+    -- Roblox sea can be are handled -- and ONLY down there (below DEEP_Y), so no
+    -- other island is touched:
+    --   * its own floor slab like the one at sea level (a part named WaterBase):
+    --     raised the same way, 32 taller, so its top comes up 16;
+    --   * terrain water: the surface is read from the voxels under you;
+    --   * a see-through water part you sink into: its top.
+    -- For the last two an invisible floor is kept at the surface, under your
+    -- feet, following you every frame; if you are already under the surface you
+    -- are lifted onto it. The panel says which one it found.
 end
 
--- ---------------------------------------------------------
--- THE DEEP SEA: SUBMERGED ISLAND
--- ---------------------------------------------------------
--- Submerged Island is not ON the sea, it is at the BOTTOM of it: about
--- 1900-2200 studs below sea level, reached only by the submarine at Tiki
--- Outpost, with a sea of its own round it. The slab raised above is the one
--- at sea level, nowhere near there -- which is why water was land on every
--- island from Port Town to the Sea of Treats and not on this one.
---
--- Nothing public says what that deep sea is made of, so all three things a
--- Roblox sea can be are handled -- and ONLY down there (below DEEP_Y), so no
--- other island is touched:
---   * its own floor slab like the one at sea level (a part named WaterBase):
---     raised the same way, 32 taller, so its top comes up 16;
---   * terrain water: the surface is read from the voxels under you;
---   * a see-through water part you sink into: its top.
--- For the last two an invisible floor is kept at the surface, under your
--- feet, following you every frame; if you are already under the surface you
--- are lifted onto it. The panel says which one it found.
 local parkFloor, deepTick
 do
     local DEEP_Y = -1000
@@ -3723,7 +3842,7 @@ local function fight(cur, names)
             end
         end
 
-        if not cur.raid and questFull() then
+        if not (cur.raid or cur.random) and questFull() then
             if pileStart then recordPile(now - pileStart) end
             attacking = false
             return "done"
@@ -3803,61 +3922,105 @@ end
 -- workspace._WorldOrigin.Locations named "Island 1" .. "Island 5". So: the
 -- newest island there is where the fight is; nobody left near it = wait over
 -- it for the wave, or for the next island to open.
-local function raidState()
-    local pg   = player:FindFirstChild("PlayerGui")
-    local main = pg and pg:FindFirstChild("Main")
-    local hud  = main and main:FindFirstChild("TopHUDList")
-    local t = (hud and hud:FindFirstChild("RaidTimer")) or (main and main:FindFirstChild("Timer"))
-    local on = t ~= nil and t:IsA("GuiObject") and t.Visible
-    local text
-    if on then
-        local l = t:IsA("TextLabel") and t or t:FindFirstChildWhichIsA("TextLabel", true)
-        text = l and l.Text or nil
-    end
-    local wo  = workspace:FindFirstChild("_WorldOrigin")
-    local loc = wo and wo:FindFirstChild("Locations")
-    if loc then
-        for i = 5, 1, -1 do
-            local p = loc:FindFirstChild("Island " .. i)
-            local pos = p and ((p:IsA("BasePart") and p.Position) or (p:IsA("Model") and p:GetPivot().Position))
-            if pos then return on, pos, i, text end
+local raidStep, randomStep
+do
+    local function raidState()
+        local pg   = player:FindFirstChild("PlayerGui")
+        local main = pg and pg:FindFirstChild("Main")
+        local hud  = main and main:FindFirstChild("TopHUDList")
+        local t = (hud and hud:FindFirstChild("RaidTimer")) or (main and main:FindFirstChild("Timer"))
+        local on = t ~= nil and t:IsA("GuiObject") and t.Visible
+        local text
+        if on then
+            local l = t:IsA("TextLabel") and t or t:FindFirstChildWhichIsA("TextLabel", true)
+            text = l and l.Text or nil
         end
+        local wo  = workspace:FindFirstChild("_WorldOrigin")
+        local loc = wo and wo:FindFirstChild("Locations")
+        if loc then
+            for i = 5, 1, -1 do
+                local p = loc:FindFirstChild("Island " .. i)
+                local pos = p and ((p:IsA("BasePart") and p.Position) or (p:IsA("Model") and p:GetPivot().Position))
+                if pos then return on, pos, i, text end
+            end
+        end
+        return on, nil, 0, text
     end
-    return on, nil, 0, text
-end
-P.raidState = raidState
+    P.raidState = raidState
 
-local function raidStep()
-    local on, islandPos, n, text = raidState()
-    P.raidAt = islandPos
-    local list = buildRaidPile()
-    if islandPos or on then
-        P.raidNote = string.format("in a raid  ·  Island %d%s  ·  %d enemies here", n,
-            text and ("  ·  " .. text) or "", #list)
-    else
-        P.raidNote = string.format("not in a raid  ·  everything within %d studs of you  ·  %d enemies",
-            math.floor(CFG.RaidRadius or 450), #list)
-    end
-    if #list > 0 then
-        activeName = "raid"
-        fight({ name = "raid", raid = true }, nil)
-        return
-    end
-    -- Nobody here: over the newest island, and wait for its wave.
-    local _, r = parts()
-    if islandPos and r then
-        local over = islandPos + Vector3.new(0, 45, 0)
-        if (r.Position - over).Magnitude > 60 then
-            releasePile()
-            setState("FLY")
-            say("raid: to Island " .. n)
-            flyTo(over)
+    function raidStep()
+        local on, islandPos, n, text = raidState()
+        P.raidAt = islandPos
+        local list = buildRaidPile()
+        if islandPos or on then
+            P.raidNote = string.format("in a raid  ·  Island %d%s  ·  %d enemies here", n,
+                text and ("  ·  " .. text) or "", #list)
+        else
+            P.raidNote = string.format("not in a raid  ·  everything within %d studs of you  ·  %d enemies",
+                math.floor(CFG.RaidRadius or 450), #list)
         end
+        if #list > 0 then
+            activeName = "raid"
+            fight({ name = "raid", raid = true }, nil)
+            return
+        end
+        -- Nobody here: over the newest island, and wait for its wave.
+        local _, r = parts()
+        if islandPos and r then
+            local over = islandPos + Vector3.new(0, 45, 0)
+            if (r.Position - over).Magnitude > 60 then
+                releasePile()
+                setState("FLY")
+                say("raid: to Island " .. n)
+                flyTo(over)
+            end
+        end
+        setState("WAIT")
+        say(islandPos and ("raid: Island " .. n .. " - waiting for enemies")
+            or "raid mode: no enemy near you")
+        task.wait(0.25)
     end
-    setState("WAIT")
-    say(islandPos and ("raid: Island " .. n .. " - waiting for enemies")
-        or "raid mode: no enemy near you")
-    task.wait(0.25)
+
+    -- =========================================================
+    -- RANDOM MODE
+    -- =========================================================
+    -- Castle on the Sea pirate raid (Third Sea, every ~1 h 15): the game tags its
+    -- mobs "BasicMob", and a raid pirate is one that appears within 750 studs of
+    -- (-5556, 314, -2988) -- the redz hub's own definition (2025-10); the 2026-09
+    -- hub teleports to (-5128, 314, -2957) when farther than 1000. There, the
+    -- area is that circle, however far the pirates spread over the yard. Anywhere
+    -- else: RandomRadius round you.
+    local CASTLE_RAID = Vector3.new(-5556, 314, -2988)
+    function randomStep()
+        local _, r = parts()
+        if not r then return end
+        local sea = mySea()
+        local atCastle = (sea == 3 or sea == nil) and (r.Position - CASTLE_RAID).Magnitude <= 1500
+        P.randomAt = atCastle and CASTLE_RAID or nil
+        local list, _, inPlace = buildRandomPile()
+        P.randomNote = string.format("%s  ·  %d to fight%s%s",
+            atCastle and "Castle on the Sea raid area" or ("everything within " .. math.floor(CFG.RandomRadius or 750) .. " studs of you"),
+            #list, inPlace and "  ·  one fought where it stands" or "",
+            P.randomCant > 0 and ("  ·  could not hurt " .. P.randomCant) or "")
+        if #list > 0 then
+            activeName = "random"
+            fight({ name = "random", random = true }, nil)
+            return
+        end
+        -- Nobody: at the castle, over the raid area for the next wave.
+        if atCastle then
+            local over = CASTLE_RAID + Vector3.new(0, math.max(CFG.HeightSafe or 20, 30), 0)
+            if (r.Position - over).Magnitude > 80 then
+                releasePile()
+                setState("FLY")
+                say("random: to the castle's raid area")
+                flyTo(over)
+            end
+        end
+        setState("WAIT")
+        say(atCastle and "random: waiting for the pirates" or "random mode: no enemy near you")
+        task.wait(0.25)
+    end
 end
 
 -- =========================================================
@@ -3876,6 +4039,7 @@ local function step()
     end
     pcall(keepHaki)
 
+    if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
 
     local list = circuit()
@@ -4674,12 +4838,23 @@ local function buildUI()
             function() return CFG.RaidMode end,
             function(x)
                 CFG.RaidMode = x
+                if x then CFG.RandomMode = false end
                 releasePile()
                 say(x and "raid mode on" or "raid mode off - back to the circuit")
             end)
+        switchRow(v, "Random mode",
+            "Any enemy near you, every one damaged - Castle on the Sea raid",
+            function() return CFG.RandomMode end,
+            function(x)
+                CFG.RandomMode = x
+                if x then CFG.RaidMode = false end
+                releasePile()
+                say(x and "random mode on" or "random mode off - back to the circuit")
+            end)
         readout(v, function()
-            if not CFG.RaidMode then return "raid mode off" end
-            return tostring(P.raidNote)
+            if CFG.RandomMode then return tostring(P.randomNote) end
+            if CFG.RaidMode then return tostring(P.raidNote) end
+            return "raid mode off  ·  random mode off"
         end)
 
         gap(v, 8)
@@ -5111,6 +5286,15 @@ local function buildUI()
         sliderRow(v, "This camp means within", 20, 300, 10,
             function() return CFG.OthersRadius end,
             function(x) CFG.OthersRadius = x end, " studs")
+        heading2(v, "random mode")
+        sliderRow(v, "Random mode reaches", 200, 2000, 50,
+            function() return CFG.RandomRadius end,
+            function(x) CFG.RandomRadius = x end, " studs")
+        caption(v, "Round you; at the Castle on the Sea, round the pirate raid's "
+            .. "area (at least 800). Only ones within their pull limit go in a "
+            .. "pile - a far one gets its own. One that takes no damage when "
+            .. "pulled is fought where it stands, from close if high does not "
+            .. "hurt it.")
         heading2(v, "raid mode")
         sliderRow(v, "Raid mode pulls within", 100, 1500, 50,
             function() return CFG.RaidRadius end,
@@ -5586,13 +5770,15 @@ task.spawn(function()
         task.wait(0.25)
     end
 end)
-local deepConn
-deepConn = RunService.Heartbeat:Connect(function()
-    if _G.BFF ~= P then
-        deepConn:Disconnect()
-        parkFloor()
-        return
-    end
-    pcall(deepTick)
-end)
+do
+    local deepConn
+    deepConn = RunService.Heartbeat:Connect(function()
+        if _G.BFF ~= P then
+            deepConn:Disconnect()
+            parkFloor()
+            return
+        end
+        pcall(deepTick)
+    end)
+end
 print("[BFF] loaded. Use the panel, or _G.BFF.start()")

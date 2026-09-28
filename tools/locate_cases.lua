@@ -263,4 +263,71 @@ CFG.LearnLeash = false
 check("learning off: back to your 300", pullLimit("Billionaire C") == 300, pullLimit("Billionaire C"))
 CFG.MaxPull, CFG.LearnLeash = 300, true
 
+-- ---------------------------------------------------------------- RANDOM MODE
+local function rreset()
+    reset()
+    table.clear(putBack)
+    P.randomSkip, P.randomAt = {}, nil
+    CFG.RandomRadius, CFG.MaxPull, CFG.LearnLeash, CFG.GrabMax = 750, 300, true, 12
+    table.clear(P.leash)
+    pileCentre = nil
+end
+
+-- 26. mixed kinds close together: one pile, all of them
+rreset()
+ME.Position = v3(0, 40, 0)
+for i, n in ipairs({ "Pirate", "Brute", "Gunner", "Captain" }) do
+    table.insert(WORLD.loaded, enemy(n, v3(i * 30, 0, 0)))
+end
+local pl2, c2, inPlace = buildRandomPile()
+check("random: 4 kinds within the limit = one pile of 4", #pl2 == 4 and not inPlace, "held " .. #pl2)
+
+-- 27. two groups on opposite corners of the yard (~560 apart): the near group
+--     only - the far one is NOT dragged past its limit
+rreset()
+ME.Position = v3(0, 40, 0)
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raider", v3(i * 20, 0, 0))) end
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raider", v3(400 + i * 20, 0, 400))) end
+pl2, c2 = buildRandomPile()
+local farIn = false
+for _, e in ipairs(pl2) do if e.root.Position.X > 300 then farIn = true end end
+check("random: diagonal groups - near group piled, far one not dragged", #pl2 == 3 and not farIn, "held " .. #pl2)
+
+-- 28. near group dead: the far corner is the next pile (nobody left out)
+WORLD.loaded = {}
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raider", v3(400 + i * 20, 0, 400))) end
+pl2, c2 = buildRandomPile()
+check("random: then the far corner gets its own pile", #pl2 == 3 and near(c2, v3(440, 0, 400), 1),
+    "held " .. #pl2 .. " at " .. tostring(c2 and c2.X))
+
+-- 29. one that took no damage when pulled is fought WHERE IT STANDS, after the free ones
+rreset()
+ME.Position = v3(0, 40, 0)
+local stubborn = enemy("Pirate", v3(200, 5, 0))
+local other = enemy("Pirate", v3(20, 0, 0))
+WORLD.loaded = { stubborn, other }
+putBack[stubborn.model] = 1e9
+pl2, c2, inPlace = buildRandomPile()
+check("random: free ones first (the put-back one is not in the pile)", #pl2 == 1 and pl2[1] == other and not inPlace)
+WORLD.loaded = { stubborn }
+pl2, c2, inPlace = buildRandomPile()
+check("random: then the put-back one, fought in place at its own position",
+    #pl2 == 1 and pl2[1] == stubborn and inPlace and near(c2, v3(200, 5, 0), 0.1), tostring(inPlace))
+
+-- 30. the area: round you, or round the castle raid area when there
+rreset()
+ME.Position = v3(0, 40, 0)
+WORLD.loaded = { enemy("Pirate", v3(700, 0, 0)), enemy("Pirate", v3(900, 0, 0)) }
+check("random: 750 round you - the one at 900 is out", #buildRandomPile() == 1)
+P.randomAt = v3(900, 0, 0)
+check("random at the castle: round the raid area (at least 800) - both in", #buildRandomPile() == 2)
+
+-- 31. one that cannot be hurt at all is skipped for a minute, not fought for ever
+rreset()
+local ghost = enemy("Pirate", v3(10, 0, 0))
+WORLD.loaded = { ghost }
+P.randomSkip[ghost.model] = 1e9
+check("random: an unhurtable one (skipped) is left out", #buildRandomPile() == 0)
+P.randomSkip = {}
+
 print(all and "ALL PASS" or "SOME FAILED")
