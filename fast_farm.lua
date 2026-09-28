@@ -3054,10 +3054,14 @@ end
 --
 -- UP: the game has it loaded (near a player) or parked in ReplicatedStorage
 -- (far from every player) -- bossUp reads both -- or the Elite Hunter says so.
--- Neither, after a short look: another server. The game's own server browser
--- (ReplicatedStorage.__ServerBrowser, what its Servers menu calls: a page
--- number gives { [JobId] = { Count, Region } }, "teleport" + JobId joins),
--- the Roblox server list if that one fails.
+-- Neither, after a short look: another server. The list: the game's own
+-- server browser (ReplicatedStorage.__ServerBrowser, what its Servers menu
+-- calls: a page number gives { [JobId] = { Count, Region } }), the Roblox
+-- server list if that one fails. The JOIN: always the game's ("teleport" +
+-- JobId: its SERVER starts the teleport). The Third Sea takes only
+-- server-started teleports (Roblox "Secure within universe" places): one
+-- started here (TeleportToPlaceInstance) is refused with "Cannot teleport
+-- without a valid teleport token" (in game, 2026-09-28).
 --
 -- A teleport ends this script. What it knew -- your settings, the servers
 -- already looked at, the counts -- goes with you twice: in the reload queued
@@ -3196,6 +3200,9 @@ do
             asks = 0, askAt = -100, questAskAt = -100, reply = nil, replyText = nil,
             npcVisited = false, dropped = false, isleTried = false,
             missSince = nil, progress = nil, lastKill = nil, lastList = nil,
+            listWhy = nil,           -- why the game's server list came up empty
+            lastJoin = nil,          -- how the last join went, in words
+            clientRefused = false,   -- this place refused a join started here: not tried again
             eliteDoneUntil = 0,      -- this server's elite is down: not looked for till then
             why = nil,               -- why the last "nothing here" said so
             fruitNote = "no fruit gone for yet", fruitSkip = setmetatable({}, { __mode = "k" }),
@@ -3363,15 +3370,38 @@ do
 
         -- Every server the game's browser lists, a page at a time, until a page adds
         -- nothing new.
+        -- What a page came back as, in words: the shape tells a moved format
+        -- from an empty one.
+        local function shapeOf(res)
+            if type(res) ~= "table" then return type(res) .. " " .. tostring(res) end
+            local n, k1, v1 = 0, nil, nil
+            for k, v in pairs(res) do
+                n += 1
+                if n == 1 then k1, v1 = k, v end
+            end
+            if n == 0 then return "an empty table" end
+            return string.format("a table of %d, first %s %s -> %s", n, type(k1), tostring(k1), type(v1))
+        end
+
         local function browserList(myEpoch)
             local sb = RS:FindFirstChild("__ServerBrowser")
-            if not sb then return nil end
+            if not sb then
+                E.listWhy = "the game's server browser (ReplicatedStorage.__ServerBrowser) is missing"
+                return nil
+            end
+            E.listWhy = nil
             local out, seen = {}, {}
             for page = 1, 40 do
                 if stale(myEpoch) then break end
                 local rows = {}
                 local ok, res = pcall(function() return sb:InvokeServer(page) end)
-                if not ok or browserRows(res, rows) == 0 then break end
+                if not ok or browserRows(res, rows) == 0 then
+                    if page == 1 then
+                        E.listWhy = ok and ("its page 1 gave " .. shapeOf(res))
+                            or ("its page 1 failed: " .. tostring(res))
+                    end
+                    break
+                end
                 local new = 0
                 for _, row in ipairs(rows) do
                     if not seen[row.id] then
@@ -3406,13 +3436,24 @@ do
         end
 
         -- One join. Returns only if it did not happen (a teleport that works ends
-        -- this script mid-wait).
-        local function joinServer(id, via, myEpoch)
-            local failed = false
+        -- this script mid-wait). The game's server join whatever list the JobId
+        -- came from; one started here only without it, and never again in this
+        -- server once refused for want of a teleport token.
+        local function joinServer(id, myEpoch)
+            local sb = RS:FindFirstChild("__ServerBrowser")
+            local via = sb and "game" or "here"
+            if not sb and E.clientRefused then
+                E.lastJoin = "no way to join: the game's server join is missing, and this place refuses joins started here"
+                return false
+            end
+            local failed, why, ret = false, nil, nil
             local c1, c2
             pcall(function()
-                c1 = TeleportService.TeleportInitFailed:Connect(function(p)
-                    if p == player then failed = true end
+                c1 = TeleportService.TeleportInitFailed:Connect(function(p, result, msg)
+                    if p == player then
+                        failed = true
+                        why = tostring(msg or result)
+                    end
                 end)
             end)
             pcall(function()
@@ -3420,19 +3461,34 @@ do
                     if st == Enum.TeleportState.Failed then failed = true end
                 end)
             end)
-            local called = pcall(function()
-                if via == "browser" then
-                    RS:FindFirstChild("__ServerBrowser"):InvokeServer("teleport", id)
-                else
+            -- Its own thread: the game's server may take its time answering, and
+            -- the wait below must still end.
+            task.spawn(function()
+                local ok, r = pcall(function()
+                    if via == "game" then return sb:InvokeServer("teleport", id) end
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, id, player)
+                end)
+                if ok then ret = r else
+                    failed = true
+                    why = "the call failed: " .. tostring(r)
                 end
             end)
             local t0 = os.clock()
-            while called and not failed and os.clock() - t0 < 15 and not stale(myEpoch) do
+            while not failed and os.clock() - t0 < 15 and not stale(myEpoch) do
                 task.wait(0.25)
             end
             if c1 then pcall(function() c1:Disconnect() end) end
             if c2 then pcall(function() c2:Disconnect() end) end
+            if not failed then
+                why = stale(myEpoch) and "stopped"
+                    or ("no teleport within 15 s" .. ((ret ~= nil) and ("  (the game said " .. tostring(ret) .. ")") or ""))
+            end
+            why = tostring(why or "refused")
+            if via == "here" and string.find(string.lower(why), "token", 1, true) then
+                E.clientRefused = true
+            end
+            E.lastJoin = (via == "game" and "game's join: " or "join from here: ") .. why
+            print("[BFF] hop: " .. E.lastJoin)
             return false
         end
 
@@ -3460,7 +3516,9 @@ do
                 local cands = pickServers(rows or {}, game.JobId, E.visited, os.time(),
                     (CFG.HopRevisit or 10) * 60, CFG.HopOrder, math.random)
                 E.lastList = string.format("%d listed, %d worth joining  ·  %s", #(rows or {}), #cands,
-                    via == "browser" and "the game's server browser" or "the Roblox server list")
+                    via == "browser" and "the game's server browser"
+                        or ("the Roblox server list - " .. tostring(E.listWhy or "the game's was empty")))
+                print("[BFF] hop: " .. E.lastList)
                 for i, s in ipairs(cands) do
                     if i > 5 or stale(myEpoch) then break end
                     if holdingChalice() then
@@ -3474,7 +3532,7 @@ do
                     queueReload(carry)
                     E.note = string.format("hop: joining a server with %d players  (%s)", s.count, tostring(why))
                     say(E.note)
-                    joinServer(s.id, via, myEpoch)
+                    joinServer(s.id, myEpoch)
                     -- Still here: that one refused (full, gone, or teleports throttled).
                     E.tally.fails += 1
                     task.wait(1)
@@ -3483,7 +3541,7 @@ do
                 task.wait(3 * round)
             end
             E.hopping = false
-            E.note = "hop failed three times - trying again shortly  (" .. tostring(E.lastList) .. ")"
+            E.note = "hop failed three times - trying again shortly  (" .. tostring(E.lastJoin or E.lastList) .. ")"
             say(E.note)
             return false
         end
@@ -5289,6 +5347,7 @@ local function buildUI()
                 "now       " .. tostring(el.note),
                 string.format("joined    %d   ·   join %s   ·   failed joins %d", t.joins, avg, t.fails),
                 "servers   " .. tostring(el.lastList or "not read yet"),
+                "last join " .. tostring(el.lastJoin or "none yet"),
                 "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
             }, "\n")
         end)

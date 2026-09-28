@@ -4,6 +4,9 @@ run in luau.exe:
   pure   eliteReply / eliteIsle / browserRows / pickServers / pruneVisited
   hop    hop() itself: THE CHALICE -- held, seen earlier, or arriving mid-hop
          -- means not one more teleport; order, five a round, marks, stop
+  join   joinServer() / browserList(): the game's server join whatever list
+         the JobId came from (the Third Sea refuses joins started here);
+         why a join or a list failed, in words
   carry  takeCarry(): what the next server's copy takes over, and when it
          starts by itself
   director  huntStep(): the chalice stops everything; a fruit before an
@@ -39,10 +42,14 @@ pure = cut("local ELITES    = {", "-- Everything the hunt knows.")
 hop = cut("local function hop(why)", "function P.hopNow()")
 carry = cut("local function takeCarry()", "P.takeCarry = takeCarry")
 director = cut("function huntStep()", "-- The Home switch.")
+listing = cut("-- What a page came back as, in words", "local function robloxList(")
+join = cut("-- One join. Returns only if", "-- THE HOP.")
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
     ("hop", read("hop_stubs.lua") + pure + hop + read("hop_cases.lua")),
+    ("join", read("elite_stubs.lua") + pure + read("join_stubs.lua") + listing + join
+        + read("join_cases.lua")),
     ("carry", read("carry_stubs.lua") + carry + read("carry_cases.lua")),
     ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
 ]
