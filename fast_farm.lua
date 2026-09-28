@@ -1906,7 +1906,9 @@ end
 --            alone: once no free one is left it is fought where it stands
 --            (third return value true = do not move it).
 P.randomAt, P.randomNote, P.randomSkip, P.randomCant = nil, "random mode: starting", {}, 0
-local function buildRandomPile(around, radius)
+-- pullAll: no pull limit at all (raid mode: raid enemies roam the whole
+-- island to reach you - the user saw no leash there, 2026-09-28).
+local function buildRandomPile(around, radius, pullAll)
     local _, r = parts()
     if not r then return {}, nil, false end
     if not around then
@@ -1934,7 +1936,7 @@ local function buildRandomPile(around, radius)
         local anchor = nearest(free)
         if not CFG.Magnet then return { anchor }, anchor.root.Position, true end
         local home = homeOf(anchor)
-        local lim = pullLimit(anchor.name)
+        local lim = pullAll and math.huge or pullLimit(anchor.name)
         local pts = {}
         for _, e in ipairs(free) do
             local h = homeOf(e)
@@ -1943,7 +1945,7 @@ local function buildRandomPile(around, radius)
         local centre, reach = middleOf(pts)
         local list = {}
         for _, e in ipairs(free) do
-            if (homeOf(e) - centre).Magnitude <= pullLimit(e.name) then table.insert(list, e) end
+            if pullAll or (homeOf(e) - centre).Magnitude <= pullLimit(e.name) then table.insert(list, e) end
         end
         if #list == 0 then list = { anchor } end
         table.sort(list, function(a, b)
@@ -1962,15 +1964,16 @@ local function buildRandomPile(around, radius)
 end
 
 -- RAID MODE's pile: random mode's rules round the newest raid island
--- (P.raidAt), or round you outside a raid, within RaidRadius. It used to pull
--- everyone to one middle with no limit: one dragged out of its area took no
--- damage, was put back and then left out -- the wave stuck with it alive
+-- (P.raidAt), or round you outside a raid, within RaidRadius - every one
+-- pulled (raid enemies have no leash). One that takes no damage when pulled
+-- is no longer put back and LEFT OUT: that left the wave stuck with it alive
 -- while the farm waited over the island (2026-09-28, "2 of 5 never hurt").
+-- It is fought where it stands once the free ones are dead.
 P.raidAt, P.raidNote = nil, "raid mode: starting"
 local function buildRaidPile()
     local _, r = parts()
     if not r then return {}, nil, false end
-    return buildRandomPile(P.raidAt or r.Position, CFG.RaidRadius or 450)
+    return buildRandomPile(P.raidAt or r.Position, CFG.RaidRadius or 450, true)
 end
 
 -- ELITE HUNT's pile: the one elite, nearest you, fought WHERE IT STANDS. Never
@@ -2067,6 +2070,46 @@ local function magnetTick()
     P.pileHeld, P.pileOwned = held, owned
 end
 
+-- WHY NO DAMAGE. The moment one stops taking damage, what was true then is
+-- written down (Magnet page), so a guess becomes a reading:
+--   NOT OURS   the magnet moves it only on your screen; the server has it
+--              where the gap says, and judges your hit by THAT position
+--   OUT OF REACH  the hit call does not name it at all
+--   SHIELDED   a ForceField on it (spawn protection)
+--   ours, in reach, no shield, no damage: the server refused the hit itself
+--              (its place in the pile shows a cap on how many one hit takes)
+P.noDamage = {}
+function P.noteNoDamage(e, how)
+    local bits = {}
+    -- Only while it is being pulled: in place, lastDest is an old pull's.
+    local dest = (not P.pileInPlace) and lastDest[e.model] or nil
+    if dest then
+        local gap = (e.root.Position - dest).Magnitude
+        table.insert(bits, (gap > 4) and string.format("NOT OURS (really %.0f from where it was put)", gap) or "held, ours")
+    end
+    if isnetworkowner then
+        local ok, own = pcall(isnetworkowner, e.root)
+        if ok then table.insert(bits, own and "network owner you" or "network owner NOT you") end
+    end
+    local _, r = parts()
+    if r then
+        local reach = P.hitReach and P.hitReach() or (CFG.HitRange or 60)
+        local d = (e.root.Position - r.Position).Magnitude
+        table.insert(bits, string.format("%s (%.0f of %.0f)", (d <= reach) and "in reach" or "OUT OF REACH", d, reach))
+    end
+    local ok, ff = pcall(function() return e.model:FindFirstChildOfClass("ForceField") end)
+    if ok and ff then table.insert(bits, "SHIELDED") end
+    local idx
+    for i, o in ipairs(pile) do if o == e then idx = i break end end
+    table.insert(bits, string.format("pile %s of %d", tostring(idx or "?"), #pile))
+    local h = homePos[e.model]
+    if h and pileCentre and not P.pileInPlace then
+        table.insert(bits, string.format("pulled %.0f", (h - pileCentre).Magnitude))
+    end
+    table.insert(P.noDamage, 1, tostring(e.name or "?") .. " - " .. how .. ": " .. table.concat(bits, ", "))
+    while #P.noDamage > 6 do table.remove(P.noDamage) end
+end
+
 -- Held, hit, and not losing HP: out of its area, or not ours to move.
 local function checkPutBack()
     if not attacking or probing then return end
@@ -2083,8 +2126,10 @@ local function checkPutBack()
         elseif e.hum.Health < j.hp - 0.5 then
             j.at, j.hp, j.act, j.hit = now, e.hum.Health, actions, true
         elseif now - j.at > 6 and actions - j.act >= 6 and not P.forceClose then
+            P.noteNoDamage(e, "in place, from high")
             P.forceClose = true          -- poseTarget takes you close from the next frame
         elseif now - j.at > 15 and actions - j.act >= 15 then
+            P.noteNoDamage(e, "in place, close")
             -- An elite is never skipped: it is the only one there is.
             if not (pileCur and pileCur.elite) then
                 P.randomSkip[e.model] = now + 60
@@ -2127,6 +2172,7 @@ local function checkPutBack()
                     end
                 end
             end
+            P.noteNoDamage(e, "pulled")
             putBack[e.model] = now + 30
             pileJoin[e.model] = nil
             stats.putBack += 1
@@ -2425,17 +2471,23 @@ local lastProbeMethod = CFG.M1Method
 local fireM1
 do
     local HIT_TAG = "078da341"
+    -- Your reach, or far enough to reach the pile from the height you set
+    -- (60 up with a 60 reach named nobody at all). Whether the server takes a
+    -- hit from that far is its call: "how M1 lands" shows it. On P so the
+    -- no-damage note (checkPutBack) reads the same number the hit uses.
+    function P.hitReach()
+        local _, r = parts()
+        local range = CFG.HitRange or 60
+        if r and pileCentre then
+            range = math.max(range, (r.Position - pileCentre).Magnitude + (CFG.PileSpread or 3) + 5)
+        end
+        return range
+    end
     local function hitTargets()
         local _, r = parts()
         if not r then return {} end
         local out = {}
-        -- Your reach, or far enough to reach the pile from the height you
-        -- set (60 up with a 60 reach named nobody at all). Whether the server
-        -- takes a hit from that far is its call: "how M1 lands" shows it.
-        local range = CFG.HitRange or 60
-        if pileCentre then
-            range = math.max(range, (r.Position - pileCentre).Magnitude + (CFG.PileSpread or 3) + 5)
-        end
+        local range = P.hitReach()
         for _, e in ipairs(pile) do
             if e.model.Parent and e.hum.Health > 0
                 and (e.root.Position - r.Position).Magnitude <= range then
@@ -5937,6 +5989,17 @@ local function buildUI()
             return string.format("held %d   ·   staying put %d   ·   put back %d\n%s",
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
+        heading2(v, "why no damage - the last ones")
+        readout(v, function()
+            if #P.noDamage == 0 then return "every one hit so far took damage" end
+            return table.concat(P.noDamage, "\n")
+        end)
+        caption(v, "Written the moment one stops taking damage. NOT OURS = the "
+            .. "magnet moves it only on your screen, the server has it where the "
+            .. "gap says. OUT OF REACH = the hit does not name it. SHIELDED = spawn "
+            .. "protection. Ours, in reach, no shield = the server refused the hit; "
+            .. "\"pile N of M\" shows whether it is always the last ones (a cap).")
+        actionRow(v, "Clear the list", nil, function() table.clear(P.noDamage) end)
         heading2(v, "the pile")
         switchRow(v, "Pull every one loaded",
             "Any distance - a new spawn joins the pile at once",

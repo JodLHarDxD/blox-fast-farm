@@ -77,4 +77,44 @@ check("in place, no damage 15 s even close: skipped for a minute and counted",
     P.randomSkip[st2.model] ~= nil and P.randomCant == 1 and putBack[st2.model] == nil)
 P.pileInPlace, P.forceClose = false, false
 
+-- ---------------------------------------------------------------- WHY NO DAMAGE (the note)
+-- 8. pulled, but the server has it elsewhere: NOT OURS, with the gap
+reset()
+table.clear(P.noDamage)
+local ghostly = enemy("Raid Brute", v3(10, 0, 0))
+local fine    = enemy("Raid Brute", v3(20, 0, 0))
+lastDest[ghostly.model] = v3(0, 0, 0)
+ghostly.root.Position = v3(80, 0, 0)          -- replication put it back where it really is
+lastDest[fine.model] = v3(0, 0, 0)
+pile = { fine, ghostly }
+run(4, { fine })
+check("not ours: the note says NOT OURS with the gap, and pulled",
+    P.noDamage[1] and P.noDamage[1]:find("NOT OURS (really 80", 1, true) and P.noDamage[1]:find("pulled:", 1, true),
+    P.noDamage[1])
+
+-- 9. held where it was put, in reach, no shield, still no damage: the server refused it
+reset()
+table.clear(P.noDamage)
+local a9 = enemy("Raid Archer", v3(5, 0, 0))
+local b9 = enemy("Raid Archer", v3(6, 0, 0))
+lastDest[a9.model], lastDest[b9.model] = v3(0, 0, 0), v3(0, 0, 0)
+pile = { a9, b9 }
+run(4, { a9 })
+check("ours + in reach + no damage: 'held, ours', 'in reach', its place in the pile",
+    P.noDamage[1] and P.noDamage[1]:find("held, ours", 1, true) and P.noDamage[1]:find("in reach (20 of 60)", 1, true)
+        and P.noDamage[1]:find("pile 2 of 2", 1, true), P.noDamage[1])
+
+-- 10. fought in place: no ownership claim (lastDest is an old pull's), the stage named
+reset()
+table.clear(P.noDamage)
+P.pileInPlace, P.forceClose = true, false
+local c10 = enemy("Raid Brute", v3(0, 0, 0))
+lastDest[c10.model] = v3(500, 0, 0)
+pile = { c10 }
+run(7, {})
+check("in place: 'in place, from high', no NOT OURS from an old pull",
+    P.noDamage[1] and P.noDamage[1]:find("in place, from high", 1, true) and not P.noDamage[1]:find("OURS", 1, true),
+    P.noDamage[1])
+P.pileInPlace, P.forceClose = false, false
+
 print(all and "ALL PASS" or "SOME FAILED")

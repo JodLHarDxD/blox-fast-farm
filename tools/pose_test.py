@@ -26,7 +26,7 @@ def read(name):
 src = read(os.path.join("..", "fast_farm.lua"))
 a = src.index("local wantPose")
 b = src.index("-- WEAPONS: WHAT EACH ONE FIRES", a)
-c = src.index("local function hitTargets()")
+c = src.index("function P.hitReach()")
 d = src.index("local function m1Remote(", c)
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:

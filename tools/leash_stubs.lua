@@ -20,3 +20,7 @@ local function enemy(name, home)
     homePos[m] = home
     return { model = m, name = name, hum = { Health = 100, Parent = true }, root = { Position = v3(0, 0, 0) } }
 end
+-- For the why-no-damage note: where the magnet last put each one, and you.
+local lastDest = {}
+local ME = { Position = v3(0, 20, 0) }
+local function parts() return nil, ME end

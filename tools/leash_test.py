@@ -23,7 +23,7 @@ def read(name):
 
 
 src = read(os.path.join("..", "fast_farm.lua"))
-a = src.index("local function checkPutBack()")
+a = src.index("-- WHY NO DAMAGE.")
 b = src.index("-- Where skills are aimed", a)
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:

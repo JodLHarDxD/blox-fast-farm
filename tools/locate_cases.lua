@@ -194,13 +194,9 @@ table.insert(WORLD.loaded, pirate19)
 table.insert(WORLD.loaded, enemy("Brute", v3(-200, 0, 50)))
 table.insert(WORLD.loaded, enemy("Sea Beast", v3(900, 0, 0)))
 pl = buildRaidPile()
--- The Brute spawned 304 from the Pirate: past the 300 pull limit, so it is
--- not dragged into the Pirate's pile (that drag was the stuck-wave bug); it
--- is the next pile.
-check("outside a raid: near you, one per pile when 304 apart (limit 300)", #pl == 1 and pl[1] == pirate19, "held " .. #pl)
-WORLD.loaded = { WORLD.loaded[2], WORLD.loaded[3] }
-pl = buildRaidPile()
-check("then the Brute; the one 900 away never", #pl == 1 and pl[1].name == "Brute", "held " .. #pl)
+-- Raid enemies have no leash (user, 2026-09-28): the Brute 304 away goes in
+-- the same pile - no pull limit in raid mode.
+check("outside a raid: everything near you, any kind (2), not the far one", #pl == 2, "held " .. #pl)
 
 -- 20. nobody near: empty
 reset()
@@ -347,8 +343,8 @@ P.randomSkip = {}
 -- no limit; one dragged out of its area took no damage, was put back, and
 -- was IGNORED - so the pile went empty while it lived and the farm waited.
 
--- 32. two groups on the raid island ~560 apart: the near group piled, the far
---     one NOT dragged past its limit (it gets its own pile next)
+-- 32. two groups on the raid island ~560 apart: ONE pile of all six - raid
+--     enemies roam the island to reach you, there is no leash to respect
 rreset()
 CFG.RaidRadius = 450
 P.raidAt = v3(0, 0, 0)
@@ -358,7 +354,7 @@ for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raid Brute", v3(200 + i * 10, 
 pl2 = buildRaidPile()
 local dragged = false
 for _, e in ipairs(pl2) do if e.root.Position.X > 0 then dragged = true end end
-check("raid: far group not dragged past the pull limit", #pl2 == 3 and not dragged, "held " .. #pl2)
+check("raid: no pull limit - both groups in one pile", #pl2 == 6 and dragged, "held " .. #pl2)
 
 -- 33. the one put back (no damage when pulled) is fought IN PLACE once the
 --     free ones are dead - never left alive while the farm waits
