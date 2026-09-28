@@ -74,4 +74,20 @@ FILE, _G.BFF_CARRY = "garbage", "q1"
 r = takeCarry()
 check("broken file: the queued copy is used", r == true and E.carried == "queued reload")
 
+-- 9. ANOTHER ACCOUNT's file (both share the executor folder): nothing taken -
+--    not its settings (eating allowed on the second account must never reach
+--    the main), not its counts, no resume
+reset()
+DB.f1 = state({ userId = 222, cfg = { TravelSpeed = 900, EliteHunt = true } })
+FILE = "f1"
+r = takeCarry()
+check("other account's state: no resume, no settings, no counts", r == false and CFG.TravelSpeed == 330
+    and not CFG.EliteHunt and E.tally.joins == 0 and E.visited.x == nil)
+
+-- 10. this account's own (userId matches): resumed as usual
+reset()
+DB.f1 = state({ userId = 111 })
+FILE = "f1"
+check("own account's state: resumed", takeCarry() == true and CFG.TravelSpeed == 500)
+
 print(all and "ALL PASS" or "SOME FAILED")

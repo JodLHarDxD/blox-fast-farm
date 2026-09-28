@@ -33,3 +33,4 @@ local function joinServer(id)
     if AFTER_JOIN then AFTER_JOIN(id) end
     return false
 end
+local player = { UserId = 1 }

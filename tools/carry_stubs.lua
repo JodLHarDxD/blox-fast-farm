@@ -27,3 +27,5 @@ local function reset()
           tally = { joins = 0, found = 0, kills = 0, chalices = 0, joinSecs = 0, fails = 0, since = 0 } }
 end
 reset()
+-- this account
+local player = { UserId = 111 }

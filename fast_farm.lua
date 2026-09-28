@@ -949,11 +949,23 @@ P.heldTool = function()
     return t and t.Name or nil
 end
 
+-- A PHYSICAL FRUIT (one to eat or store, "Kitsune Fruit" with an EatRemote -
+-- not your eaten fruit's power, "Kitsune-Kitsune") is never a weapon: it is
+-- never listed, never equipped, and nothing is clicked while one is in your
+-- hand. A click with it held EATS it and replaces your fruit (user, main
+-- account, 2026-09-28). Roblox puts a tool you touch straight into your hand.
+function P.isPhysicalFruit(t)
+    if not (t and t:IsA("Tool")) then return false end
+    if string.find(t.Name, " Fruit$") then return true end
+    local ok, er = pcall(function() return t:FindFirstChild("EatRemote", true) end)
+    return ok and er ~= nil
+end
+
 local function findTool(name)
     local bp   = player:FindFirstChild("Backpack")
     local char = player.Character
     local t = (char and char:FindFirstChild(name)) or (bp and bp:FindFirstChild(name))
-    if t and t:IsA("Tool") then return t end
+    if t and t:IsA("Tool") and not P.isPhysicalFruit(t) then return t end
     return nil
 end
 
@@ -962,7 +974,7 @@ local function toolNames()
     for _, src in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
         if src then
             for _, t in ipairs(src:GetChildren()) do
-                if t:IsA("Tool") and not seen[t.Name] then
+                if t:IsA("Tool") and not seen[t.Name] and not P.isPhysicalFruit(t) then
                     seen[t.Name] = true
                     table.insert(out, t)
                 end
@@ -1005,6 +1017,13 @@ local function holdKey(code, secs, before)
 end
 
 local function pressM1()
+    -- A fruit in hand: the click would EAT it. Put it away instead.
+    local held = heldTool()
+    if held and P.isPhysicalFruit(held) then
+        local _, _, h = parts()
+        if h then pcall(function() h:UnequipTools() end) end
+        return
+    end
     local cam = workspace.CurrentCamera
     if not cam then return end
     local vs = cam.ViewportSize
@@ -3438,6 +3457,12 @@ local function clickQuestDialog(wantName)
         end)
         if not fired then
             pcall(function()
+                -- A fruit in hand would take the click (and be eaten).
+                local held = heldTool()
+                if held and P.isPhysicalFruit(held) then
+                    local _, _, h = parts()
+                    if h then h:UnequipTools() end
+                end
                 local ap, as = b.AbsolutePosition, b.AbsoluteSize
                 local x, y = ap.X + as.X / 2, ap.Y + as.Y / 2
                 VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
@@ -4147,7 +4172,9 @@ do
         local ELITES    = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" }
         local ELITE_NPC = Vector3.new(-5418.9, 313.7, -2826.2)   -- the Elite Hunter (public hubs' spot)
         local CHALICE   = "God's Chalice"
-        local HOP_FILE  = "bff_elite_hop.json"
+        -- One file PER ACCOUNT: two accounts share the executor's folder, and
+        -- one's settings (eating allowed, say) must never reach the other.
+        local HOP_FILE  = "bff_elite_hop_" .. tostring(player.UserId) .. ".json"
         local SOURCE_URL = "https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/fast_farm.lua"
         -- Where the Elite Hunter's words send you, when no model can be seen: over
         -- the middle of the island, from the camps in LEVELS round it.
@@ -4292,7 +4319,7 @@ do
             local cfg = {}
             for k, v in pairs(CFG) do cfg[k] = v end
             local t = {
-                v = 1, resume = resume and true or false,
+                v = 1, userId = player.UserId, resume = resume and true or false,
                 freshUntil = os.time() + 300, hopAt = os.time(), fromJob = game.JobId,
                 visited = E.visited, tally = E.tally, cfg = cfg,
             }
@@ -4335,6 +4362,8 @@ do
                 if ok and type(d) == "table" then t, via = d, "queued reload" end
             end
             if not t then return false end
+            -- Another account's state: nothing of it is taken.
+            if t.userId ~= nil and t.userId ~= player.UserId then return false end
             if type(t.visited) == "table" then E.visited = t.visited end
             if type(t.tally) == "table" then
                 for k, v in pairs(t.tally) do
