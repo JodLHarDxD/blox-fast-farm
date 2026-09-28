@@ -92,6 +92,10 @@ local CFG = {
     -- fruit skills), close beside it when it does not (keys, melee skills).
     -- "fixed": one spot, whatever is firing.
     HeightMode         = "auto",
+    -- On: never down to the close spot -- every attack is fired from HeightSafe
+    -- over the highest enemy in the pile. What cannot reach from there (a
+    -- sword swing, a short melee skill) will show up as MISSED / nothing landed.
+    StayHigh           = true,
     HeightSafe         = 20,
     HeightMelee        = 3,
     MeleeDistance      = 5,      -- close = this far out to the side, pile in front
@@ -1942,7 +1946,15 @@ local wantPose = "safe"      -- "safe" (high) or "melee" (close beside)
 
 local function poseTarget()
     if not pileCentre then return nil end
-    local c = pileCentre
+    -- Height is counted from the HIGHEST living enemy in the pile, not from
+    -- the pile's centre: one the magnet does not own stands where it really
+    -- is (up on the ledges at Port Town, say), and "60 over them" has to mean
+    -- 60 over every one of them.
+    local top = pileCentre.Y
+    for _, e in ipairs(pile) do
+        if e.model.Parent and e.hum.Health > 0 then top = math.max(top, e.root.Position.Y) end
+    end
+    local c = Vector3.new(pileCentre.X, top, pileCentre.Z)
     if not pileSide then
         local _, r = parts()
         local d = r and Vector3.new(r.Position.X - c.X, 0, r.Position.Z - c.Z) or Vector3.zero
@@ -1973,6 +1985,7 @@ local function applyPose()
 end
 
 local function setPose(p)
+    if CFG.StayHigh then p = "safe" end     -- never down to the close spot
     if wantPose ~= p then
         wantPose = p
         applyPose()
@@ -2201,7 +2214,13 @@ do
         local _, r = parts()
         if not r then return {} end
         local out = {}
+        -- Your reach, or far enough to reach the pile from the height you
+        -- set (60 up with a 60 reach named nobody at all). Whether the server
+        -- takes a hit from that far is its call: "how M1 lands" shows it.
         local range = CFG.HitRange or 60
+        if pileCentre then
+            range = math.max(range, (r.Position - pileCentre).Magnitude + (CFG.PileSpread or 3) + 5)
+        end
         for _, e in ipairs(pile) do
             if e.model.Parent and e.hum.Health > 0
                 and (e.root.Position - r.Position).Magnitude <= range then
@@ -2297,6 +2316,19 @@ local function waysFor(tool)
         table.insert(all, { path = "keys", pose = "melee" })
     else
         table.insert(all, { path = "keys", pose = "melee" })
+    end
+    if CFG.StayHigh then
+        -- Every way tried from up there; a way listed twice (high and close)
+        -- is tried once.
+        local out, seen = {}, {}
+        for _, w in ipairs(all) do
+            local key = w.path .. (w.variant or "")
+            if not seen[key] then
+                seen[key] = true
+                table.insert(out, { path = w.path, variant = w.variant, pose = "safe" })
+            end
+        end
+        all = out
     end
     local force = CFG.M1Method
     if force and force ~= "auto" then
@@ -4609,7 +4641,7 @@ local function buildUI()
         hairline(v)
         navRow(v, "Position", function()
             if CFG.HeightMode == "fixed" then return math.floor(CFG.HeightFixed) .. " up, fixed" end
-            return "auto  ·  " .. math.floor(CFG.HeightSafe) .. " up"
+            return "auto  ·  " .. math.floor(CFG.HeightSafe) .. " up" .. (CFG.StayHigh and ", always" or "")
         end, "position")
         hairline(v)
         navRow(v, "Travel", function()
@@ -5013,7 +5045,8 @@ local function buildUI()
             if wantPose == "melee" then
                 return string.format("now close: %.1f up, %.1f out", CFG.HeightMelee, CFG.MeleeDistance)
             end
-            return string.format("now high: %d over the pile", CFG.HeightSafe)
+            return string.format("now high: %d over the highest enemy%s", CFG.HeightSafe,
+                CFG.StayHigh and "  (always)" or "")
         end)
         radio(v, 82, {
             { "auto", "Auto - high or close" },
@@ -5023,8 +5056,20 @@ local function buildUI()
             .. "there (remote hit, fruit click, fruit skills) - out of their "
             .. "reach. Close beside it when it does not (key presses, "
             .. "fighting-style and sword skills).")
+        switchRow(v, "Always stay above them",
+            "Never comes down close - every attack from this height",
+            function() return CFG.StayHigh end,
+            function(x)
+                CFG.StayHigh = x
+                if x then setPose("safe") end
+                P.reprobe()             -- the M1 ways were found at the old height
+            end)
+        caption(v, "The height is counted from the highest enemy in the pile. "
+            .. "Staying above: what cannot reach from up there (a sword swing, "
+            .. "a short melee skill) shows as MISSED or 'nothing landed' - "
+            .. "lower the height, or switch this off for that weapon.")
         heading2(v, "auto")
-        sliderRow(v, "High, over the pile", 5, 60, 1,
+        sliderRow(v, "High, over the pile", 5, 150, 1,
             function() return CFG.HeightSafe end,
             function(x) CFG.HeightSafe = x end, " studs")
         sliderRow(v, "Close, height", 0, 10, 0.5,
@@ -5034,7 +5079,7 @@ local function buildUI()
             function() return CFG.MeleeDistance end,
             function(x) CFG.MeleeDistance = x end, " studs")
         heading2(v, "fixed")
-        sliderRow(v, "Height", 0, 60, 1,
+        sliderRow(v, "Height", 0, 150, 1,
             function() return CFG.HeightFixed end,
             function(x) CFG.HeightFixed = x end, " studs")
         sliderRow(v, "Out to the side", 0, 20, 1,

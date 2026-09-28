@@ -1,0 +1,58 @@
+
+-- ---------------------------------------------------------------- cases
+local all = true
+local function check(name, cond, detail)
+    print((cond and "PASS " or "FAIL ") .. name)
+    if not cond then print("  " .. tostring(detail)) all = false end
+end
+local function reset()
+    CFG.HeightMode, CFG.StayHigh, CFG.HeightSafe = "auto", true, 60
+    wantPose, pileSide, LOCK = "safe", v3(1, 0, 0), nil
+end
+
+-- 1. PORT TOWN: the pile held over the pond at Y 40 -> you 60 over them
+reset()
+pileCentre = v3(0, 40, 0)
+pile = { enemy(v3(3, 40, 0)), enemy(v3(-3, 40, 0)) }
+check("Port Town: 60 set = 60 over the pile (Y 100)", poseTarget().Y == 100, poseTarget().Y)
+
+-- 2. one the magnet does not own stays up on the ledge (Y 80): 60 over IT
+pile = { enemy(v3(3, 40, 0)), enemy(v3(40, 80, 10)) }
+check("an enemy left on the ledge (Y 80): 60 over the highest one (Y 140)", poseTarget().Y == 140, poseTarget().Y)
+
+-- 3. always stay above: a melee skill / key M1 asks for close -> still high
+pile = { enemy(v3(3, 40, 0)) }
+setPose("melee")
+check("staying above: 'close' is refused, still 60 over", wantPose == "safe" and poseTarget().Y == 100, wantPose)
+
+-- 4. switch off: close comes back (3 up, 5 out)
+CFG.StayHigh = false
+setPose("melee")
+local t = poseTarget()
+check("switch off: close = 3 up, 5 to the side", wantPose == "melee" and t.Y == 43 and t.X == 5, t.Y .. "," .. t.X)
+
+-- 5. 120 up is possible now, and holds
+reset()
+CFG.HeightSafe = 120
+check("120 over the pile", poseTarget().Y == 160, poseTarget().Y)
+
+-- 6. fixed mode counts from the highest enemy too
+CFG.HeightMode, CFG.HeightFixed = "fixed", 30
+pile = { enemy(v3(0, 40, 0)), enemy(v3(0, 55, 0)) }
+check("fixed: 30 over the highest (Y 85)", poseTarget().Y == 85, poseTarget().Y)
+
+-- 7. THE REMOTE HIT: 60 up with a 60 reach used to name nobody
+reset()
+pileCentre = v3(0, 40, 0)
+pile = { enemy(v3(3, 40, 0)), enemy(v3(-3, 40, 0)), enemy(v3(0, 40, 3)) }
+ME.Position = v3(0, 100, 0)
+check("60 up: the remote hit names the whole pile (was 0)", #hitTargets() == 3, #hitTargets())
+ME.Position = v3(0, 160, 0)
+check("120 up: still the whole pile", #hitTargets() == 3, #hitTargets())
+
+-- 8. an enemy that is not in the pile is never named, however far the reach
+pileCentre = v3(0, 40, 0)
+pile = { enemy(v3(3, 40, 0)) }
+check("only pile members are named", #hitTargets() == 1)
+
+print(all and "ALL PASS" or "SOME FAILED")

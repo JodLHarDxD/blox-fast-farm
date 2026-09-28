@@ -32,7 +32,7 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 |---|---|
 | Finding the camp | farm_pro's rule: every LOADED enemy of the species counts, wherever it stands; the one nearest you picks the camp. Travel goes to a loaded one, else the game's own spawn points (`_WorldOrigin.EnemySpawns`), else enemies the game parked in ReplicatedStorage, and only then the level table (12 of its points were corrected against three hubs). The Targets page says which source each camp came from. |
 | Magnet | **Every loaded enemy of the quest species, any distance** ("Pull every one loaded", on by default). Looked for again 10×/s from the frame loop, so one that spawns mid-fight joins the pile at once, even during a cast. The pile sits at the camp's middle: the centre of the smallest circle round its spawn points (game's `EnemySpawns`, else spots seen) — the spot where the farthest pull is shortest, so every one stays inside its own area. SimulationRadius raised; every frame each is written to a ring there, velocity zeroed, knockback removed. Held + hit with no HP change for 3 s = put back, left alone 30 s. |
-| Lock | your body is written to a spot over the pile every frame: high (default 20 up) when the hit reaches from there, close beside it when it does not. A Kitsune lunge is undone the same frame. |
+| Lock | your body is written every frame to a spot over the pile: **"High, over the pile" (up to 150) counted from the HIGHEST living enemy in it** (one the magnet does not own stays up on its ledge, and you still stay that far over it). **"Always stay above them" (on by default): never down to the close spot** — every attack is fired from that height, and the remote hit reaches that far (a 60 reach at 60 up used to name nobody). Off: close beside the pile for key presses and fighting-style / sword skills. A Kitsune lunge is undone the same frame. |
 | Noclip | every part stops colliding before each physics step while running. The body is always held, so it never falls through anything. |
 | Travel | under 150 studs: one jump. Further: a straight flight at 330 studs/s (slider). "Pulled back" on the Travel page counts server corrections. Submerged Island: the Tiki submarine. |
 | M1 | tried against the pile, kept per weapon if it takes HP off: remote hit (`RE/RegisterAttack` + `RE/RegisterHit` naming the whole pile), fruit click (`tool.LeftClickRemote`), key press. |
@@ -65,6 +65,7 @@ python tools/rhythm_test.py                      # the combo rhythm, real code, 
 python tools/quest_test.py                       # the quest engine, real code, 22 scenarios (never mode never moves you; boss quests, level gate, renamed boss, sea skip)
 python tools/locate_test.py                      # where a species is + the pile, real code, 25 scenarios (Sky Bandit case, new spawns joining, raid pile)
 python tools/raid_test.py                        # raid mode's view of the game: both timer paths, newest Island N
+python tools/pose_test.py                        # where you hang + the remote hit's reach, real code: Port Town, ledge, 120 up, stay above
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
 ```
