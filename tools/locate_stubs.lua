@@ -41,5 +41,5 @@ local function enemy(name, pos)
 end
 local function releaseCamera() end
 local P = {}
-local CFG = { Magnet = true, GrabRadius = 300, GrabMax = 12, PullOthers = true, OthersRadius = 100 }
+local CFG = { Magnet = true, GrabRadius = 300, GrabMax = 12, PullOthers = true, OthersRadius = 100, MaxPull = 300, LearnLeash = true }
 

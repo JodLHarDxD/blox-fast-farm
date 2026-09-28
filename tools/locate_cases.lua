@@ -153,8 +153,8 @@ ME.Position = v3(0, 20, 0)
 for i = 0, 1 do table.insert(WORLD.loaded, enemy("Sniper", v3(i * 10, 0, 0))) end
 for i = 0, 1 do table.insert(WORLD.loaded, enemy("Sniper", v3(3000 + i * 10, 0, 0))) end
 pl, centre = buildPile({ name = "Sniper" }, { Sniper = true })
-check("two camps: all 4 pulled, centre at YOUR camp", #pl == 4 and near(centre, v3(10, 0, 0)),
-    "held " .. #pl .. " at " .. tostring(centre and centre.X))
+check("two camps: only yours (the other is 3000 away, past the pull limit), centre at YOUR camp",
+    #pl == 2 and near(centre, v3(10, 0, 0)), "held " .. #pl .. " at " .. tostring(centre and centre.X))
 
 -- 17. heights: the middle height of the camp
 reset()
@@ -211,5 +211,56 @@ pl = buildRaidPile()
 check("raid: capped at Most in one pile, nearest first", #pl == 5 and pl[5].name == "Raider 5", "held " .. #pl)
 CFG.GrabMax = 12
 P.raidAt = nil
+
+-- ---------------------------------------------------------------- HOW FAR ONE CAN BE PULLED
+-- A Port Town-like camp: side A (x 0-40) and side B (x 380-420), one camp
+-- (340 apart, linked), 210 from its middle to either side.
+local function portTown(name)
+    for _, x in ipairs({ 0, 20, 40, 380, 400, 420 }) do table.insert(WORLD.spawns, part(name, v3(x, 0, 0))) end
+end
+
+-- 22. limit 300: the whole camp fits -> one pile at the middle, all 6
+reset()
+CFG.PullAll, CFG.MaxPull = true, 300
+portTown("Billionaire A")
+ME.Position = v3(10, 60, 0)
+for _, x in ipairs({ 5, 25, 35, 385, 405, 415 }) do table.insert(WORLD.loaded, enemy("Billionaire A", v3(x, 0, 0))) end
+pl, centre = buildPile({ name = "Billionaire A" }, { ["Billionaire A"] = true })
+check("limit 300, camp 210 from its middle: one pile of 6 at the middle", #pl == 6 and near(centre, v3(210, 0, 0)),
+    "held " .. #pl .. " at " .. tostring(centre and centre.X))
+
+-- 23. limit 150: side A only (you are there), B left alone for now
+reset()
+CFG.PullAll, CFG.MaxPull = true, 150
+portTown("Billionaire B")
+ME.Position = v3(10, 60, 0)
+for _, x in ipairs({ 5, 25, 35, 385, 405, 415 }) do table.insert(WORLD.loaded, enemy("Billionaire B", v3(x, 0, 0))) end
+pl, centre = buildPile({ name = "Billionaire B" }, { ["Billionaire B"] = true })
+local allA = true
+for _, e in ipairs(pl) do if e.root.Position.X > 100 then allA = false end end
+check("limit 150: side A only, piled at A's middle (x 20)", #pl == 3 and allA and near(centre, v3(20, 0, 0)),
+    "held " .. #pl .. " at " .. tostring(centre and centre.X))
+check("limit 150: the panel says it is one side at a time", P.pileSplit ~= nil, P.pileSplit)
+
+-- 24. side A cleared: the pile moves to side B
+WORLD.loaded = {}
+for _, x in ipairs({ 385, 405, 415 }) do table.insert(WORLD.loaded, enemy("Billionaire B", v3(x, 0, 0))) end
+pl, centre = buildPile({ name = "Billionaire B" }, { ["Billionaire B"] = true })
+check("side A empty: side B's 3, at B's middle (x 400)", #pl == 3 and near(centre, v3(400, 0, 0)),
+    "held " .. #pl .. " at " .. tostring(centre and centre.X))
+
+-- 25. measured: one stopped taking damage 150 from its spawn -> limit 135
+reset()
+CFG.PullAll, CFG.MaxPull, CFG.LearnLeash = true, 300, true
+portTown("Billionaire C")
+P.leash["Billionaire C"] = { ok = 90, bad = 150 }
+check("measured 'no damage at 150' -> pulls at most 135", pullLimit("Billionaire C") == 135, pullLimit("Billionaire C"))
+ME.Position = v3(10, 60, 0)
+for _, x in ipairs({ 5, 25, 35, 385, 405, 415 }) do table.insert(WORLD.loaded, enemy("Billionaire C", v3(x, 0, 0))) end
+pl = buildPile({ name = "Billionaire C" }, { ["Billionaire C"] = true })
+check("so the camp is done one side at a time (3)", #pl == 3, "held " .. #pl)
+CFG.LearnLeash = false
+check("learning off: back to your 300", pullLimit("Billionaire C") == 300, pullLimit("Billionaire C"))
+CFG.MaxPull, CFG.LearnLeash = 300, true
 
 print(all and "ALL PASS" or "SOME FAILED")

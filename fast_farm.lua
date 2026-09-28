@@ -74,6 +74,13 @@ local CFG = {
     -- The pile sits at the middle of the camp's spawn points: the one spot
     -- where the farthest pull is shortest, so every one stays in its area.
     PullAll            = true,
+    -- How far one can be pulled from where it spawned and still take damage.
+    -- Nobody publishes the game's number; the hubs pull within 250-350. A camp
+    -- wider than this (Port Town) is piled one side at a time. LearnLeash
+    -- lowers it per species when a pulled one stops taking damage further out
+    -- than others that still do.
+    MaxPull            = 300,
+    LearnLeash         = true,
     GrabRadius         = 300,    -- PullAll off: spawned this close to the camp = pulled
     GrabMax            = 30,     -- most enemies in one pile
     PileSpread         = 3,      -- the pile is a ring this wide, not one point
@@ -1570,7 +1577,8 @@ local simAt      = 0
 P.pileHeld, P.pileOwned = 0, 0
 P.simNote = sethiddenproperty and "SimulationRadius: settable" or "SimulationRadius: this executor cannot set it"
 
-local homeOf, campFor, middleOf
+local homeOf, campFor, middleOf, pullLimit
+P.leash = {}             -- species -> { ok = farthest pull that still took damage, bad = nearest that did not }
 do
     -- Every spawn spot seen, per species (8 studs apart): the camp's middle can
     -- be found even when the game gives no spawn points, and it does not move
@@ -1728,6 +1736,16 @@ do
         return nil
     end
     P.pileReach = nil
+
+    -- How far one of this kind can be pulled from its spawn: your "Pull at
+    -- most", or less when this farm saw one stop taking damage nearer than
+    -- that (checkPutBack writes P.leash).
+    function pullLimit(name)
+        local lim = CFG.MaxPull or 300
+        local l = P.leash[name]
+        if CFG.LearnLeash and l and l.bad then lim = math.min(lim, l.bad - 15) end
+        return math.max(lim, 30)
+    end
 end
 
 local function isPutBack(model)
@@ -1797,18 +1815,43 @@ local function buildPile(cur, names)
         return (homeOf(a) - home).Magnitude < (homeOf(b) - home).Magnitude
     end)
     local cap = math.max(1, math.floor(CFG.GrabMax or 12))
-    while #group > cap do table.remove(group) end
 
     local centre
     local camp = CFG.PullAll and campFor(cur.name, home) or nil
     if camp then
-        centre = camp.centre
-        P.pileReach = camp.reach
+        local limit = pullLimit(cur.name)
+        if camp.reach <= limit then
+            -- The whole camp fits: one pile at its middle.
+            centre, P.pileReach, P.pileSplit = camp.centre, camp.reach, nil
+        else
+            -- One pile in the middle would drag some past the limit. The side
+            -- the anchor is on -- its camp's spawn points within the limit of
+            -- it -- now; the far side when this one is empty (the anchor is
+            -- then over there). Every point of the side is within the limit of
+            -- the anchor, so its middle is too: the anchor always fits.
+            local side = {}
+            for _, p in ipairs(camp.pts) do
+                if (p - home).Magnitude <= limit then table.insert(side, p) end
+            end
+            if #side == 0 then side = { home } end
+            centre, P.pileReach = middleOf(side)
+            P.pileSplit = string.format("camp %.0f studs across - one side at a time (pull at most %.0f)",
+                camp.reach * 2, limit)
+        end
+        -- Only the ones whose spawn is within the limit of the pile.
+        local keep = {}
+        for _, e in ipairs(group) do
+            if (homeOf(e) - centre).Magnitude <= limit then table.insert(keep, e) end
+        end
+        if #keep == 0 then keep = { anchor } end
+        group = keep
+        while #group > cap do table.remove(group) end
     else
+        while #group > cap do table.remove(group) end
         local sum = Vector3.zero
         for _, e in ipairs(group) do sum += homeOf(e) end
         centre = sum / #group
-        P.pileReach = nil
+        P.pileReach, P.pileSplit = nil, nil
     end
 
     for _, e in ipairs(others) do
@@ -1918,8 +1961,33 @@ local function checkPutBack()
         if not j then
             pileJoin[e.model] = { at = now, hp = e.hum.Health, act = actions }
         elseif e.hum.Health < j.hp - 0.5 then
-            j.at, j.hp, j.act = now, e.hum.Health, actions
+            j.at, j.hp, j.act, j.hit = now, e.hum.Health, actions, true
+            -- Took damage this far from its spawn: that far is fine.
+            local h = homePos[e.model]
+            if h and pileCentre and e.name then
+                local d = (h - pileCentre).Magnitude
+                local l = P.leash[e.name] or {}
+                P.leash[e.name] = l
+                if not l.ok or d > l.ok then l.ok = d end
+            end
         elseif now - j.at > (CFG.PutBackAfter or 3) and actions - j.act >= 6 then
+            -- No damage. If one pulled from NEARER its spawn in this same pile
+            -- did take damage, the distance is why: that is the limit for its
+            -- kind. (Without that contrast it may just not be ours to move.)
+            local spawnAt = homePos[e.model]
+            if CFG.LearnLeash and spawnAt and pileCentre and e.name then
+                local d = (spawnAt - pileCentre).Magnitude
+                for _, o in ipairs(pile) do
+                    local jo = pileJoin[o.model]
+                    local ho = homePos[o.model]
+                    if o ~= e and jo and jo.hit and ho and (ho - pileCentre).Magnitude < d - 10 then
+                        local l = P.leash[e.name] or {}
+                        P.leash[e.name] = l
+                        if not l.bad or d < l.bad then l.bad = d end
+                        break
+                    end
+                end
+            end
             putBack[e.model] = now + 30
             pileJoin[e.model] = nil
             stats.putBack += 1
@@ -4999,6 +5067,34 @@ local function buildUI()
             return P.pileReach and string.format("pile at the camp's middle  ·  farthest pull %.0f studs",
                 P.pileReach) or "pile at the camp's middle (found on the first pile)"
         end)
+        sliderRow(v, "Pull at most, from their spawn", 50, 1000, 10,
+            function() return CFG.MaxPull end,
+            function(x) CFG.MaxPull = x end, " studs")
+        switchRow(v, "Learn how far each kind can go",
+            "One that stops taking damage further out lowers its limit",
+            function() return CFG.LearnLeash end,
+            function(x) CFG.LearnLeash = x end)
+        readout(v, function()
+            local lines = {}
+            if P.pileSplit then table.insert(lines, P.pileSplit) end
+            local names = {}
+            for n in pairs(P.leash) do table.insert(names, n) end
+            table.sort(names)
+            for _, n in ipairs(names) do
+                local l = P.leash[n]
+                table.insert(lines, string.format("%s: hit up to %s from spawn%s  ->  at most %.0f", n,
+                    l.ok and string.format("%.0f", l.ok) or "-",
+                    l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
+            end
+            if #lines == 0 then return "one pile per camp  ·  nothing measured yet" end
+            return table.concat(lines, "\n")
+        end)
+        actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
+        caption(v, "A camp wider than the limit is piled one side at a time: "
+            .. "the side nearest you, then the other when it is empty. How far "
+            .. "the game lets one go is published nowhere - the farm measures "
+            .. "it: pulled ones that stop taking damage while nearer ones still "
+            .. "do lower the limit for their kind.")
         sliderRow(v, "When that is off: within", 50, 600, 10,
             function() return CFG.GrabRadius end,
             function(x) CFG.GrabRadius = x end, " studs")
