@@ -5,7 +5,7 @@ local Vector3 = { new = function(x, y, z) return { X = x, Y = y, Z = z } end }
 local NOW = 100000
 local os = { time = function() return NOW end, clock = function() return NOW end }
 local task = { wait = function() end, spawn = function(f, ...) f(...) end }
-local CFG = { EliteHunt = true, EliteRevisit = 10, EliteOrder = "fewest" }
+local CFG = { Hunt = true, HopRevisit = 10, HopOrder = "fewest" }
 local P = { running = true }
 local epoch = 0
 local function stale(e) return e ~= epoch end

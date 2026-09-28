@@ -21,9 +21,10 @@
                the game's own cooldown bars; M1 fills the gaps between them.
       CIRCUIT  the species on the Targets page: A's pile, B's pile, back to A,
                respawned by now. No quests (max level; removed 2026-09-28).
-      ELITES   Third Sea: an Elite Pirate up here is found, flown to and hit
-               to the last; none up (or it is down) = the next server. The
-               God's Chalice ends it: no hop, ever, in the server it came in.
+      HUNT     the best thing in this server first - a fruit lying on the
+               ground (grabbed, STORED, never eaten), then an Elite Pirate
+               (God's Chalice) - nothing worth doing here = the next server.
+               The God's Chalice ends it: no hop, ever, in the server it came in.
 
     TAKEN FROM FARM_PRO UNCHANGED: the level table, Enhancement + Observation,
     walk on water. Its panel too -- made opaque, because farm_pro's background was
@@ -164,22 +165,33 @@ local CFG = {
     RandomMode         = false,
     RandomRadius       = 750,
 
-    -- ---------- ELITE HUNT ----------
-    -- Third Sea. Diablo, Deandre, Urban (and Tyrant of the Skies while he is
-    -- up): one per server, back 8 min 45 s after the last one died. Only the
-    -- LAST hit gets the drops -- the God's Chalice among them. Fought where it
-    -- stands, never pulled.
-    EliteHunt          = false,
-    -- None up here, or it is down without a chalice: the next server.
-    -- Off: wait in this one for the next spawn. With the chalice in your
-    -- backpack or hand there is no hop at all, whatever this says.
-    EliteHop           = true,
-    EliteOrder         = "fewest",   -- "fewest" (players first) | "random"
+    -- ---------- THE HUNT ----------
+    -- One loop, several targets, the best one present first: a fruit lying
+    -- on the ground (gone within 20 min or to another player), then an Elite
+    -- Pirate (God's Chalice). Nothing worth doing here = the next server.
+    -- Every target has its own switch.
+    Hunt               = false,
+    -- FRUITS ON THE GROUND: grabbed and STORED, never eaten. Worth it = the
+    -- game's own price at least this (0 = any). Player drops are mostly
+    -- trades (dropped and picked up within a second): off = server spawns only.
+    HuntFruit          = true,
+    FruitMinPrice      = 0,
+    FruitPlayerDrops   = false,
+    -- ELITE PIRATES (Third Sea). Diablo, Deandre, Urban (and Tyrant of the
+    -- Skies while he is up): one per server, back 8 min 45 s after the last
+    -- one died. Only the LAST hit gets the drops -- the God's Chalice among
+    -- them. Fought where it stands, never pulled.
+    HuntElite          = true,
+    -- Nothing worth doing here: the next server. Off: wait in this one.
+    -- With the chalice in your backpack or hand there is no hop at all,
+    -- whatever this says.
+    HuntHop            = true,
+    HopOrder           = "fewest",   -- "fewest" (players first) | "random"
     -- The Elite Hunter's quest (the cat at the Castle on the Sea): progress
     -- toward Yama (30), money, EXP. The chalice does not need it.
     EliteQuest         = true,
     EliteLook          = 8,          -- seconds after a join to look before leaving
-    EliteRevisit       = 10,         -- minutes before a server looked at is tried again
+    HopRevisit         = 10,         -- minutes before a server looked at is tried again
 
     -- ---------- THE CIRCUIT (Targets page) ----------
     -- One species alone: its camp empty = wait this long for the respawn.
@@ -2817,6 +2829,7 @@ local function fight(cur, names)
     pileCur, pileNames = cur, names
     local pileStart = nil
     local lastHaki = 0
+    local lastPre = 0
     local sweepEnd = os.clock() + 30
     m1Count = (CFG.StartWith == "M1") and 0 or (CFG.M1Between or 0)
 
@@ -2856,6 +2869,16 @@ local function fight(cur, names)
         if now - lastHaki > 1 then
             lastHaki = now
             pcall(keepHaki)
+        end
+
+        -- THE HUNT: a fruit lying on the ground outranks the elite being
+        -- fought (it is gone within 20 min, or to someone else).
+        if cur.elite and P.fruitWanted and now - lastPre > 0.5 then
+            lastPre = now
+            if P.fruitWanted() then
+                attacking = false
+                return "preempt"
+            end
         end
 
         pileActive = true
@@ -3043,9 +3066,9 @@ end
 -- THE CHALICE ENDS IT. Leaving the server, or dying, with it in your backpack
 -- loses it. Once it is seen the hunt stops in that server for good: every hop
 -- refuses, and the last look is right before the teleport call itself.
--- Only eliteStep leaves the block as a local (the rest are on P): the main
+-- Only huntStep leaves the block as a local (the rest are on P): the main
 -- chunk is at Luau's 200-local register limit.
-local eliteStep
+local huntStep
 do
     -- In a function of its own: registers are per function, and a do block
     -- would still count against the main chunk's.
@@ -3143,10 +3166,26 @@ do
             return visited
         end
 
+        -- The fruit worth going for, of the ones lying in this server:
+        -- { orig, price, dropper, dropperNear } -> the dearest that passes, or
+        -- nil. A player's drop only if you allow them AND its dropper has
+        -- walked off (one standing by it is a trade in progress). No price
+        -- known counts as 0: it passes only when the minimum is 0.
+        local function pickFruit(list, minPrice, allowDrops)
+            local best
+            for _, f in ipairs(list) do
+                local ok = (not f.dropper) or (allowDrops and not f.dropperNear)
+                if ok and (f.price or 0) >= (minPrice or 0) then
+                    if not best or (f.price or 0) > (best.price or 0) then best = f end
+                end
+            end
+            return best
+        end
+
         -- Everything the hunt knows. `tally` and `visited` survive the hop.
         local E = {
             visited = {},
-            tally = { joins = 0, found = 0, kills = 0, chalices = 0, joinSecs = 0, fails = 0, since = os.time() },
+            tally = { joins = 0, found = 0, kills = 0, chalices = 0, fruits = 0, joinSecs = 0, fails = 0, since = os.time() },
             used = false,            -- the hunt was on at some point in this server
             carried = nil,           -- how this server's copy got its state: "queued reload" / "file"
             queued = false,          -- the reload is queued once per server (each call would add a copy)
@@ -3157,7 +3196,10 @@ do
             asks = 0, askAt = -100, questAskAt = -100, reply = nil, replyText = nil,
             npcVisited = false, dropped = false, isleTried = false,
             missSince = nil, progress = nil, lastKill = nil, lastList = nil,
-            note = "elite hunt off",
+            eliteDoneUntil = 0,      -- this server's elite is down: not looked for till then
+            why = nil,               -- why the last "nothing here" said so
+            fruitNote = "no fruit gone for yet", fruitSkip = setmetatable({}, { __mode = "k" }),
+            note = "hunt off",
         }
         P.elite = E
 
@@ -3269,7 +3311,7 @@ do
                 t.tally = E.tally          -- with this join in it
                 pcall(function() fileWrite(HttpService:JSONEncode(t)) end)
             end
-            CFG.EliteHunt, CFG.RaidMode, CFG.RandomMode = true, false, false
+            CFG.Hunt, CFG.RaidMode, CFG.RandomMode = true, false, false
             E.used, E.carried = true, via
             return true
         end
@@ -3416,7 +3458,7 @@ do
                 local rows, via = browserList(myEpoch), "browser"
                 if not rows or #rows == 0 then rows, via = robloxList(myEpoch), "roblox" end
                 local cands = pickServers(rows or {}, game.JobId, E.visited, os.time(),
-                    (CFG.EliteRevisit or 10) * 60, CFG.EliteOrder, math.random)
+                    (CFG.HopRevisit or 10) * 60, CFG.HopOrder, math.random)
                 E.lastList = string.format("%d listed, %d worth joining  ·  %s", #(rows or {}), #cands,
                     via == "browser" and "the game's server browser" or "the Roblox server list")
                 for i, s in ipairs(cands) do
@@ -3427,7 +3469,7 @@ do
                         return false
                     end
                     E.visited[s.id] = os.time()
-                    local carry = carryState(CFG.EliteHunt and P.running)
+                    local carry = carryState(CFG.Hunt and P.running)
                     fileWrite(carry)
                     queueReload(carry)
                     E.note = string.format("hop: joining a server with %d players  (%s)", s.count, tostring(why))
@@ -3529,6 +3571,112 @@ do
             E.isleTried, E.missSince = false, nil
         end
 
+        -- FRUITS ON THE GROUND (probed in game 2026-09-28): a Tool in
+        -- workspace, seen map-wide, Name "X Fruit", attribute OriginalName
+        -- "X-X"; a player's drop also carries DroppedBy / DroppedAt / ItemId.
+        -- Prices: the game's own list (GetFruits gives every fruit with its
+        -- price; OnSale marks today's stock), read every 5 minutes.
+        local prices, pricesAt = {}, -1e9
+        local function priceOf(orig)
+            if os.clock() - pricesAt > 300 then
+                pricesAt = os.clock()
+                local cf = commF()
+                local ok, res = pcall(function() return cf and cf:InvokeServer("GetFruits", false) end)
+                if ok and type(res) == "table" then
+                    for _, f in pairs(res) do
+                        if type(f) == "table" and f.Name then prices[f.Name] = tonumber(f.Price) end
+                    end
+                end
+            end
+            return prices[orig]
+        end
+
+        local function fruitsLying()
+            local out, now = {}, os.clock()
+            for _, c in ipairs(workspace:GetChildren()) do
+                if c:IsA("Tool") and not (E.fruitSkip[c] and now < E.fruitSkip[c]) then
+                    local orig = c:GetAttribute("OriginalName")
+                    local h = c:FindFirstChild("Handle")
+                    if orig and h then
+                        local dropper = c:GetAttribute("DroppedBy")
+                        local near = false
+                        if dropper then
+                            for _, pl in ipairs(Players:GetPlayers()) do
+                                local rr = pl ~= player and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+                                if rr and (rr.Position - h.Position).Magnitude < 30 then near = true break end
+                            end
+                        end
+                        table.insert(out, { tool = c, orig = orig, name = c.Name, price = priceOf(orig),
+                            dropper = dropper, dropperNear = near, pos = h.Position })
+                    end
+                end
+            end
+            return out
+        end
+        P.fruitsLying = fruitsLying
+
+        local function fruitWanted()
+            if not (CFG.Hunt and CFG.HuntFruit) then return nil end
+            return pickFruit(fruitsLying(), CFG.FruitMinPrice, CFG.FruitPlayerDrops)
+        end
+        P.fruitWanted = fruitWanted
+
+        -- Fly onto it, touch it, and put it away at once: never left in your
+        -- hand (a click with it held EATS it), then StoreFruit with the name
+        -- the game gave it. Not stored = said so; it stays in your backpack.
+        local function grabFruit(f, myEpoch)
+            local h = f.tool:FindFirstChild("Handle")
+            if not h then E.fruitSkip[f.tool] = os.clock() + 30 return end
+            E.fruitNote = string.format("going for %s  (%s, %s)", f.name,
+                f.price and ("$" .. tostring(f.price)) or "price unknown",
+                f.dropper and ("dropped by " .. tostring(f.dropper)) or "server spawn")
+            E.note = E.fruitNote
+            say(E.fruitNote)
+            releasePile()
+            setState("FRUIT")
+            flyTo(h.Position)
+            if stale(myEpoch) then return end
+            local bp = player:FindFirstChild("Backpack")
+            local t0 = os.clock()
+            while os.clock() - t0 < 6 and not stale(myEpoch) and f.tool.Parent == workspace do
+                local _, r = parts()
+                if r then
+                    lockAt(h.Position)
+                    if firetouchinterest then
+                        pcall(firetouchinterest, r, h, 0)
+                        pcall(firetouchinterest, r, h, 1)
+                    end
+                end
+                task.wait(0.15)
+            end
+            local where = f.tool.Parent
+            if where == workspace then
+                E.fruitSkip[f.tool] = os.clock() + 60
+                E.fruitNote = f.name .. ": could not pick it up - left for a minute"
+            elseif not (where == player.Character or where == bp) then
+                E.fruitNote = f.name .. ": someone else took it first"
+            else
+                local _, _, hum = parts()
+                if hum and where == player.Character then
+                    pcall(function() hum:UnequipTools() end)
+                    task.wait(0.1)
+                end
+                local cf = commF()
+                local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", f.orig, f.tool) end)
+                task.wait(0.6)
+                if not (f.tool.Parent == player.Character or f.tool.Parent == bp) then
+                    E.tally.fruits += 1
+                    E.fruitNote = "STORED " .. f.orig .. (f.price and ("  ($" .. tostring(f.price) .. ")") or "")
+                    notify("Fruit stored: " .. f.orig)
+                else
+                    E.fruitNote = f.orig .. " picked up but NOT stored (" .. tostring(ok and res or "error")
+                        .. ") - it is in your backpack"
+                end
+            end
+            E.note = E.fruitNote
+            say(E.fruitNote)
+        end
+
         local function eliteFight(name, at, where, myEpoch)
             activeName = name
             if CFG.EliteQuest then takeEliteQuest(myEpoch) end
@@ -3561,7 +3709,7 @@ do
             E.missSince = nil
             local model, hum = e.model, e.hum
             local why = fight({ name = name, elite = true }, { [name] = true })
-            if why ~= "empty" then return end                 -- hurt / 30 s sweep: the next step
+            if why ~= "empty" then return end                 -- hurt / 30 s sweep / a fruit: the next step
             if not (hum.Health <= 0 or model.Parent == nil) then return end   -- walked off / parked: look again
             E.tally.kills += 1
             releasePile()
@@ -3573,30 +3721,21 @@ do
             end
             pcall(readProgress)
             E.lastKill = name .. " down, no chalice"
-            lookAgain()
-            if CFG.EliteHop and not stale(myEpoch) then hop(name .. " down, no chalice") end
+            -- The next one here is 8 min 45 s away: not looked for till then.
+            -- The director hops (or, hop off, waits) when nothing else is here.
+            E.eliteDoneUntil = os.clock() + 480
+            E.why = name .. " down, no chalice"
         end
 
-        function eliteStep()
-            local myEpoch = epoch
+        -- THE ELITE TARGET. true = busy with it this step; false = nothing to
+        -- do about elites here (E.why says why).
+        local function eliteLook(myEpoch)
             local sea = mySea()
             if sea and sea ~= 3 then
-                E.note = "elite hunt: Third Sea only - you are in sea " .. sea
-                say(E.note)
-                setState("WAIT")
-                task.wait(1)
-                return
+                E.why = "no elites outside the Third Sea"
+                return false
             end
-            if E.chalice or holdingChalice() then
-                chaliceStop()
-                task.wait(0.5)
-                return
-            end
-            E.used = true
-            if not E.lookStart then
-                lookAgain()
-                pcall(readProgress)
-            end
+            if os.clock() < E.eliteDoneUntil then return false end
 
             local name, at, where = eliteUp()
             -- The Elite Hunter: once on arrival, then every 15 s while nothing is
@@ -3610,7 +3749,7 @@ do
                 end
                 E.note = string.format("%s is up (%s)", name, where == "parked" and "parked by the game" or "loaded")
                 eliteFight(name, at, where, myEpoch)
-                return
+                return true
             end
 
             local waited = os.clock() - E.lookStart
@@ -3623,14 +3762,14 @@ do
                     setState("FLY")
                     say("the Elite Hunter says " .. isle .. " - flying over it")
                     flyTo(pos)
-                    return
+                    return true
                 end
                 if waited < 45 then
                     E.note = string.format("the Elite Hunter says one is up - looking  %.0fs", waited)
                     say(E.note)
                     setState("LOOK")
                     task.wait(0.5)
-                    return
+                    return true
                 end
             else
                 local need = (E.reply == "none") and math.min(3, CFG.EliteLook or 8) or (CFG.EliteLook or 8)
@@ -3639,15 +3778,53 @@ do
                     say(E.note)
                     setState("LOOK")
                     task.wait(0.25)
-                    return
+                    return true
                 end
             end
+            E.why = (E.reply == "none") and "no elite up here" or "no elite seen here"
+            return false
+        end
 
-            if CFG.EliteHop then
-                hop((E.reply == "none") and "none up here" or "none seen here")
+        -- THE DIRECTOR. Every step: the chalice stops everything; then the
+        -- best target present, in the user's order - a fruit on the ground
+        -- (gone within 20 min, or to someone else), then an elite; nothing
+        -- worth doing here = the next server (or, hop off, wait here).
+        function huntStep()
+            local myEpoch = epoch
+            if E.chalice or holdingChalice() then
+                chaliceStop()
+                task.wait(0.5)
+                return
+            end
+            E.used = true
+            if not E.lookStart then
+                lookAgain()
+                pcall(readProgress)
+            end
+
+            local f = fruitWanted()
+            if f then
+                grabFruit(f, myEpoch)
+                return
+            end
+            if CFG.HuntElite and eliteLook(myEpoch) then return end
+
+            -- Nothing worth doing here. A moment after a join first: the
+            -- world is still arriving.
+            local waited = os.clock() - E.lookStart
+            if waited < 3 then
+                E.note = string.format("looking  %.0fs", waited)
+                say(E.note)
+                setState("LOOK")
+                task.wait(0.25)
+                return
+            end
+            if not CFG.HuntElite then E.why = "no fruit worth it here" end
+            if CFG.HuntHop then
+                hop(E.why or "nothing worth doing here")
                 task.wait(2)          -- still here: the hop failed; do not hammer it
             else
-                E.note = "no elite up here - waiting for the next spawn (hop is off)"
+                E.note = tostring(E.why or "nothing here") .. " - waiting (hop is off)"
                 say(E.note)
                 setState("WAIT")
                 task.wait(1)
@@ -3655,17 +3832,17 @@ do
         end
 
         -- The Home switch. Off: the next server's copy does not start by itself.
-        function P.setEliteHunt(x)
-            CFG.EliteHunt = x and true or false
+        function P.setHunt(x)
+            CFG.Hunt = x and true or false
             releasePile()
             if x then
                 CFG.RaidMode, CFG.RandomMode = false, false
                 E.used = true
                 lookAgain()
-                E.note = "elite hunt on"
+                E.note = "hunt on"
             else
                 carryOff()
-                E.note = "elite hunt off"
+                E.note = "hunt off"
             end
             say(E.note)
         end
@@ -3689,7 +3866,7 @@ local function step()
     end
     pcall(keepHaki)
 
-    if CFG.EliteHunt then eliteStep() return end
+    if CFG.Hunt then huntStep() return end
     if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
 
@@ -3989,7 +4166,7 @@ local function buildUI()
         home = "Fast Farm", target = "Targets", attack = "Attack", weapon = "Weapon",
         magnet = "Magnet", position = "Position", travel = "Travel",
         safety = "Safety", stats = "Stats",
-        elite = "Elite hunt",
+        elite = "Hunt",
     }
 
     local function show(name, back)
@@ -4451,7 +4628,7 @@ local function buildUI()
             "Every enemy near you, any kind - no quests, no Observation",
             function() return CFG.RaidMode end,
             function(x)
-                if x and CFG.EliteHunt then P.setEliteHunt(false) end
+                if x and CFG.Hunt then P.setHunt(false) end
                 CFG.RaidMode = x
                 if x then CFG.RandomMode = false end
                 releasePile()
@@ -4461,25 +4638,25 @@ local function buildUI()
             "Any enemy near you, every one damaged - Castle on the Sea raid",
             function() return CFG.RandomMode end,
             function(x)
-                if x and CFG.EliteHunt then P.setEliteHunt(false) end
+                if x and CFG.Hunt then P.setHunt(false) end
                 CFG.RandomMode = x
                 if x then CFG.RaidMode = false end
                 releasePile()
                 say(x and "random mode on" or "random mode off - back to the circuit")
             end)
-        switchRow(v, "Elite hunt",
-            "Third Sea elites, last hit, next server - stops on the Chalice",
-            function() return CFG.EliteHunt end,
-            function(x) P.setEliteHunt(x) end)
+        switchRow(v, "Hunt",
+            "Fruits on the ground, elites - best first, then the next server",
+            function() return CFG.Hunt end,
+            function(x) P.setHunt(x) end)
         readout(v, function()
-            if CFG.EliteHunt then
+            if CFG.Hunt then
                 local t = P.elite.tally
-                return string.format("%s\n%d joined  ·  %d had one  ·  %d down  ·  %d chalice",
-                    tostring(P.elite.note), t.joins, t.found, t.kills, t.chalices)
+                return string.format("%s\n%d joined  ·  %d fruits stored  ·  %d elites down  ·  %d chalice",
+                    tostring(P.elite.note), t.joins, t.fruits or 0, t.kills, t.chalices)
             end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
-            return "raid mode off  ·  random mode off  ·  elite hunt off"
+            return "raid mode off  ·  random mode off  ·  hunt off"
         end)
 
         gap(v, 8)
@@ -4520,10 +4697,10 @@ local function buildUI()
             return "out under " .. math.floor(CFG.EscapeBelow * 100) .. "%"
         end, "safety")
         hairline(v)
-        navRow(v, "Elite hunt", function()
+        navRow(v, "Hunt", function()
             if P.elite.chalice then return "CHALICE - stopped" end
-            if not CFG.EliteHunt then return "Off" end
-            return CFG.EliteHop and "On, hopping" or "On, this server"
+            if not CFG.Hunt then return "Off" end
+            return CFG.HuntHop and "On, hopping" or "On, this server"
         end, "elite")
         hairline(v)
         navRow(v, "Stats", function()
@@ -5100,23 +5277,17 @@ local function buildUI()
     do
         local v = makeView("elite")
         gap(v, 6)
-        switchRow(v, "Elite hunt",
-            "Diablo, Deandre, Urban, Tyrant of the Skies",
-            function() return CFG.EliteHunt end,
-            function(x) P.setEliteHunt(x) end)
+        switchRow(v, "Hunt",
+            "The best thing here first, then the next server",
+            function() return CFG.Hunt end,
+            function(x) P.setHunt(x) end)
         readout(v, function()
             local el = P.elite
             local t = el.tally
             local avg = (t.joins > 0) and string.format("%.0fs", t.joinSecs / t.joins) or "-"
-            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
             return table.concat({
                 "now       " .. tostring(el.note),
-                "Elite Hunter  " .. tostring(el.reply or "not asked")
-                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
-                string.format("joined    %d   ·   had one %d (%s)   ·   join %s", t.joins, t.found, rate, avg),
-                string.format("down      %d   ·   chalices %d   ·   failed joins %d", t.kills, t.chalices, t.fails),
-                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
-                "last      " .. tostring(el.lastKill or "-"),
+                string.format("joined    %d   ·   join %s   ·   failed joins %d", t.joins, avg, t.fails),
                 "servers   " .. tostring(el.lastList or "not read yet"),
                 "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
             }, "\n")
@@ -5125,23 +5296,76 @@ local function buildUI()
             .. "no hop there, ever - leaving or dying with it loses it. You are "
             .. "held 300 up; Stop gives the character back.")
 
-        heading2(v, "when none is up here")
-        switchRow(v, "Hop to find one",
-            "Off: wait in this server for the next spawn",
-            function() return CFG.EliteHop end,
-            function(x) CFG.EliteHop = x end)
+        heading2(v, "1  fruits on the ground")
+        switchRow(v, "Fruits on the ground",
+            "Grabbed and STORED - never eaten",
+            function() return CFG.HuntFruit end,
+            function(x) CFG.HuntFruit = x end)
+        sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
+            function() return CFG.FruitMinPrice end,
+            function(x) CFG.FruitMinPrice = x end, " Beli")
+        caption(v, "The game's own price. 0 = any fruit. 1000000 and up = "
+            .. "Legendary and Mythical. The dearest one lying here goes first.")
+        switchRow(v, "Include fruits players dropped",
+            "Off: server spawns only - drops are mostly trades",
+            function() return CFG.FruitPlayerDrops end,
+            function(x) CFG.FruitPlayerDrops = x end)
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.fruitNote),
+                string.format("stored    %d", el.tally.fruits or 0) }
+            local ok, list = pcall(P.fruitsLying)
+            if ok and type(list) == "table" and #list > 0 then
+                for _, f in ipairs(list) do
+                    table.insert(lines, string.format("   %s  %s  %s", f.name,
+                        f.price and ("$" .. tostring(f.price)) or "$?",
+                        f.dropper and ("dropped by " .. tostring(f.dropper) .. (f.dropperNear and ", still by it" or ""))
+                            or "server spawn"))
+                end
+            else
+                table.insert(lines, "lying in this server: none")
+            end
+            return table.concat(lines, "\n")
+        end)
+        caption(v, "The whole server's fruits are seen from anywhere. A player "
+            .. "standing by their drop is trading it: never taken, even with "
+            .. "player drops on.")
+
+        heading2(v, "2  elite pirates (Third Sea)")
+        switchRow(v, "Elite pirates",
+            "Diablo, Deandre, Urban, Tyrant - last hit, God's Chalice",
+            function() return CFG.HuntElite end,
+            function(x) CFG.HuntElite = x end)
+        readout(v, function()
+            local el = P.elite
+            local t = el.tally
+            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
+            return table.concat({
+                "Elite Hunter  " .. tostring(el.reply or "not asked")
+                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
+                string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
+                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
+                "last      " .. tostring(el.lastKill or "-"),
+            }, "\n")
+        end)
+
+        heading2(v, "when nothing here is worth it")
+        switchRow(v, "Hop to the next server",
+            "Off: wait in this one",
+            function() return CFG.HuntHop end,
+            function(x) CFG.HuntHop = x end)
         radio(v, 82, {
             { "fewest", "Fewest players first", "fewer hunters" },
             { "random", "Any order",            "" },
-        }, function() return CFG.EliteOrder end, function(x) CFG.EliteOrder = x end)
+        }, function() return CFG.HopOrder end, function(x) CFG.HopOrder = x end)
         sliderRow(v, "Look for", 3, 30, 1,
             function() return CFG.EliteLook end,
             function(x) CFG.EliteLook = x end, " s")
-        caption(v, "After a join: this long for one to show before leaving. "
+        caption(v, "After a join: this long for an elite to show before leaving. "
             .. "When the Elite Hunter says none is up, 3 s is enough.")
         sliderRow(v, "Try a server again after", 5, 60, 1,
-            function() return CFG.EliteRevisit end,
-            function(x) CFG.EliteRevisit = x end, " min")
+            function() return CFG.HopRevisit end,
+            function(x) CFG.HopRevisit = x end, " min")
         caption(v, "One killed there is back 8 min 45 s later.")
 
         heading2(v, "the quest")
@@ -5165,11 +5389,11 @@ local function buildUI()
             table.clear(P.elite.visited)
             P.elite.note = "servers looked at: forgotten"
         end)
-        actionRow(v, "Reset the elite counts", nil, function()
+        actionRow(v, "Reset the hunt counts", nil, function()
             local t = P.elite.tally
             for k in pairs(t) do t[k] = 0 end
             t.since = os.time()
-            P.elite.note = "elite counts reset"
+            P.elite.note = "hunt counts reset"
         end)
     end
 

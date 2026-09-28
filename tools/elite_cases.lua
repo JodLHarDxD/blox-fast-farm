@@ -70,4 +70,21 @@ local v = { a = 100, b = 5000, c = "x" }
 pruneVisited(v, 5000, 3600)
 check("older than an hour and junk forgotten", v.a == nil and v.b == 5000 and v.c == nil)
 
+-- pickFruit: which fruit lying here is worth going for
+local spawnCheap = { orig = "Rocket-Rocket", price = 5000 }
+local spawnDear  = { orig = "Kitsune-Kitsune", price = 8000000 }
+local dropFar    = { orig = "Yeti-Yeti", price = 5000000, dropper = "someone", dropperNear = false }
+local dropNear   = { orig = "Tiger-Tiger", price = 5000000, dropper = "trader", dropperNear = true }
+local unknown    = { orig = "New-New" }
+check("server spawns: the dearest first", pickFruit({ spawnCheap, spawnDear }, 0, false) == spawnDear)
+check("player drops off: a dear drop is ignored", pickFruit({ dropFar, spawnCheap }, 0, false) == spawnCheap)
+check("player drops on: a drop whose dropper walked off counts", pickFruit({ dropFar, spawnCheap }, 0, true) == dropFar)
+check("a dropper still by it = a trade: never taken, even with drops on",
+    pickFruit({ dropNear }, 0, true) == nil)
+check("minimum price: a cheap spawn is left", pickFruit({ spawnCheap }, 1000000, false) == nil
+    and pickFruit({ spawnCheap, spawnDear }, 1000000, false) == spawnDear)
+check("price unknown: taken only when the minimum is 0", pickFruit({ unknown }, 0, false) == unknown
+    and pickFruit({ unknown }, 1, false) == nil)
+check("nothing lying: nil", pickFruit({}, 0, true) == nil)
+
 print(all and "ALL PASS" or "SOME FAILED")

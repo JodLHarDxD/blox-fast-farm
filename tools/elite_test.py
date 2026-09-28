@@ -6,6 +6,9 @@ run in luau.exe:
          -- means not one more teleport; order, five a round, marks, stop
   carry  takeCarry(): what the next server's copy takes over, and when it
          starts by itself
+  director  huntStep(): the chalice stops everything; a fruit before an
+         elite; nothing here = hop (a moment after a join first); hop off =
+         wait; a target switched off is not looked at
 
 usage: python tools/elite_test.py [path-to-luau.exe]
 """
@@ -35,11 +38,13 @@ def cut(start, end):
 pure = cut("local ELITES    = {", "-- Everything the hunt knows.")
 hop = cut("local function hop(why)", "function P.hopNow()")
 carry = cut("local function takeCarry()", "P.takeCarry = takeCarry")
+director = cut("function huntStep()", "-- The Home switch.")
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
     ("hop", read("hop_stubs.lua") + pure + hop + read("hop_cases.lua")),
     ("carry", read("carry_stubs.lua") + carry + read("carry_cases.lua")),
+    ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
 ]
 ok = True
 for name, code in runs:

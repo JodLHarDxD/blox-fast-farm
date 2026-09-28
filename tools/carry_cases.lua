@@ -9,7 +9,7 @@ local function state(over)
     local t = {
         resume = true, freshUntil = NOW + 100, hopAt = NOW - 12, fromJob = "old",
         visited = { x = NOW - 5 }, tally = { joins = 4, found = 2, kills = 1, chalices = 0, joinSecs = 40, fails = 1, since = 1 },
-        cfg = { TravelSpeed = 500, EliteHunt = true, NotAField = 1, QuestName = "Q" },
+        cfg = { TravelSpeed = 500, Hunt = true, NotAField = 1, QuestName = "Q" },
     }
     for k, v in pairs(over or {}) do t[k] = v end
     return t
@@ -24,7 +24,7 @@ reset()
 DB.f1 = state()
 FILE = "f1"
 local r = takeCarry()
-check("resumed", r == true and CFG.EliteHunt and not CFG.RaidMode and E.carried == "file")
+check("resumed", r == true and CFG.Hunt and not CFG.RaidMode and E.carried == "file")
 check("join counted with its time", E.tally.joins == 5 and E.tally.joinSecs == 52, E.tally.joins)
 check("settings back; unknown keys ignored (QuestName too - the quest engine is gone)",
     CFG.TravelSpeed == 500 and CFG.NotAField == nil and CFG.QuestName == nil)
@@ -41,7 +41,7 @@ DB.f1 = state({ fromJob = "new" })
 FILE = "f1"
 r = takeCarry()
 check("same server: no resume, settings not touched", r == false and CFG.TravelSpeed == 330
-    and not CFG.EliteHunt)
+    and not CFG.Hunt)
 
 -- 5. an old hunt (over 5 minutes): not resumed, counts still kept
 reset()
@@ -78,11 +78,11 @@ check("broken file: the queued copy is used", r == true and E.carried == "queued
 --    not its settings (eating allowed on the second account must never reach
 --    the main), not its counts, no resume
 reset()
-DB.f1 = state({ userId = 222, cfg = { TravelSpeed = 900, EliteHunt = true } })
+DB.f1 = state({ userId = 222, cfg = { TravelSpeed = 900, Hunt = true } })
 FILE = "f1"
 r = takeCarry()
 check("other account's state: no resume, no settings, no counts", r == false and CFG.TravelSpeed == 330
-    and not CFG.EliteHunt and E.tally.joins == 0 and E.visited.x == nil)
+    and not CFG.Hunt and E.tally.joins == 0 and E.visited.x == nil)
 
 -- 10. this account's own (userId matches): resumed as usual
 reset()

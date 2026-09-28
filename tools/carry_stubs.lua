@@ -22,7 +22,7 @@ local game = { JobId = "new" }
 local function reset()
     DB, FILE, WRITES = {}, nil, {}
     _G.BFF_CARRY = nil
-    CFG = { EliteHunt = false, RaidMode = true, RandomMode = false, TravelSpeed = 330 }
+    CFG = { Hunt = false, RaidMode = true, RandomMode = false, TravelSpeed = 330 }
     E = { visited = {}, used = false, carried = nil,
           tally = { joins = 0, found = 0, kills = 0, chalices = 0, joinSecs = 0, fails = 0, since = 0 } }
 end
