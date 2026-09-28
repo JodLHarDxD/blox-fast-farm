@@ -19,15 +19,14 @@
                found by trying each one against the pile.
       COMBO    per-weapon switches for M1 Z X C V F. Ready skills are read off
                the game's own cooldown bars; M1 fills the gaps between them.
-      CIRCUIT  several species, one quest at a time: A's quest, A's pile, done
-               -> B's quest, fly, B's pile, done -> back to A, respawned by now.
+      CIRCUIT  the species on the Targets page: A's pile, B's pile, back to A,
+               respawned by now. No quests (max level; removed 2026-09-28).
       ELITES   Third Sea: an Elite Pirate up here is found, flown to and hit
                to the last; none up (or it is down) = the next server. The
                God's Chalice ends it: no hop, ever, in the server it came in.
 
-    TAKEN FROM FARM_PRO UNCHANGED: the level / quest / giver tables, the quest
-    tracker reader, the quest dialog fallback, Enhancement + Observation, walk
-    on water. Its panel too -- made opaque, because farm_pro's background was
+    TAKEN FROM FARM_PRO UNCHANGED: the level table, Enhancement + Observation,
+    walk on water. Its panel too -- made opaque, because farm_pro's background was
     94-100% see-through (a UIGradient's transparency applies TO its frame).
 
     USE IT ON AN ACCOUNT YOU CAN AFFORD TO LOSE. Flight, noclip, hovering and
@@ -182,29 +181,11 @@ local CFG = {
     EliteLook          = 8,          -- seconds after a join to look before leaving
     EliteRevisit       = 10,         -- minutes before a server looked at is tried again
 
-    -- ---------- QUEST ----------
-    QuestLoop          = true,
-    -- The camp runs out before the quest is full. On: wait there for the
-    -- respawn (the count is kept). Off: drop the quest and go to the next.
-    WaitRespawn        = true,
-    RespawnMax         = 45,     -- seconds; nothing back by then = move on
-    -- A quest boss that is up goes before the rest of the circuit (only
-    -- between quests: a running count is never thrown away for it).
+    -- ---------- THE CIRCUIT (Targets page) ----------
+    -- One species alone: its camp empty = wait this long for the respawn.
+    RespawnMax         = 45,
+    -- A boss on the circuit that is up goes before the rest.
     BossFirst          = true,
-    -- WHO GOES TO THE GIVER -- farm_pro's switch, the same three answers.
-    --   "never"  : never go. Asked from where you stand (the circuit flies to
-    --              the camp first, then asks). A clean ask whose tracker cannot
-    --              be read is not a failure: the kills are counted here.
-    --   "auto"   : go only when the giver is near (GiverWalkRadius); asked from
-    --              range and refused, it goes up and asks once more.
-    --   "always" : go to the giver every time.
-    GiverMode          = "never",
-    GiverWalkRadius    = 250,
-    QuestRetrySeconds  = 8,
-    QuestStallSeconds  = 240,    -- a count that never moves = take a fresh one
-    QuestKillsFallback = 10,     -- tracker unreadable, count unknown: this many
-    QuestName          = nil,    -- exact server quest id; blank = the table
-    QuestTier          = nil,    -- 1..3; blank = work it out and lock it
 
     -- ---------- SAFETY ----------
     -- There is no real god mode: health lives on the server. What keeps you
@@ -336,224 +317,16 @@ local LEVELS = {
 P.levels = LEVELS
 
 -- =========================================================
--- QUEST TABLES
+-- BOSSES AND SEAS
 -- =========================================================
--- The server's own quest ids, not the titles the dialog shows.
-local QUESTS = {
-    ["Bandit"]                = { "BanditQuest1", 1 },
-    ["Monkey"]                = { "JungleQuest", 1 },
-    ["Gorilla"]               = { "JungleQuest", 2 },
-    ["Pirate"]                = { "BuggyQuest1", 1 },
-    ["Brute"]                 = { "BuggyQuest1", 2 },
-    ["Desert Bandit"]         = { "DesertQuest", 1 },
-    ["Desert Officer"]        = { "DesertQuest", 2 },
-    ["Snow Bandit"]           = { "SnowQuest", 1 },
-    ["Snowman"]               = { "SnowQuest", 2 },
-    -- MEASURED: MarineQuest tier 1 handed back "Defeat 5 Trainees", so the
-    -- Trainee is tier 1 and the Officer is tier 2.
-    ["Trainee"]               = { "MarineQuest", 1 },
-    -- The game's own quest data says MarineQuest2 tier 1 (farm_pro had
-    -- MarineQuest tier 2; kept below as the fallback id).
-    ["Chief Petty Officer"]   = { "MarineQuest2", 1 },
-    ["Sky Bandit"]            = { "SkyQuest", 1 },
-    ["Dark Master"]           = { "SkyQuest", 2 },
-    ["Prisoner"]              = { "PrisonerQuest", 1 },
-    ["Dangerous Prisoner"]    = { "PrisonerQuest", 2 },
-    ["Toga Warrior"]          = { "ColosseumQuest", 1 },
-    ["Gladiator"]             = { "ColosseumQuest", 2 },
-    ["Military Soldier"]      = { "MagmaQuest", 1 },
-    ["Military Spy"]          = { "MagmaQuest", 2 },
-    ["Fishman Warrior"]       = { "FishmanQuest", 1 },
-    ["Fishman Commando"]      = { "FishmanQuest", 2 },
-    ["God's Guard"]           = { "SkyExp1Quest", 1 },
-    ["Shanda"]                = { "SkyExp1Quest", 2 },
-    ["Royal Squad"]           = { "SkyExp2Quest", 1 },
-    ["Royal Soldier"]         = { "SkyExp2Quest", 2 },
-    ["Galley Pirate"]         = { "FountainQuest", 1 },
-    ["Galley Captain"]        = { "FountainQuest", 2 },
-
-    ["Raider"]                = { "Area1Quest", 1 },
-    ["Mercenary"]             = { "Area1Quest", 2 },
-    ["Swan Pirate"]           = { "Area2Quest", 1 },
-    ["Factory Staff"]         = { "Area2Quest", 2 },
-    ["Marine Lieutenant"]     = { "MarineQuest3", 1 },
-    ["Marine Captain"]        = { "MarineQuest3", 2 },
-    ["Zombie"]                = { "ZombieQuest", 1 },
-    ["Vampire"]               = { "ZombieQuest", 2 },
-    ["Snow Trooper"]          = { "SnowMountainQuest", 1 },
-    ["Winter Warrior"]        = { "SnowMountainQuest", 2 },
-    ["Lab Subordinate"]       = { "IceSideQuest", 1 },
-    ["Horned Warrior"]        = { "IceSideQuest", 2 },
-    ["Magma Ninja"]           = { "FireSideQuest", 1 },
-    ["Lava Pirate"]           = { "FireSideQuest", 2 },
-    ["Ship Deckhand"]         = { "ShipQuest1", 1 },
-    ["Ship Engineer"]         = { "ShipQuest1", 2 },
-    ["Ship Steward"]          = { "ShipQuest2", 1 },
-    ["Ship Officer"]          = { "ShipQuest2", 2 },
-    ["Arctic Warrior"]        = { "FrostQuest", 1 },
-    ["Snow Lurker"]           = { "FrostQuest", 2 },
-    ["Sea Soldier"]           = { "ForgottenQuest", 1 },
-    ["Water Fighter"]         = { "ForgottenQuest", 2 },
-
-    -- THIRD SEA
-    ["Pirate Millionaire"]    = { "PiratePortQuest", 1 },
-    ["Pistol Billionaire"]    = { "PiratePortQuest", 2 },
-    -- Game quest data: DragonCrewQuest. farm_pro's AmazonQuest is the fallback.
-    ["Dragon Crew Warrior"]   = { "DragonCrewQuest", 1 },
-    ["Dragon Crew Archer"]    = { "DragonCrewQuest", 2 },
-    ["Female Islander"]       = { "AmazonQuest2", 1 },
-    ["Giant Islander"]        = { "AmazonQuest2", 2 },
-    ["Marine Commodore"]      = { "MarineTreeIsland", 1 },
-    ["Marine Rear Admiral"]   = { "MarineTreeIsland", 2 },
-    ["Fishman Raider"]        = { "DeepForestIsland3", 1 },
-    ["Fishman Captain"]       = { "DeepForestIsland3", 2 },
-    ["Forest Pirate"]         = { "DeepForestIsland", 1 },
-    ["Mythological Pirate"]   = { "DeepForestIsland", 2 },
-    ["Jungle Pirate"]         = { "DeepForestIsland2", 1 },
-    ["Musketeer Pirate"]      = { "DeepForestIsland2", 2 },
-    -- HAUNTED CASTLE. Giver 1 is in the grey hut in the middle of the grounds,
-    -- giver 2 stands at the castle's front door among the Demonic Souls.
-    ["Reborn Skeleton"]       = { "HauntedQuest1", 1 },
-    ["Living Zombie"]         = { "HauntedQuest1", 2 },
-    ["Demonic Soul"]          = { "HauntedQuest2", 1 },
-    ["Posessed Mummy"]        = { "HauntedQuest2", 2 },
-    ["Peanut Scout"]          = { "NutsIslandQuest", 1 },
-    ["Peanut President"]      = { "NutsIslandQuest", 2 },
-    ["Ice Cream Chef"]        = { "IceCreamIslandQuest", 1 },
-    ["Ice Cream Commander"]   = { "IceCreamIslandQuest", 2 },
-    ["Cookie Crafter"]        = { "CakeQuest1", 1 },
-    ["Cake Guard"]            = { "CakeQuest1", 2 },
-    ["Baking Staff"]          = { "CakeQuest2", 1 },
-    ["Head Baker"]            = { "CakeQuest2", 2 },
-    ["Cocoa Warrior"]         = { "ChocQuest1", 1 },
-    ["Chocolate Bar Battler"] = { "ChocQuest1", 2 },
-    ["Sweet Thief"]           = { "ChocQuest2", 1 },
-    ["Candy Rebel"]           = { "ChocQuest2", 2 },
-    ["Candy Pirate"]          = { "CandyQuest1", 1 },
-    ["Snow Demon"]            = { "CandyQuest1", 2 },
-    ["Isle Outlaw"]           = { "TikiQuest1", 1 },
-    ["Island Boy"]            = { "TikiQuest1", 2 },
-    ["Sun-kissed Warrior"]    = { "TikiQuest2", 1 },
-    ["Isle Champion"]         = { "TikiQuest2", 2 },
-    ["Serpent Hunter"]        = { "TikiQuest3", 1 },
-    ["Skull Slayer"]          = { "TikiQuest3", 2 },
-    -- Submerged Island. Ocean Prophet's tier is from the wiki and one table;
-    -- the first accept probes tiers anyway and locks the one that matches.
-    ["Reef Bandit"]           = { "SubmergedQuest1", 1 },
-    ["Coral Pirate"]          = { "SubmergedQuest1", 2 },
-    ["Sea Chanter"]           = { "SubmergedQuest2", 1 },
-    ["Ocean Prophet"]         = { "SubmergedQuest2", 2 },
-    ["High Disciple"]         = { "SubmergedQuest3", 1 },
-    ["Grand Devotee"]         = { "SubmergedQuest3", 2 },
-}
-P.quests = QUESTS
-
--- A second quest id to try when the first one's tracker asks for someone else
--- (or is refused while trackers ARE readable). Where public tables and the
--- game's own quest data disagree, both are tried.
-local QUEST_ALT = {
-    ["Chief Petty Officer"]   = { "MarineQuest", 2 },
-    ["Dragon Crew Warrior"]   = { "AmazonQuest", 1 },
-    ["Dragon Crew Archer"]    = { "AmazonQuest", 2 },
-}
-
--- How many kills each quest asks for, from the game's own quest data. Used
--- only when the tracker cannot be read, so the count here is exact instead of
--- a guess.
-local QUEST_NEED = {
-    ["Bandit"] = 5,
-    ["Monkey"] = 6,
-    ["Gorilla"] = 8,
-    ["Pirate"] = 8,
-    ["Brute"] = 8,
-    ["Desert Bandit"] = 8,
-    ["Desert Officer"] = 6,
-    ["Snow Bandit"] = 7,
-    ["Snowman"] = 8,
-    ["Chief Petty Officer"] = 8,
-    ["Sky Bandit"] = 7,
-    ["Dark Master"] = 8,
-    ["Prisoner"] = 8,
-    ["Dangerous Prisoner"] = 8,
-    ["Toga Warrior"] = 7,
-    ["Gladiator"] = 8,
-    ["Military Soldier"] = 7,
-    ["Military Spy"] = 8,
-    ["Fishman Warrior"] = 8,
-    ["Fishman Commando"] = 7,
-    ["God's Guard"] = 7,
-    ["Shanda"] = 9,
-    ["Royal Squad"] = 8,
-    ["Royal Soldier"] = 8,
-    ["Galley Pirate"] = 8,
-    ["Galley Captain"] = 9,
-    ["Raider"] = 8,
-    ["Mercenary"] = 8,
-    ["Swan Pirate"] = 8,
-    ["Factory Staff"] = 8,
-    ["Marine Lieutenant"] = 8,
-    ["Marine Captain"] = 9,
-    ["Zombie"] = 8,
-    ["Vampire"] = 8,
-    ["Snow Trooper"] = 8,
-    ["Winter Warrior"] = 9,
-    ["Lab Subordinate"] = 8,
-    ["Horned Warrior"] = 9,
-    ["Magma Ninja"] = 8,
-    ["Lava Pirate"] = 8,
-    ["Ship Deckhand"] = 8,
-    ["Ship Engineer"] = 8,
-    ["Ship Steward"] = 8,
-    ["Ship Officer"] = 8,
-    ["Arctic Warrior"] = 8,
-    ["Snow Lurker"] = 8,
-    ["Sea Soldier"] = 8,
-    ["Water Fighter"] = 8,
-    ["Pirate Millionaire"] = 8,
-    ["Pistol Billionaire"] = 8,
-    ["Dragon Crew Warrior"] = 8,
-    ["Dragon Crew Archer"] = 8,
-    ["Marine Commodore"] = 8,
-    ["Marine Rear Admiral"] = 8,
-    ["Fishman Raider"] = 8,
-    ["Fishman Captain"] = 8,
-    ["Forest Pirate"] = 8,
-    ["Mythological Pirate"] = 8,
-    ["Jungle Pirate"] = 8,
-    ["Musketeer Pirate"] = 8,
-    ["Reborn Skeleton"] = 8,
-    ["Living Zombie"] = 8,
-    ["Demonic Soul"] = 8,
-    ["Posessed Mummy"] = 8,
-    ["Peanut Scout"] = 8,
-    ["Peanut President"] = 8,
-    ["Ice Cream Chef"] = 8,
-    ["Ice Cream Commander"] = 8,
-    ["Cookie Crafter"] = 8,
-    ["Cake Guard"] = 8,
-    ["Baking Staff"] = 8,
-    ["Head Baker"] = 8,
-    ["Cocoa Warrior"] = 8,
-    ["Chocolate Bar Battler"] = 8,
-    ["Sweet Thief"] = 8,
-    ["Candy Rebel"] = 8,
-    ["Candy Pirate"] = 8,
-    ["Snow Demon"] = 8,
-    ["Isle Outlaw"] = 8,
-    ["Island Boy"] = 8,
-    ["Sun-kissed Warrior"] = 8,
-    ["Isle Champion"] = 8,
-    ["Serpent Hunter"] = 8,
-    ["Skull Slayer"] = 8,
-}
-
 -- QUEST BOSSES. Ids, tiers and levels from the game's own quest module (dump
 -- of 2025-05, tlredz/Scripts GameModules/Quests.lua). Three were renamed since
 -- (the 2025-10 and 2026-09 public tables): Fajita -> Orbitus, Bobby -> Chef,
 -- Island Empress -> Hydra Leader. Every name of one boss maps to its quest;
 -- the Targets page shows the one the game has. Spawn = where the 2025-10
 -- table sends you; only the LAST way of finding one (see WHERE A SPECIES IS).
--- A boss quest is always one kill.
+-- The quest id and tier columns are the game's data, unused since the quest
+-- engine was removed (2026-09-28).
 local BOSS = {}          -- name -> { id, tier, lv, spot, names }
 do
     local rows: { any } = {   -- plain data: typed so, the checker skips inferring each row
@@ -590,247 +363,10 @@ do
         table.insert(P.bosses, rec)
         for _, n in ipairs(b[1]) do
             BOSS[n] = rec
-            QUESTS[n] = QUESTS[n] or { b[2], b[3] }
-            QUEST_NEED[n] = 1
         end
     end
-    -- Hydra Island's two ordinary species (the game's quest data, and the
-    -- 2026-09 table): the island the old Female / Giant Islander rows were on.
-    QUESTS["Hydra Enforcer"]     = QUESTS["Hydra Enforcer"] or { "VenomCrewQuest", 1 }
-    QUESTS["Venomous Assailant"] = QUESTS["Venomous Assailant"] or { "VenomCrewQuest", 2 }
-    QUEST_NEED["Hydra Enforcer"], QUEST_NEED["Venomous Assailant"] = 8, 8
 end
 P.BOSS = BOSS
-
--- The giver's NAME is a hint. The giver's POSITION is the thing that works:
--- the server refuses StartQuest unless you are standing near it, and a
--- coordinate cannot be misspelled or fail to stream in.
-local GIVER_POS = {
-    -- FIRST SEA (public hub tables; farm_pro had none, so "auto"/"always"
-    -- had to scan for the giver by name there).
-    ["Bandit"]                = Vector3.new(1059.4, 15.4, 1550.4),
-    ["Monkey"]                = Vector3.new(-1598.1, 35.6, 153.4),
-    ["Gorilla"]               = Vector3.new(-1598.1, 35.6, 153.4),
-    ["Pirate"]                = Vector3.new(-1141.1, 4.1, 3831.5),
-    ["Brute"]                 = Vector3.new(-1141.1, 4.1, 3831.5),
-    ["Desert Bandit"]         = Vector3.new(894.5, 5.1, 4392.4),
-    ["Desert Officer"]        = Vector3.new(894.5, 5.1, 4392.4),
-    ["Snow Bandit"]           = Vector3.new(1389.7, 88.2, -1298.9),
-    ["Snowman"]               = Vector3.new(1389.7, 88.2, -1298.9),
-    ["Chief Petty Officer"]   = Vector3.new(-5039.6, 27.4, 4324.7),
-    ["Sky Bandit"]            = Vector3.new(-4839.5, 716.4, -2619.4),
-    ["Dark Master"]           = Vector3.new(-4839.5, 716.4, -2619.4),
-    ["Prisoner"]              = Vector3.new(5308.9, 1.7, 475.1),
-    ["Dangerous Prisoner"]    = Vector3.new(5308.9, 1.7, 475.1),
-    ["Toga Warrior"]          = Vector3.new(-1580.0, 6.4, -2986.5),
-    ["Gladiator"]             = Vector3.new(-1580.0, 6.4, -2986.5),
-    ["Military Soldier"]      = Vector3.new(-5313.4, 11.0, 8515.3),
-    ["Military Spy"]          = Vector3.new(-5313.4, 11.0, 8515.3),
-    ["Fishman Warrior"]       = Vector3.new(61122.7, 18.5, 1569.4),
-    ["Fishman Commando"]      = Vector3.new(61122.7, 18.5, 1569.4),
-    ["God's Guard"]           = Vector3.new(-4721.9, 843.9, -1950.0),
-    ["Shanda"]                = Vector3.new(-7859.1, 5544.2, -381.5),
-    ["Royal Squad"]           = Vector3.new(-7906.8, 5634.7, -1412.0),
-    ["Royal Soldier"]         = Vector3.new(-7906.8, 5634.7, -1412.0),
-    ["Galley Pirate"]         = Vector3.new(5259.8, 37.4, 4050.0),
-    ["Galley Captain"]        = Vector3.new(5259.8, 37.4, 4050.0),
-
-    ["Raider"]                = Vector3.new(-427.7, 73.0, 1835.9),
-    ["Mercenary"]             = Vector3.new(-427.7, 73.0, 1835.9),
-    ["Swan Pirate"]           = Vector3.new(635.6, 73.1, 917.8),
-    ["Factory Staff"]         = Vector3.new(635.6, 73.1, 917.8),
-    ["Marine Lieutenant"]     = Vector3.new(-2441.0, 73.0, -3217.7),
-    ["Marine Captain"]        = Vector3.new(-2441.0, 73.0, -3217.7),
-    ["Zombie"]                = Vector3.new(-5494.3, 48.5, -794.6),
-    ["Vampire"]               = Vector3.new(-5494.3, 48.5, -794.6),
-    ["Snow Trooper"]          = Vector3.new(607.1, 401.5, -5370.6),
-    ["Winter Warrior"]        = Vector3.new(607.1, 401.5, -5370.6),
-    ["Lab Subordinate"]       = Vector3.new(-6061.8, 15.9, -4902.0),
-    ["Horned Warrior"]        = Vector3.new(-6061.8, 15.9, -4902.0),
-    ["Magma Ninja"]           = Vector3.new(-5429.1, 16.0, -5298.0),
-    ["Lava Pirate"]           = Vector3.new(-5429.1, 16.0, -5298.0),
-    ["Ship Deckhand"]         = Vector3.new(1040.3, 125.1, 32911.0),
-    ["Ship Engineer"]         = Vector3.new(1040.3, 125.1, 32911.0),
-    ["Ship Steward"]          = Vector3.new(971.4, 125.1, 33245.5),
-    ["Ship Officer"]          = Vector3.new(971.4, 125.1, 33245.5),
-    ["Arctic Warrior"]        = Vector3.new(5668.1, 28.2, -6484.6),
-    ["Snow Lurker"]           = Vector3.new(5668.1, 28.2, -6484.6),
-    ["Sea Soldier"]           = Vector3.new(-3054.6, 236.9, -10147.8),
-    ["Water Fighter"]         = Vector3.new(-3054.6, 236.9, -10147.8),
-
-    ["Pirate Millionaire"]    = Vector3.new(-290.1, 42.9, 5581.6),
-    ["Pistol Billionaire"]    = Vector3.new(-290.1, 42.9, 5581.6),
-    ["Dragon Crew Warrior"]   = Vector3.new(5832.8, 51.7, -1101.5),
-    ["Dragon Crew Archer"]    = Vector3.new(5832.8, 51.7, -1101.5),
-    ["Female Islander"]       = Vector3.new(5448.9, 601.5, 751.1),
-    ["Giant Islander"]        = Vector3.new(5448.9, 601.5, 751.1),
-    ["Marine Commodore"]      = Vector3.new(2180.5, 27.8, -6741.6),
-    ["Marine Rear Admiral"]   = Vector3.new(2180.5, 27.8, -6741.6),
-    ["Fishman Raider"]        = Vector3.new(-10581.7, 330.9, -8761.2),
-    ["Fishman Captain"]       = Vector3.new(-10581.7, 330.9, -8761.2),
-    ["Forest Pirate"]         = Vector3.new(-13234.0, 331.5, -7625.4),
-    ["Mythological Pirate"]   = Vector3.new(-13234.0, 331.5, -7625.4),
-    ["Jungle Pirate"]         = Vector3.new(-12680.4, 390.0, -9902.0),
-    ["Musketeer Pirate"]      = Vector3.new(-12680.4, 390.0, -9902.0),
-    ["Reborn Skeleton"]       = Vector3.new(-9480.8, 142.1, 5566.1),
-    ["Living Zombie"]         = Vector3.new(-9480.8, 142.1, 5566.1),
-    ["Demonic Soul"]          = Vector3.new(-9517.0, 178.0, 6078.5),
-    ["Posessed Mummy"]        = Vector3.new(-9517.0, 178.0, 6078.5),
-    ["Peanut Scout"]          = Vector3.new(-2104.4, 38.1, -10194.1),
-    ["Peanut President"]      = Vector3.new(-2104.4, 38.1, -10194.1),
-    ["Ice Cream Chef"]        = Vector3.new(-820.2, 65.8, -10966.2),
-    ["Ice Cream Commander"]   = Vector3.new(-820.2, 65.8, -10966.2),
-    ["Cookie Crafter"]        = Vector3.new(-2022.3, 36.9, -12030.9),
-    ["Cake Guard"]            = Vector3.new(-2022.3, 36.9, -12030.9),
-    ["Baking Staff"]          = Vector3.new(-1928.3, 37.7, -12840.6),
-    ["Head Baker"]            = Vector3.new(-1928.3, 37.7, -12840.6),
-    ["Cocoa Warrior"]         = Vector3.new(231.8, 23.9, -12200.3),
-    ["Chocolate Bar Battler"] = Vector3.new(231.8, 23.9, -12200.3),
-    ["Sweet Thief"]           = Vector3.new(151.2, 23.9, -12774.6),
-    ["Candy Rebel"]           = Vector3.new(151.2, 23.9, -12774.6),
-    ["Candy Pirate"]          = Vector3.new(-1149.3, 13.6, -14445.6),
-    ["Snow Demon"]            = Vector3.new(-1149.3, 13.6, -14445.6),
-    ["Isle Outlaw"]           = Vector3.new(-16549.9, 55.7, -179.9),
-    ["Island Boy"]            = Vector3.new(-16549.9, 55.7, -179.9),
-    ["Sun-kissed Warrior"]    = Vector3.new(-16541.0, 54.8, 1051.5),
-    ["Isle Champion"]         = Vector3.new(-16541.0, 54.8, 1051.5),
-    ["Serpent Hunter"]        = Vector3.new(-16665.2, 104.6, 1579.7),
-    ["Skull Slayer"]          = Vector3.new(-16665.2, 104.6, 1579.7),
-    ["Reef Bandit"]           = Vector3.new(10780.1, -2087.7, 9261.9),
-    ["Coral Pirate"]          = Vector3.new(10780.1, -2087.7, 9261.9),
-    ["Sea Chanter"]           = Vector3.new(10883.6, -2086.2, 10032.2),
-    ["Ocean Prophet"]         = Vector3.new(10883.6, -2086.2, 10032.2),
-    ["High Disciple"]         = Vector3.new(9635.9, -1992.4, 9614.4),
-    ["Grand Devotee"]         = Vector3.new(9635.9, -1992.4, 9614.4),
-}
-P.giverPositions = GIVER_POS
-
-local GIVER_NAMES = {
-    ["Bandit"]                = "Bandit Quest Giver",
-    ["Monkey"]                = "Adventurer",
-    ["Gorilla"]               = "Adventurer",
-    ["Pirate"]                = "Pirate Adventurer",
-    ["Brute"]                 = "Pirate Adventurer",
-    ["Desert Bandit"]         = "Desert Adventurer",
-    ["Desert Officer"]        = "Desert Adventurer",
-    ["Snow Bandit"]           = "Villager",
-    ["Snowman"]               = "Villager",
-    ["Chief Petty Officer"]   = "Marine",
-    ["Sky Bandit"]            = "Sky Adventurer",
-    ["Dark Master"]           = "Sky Adventurer",
-    ["Prisoner"]              = "Jail Keeper",
-    ["Dangerous Prisoner"]    = "Jail Keeper",
-    ["Toga Warrior"]          = "Colosseum Quest Giver",
-    ["Gladiator"]             = "Colosseum Quest Giver",
-    ["God's Guard"]           = "Sky Quest Giver 2",
-    ["Shanda"]                = "Sky Quest Giver 2",
-    ["Royal Squad"]           = "Mole",
-    ["Royal Soldier"]         = "Mole",
-    ["Raider"]                = "Area 1 Quest Giver",
-    ["Mercenary"]             = "Area 1 Quest Giver",
-    ["Swan Pirate"]           = "Area 2 Quest Giver",
-    ["Factory Staff"]         = "Area 2 Quest Giver",
-    ["Marine Lieutenant"]     = "Marine Quest Giver",
-    ["Marine Captain"]        = "Marine Quest Giver",
-    ["Zombie"]                = "Graveyard Quest Giver",
-    ["Vampire"]               = "Graveyard Quest Giver",
-    ["Snow Trooper"]          = "Snow Quest Giver",
-    ["Winter Warrior"]        = "Snow Quest Giver",
-    ["Lab Subordinate"]       = "Ice Quest Giver",
-    ["Horned Warrior"]        = "Ice Quest Giver",
-    ["Magma Ninja"]           = "Fire Quest Giver",
-    ["Lava Pirate"]           = "Fire Quest Giver",
-    ["Sea Soldier"]           = "Forgotten Quest Giver",
-    ["Water Fighter"]         = "Forgotten Quest Giver",
-    ["Ship Deckhand"]         = "Front Crew Quest Giver",
-    ["Ship Engineer"]         = "Front Crew Quest Giver",
-    ["Ship Steward"]          = "Rear Crew Quest Giver",
-    ["Ship Officer"]          = "Rear Crew Quest Giver",
-    ["Arctic Warrior"]        = "Frost Quest Giver",
-    ["Snow Lurker"]           = "Frost Quest Giver",
-    ["Pirate Millionaire"]    = "Port Town Quest Giver",
-    ["Pistol Billionaire"]    = "Port Town Quest Giver",
-    ["Dragon Crew Warrior"]   = "Hydra Town Quest Giver",
-    ["Dragon Crew Archer"]    = "Hydra Town Quest Giver",
-    ["Female Islander"]       = "Hydra Island Quest Giver",
-    ["Giant Islander"]        = "Hydra Island Quest Giver",
-    ["Marine Commodore"]      = "Marine Tree Quest Giver",
-    ["Marine Rear Admiral"]   = "Marine Tree Quest Giver",
-    ["Fishman Raider"]        = "Deep Forest Quest Giver 3",
-    ["Fishman Captain"]       = "Deep Forest Quest Giver 3",
-    ["Forest Pirate"]         = "Deep Forest Quest Giver",
-    ["Mythological Pirate"]   = "Deep Forest Quest Giver",
-    ["Jungle Pirate"]         = "Deep Forest Quest Giver 2",
-    ["Musketeer Pirate"]      = "Deep Forest Quest Giver 2",
-    ["Reborn Skeleton"]       = "Haunted Castle Quest Giver 1",
-    ["Living Zombie"]         = "Haunted Castle Quest Giver 1",
-    ["Demonic Soul"]          = "Haunted Castle Quest Giver 2",
-    ["Posessed Mummy"]        = "Haunted Castle Quest Giver 2",
-    ["Peanut Scout"]          = "Peanut Quest Giver",
-    ["Peanut President"]      = "Peanut Quest Giver",
-    ["Ice Cream Chef"]        = "Ice Cream Quest Giver",
-    ["Ice Cream Commander"]   = "Ice Cream Quest Giver",
-    ["Cookie Crafter"]        = "Cake Quest Giver 1",
-    ["Cake Guard"]            = "Cake Quest Giver 1",
-    ["Baking Staff"]          = "Cake Quest Giver 2",
-    ["Head Baker"]            = "Cake Quest Giver 2",
-    ["Cocoa Warrior"]         = "Chocolate Quest Giver 1",
-    ["Chocolate Bar Battler"] = "Chocolate Quest Giver 1",
-    ["Sweet Thief"]           = "Chocolate Quest Giver 2",
-    ["Candy Rebel"]           = "Chocolate Quest Giver 2",
-    ["Candy Pirate"]          = "Candy Cane Quest Giver",
-    ["Snow Demon"]            = "Candy Cane Quest Giver",
-    ["Isle Outlaw"]           = "Tiki Quest Giver 1",
-    ["Island Boy"]            = "Tiki Quest Giver 1",
-    ["Sun-kissed Warrior"]    = "Tiki Quest Giver 2",
-    ["Isle Champion"]         = "Tiki Quest Giver 2",
-    ["Serpent Hunter"]        = "Tiki Quest Giver 3",
-    ["Skull Slayer"]          = "Tiki Quest Giver 3",
-    ["Reef Bandit"]           = "Submerged Quest Giver 1",
-    ["Coral Pirate"]          = "Submerged Quest Giver 1",
-    ["Sea Chanter"]           = "Submerged Quest Giver 2",
-    ["Ocean Prophet"]         = "Submerged Quest Giver 2",
-    ["High Disciple"]         = "Submerged Quest Giver 3",
-    ["Grand Devotee"]         = "Submerged Quest Giver 3",
-}
-P.giverNames = GIVER_NAMES
-
--- Every name the wiki lists as a farm-quest giver, island not attached. Being
--- on this list is a strong signal on its own, so the nearby scan works even
--- where the enemy mapping above is wrong.
-local KNOWN_GIVERS = {}
-for _, n in ipairs({
-    "Bandit Quest Giver", "Adventurer", "Pirate Adventurer", "Desert Adventurer",
-    "Villager", "Marine", "Marine Leader", "Colosseum Quest Giver",
-    "Sky Adventurer", "Sky Quest Giver 2", "Mole", "Head Jailer", "Jail Keeper",
-    "Freezeburg Quest Giver", "Submerged Quest Giver 1", "Submerged Quest Giver 2",
-    "Area 1 Quest Giver", "Area 2 Quest Giver", "Marine Quest Giver",
-    "Graveyard Quest Giver", "Snow Quest Giver", "Ice Quest Giver",
-    "Fire Quest Giver", "Forgotten Quest Giver", "Front Crew Quest Giver",
-    "Rear Crew Quest Giver", "Frost Quest Giver",
-    "Port Town Quest Giver", "Pirate Port Quest Giver", "Hydra Town Quest Giver",
-    "Hydra Island Quest Giver", "Dragon Crew Quest Giver",
-    "Marine Tree Quest Giver", "Turtle Adventure Quest Giver",
-    "Deep Forest Quest Giver", "Deep Forest Quest Giver 2",
-    "Deep Forest Quest Giver 3", "Haunted Castle Quest Giver 1",
-    "Haunted Castle Quest Giver 2", "Cake Quest Giver 1", "Cake Quest Giver 2",
-    "Chocolate Quest Giver 1", "Chocolate Quest Giver 2", "Ice Cream Quest Giver",
-    "Peanut Quest Giver", "Candy Cane Quest Giver", "Submerged Quest Giver 3",
-    "Tiki Quest Giver 1", "Tiki Quest Giver 2", "Tiki Quest Giver 3",
-}) do KNOWN_GIVERS[string.lower(n)] = n end
-P.knownGivers = KNOWN_GIVERS
-
--- A boss's quest giver is the one who gives the ordinary quests of the same
--- id: borrow that giver's spot and name (for Auto / Always).
-for name, rec in pairs(BOSS) do
-    for enemy, q in pairs(QUESTS) do
-        if q[1] == rec.id and not BOSS[enemy] then
-            GIVER_POS[name]   = GIVER_POS[name] or GIVER_POS[enemy]
-            GIVER_NAMES[name] = GIVER_NAMES[name] or GIVER_NAMES[enemy]
-        end
-    end
-end
-
 
 -- Seas are separate servers. A species from another sea cannot be reached
 -- from this one, so the circuit skips it and says so.
@@ -865,10 +401,10 @@ end
 -- STATE
 -- =========================================================
 local stats = {
-    kills = 0, piles = 0, quests = 0, questsDone = 0, m1 = 0, casts = 0,
+    kills = 0, piles = 0, m1 = 0, casts = 0,
     castsTook = 0, castsMissed = 0, castsHit = 0,
     swaps = 0, flights = 0, hops = 0, pulledBack = 0, putBack = 0,
-    escapes = 0, abandons = 0, probes = 0, hakiPresses = 0, startedAt = 0,
+    escapes = 0, probes = 0, hakiPresses = 0, startedAt = 0,
 }
 
 local state          = "IDLE"
@@ -881,10 +417,6 @@ local waterFloor     = nil
 local activeName     = nil     -- the species being fought right now
 local countedDead    = {}
 local circuitIdx     = 1
-
-P.learnedGivers = {}
-P.learnedQuests = {}
-P.giverSpots    = {}
 
 -- THE ABORT EPOCH. Every long operation captures this on entry and gives up
 -- the moment it changes. Stop bumps it, so stop means stop.
@@ -3211,567 +2743,12 @@ end
 
 
 -- =========================================================
--- QUEST
+-- THE CIRCUIT: THE SPECIES ON THE TARGETS PAGE
 -- =========================================================
--- Finding a giver, reading the tracker and clicking the quest dialog: all
--- farm_pro's, unchanged.
-local findQuestGiver
-do
-    local function npcSources()
-        local out = {}
-        for _, n in ipairs({ "NPCs", "Npcs", "Characters", "Map" }) do
-            local f = workspace:FindFirstChild(n)
-            if f then table.insert(out, f) end
-        end
-        table.insert(out, workspace)
-        return out
-    end
-
-    local function anchorPart(model)
-        return model.PrimaryPart
-            or model:FindFirstChild("HumanoidRootPart")
-            or model:FindFirstChild("Head")
-            or model:FindFirstChild("Torso")
-            or model:FindFirstChildWhichIsA("BasePart")
-    end
-
-    -- Blox Fruits puts no ClickDetector and no ProximityPrompt on a quest giver.
-    -- The "E Interact" ring is the game's own client-side UI. What a giver DOES
-    -- have is the "?" billboard reading QUEST above its head, so that is the
-    -- signal used here.
-    local function questMarker(model)
-        local ok, hit = pcall(function()
-            for _, d in ipairs(model:GetDescendants()) do
-                if d:IsA("BillboardGui") then
-                    for _, t in ipairs(d:GetDescendants()) do
-                        if (t:IsA("TextLabel") or t:IsA("TextButton"))
-                            and type(t.Text) == "string"
-                            and string.find(string.lower(t.Text), "quest", 1, true) then
-                            return true
-                        end
-                    end
-                end
-            end
-            return false
-        end)
-        return ok and hit or false
-    end
-
-    function findQuestGiver(maxRange, wantName, markerOnly)
-        local _, root = parts()
-        if not root then return nil end
-        maxRange = maxRange or 300
-        local want = wantName and string.lower(wantName) or nil
-
-        local cands, seen = {}, {}
-        for _, src in ipairs(npcSources()) do
-            for _, m in ipairs(src:GetChildren()) do
-                if m:IsA("Model") and not seen[m] then
-                    seen[m] = true
-                    local part = anchorPart(m)
-                    if part then
-                        local d = (part.Position - root.Position).Magnitude
-                        if d <= maxRange then
-                            local low   = string.lower(m.Name)
-                            local named = string.find(low, "quest", 1, true)
-                                       or string.find(low, "giver", 1, true)
-                            local known  = KNOWN_GIVERS[low] ~= nil
-                            local marker = questMarker(m)
-                            local exact  = want and (low == want)
-                            local score = d
-                                - (exact and 50000 or 0)
-                                - (known and 20000 or 0)
-                                - (marker and 5000 or 0)
-                                - (named and 1000 or 0)
-                            local accept = exact or known or marker or named
-                                or m:FindFirstChildOfClass("Humanoid")
-                            if markerOnly then
-                                accept = (exact or known or marker) and true or false
-                            end
-                            if accept then
-                                table.insert(cands, {
-                                    model = m, part = part, dist = d, name = m.Name,
-                                    score = score,
-                                    signal = (exact and "exact name")
-                                          or (known and "known giver")
-                                          or (marker and "QUEST marker")
-                                          or (named and "name") or "npc",
-                                })
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        table.sort(cands, function(a, b) return a.score < b.score end)
-        P.questCandidates = cands
-        local best = cands[1]
-        return best, best and best.dist or nil
-    end
-    P.findQuestGiver = findQuestGiver
-end
-
-function P.questScan(range)
-    findQuestGiver(range or 400)
-    local out = {}
-    for i, c in ipairs(P.questCandidates or {}) do
-        if i > 8 then break end
-        table.insert(out, string.format("%s  %.0f studs  (%s)",
-            tostring(c.name), c.dist, c.signal))
-    end
-    if #out == 0 then return { "no NPC models in range" } end
-    return out
-end
-
--- ---------------------------------------------------------
--- READING THE TRACKER
--- ---------------------------------------------------------
--- "A GUI called Quest contains some text" is equally true of the quest BOARD
--- standing in front of you, which is why the old check reported a quest as
--- active whenever the board was on screen. The tracker has one thing nothing
--- else has: a live have/need counter beside the word Defeat.
-do
-    local function shownOnScreen(g)
-        local o = g
-        while o and o:IsA("GuiObject") do
-            if not o.Visible then return false end
-            o = o.Parent
-        end
-        return true
-    end
-
-    local function blockText(frame)
-        local acc = {}
-        for _, d in ipairs(frame:GetDescendants()) do
-            if (d:IsA("TextLabel") or d:IsA("TextButton")) and type(d.Text) == "string" then
-                table.insert(acc, d.Text)
-            end
-        end
-        return string.lower(table.concat(acc, " "))
-    end
-
-    local questCache, questCacheAt = nil, 0
-    -- The exact label the counter lives in, once we have found it once.
-    local questLabel = nil
-    P.questScans = 0        -- how many full tree walks this run has cost
-
-    -- Read one label. This is the whole job once you know WHICH label.
-    local function parseCounter(d)
-        if not d or not d.Parent then return nil end
-        local txt = d.Text
-        if type(txt) ~= "string" or #txt == 0 then return nil end
-        local have, need = string.match(txt, "(%d+)%s*/%s*(%d+)")
-        if not (have and need) then return nil end
-        if not shownOnScreen(d) then return nil end
-        local blob = d.Parent and blockText(d.Parent) or string.lower(txt)
-        if not (string.find(blob, "defeat", 1, true)
-            or string.find(blob, "eliminate", 1, true)
-            or string.find(blob, "kill", 1, true)) then return nil end
-        local enemy = string.match(blob, "defeat%s+%d+%s+([%a%s\'%-]+)")
-        if enemy then enemy = (enemy:gsub("%s+$", "")) end
-        return {
-            have = tonumber(have) or 0, need = tonumber(need) or 0,
-            enemy = enemy, text = txt,
-        }
-    end
-
-    -- WHY THIS USED TO STALL THE FARM.
-    -- The counter lives in one TextLabel, and that label does not move. The old
-    -- version walked EVERY descendant of PlayerGui to find it again on every
-    -- single call -- and Blox Fruits' PlayerGui is thousands of instances, each
-    -- TextLabel of which then cost an ancestor walk and a subtree walk on top.
-    -- Called once every few seconds that is invisible. Called after every kill it
-    -- is the pause you can watch from outside.
-    --
-    -- So the label is remembered. The fast path re-reads the one we hold, which is
-    -- a text compare and a pattern match. The tree is only walked again when that
-    -- label has actually gone -- a respawn, a UI reset, a new quest panel.
-    function P.readQuest(force)
-        if not force and (os.clock() - questCacheAt) < 0.5 then return questCache end
-        questCacheAt = os.clock()
-
-        local fast
-        pcall(function() fast = parseCounter(questLabel) end)
-        if fast then
-            questCache = (fast.need > 0) and fast or nil
-            return questCache
-        end
-        questLabel = nil
-
-        local pg = player:FindFirstChild("PlayerGui")
-        if not pg then questCache = nil return nil end
-        local found
-        P.questScans += 1
-        pcall(function()
-            for _, d in ipairs(pg:GetDescendants()) do
-                if d:IsA("TextLabel") and not d:FindFirstAncestor("BFFHUD") then
-                    local parsed = parseCounter(d)
-                    if parsed then
-                        questLabel = d
-                        found = parsed
-                        return
-                    end
-                end
-            end
-        end)
-        questCache = (found and found.need > 0) and found or nil
-        return questCache
-    end
-end
-
-function P.questActive() return P.readQuest() ~= nil end
-
--- After the giver is triggered a dialog appears with one button per tier.
--- Blox Fruits builds it out of ImageButtons whose caption lives in a child
--- TextLabel, not out of TextButtons, so GuiButton is what has to be scanned.
-local function clickQuestDialog(wantName)
-    local pg = player:FindFirstChild("PlayerGui")
-    if not pg then return false end
-
-    local function textOf(b)
-        local acc = {}
-        if type(b.Text) == "string" and #b.Text > 0 then table.insert(acc, b.Text) end
-        for _, d in ipairs(b:GetDescendants()) do
-            if (d:IsA("TextLabel") or d:IsA("TextBox"))
-                and type(d.Text) == "string" and #d.Text > 0 then
-                table.insert(acc, d.Text)
-            end
-        end
-        return string.lower(table.concat(acc, " "))
-    end
-
-    local function click(b)
-        local fired = false
-        pcall(function()
-            if getconnections then
-                for _, conn in ipairs(getconnections(b.Activated)) do
-                    conn:Fire() fired = true
-                end
-                if not fired then
-                    for _, conn in ipairs(getconnections(b.MouseButton1Click)) do
-                        conn:Fire() fired = true
-                    end
-                end
-            end
-        end)
-        if not fired then
-            pcall(function()
-                -- A fruit in hand would take the click (and be eaten).
-                local held = heldTool()
-                if held and P.isPhysicalFruit(held) then
-                    local _, _, h = parts()
-                    if h then h:UnequipTools() end
-                end
-                local ap, as = b.AbsolutePosition, b.AbsoluteSize
-                local x, y = ap.X + as.X / 2, ap.Y + as.Y / 2
-                VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
-                task.wait(0.06)
-                VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
-            end)
-        end
-    end
-
-    local deadline = os.clock() + 4
-    while os.clock() < deadline do
-        local best, fallback, seen = nil, nil, {}
-        for _, d in ipairs(pg:GetDescendants()) do
-            -- Our own panel has buttons reading QUEST. Without this guard the
-            -- dialog hunt clicks the farm's own UI instead of the game's.
-            local mine = d:FindFirstAncestor("BFFHUD") ~= nil
-            if not mine and d:IsA("GuiButton") and d.Visible and d.AbsoluteSize.X > 20 then
-                local txt = textOf(d)
-                if #txt > 2 then
-                    table.insert(seen, string.sub(txt, 1, 40))
-                    if wantName and string.find(txt, string.lower(wantName), 1, true) then
-                        best = d
-                    elseif string.find(txt, "quest", 1, true)
-                        or string.find(txt, "accept", 1, true)
-                        or string.find(txt, "kill", 1, true)
-                        or string.find(txt, "defeat", 1, true) then
-                        fallback = fallback or d
-                    end
-                end
-            end
-        end
-        P.lastQuestOptions = seen
-        local pick = best or fallback
-        if pick then
-            click(pick)
-            return true, string.sub(textOf(pick), 1, 60)
-        end
-        task.wait(0.25)
-    end
-    return false
-end
-
-
-
--- ---------------------------------------------------------
--- TAKING A QUEST: FROM WHERE YOU STAND
--- ---------------------------------------------------------
--- farm_pro's engine and farm_pro's switch for the giver (Quest page). The
--- default, "never", is what you run farm_pro on: you are never moved to take
--- a quest. The circuit flies to the camp FIRST and asks from there, with the
--- server's own quest id. The tracker is read back; only a quest whose tracker
--- names the enemy it was taken for is kept, and an unknown tier is probed
--- 1-2-3 and the one that matches is locked. A clean ask whose tracker cannot
--- be read is NOT a failure -- the quest is running and its kills are counted
--- here instead (exact count from the game's quest data where known).
---
--- One quest runs at a time; that is the game's rule. Asking again while one
--- is running resets its count, so nothing here ever asks while one is.
-local questSpecies = nil     -- whose quest is running
-local questNeed    = nil
-local questKills   = 0       -- kills of questSpecies since it was taken
-local questBlind   = false   -- sent cleanly, tracker unreadable: counted here
-local questTakenAt = 0
-local questLastHave, questMovedAt = -1, 0
-local trackerSeen  = false   -- a tracker was read this session: it IS readable
-local lastAskAt    = {}
-local stalled      = {}      -- species whose camp stopped respawning -> until
-local lastPeek     = 0
-local nilPeeks     = 0       -- tracker looks in a row that found no tracker
-P.lastQuestResult  = "none yet"
-P.circuitNote      = ""
-
-local function wanted(trackerEnemy, enemy)
-    if not trackerEnemy or not enemy then return true end
-    local a = string.lower(tostring(trackerEnemy))
-    local names = BOSS[enemy] and BOSS[enemy].names or { enemy }
-    for _, n in ipairs(names) do
-        local b = string.lower(n)
-        if string.find(a, b, 1, true) ~= nil or string.find(b, a, 1, true) ~= nil then return true end
-    end
-    return false
-end
-
--- The quest ids to try for a species, in order: typed by hand > learned (a
--- tier that already worked, locked) > the table > the fallback id.
--- Each is { id, tier, lockedTier }.
-local function questIds(enemy)
-    local out = {}
-    if CFG.QuestName and #tostring(CFG.QuestName) > 0 then
-        table.insert(out, { CFG.QuestName, CFG.QuestTier or 1, CFG.QuestTier ~= nil })
-        return out
-    end
-    local learned = P.learnedQuests[enemy]
-    if learned then
-        table.insert(out, { learned.name, learned.tier, true })
-        return out
-    end
-    local q = QUESTS[enemy]
-    if q then table.insert(out, { q[1], q[2], false }) end
-    local alt = QUEST_ALT[enemy]
-    if alt then table.insert(out, { alt[1], alt[2], false }) end
-    return out
-end
-P.questIds = questIds
-
-function P.giverFor(enemy)
-    local name = P.learnedGivers[enemy] or GIVER_NAMES[enemy]
-    local pos  = P.giverSpots[enemy] or GIVER_POS[enemy]
-    return name, pos
-end
-
-function P.setGiverHere()
-    local e = activeName
-    local _, r = parts()
-    if not e or not r then say("start the farm on a target first") return false end
-    P.giverSpots[e] = r.Position
-    say("giver for " .. e .. " = where you stand")
-    return true
-end
-
-function P.clearGiver()
-    local e = activeName
-    if e then
-        P.giverSpots[e] = nil
-        P.learnedGivers[e] = nil
-    end
-    say("giver back to the table")
-end
-
-local function abandonQuest(why)
-    local cf = commF()
-    if cf then pcall(function() cf:InvokeServer("AbandonQuest") end) end
-    stats.abandons += 1
-    questSpecies, questNeed, questKills, questBlind = nil, nil, 0, false
-    say("quest dropped - " .. tostring(why))
-    task.wait(0.4)
-end
-P.abandonQuest = function() abandonQuest("by hand") end
-
-local function acceptFor(enemy)
-    local cf = commF()
-    if not cf then
-        P.lastQuestResult = "no CommF_ remote"
-        say(P.lastQuestResult)
-        return false
-    end
-    if lastAskAt[enemy] and os.clock() - lastAskAt[enemy] < (CFG.QuestRetrySeconds or 8) then
-        return false
-    end
-    lastAskAt[enemy] = os.clock()
-
-    -- A boss quest below its level is refused by the game: say so, do not ask.
-    local boss, lv = BOSS[enemy], playerLevel()
-    if boss and lv and lv < boss.lv and not (CFG.QuestName and #tostring(CFG.QuestName) > 0) then
-        P.lastQuestResult = string.format("%s quest needs level %d (you are %d) - fighting it without one",
-            enemy, boss.lv, lv)
-        say(P.lastQuestResult)
-        return false
-    end
-
-    local ids = questIds(enemy)
-    if #ids == 0 then
-        P.lastQuestResult = "no quest id known for " .. enemy .. " - farming it without one"
-        say(P.lastQuestResult)
-        return false
-    end
-    local myEpoch = epoch
-    local mode    = CFG.GiverMode or "never"
-    local atGiver = false
-
-    -- Only "auto" and "always" ever come here.
-    local function goToGiver()
-        local wantName, dest = P.giverFor(enemy)
-        if not dest then
-            -- Bounded: an unbounded search finds a giver with the right name
-            -- on a DIFFERENT island and flies you off to it.
-            local g = (wantName and (findQuestGiver(500, wantName) or findQuestGiver(1200, wantName)))
-                or findQuestGiver(500, nil, true) or findQuestGiver(1200, nil, true)
-            if g then
-                dest = g.part.Position
-                P.learnedGivers[enemy] = g.name
-            end
-        end
-        if not dest or stale(myEpoch) then return false end
-        releasePile()
-        setState("TO GIVER")
-        say("flying to the quest giver")
-        flyTo(dest + Vector3.new(0, 3, 0))
-        atGiver = true
-        task.wait(0.3)
-        return not stale(myEpoch)
-    end
-
-    local function attemptId(id)
-        local qname, tier, locked = id[1], id[2] or 1, id[3]
-        local tiers
-        if CFG.QuestTier then
-            tiers = { CFG.QuestTier }
-        elseif locked then
-            tiers = { tier }
-        else
-            tiers = { tier }
-            for _, t in ipairs({ 1, 2, 3 }) do
-                if t ~= tier then table.insert(tiers, t) end
-            end
-        end
-        local gotQ, gotOk, gotRes, used = nil, nil, nil, tier
-        for i, t in ipairs(tiers) do
-            if stale(myEpoch) then break end
-            gotOk, gotRes = pcall(function()
-                return cf:InvokeServer("StartQuest", qname, t)
-            end)
-            task.wait(0.45)
-            gotQ = P.readQuest(true)
-            if not gotQ and atGiver and i == 1 then
-                say("remote refused - talking to the NPC")
-                for _ = 1, 3 do
-                    pcall(function()
-                        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                        task.wait(0.07)
-                        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                    end)
-                    task.wait(0.3)
-                end
-                pcall(clickQuestDialog, enemy)
-                task.wait(0.5)
-                gotQ = P.readQuest(true)
-            end
-            used = t
-            if gotQ then trackerSeen = true end
-            if not gotQ then break end
-            if wanted(gotQ.enemy, enemy) then break end
-            if i < #tiers then
-                say(string.format("tier %d wants %s - trying tier %d", t,
-                    tostring(gotQ.enemy), tiers[i + 1]))
-            end
-        end
-        return gotQ, gotOk, gotRes, qname, used
-    end
-
-    local function attempt()
-        local q, ok, res, qname, tier
-        for n, id in ipairs(ids) do
-            q, ok, res, qname, tier = attemptId(id)
-            if stale(myEpoch) then break end
-            if q and wanted(q.enemy, enemy) then break end
-            -- A tracker that cannot be read gives no way to tell a refusal
-            -- from a success, so a second id is only tried when trackers are
-            -- readable (or the first id's tracker named someone else).
-            if not q and not trackerSeen then break end
-            if n < #ids then say("trying the other quest id: " .. ids[n + 1][1]) end
-        end
-        return q, ok, res, qname, tier
-    end
-
-    -- Does anyone have to move? A distance question, asked from HERE -- and
-    -- the circuit only asks once it is at the camp.
-    local _, root = parts()
-    local _, gpos = P.giverFor(enemy)
-    local giverDist = (gpos and root) and (gpos - root.Position).Magnitude or nil
-    local mustGo = (mode == "always")
-        or (mode == "auto" and (giverDist == nil or giverDist <= (CFG.GiverWalkRadius or 250)))
-    if mustGo then goToGiver() end
-    if stale(myEpoch) then
-        P.lastQuestResult = "stopped before asking - no quest taken"
-        return false
-    end
-
-    setState("QUEST")
-    if not atGiver then say("taking the " .. enemy .. " quest from here") end
-    local q, ok, res, qname, tier = attempt()
-
-    -- Asked from range and nothing came back: auto goes up and asks once more,
-    -- so a server that does check distance still works. "never" means never.
-    if not q and mode == "auto" and not atGiver and not stale(myEpoch) then
-        say("nothing from here - going up and asking again")
-        if goToGiver() then q, ok, res, qname, tier = attempt() end
-    end
-
-    local matched = (q ~= nil) and wanted(q.enemy, enemy)
-    if q and matched then
-        stats.quests += 1
-        P.learnedQuests[enemy] = { name = qname, tier = tier }
-        if atGiver and root then P.giverSpots[enemy] = P.giverSpots[enemy] or gpos end
-        questSpecies, questNeed, questKills, questBlind = enemy, q.need, q.have, false
-        questTakenAt, questLastHave, questMovedAt = os.clock(), q.have, os.clock()
-        nilPeeks = 0
-    elseif q then
-        -- Every tier and id asked for someone else: this one would never move.
-        abandonQuest("no tier of " .. tostring(qname) .. " asks for " .. enemy)
-    elseif ok then
-        questSpecies, questNeed, questKills, questBlind =
-            enemy, QUEST_NEED[enemy] or CFG.QuestKillsFallback or 10, 0, true
-        questTakenAt = os.clock()
-    end
-    P.lastQuestResult = string.format("%s t%d -> %s", tostring(qname), tier or 0,
-        q and string.format("%s  %d/%d",
-                matched and "ACTIVE" or ("WRONG ENEMY, it wants " .. tostring(q.enemy)),
-                q.have, q.need)
-          or (ok and string.format("sent, tracker unreadable - counting %d kills here",
-                    questNeed or 0)
-                  or ("refused (" .. tostring(res) .. ")")))
-    say(P.lastQuestResult)
-    return (q ~= nil and matched) or questBlind
-end
-
--- ---------------------------------------------------------
--- THE CIRCUIT
--- ---------------------------------------------------------
+-- No quests (removed 2026-09-28 - max level; git tag quest-engine-2026-09-28
+-- has them): each species' camp is piled and killed, then the next one;
+-- alone on the circuit, it waits for the respawn.
+P.circuitNote = ""
 local function circuit()
     local names = CFG.Targets
     if #names == 0 then
@@ -3824,106 +2801,16 @@ function P.clearTargets()
     say("circuit cleared - the species for your level")
 end
 
--- Follow the quest already running. A quest for a species on the circuit
--- moves the circuit TO that species, so a running count is never thrown away;
--- one for something else is dropped. Returns true while a circuit quest runs.
--- Never asks for a quest -- step() does that once it is at the camp.
-local function syncQuest(list)
-    local q = P.readQuest(true)
-    if q then trackerSeen = true end
-    if q and q.have < q.need then
-        local idx
-        if q.enemy then
-            for i, t in ipairs(list) do
-                if wanted(q.enemy, t.name) then idx = i break end
-            end
-        elseif questSpecies then
-            for i, t in ipairs(list) do
-                if t.name == questSpecies then idx = i break end
-            end
-        else
-            idx = circuitIdx
-        end
-        local st = idx and stalled[list[idx].name]
-        if idx and not (st and os.clock() < st) then
-            circuitIdx = idx
-            if questSpecies ~= list[idx].name then
-                questSpecies, questBlind = list[idx].name, false
-                questKills = q.have
-            end
-            questNeed  = q.need
-            questKills = math.max(questKills, q.have)
-            -- A count that never moves is a count for an enemy we are not
-            -- fighting (farm_pro's way out of it): take a fresh one.
-            if q.have ~= questLastHave then
-                questLastHave, questMovedAt = q.have, os.clock()
-            elseif os.clock() - questMovedAt > (CFG.QuestStallSeconds or 240) then
-                questMovedAt = os.clock()
-                abandonQuest(string.format("its count has not moved in %d s",
-                    math.floor(CFG.QuestStallSeconds or 240)))
-                return false
-            end
-            return true
-        end
-        abandonQuest(idx and "its camp stopped respawning"
-            or ("it is for " .. tostring(q.enemy) .. ", not on the circuit"))
-        return false
-    elseif questBlind and questSpecies then
-        if questKills < (questNeed or 10) and os.clock() - questTakenAt < 900 then
-            for i, t in ipairs(list) do
-                if t.name == questSpecies then circuitIdx = i return true end
-            end
-        end
-        questBlind, questSpecies = false, nil
-    end
-    return false
-end
-
-function P.takeQuestNow()
-    local list = circuit()
-    if #list == 0 then say(P.circuitNote) return false end
-    local cur = list[math.min(circuitIdx, #list)]
-    lastAskAt[cur.name] = nil
-    return acceptFor(cur.name)
-end
-
--- Is the running quest's count full? Our own kill count says when to look;
--- the tracker is the authority, and it is also glanced at every two seconds
--- in case a kill was missed here. A tracker that has GONE is a finished
--- quest only if our count agrees, or if it stays gone for two looks in a
--- row -- a UI that blinked must not look like a finished quest, because the
--- next quest taken would replace a running count.
-local function questFull()
-    if not CFG.QuestLoop or not questSpecies then return false end
-    if questBlind then return questKills >= (questNeed or CFG.QuestKillsFallback or 10) end
-    local now = os.clock()
-    local counted = questNeed ~= nil and questKills >= questNeed
-    if not counted and now - lastPeek <= 2 then return false end
-    lastPeek = now
-    local q = P.readQuest(true)
-    if q then
-        nilPeeks = 0
-        if not wanted(q.enemy, questSpecies) then return true end   -- ours is gone
-        if q.have >= q.need then return true end
-        questKills = q.have
-        return false
-    end
-    if counted then return true end
-    nilPeeks += 1
-    return nilPeeks >= 2
-end
-
 local function onKill(name)
     stats.kills += 1
     if meas then meas.kills += 1 end
-    if name == questSpecies then questKills += 1 end
 end
 
 -- ---------------------------------------------------------
 -- THE FIGHT AT ONE CAMP
 -- ---------------------------------------------------------
--- Pile, lock, hit, count -- until the quest is full, the camp is empty, you
--- are hurt, or thirty seconds pass (then the quest is looked at again).
+-- Pile, lock, hit, count -- until the camp is empty, you are hurt, or thirty
+-- seconds pass (then the next step looks again).
 local function fight(cur, names)
     local myEpoch = epoch
     setState("FIGHT")
@@ -3952,12 +2839,6 @@ local function fight(cur, names)
                 -- fresh: its own spawn spot, and a new no-damage clock.
                 homePos[m], pileJoin[m], lastDest[m] = nil, nil, nil
             end
-        end
-
-        if not (cur.raid or cur.random or cur.elite) and questFull() then
-            if pileStart then recordPile(now - pileStart) end
-            attacking = false
-            return "done"
         end
 
         if now - pileScanAt > 0.1 then refreshPile() end
@@ -4375,7 +3256,7 @@ do
             if not fresh or t.fromJob == game.JobId then return false end
             if type(t.cfg) == "table" then
                 for k, v in pairs(t.cfg) do
-                    if CFG[k] ~= nil or k == "QuestName" or k == "QuestTier" then CFG[k] = v end
+                    if CFG[k] ~= nil then CFG[k] = v end
                 end
             end
             if not t.resume then return false end
@@ -4621,7 +3502,9 @@ do
             E.questAskAt = os.clock()
             if shown and not E.dropped then
                 E.dropped = true
-                abandonQuest("the elite's quest instead")
+                local cf = commF()
+                if cf then pcall(function() cf:InvokeServer("AbandonQuest") end) end
+                task.wait(0.4)
             end
             local cls = askHunter()
             shown, isElite = eliteQuestShown()
@@ -4820,11 +3703,8 @@ local function step()
     local names = {}
     for _, t in ipairs(list) do names[t.name] = true end
 
-    -- A quest already running decides which species this is.
-    local running = CFG.QuestLoop and syncQuest(list)
-    if circuitIdx > #list then circuitIdx = 1 end
-    -- Between quests, a quest boss that is up goes first.
-    if CFG.BossFirst and not running then
+    -- A boss on the circuit that is up goes first.
+    if CFG.BossFirst then
         for i, t in ipairs(list) do
             if BOSS[t.name] and bossUp(t.name) then circuitIdx = i break end
         end
@@ -4832,12 +3712,10 @@ local function step()
     local cur = list[circuitIdx]
     activeName = cur.name
 
-    -- A QUEST BOSS is one enemy on a long respawn. Its quest is taken only
-    -- while it is up. While it is not: the rest of the circuit (its quest, if
-    -- one is held, is dropped so the others can have theirs), or -- when
-    -- nothing else on the circuit can be fought (it is alone, or every other
-    -- one is a boss that is not up either) -- wait over its spawn, however
-    -- long, quest kept.
+    -- A BOSS is one enemy on a long respawn. While it is not up: the rest of
+    -- the circuit, or -- when nothing else on the circuit can be fought (it
+    -- is alone, or every other one is a boss that is not up either) -- wait
+    -- over its spawn, however long.
     if not BOSS[cur.name] then P.bossWaitSince = nil end
     if BOSS[cur.name] then
         local other = false
@@ -4847,9 +3725,6 @@ local function step()
         if bossUp(cur.name) then
             P.bossWaitSince = nil
         elseif other then
-            if running and questSpecies == cur.name then
-                abandonQuest(cur.name .. " is not up - doing the rest meanwhile")
-            end
             say(cur.name .. " has not spawned - next on the circuit")
             advance(list)
             releasePile()
@@ -4898,18 +3773,8 @@ local function step()
         end
     end
 
-    -- At the camp now: ask for its quest from HERE (farm_pro asks from where
-    -- you stand). With the giver on "never" nothing moves you for it.
-    if CFG.QuestLoop and not running then acceptFor(cur.name) end
-
     local why = fight(cur, names)
-    if why == "done" then
-        stats.questsDone += 1
-        questSpecies, questNeed, questKills, questBlind = nil, nil, 0, false
-        advance(list)
-        if list[circuitIdx].name ~= cur.name then releasePile() end
-        say("quest done - next: " .. list[circuitIdx].name)
-    elseif why == "empty" and BOSS[cur.name] then
+    if why == "empty" and BOSS[cur.name] then
         -- Down (someone else's kill, or it left): the next step sees it is not
         -- up and does the rest of the circuit, or waits for it. Still listed
         -- as parked while you stand at it for 10 s: that entry is not believed
@@ -4931,25 +3796,12 @@ local function step()
         end
         task.wait(0.5)
     elseif why == "empty" then
-        if not (CFG.QuestLoop and questSpecies == cur.name) then
-            -- No quest holding us here: the next camp while this one respawns.
-            if #list > 1 then
-                advance(list)
-                releasePile()
-            else
-                waitRespawn(cur, names)
-            end
-        elseif CFG.WaitRespawn then
-            if not waitRespawn(cur, names) then
-                stalled[cur.name] = os.clock() + 60
-                say(cur.name .. " did not respawn - moving on")
-                advance(list)
-                releasePile()
-            end
-        else
-            abandonQuest("camp empty, moving on (Wait for the respawn is off)")
+        -- The next camp while this one respawns; alone on the circuit: wait.
+        if #list > 1 then
             advance(list)
             releasePile()
+        else
+            waitRespawn(cur, names)
         end
     end
     -- "hurt" and "sweep": the next step decides.
@@ -5136,7 +3988,7 @@ local function buildUI()
     local TITLES = {
         home = "Fast Farm", target = "Targets", attack = "Attack", weapon = "Weapon",
         magnet = "Magnet", position = "Position", travel = "Travel",
-        quest = "Quest circuit", safety = "Safety", stats = "Stats",
+        safety = "Safety", stats = "Stats",
         elite = "Elite hunt",
     }
 
@@ -5595,13 +4447,6 @@ local function buildUI()
 
         gap(v, 16)
 
-        switchRow(v, "Quest circuit",
-            "Quest, pile, kill - then the next species",
-            function() return CFG.QuestLoop end,
-            function(x)
-                CFG.QuestLoop = x
-                say(x and "quest circuit on" or "quest circuit off - farming without quests")
-            end)
         switchRow(v, "Raid mode",
             "Every enemy near you, any kind - no quests, no Observation",
             function() return CFG.RaidMode end,
@@ -5670,13 +4515,6 @@ local function buildUI()
         navRow(v, "Travel", function()
             return math.floor(CFG.TravelSpeed) .. " studs/s"
         end, "travel")
-        hairline(v)
-        navRow(v, "Quest", function()
-            if not CFG.QuestLoop then return "Off" end
-            local q = P.readQuest()
-            if q then return q.have .. " / " .. q.need end
-            return questBlind and (questKills .. " counted") or "none running"
-        end, "quest")
         hairline(v)
         navRow(v, "Safety", function()
             return "out under " .. math.floor(CFG.EscapeBelow * 100) .. "%"
@@ -5828,6 +4666,22 @@ local function buildUI()
             P.toggleTarget(val)
             signature = nil
         end)
+
+        heading2(v, "bosses and respawns")
+        switchRow(v, "Bosses first",
+            "A boss on the circuit that is up goes before the rest",
+            function() return CFG.BossFirst end,
+            function(x) CFG.BossFirst = x end)
+        readout(v, function()
+            if not P.bossWaitSince then return "no boss wait" end
+            return string.format("waiting for a boss  %ds", math.floor(os.clock() - P.bossWaitSince))
+        end)
+        sliderRow(v, "One species alone: wait for it", 10, 120, 5,
+            function() return CFG.RespawnMax end,
+            function(x) CFG.RespawnMax = x end, " s")
+        caption(v, "A boss is found near you, or parked by the game far away. "
+            .. "Not up: the rest of the circuit, or, if it is alone, a wait over "
+            .. "its spawn for as long as it takes.")
     end
 
     -- =====================================================
@@ -6189,140 +5043,6 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- QUEST
-    -- =====================================================
-    do
-        local v = makeView("quest")
-        gap(v, 6)
-        switchRow(v, "Quest circuit",
-            "Take it from where you are, pile, kill, next species",
-            function() return CFG.QuestLoop end,
-            function(x) CFG.QuestLoop = x end)
-        readout(v, function()
-            local q = P.readQuest()
-            local e = activeName
-            local ids = e and P.questIds(e) or {}
-            local running = (q and string.format("%s  %d/%d", tostring(q.enemy or "?"), q.have, q.need))
-                or (questBlind and string.format("counting here  %d/%d", questKills, questNeed or 0))
-                or "none"
-            local idLine = (#ids > 0) and (ids[1][1] .. "  tier " .. tostring(ids[1][2])
-                .. (ids[1][3] and "  [locked]" or "")
-                .. ((#ids > 1) and ("   then " .. ids[2][1] .. " t" .. ids[2][2]) or ""))
-                or "no quest id known"
-            return table.concat({
-                "running  " .. running,
-                "target   " .. tostring(e or "-") .. "   ->  " .. idLine,
-                "last     " .. tostring(P.lastQuestResult),
-                string.format("taken %d   ·   done %d   ·   dropped %d",
-                    stats.quests, stats.questsDone, stats.abandons),
-            }, "\n")
-        end)
-
-        heading2(v, "does it go to the giver")
-        local modeBox = chooser(v, 128)
-        local modeSig = nil
-        local MODES = {
-            { "never",  "Never go, ask from here", "the default" },
-            { "auto",   "Go only if it is near",   "by distance" },
-            { "always", "Always go to it",         "the slow one" },
-        }
-        local function modeRefresh()
-            local e = activeName
-            local gp = nil
-            if e then
-                local _, pos = P.giverFor(e)
-                gp = pos
-            end
-            local _, rr = parts()
-            local gd = (gp and rr) and math.floor((gp - rr.Position).Magnitude) or nil
-            local sig = tostring(CFG.GiverMode) .. "|" .. tostring(e) .. "|"
-                .. tostring(gd and math.floor(gd / 25))
-            if sig == modeSig then return end
-            modeSig = sig
-            for _, c in ipairs(modeBox:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            for i, m in ipairs(MODES) do
-                local tag = m[3]
-                if m[1] == "auto" and gd then
-                    tag = (gd <= (CFG.GiverWalkRadius or 250))
-                        and ("giver " .. gd .. " away: goes")
-                        or  ("giver " .. gd .. " away: asks")
-                end
-                chooserRow(modeBox, i, m[2], tag, CFG.GiverMode == m[1], function()
-                    CFG.GiverMode = m[1]
-                    say("giver: " .. m[2])
-                    modeSig = nil
-                end)
-            end
-        end
-        modeRefresh()
-        addLive(modeRefresh)
-        sliderRow(v, "Near means within", 30, 800, 10,
-            function() return CFG.GiverWalkRadius end,
-            function(x) CFG.GiverWalkRadius = x end, " studs")
-        caption(v, "Never: the quest is asked for from the camp, nothing moves "
-            .. "you. If the game's quest tracker cannot be read back, the quest "
-            .. "is still running - its kills are counted here, with the exact "
-            .. "count from the game's quest data. Auto: goes only when the giver "
-            .. "is near, and goes up to ask again if asking from range came back "
-            .. "empty.")
-
-        heading2(v, "when the camp runs out")
-        switchRow(v, "Wait for the respawn",
-            "Off: drop the quest and go to the next species",
-            function() return CFG.WaitRespawn end,
-            function(x) CFG.WaitRespawn = x end)
-        sliderRow(v, "Wait at most", 10, 120, 5,
-            function() return CFG.RespawnMax end,
-            function(x) CFG.RespawnMax = x end, " s")
-
-        heading2(v, "quest bosses")
-        switchRow(v, "Bosses first",
-            "A boss that is up goes before the rest, between quests",
-            function() return CFG.BossFirst end,
-            function(x) CFG.BossFirst = x end)
-        caption(v, "A boss's quest is taken only while it is up - it is found "
-            .. "near you, or parked by the game far away. Not up: the rest of "
-            .. "the circuit, or, if it is alone on the circuit, a wait over its "
-            .. "spawn for as long as it takes.")
-        readout(v, function()
-            if not P.bossWaitSince then return "no boss wait" end
-            return string.format("waiting for a boss  %ds", math.floor(os.clock() - P.bossWaitSince))
-        end)
-
-        heading2(v, "by hand")
-        actionRow(v, "Take the quest now", nil, function() P.takeQuestNow() end)
-        actionRow(v, "Drop the running quest", nil, function() P.abandonQuest() end)
-        hairline(v)
-        actionRow(v, "Use where I stand as the giver", nil, function() P.setGiverHere() end)
-        actionRow(v, "Giver back to the table", nil, function() P.clearGiver() end)
-        actionRow(v, "Unlock the quest and work it out again", nil, function()
-            local e = activeName
-            if e then P.learnedQuests[e] = nil end
-            say("quest unlocked - the next ask works it out")
-        end)
-        actionRow(v, "Forget learned quests and givers", nil, function()
-            table.clear(P.learnedQuests)
-            table.clear(P.learnedGivers)
-            table.clear(P.giverSpots)
-            say("learned quests and givers forgotten")
-        end)
-
-        heading2(v, "override the lookup")
-        textRow(v, "quest id, e.g. MarineQuest2", function(val)
-            CFG.QuestName = (#val > 0) and val or nil
-            say("quest id: " .. tostring(CFG.QuestName or "from the table"))
-        end)
-        sliderRow(v, "Tier   0 = work it out", 0, 3, 1,
-            function() return CFG.QuestTier or 0 end,
-            function(x) CFG.QuestTier = (x > 0) and x or nil end)
-        caption(v, "Leave the tier at 0 and the first ask tries each one, reads "
-            .. "the tracker back, and keeps whichever asks for your species. "
-            .. "That is locked, and every later cycle repeats exactly it.")
-    end
-
-    -- =====================================================
     -- SAFETY
     -- =====================================================
     do
@@ -6497,8 +5217,6 @@ local function buildUI()
                 "in hand     " .. tostring(P.heldTool() or "-"),
                 "kills       " .. stats.kills .. string.format("   %.1f/min overall", stats.kills / mins),
                 "piles       " .. stats.piles,
-                "quests      " .. stats.quests .. " taken   " .. stats.questsDone .. " done   "
-                    .. stats.abandons .. " dropped",
                 "M1          " .. stats.m1 .. "   skills " .. stats.casts
                     .. string.format(" (%d fired, %d hit, %d did not fire)", stats.castsTook,
                         stats.castsHit, stats.castsMissed)
@@ -6509,7 +5227,6 @@ local function buildUI()
                 "magnet      held " .. tostring(P.pileHeld) .. "   put back " .. stats.putBack,
                 "escapes     " .. stats.escapes,
                 "haki        " .. stats.hakiPresses .. "   (J/E presses)",
-                "gui scans   " .. tostring(P.questScans or 0),
                 "status      " .. statusLine,
             }, "\n")
         end)
@@ -6550,10 +5267,6 @@ function P.start()
     for k in pairs(stats) do stats[k] = 0 end
     stats.startedAt = os.clock()
     activeName, countedDead, circuitIdx = nil, {}, 1
-    questSpecies, questNeed, questKills, questBlind = nil, nil, 0, false
-    table.clear(lastAskAt)
-    table.clear(stalled)
-    questTakenAt, questLastHave, questMovedAt = 0, -1, 0
     releasePile()
     table.clear(pileWatch)
     lockCF, lastWritten, flying = nil, nil, false
@@ -6632,8 +5345,7 @@ function P.stop(why)
     pcall(restoreBody)
     setState("IDLE")
     say("stopped")
-    print(string.format("[BFF] stopped. kills=%d piles=%d quests=%d",
-        stats.kills, stats.piles, stats.questsDone))
+    print(string.format("[BFF] stopped. kills=%d piles=%d", stats.kills, stats.piles))
 end
 
 function P.stats() return stats end

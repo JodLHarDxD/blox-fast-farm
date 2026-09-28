@@ -26,8 +26,8 @@ FILE = "f1"
 local r = takeCarry()
 check("resumed", r == true and CFG.EliteHunt and not CFG.RaidMode and E.carried == "file")
 check("join counted with its time", E.tally.joins == 5 and E.tally.joinSecs == 52, E.tally.joins)
-check("settings back; unknown keys ignored; QuestName allowed",
-    CFG.TravelSpeed == 500 and CFG.NotAField == nil and CFG.QuestName == "Q")
+check("settings back; unknown keys ignored (QuestName too - the quest engine is gone)",
+    CFG.TravelSpeed == 500 and CFG.NotAField == nil and CFG.QuestName == nil)
 check("servers looked at carried", E.visited.x == NOW - 5)
 check("file marked arrived here", #WRITES == 1 and DB[FILE].arrivedJob == "new")
 
