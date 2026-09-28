@@ -43,8 +43,43 @@ _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 | Quest bosses | 24 quest bosses from the game's own quest data (ids, tiers, levels), all three seas; renamed ones (Fajita→Orbitus, Bobby→Chef, Island Empress→Hydra Leader) accept either name. **Up** = loaded near you, or parked by the game in ReplicatedStorage while far from players (how the hubs check); neither = not spawned. The quest is taken only while it is up (tier 3 mostly, one kill, from where you stand). Not up: the rest of the circuit (a held boss quest is dropped so the others can run), or — nothing else to fight — a wait over its spawn for as long as it takes. "Bosses first" (Quest page): a boss that is up goes next, between quests. Under its level: fought without the quest, and the panel says the level. Targets page lists this sea's bosses: up / up, here / not spawned. |
 | Raid mode | Home page switch. Species and quests forgotten: **every living enemy, any kind**, within "Raid mode pulls within" (450, Magnet page) of the newest raid island goes in one pile, killed the usual way (magnet, aim lock, combo). The raid is read the way the public raid scripts read it (2025-07, 2026-08): timer `PlayerGui.Main.TopHUDList.RaidTimer` (older `Main.Timer`), islands `workspace._WorldOrigin.Locations["Island 1".."Island 5"]`, newest = highest number. Island empty = hover 45 over it for the wave / the next island. Outside a raid it pulls everything within the radius of you. Observation is never pressed (raids switch it off); Enhancement still is. Start the raid yourself (chip + button). |
 | Random mode | Home page switch (turns raid mode off). Quests forgotten; **every living enemy of any kind within "Random mode reaches" (750) of you, and every one damaged.** At the Castle on the Sea (Third Sea) the area is the pirate raid's own: the game tags mobs `BasicMob`, and a raid pirate is one that appears within 750 of (-5556, 314, -2988) (redz module 2025-10; a 2026-09 hub goes to (-5128, 314, -2957) when farther than 1000); raid every ~1 h 15. Guarantee: (1) pulled only within each kind's pull limit (MaxPull / measured) - a far or diagonal group gets its own pile next; (2) one that took no damage when pulled is fought where it stands once the free ones are done; (3) no damage from the height in 6 s = down close for it, whatever "Always stay above" says; (4) none in 15 s even close = cannot be hurt by this setup: left a minute and counted on the panel. |
+| Elite hunt | Home page switch (turns raid / random off). Third Sea: **Diablo, Deandre, Urban** (and Tyrant of the Skies while he is up) - one per server, back 8 min 45 s after the last one died; only the **last hit** gets the drops, God's Chalice among them. **Up** = loaded near a player or parked by the game in ReplicatedStorage (quest bosses' rule), or the Elite Hunter (the cat at the Castle on the Sea, `CommF_:InvokeServer("EliteHunter")`) answers with a name. Up: its quest is taken (a different running quest is dropped; if asking from where you stand gets no answer, once per server from in front of the Elite Hunter), then flight to it and **the fight where it stands - never pulled** (a put-back would leave the one target alone for 30 s). Down: 4 s look for the chalice, progress read (`"EliteHunter","Progress"`), then the next server. None up: 3 s when the Elite Hunter says "I don't have anything for you", else "Look for" (8 s), then the next server. |
+| Server hop | The game's own server browser, `ReplicatedStorage.__ServerBrowser` (what its Servers menu calls): `InvokeServer(page)` → `{ [JobId] = { Count, Region } }`, `InvokeServer("teleport", JobId)`. Fails → the Roblox list (`games.roblox.com/v1/games/<place>/servers/Public`) + `TeleportToPlaceInstance`. Not this server, not full, not looked at in "Try a server again after" (10 min); **fewest players first** (or any order). Five tries a round, three rounds. Your settings, the servers looked at and the counts go to the next server in the reload queued with `queue_on_teleport` **and** in `workspace/bff_elite_hop.json`; the next copy starts the hunt by itself (only within 5 min of the hop, only if it was running). |
+| **The chalice** | **God's Chalice in your backpack or hand = the hunt is over in that server, for good.** Leaving the server or dying with it loses it, so every hop refuses - checked on every step, and again right before each teleport call (a drop that lands while the server list is being read still stops it). You are flown 300 up and held there; the next server's copy is told not to start. Turning the hunt off and on does not re-arm hopping in that server. Stop gives you the character back. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
+
+## Elite hunt without queue_on_teleport
+
+The **Elite hunt** page says whether your executor has `queue_on_teleport`.
+If it does not, save this in the executor's `autoexec` folder. It loads the
+farm only when a hunt hopped you here (the file says so), so it stays out of
+the way the rest of the time:
+
+```lua
+repeat task.wait() until game:IsLoaded()
+local ok, s = pcall(readfile, "bff_elite_hop.json")
+if ok and type(s) == "string" and s:find('"resume":true', 1, true) then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/fast_farm.lua?cb=" .. tick()))()
+end
+```
+
+Having both is harmless: a second copy replaces the first and the join is
+counted once.
+
+## First elite hunt test
+
+1. **Elite hunt** page, "Elite Hunter" line after the first look: the words it
+   got back from `CommF_:InvokeServer("EliteHunter")` far from the NPC. Words =
+   it answers from anywhere. "unknown" + a flight to the Elite Hunter = it
+   only answers up close.
+2. "servers" line after the first hop: "N listed … the game's server browser"?
+   ("the Roblox server list" = `__ServerBrowser` failed on your client.)
+3. "after a hop" line: queue_on_teleport yes / no. After the first hop, does
+   the panel come back by itself and say "elite hunt carried over"?
+4. After ~20 joins: "had one N (x%)" and "join Ns" - the real numbers the
+   speed estimate (~2 min per elite) was guessed from.
+5. When one is up far away: does it fly straight to it ("parked by the game")?
 
 ## First in-game test (each answer decides the next fix)
 
@@ -71,7 +106,11 @@ python tools/pose_test.py                        # where you hang + the remote h
 python tools/leash_test.py                       # checkPutBack: pull limit measured (contrast rule), random mode's in-place escalation
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
+python tools/elite_test.py                       # elite hunt, real code, 39 checks: the Elite Hunter's words, server pick, hop() refusing on the chalice (held / seen / arriving mid-hop), carry-over
 ```
+
+The main chunk is at Luau's 200-local register limit: a new section goes in
+a function of its own (see ELITE HUNT) with only what the rest needs exported.
 
 The Luau tools live in `blox-scripts/tools/luau-0.735/`.
 

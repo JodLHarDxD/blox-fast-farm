@@ -21,6 +21,9 @@
                the game's own cooldown bars; M1 fills the gaps between them.
       CIRCUIT  several species, one quest at a time: A's quest, A's pile, done
                -> B's quest, fly, B's pile, done -> back to A, respawned by now.
+      ELITES   Third Sea: an Elite Pirate up here is found, flown to and hit
+               to the last; none up (or it is down) = the next server. The
+               God's Chalice ends it: no hop, ever, in the server it came in.
 
     TAKEN FROM FARM_PRO UNCHANGED: the level / quest / giver tables, the quest
     tracker reader, the quest dialog fallback, Enhancement + Observation, walk
@@ -35,7 +38,9 @@
         _G.BFF.start()          _G.BFF.stop()          _G.BFF.config
 ]]
 
-if _G.BFF and _G.BFF.stop then pcall(_G.BFF.stop) end
+-- "reload": a new copy replacing this one, not you stopping -- an elite hunt
+-- carried over a hop stays carried.
+if _G.BFF and _G.BFF.stop then pcall(_G.BFF.stop, "reload") end
 -- farm_pro and this both drive the character; two at once fight each other.
 -- Clearing _G.BFP also ends farm_pro's water loop, which runs while it is itself.
 if _G.BFP and _G.BFP.stop then
@@ -159,6 +164,23 @@ local CFG = {
     -- where it stands, from close if high does not hurt it.
     RandomMode         = false,
     RandomRadius       = 750,
+
+    -- ---------- ELITE HUNT ----------
+    -- Third Sea. Diablo, Deandre, Urban (and Tyrant of the Skies while he is
+    -- up): one per server, back 8 min 45 s after the last one died. Only the
+    -- LAST hit gets the drops -- the God's Chalice among them. Fought where it
+    -- stands, never pulled.
+    EliteHunt          = false,
+    -- None up here, or it is down without a chalice: the next server.
+    -- Off: wait in this one for the next spawn. With the chalice in your
+    -- backpack or hand there is no hop at all, whatever this says.
+    EliteHop           = true,
+    EliteOrder         = "fewest",   -- "fewest" (players first) | "random"
+    -- The Elite Hunter's quest (the cat at the Castle on the Sea): progress
+    -- toward Yama (30), money, EXP. The chalice does not need it.
+    EliteQuest         = true,
+    EliteLook          = 8,          -- seconds after a join to look before leaving
+    EliteRevisit       = 10,         -- minutes before a server looked at is tried again
 
     -- ---------- QUEST ----------
     QuestLoop          = true,
@@ -1963,6 +1985,21 @@ local function buildRandomPile()
     return {}, nil, false
 end
 
+-- ELITE HUNT's pile: the one elite, nearest you, fought WHERE IT STANDS. Never
+-- pulled: a pulled one that took no damage would be put back and left alone
+-- for thirty seconds -- on the one target the hunt is for.
+local function buildElitePile(cur)
+    local _, r = parts()
+    if not r then return {}, nil end
+    local best, bd = nil, math.huge
+    for _, e in ipairs(liveEnemies({ [cur.name] = true })) do
+        local d = (e.root.Position - r.Position).Magnitude
+        if d < bd then best, bd = e, d end
+    end
+    if not best then return {}, nil end
+    return { best }, best.root.Position
+end
+
 -- Look again who is loaded: a new spawn joins the pile within a tenth of a
 -- second. Called from the fight AND from the frame loop below, because the
 -- fight is busy for most of a second on every cast and every M1 probe.
@@ -1977,6 +2014,12 @@ local function refreshPile()
         local model = inPlace and list[1] and list[1].model or nil
         if model ~= P.inPlaceTarget then P.forceClose = false end
         P.pileInPlace = inPlace
+        P.inPlaceTarget = model
+    elseif pileCur.elite then
+        list, centre = buildElitePile(pileCur)
+        local model = list[1] and list[1].model or nil
+        if model ~= P.inPlaceTarget then P.forceClose = false end
+        P.pileInPlace = true
         P.inPlaceTarget = model
     elseif pileCur.raid then
         P.pileInPlace = false
@@ -2053,8 +2096,11 @@ local function checkPutBack()
         elseif now - j.at > 6 and actions - j.act >= 6 and not P.forceClose then
             P.forceClose = true          -- poseTarget takes you close from the next frame
         elseif now - j.at > 15 and actions - j.act >= 15 then
-            P.randomSkip[e.model] = now + 60
-            P.randomCant += 1
+            -- An elite is never skipped: it is the only one there is.
+            if not (pileCur and pileCur.elite) then
+                P.randomSkip[e.model] = now + 60
+                P.randomCant += 1
+            end
             pileJoin[e.model] = nil
         end
         return
@@ -3842,7 +3888,7 @@ local function fight(cur, names)
             end
         end
 
-        if not (cur.raid or cur.random) and questFull() then
+        if not (cur.raid or cur.random or cur.elite) and questFull() then
             if pileStart then recordPile(now - pileStart) end
             attacking = false
             return "done"
@@ -4024,6 +4070,653 @@ do
 end
 
 -- =========================================================
+-- ELITE HUNT AND THE SERVER HOP
+-- =========================================================
+-- Third Sea. The Elite Pirates -- Diablo, Deandre, Urban, and Tyrant of the
+-- Skies while he is up -- are ONE per server, back 8 min 45 s after the last
+-- one died (Fandom, 2026-09). Only the LAST hit gets the drops, God's Chalice
+-- among them; the Elite Hunter's quest (the cat at the Castle on the Sea)
+-- adds progress (Yama at 30), money and EXP, nothing to the drop.
+--
+-- UP: the game has it loaded (near a player) or parked in ReplicatedStorage
+-- (far from every player) -- bossUp reads both -- or the Elite Hunter says so.
+-- Neither, after a short look: another server. The game's own server browser
+-- (ReplicatedStorage.__ServerBrowser, what its Servers menu calls: a page
+-- number gives { [JobId] = { Count, Region } }, "teleport" + JobId joins),
+-- the Roblox server list if that one fails.
+--
+-- A teleport ends this script. What it knew -- your settings, the servers
+-- already looked at, the counts -- goes with you twice: in the reload queued
+-- on the executor (queue_on_teleport) and in a file an autoexec loader reads.
+--
+-- THE CHALICE ENDS IT. Leaving the server, or dying, with it in your backpack
+-- loses it. Once it is seen the hunt stops in that server for good: every hop
+-- refuses, and the last look is right before the teleport call itself.
+-- Only eliteStep leaves the block as a local (the rest are on P): the main
+-- chunk is at Luau's 200-local register limit.
+local eliteStep
+do
+    -- In a function of its own: registers are per function, and a do block
+    -- would still count against the main chunk's.
+    local function build()
+        local ELITES    = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" }
+        local ELITE_NPC = Vector3.new(-5418.9, 313.7, -2826.2)   -- the Elite Hunter (public hubs' spot)
+        local CHALICE   = "God's Chalice"
+        local HOP_FILE  = "bff_elite_hop.json"
+        local SOURCE_URL = "https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/fast_farm.lua"
+        -- Where the Elite Hunter's words send you, when no model can be seen: over
+        -- the middle of the island, from the camps in LEVELS round it.
+        local ELITE_ISLES = {
+            { "port town",       Vector3.new(0, 250, 5600) },
+            { "hydra",           Vector3.new(5300, 800, 0) },
+            { "great tree",      Vector3.new(3000, 400, -7000) },
+            { "floating turtle", Vector3.new(-12000, 650, -8500) },
+            { "tiki",            Vector3.new(-16500, 250, 700) },
+        }
+
+        -- What the Elite Hunter answered: "none" (nothing up), "up" (it named one or
+        -- gave its quest), "unknown" (no answer, or words not known here).
+        local function eliteReply(r)
+            if type(r) ~= "string" or #r == 0 then return "unknown" end
+            local s = string.lower(r)
+            if string.find(s, "anything for you", 1, true) then return "none" end
+            if string.find(s, "roaming", 1, true) or string.find(s, "last seen", 1, true) then return "up" end
+            for _, n in ipairs(ELITES) do
+                if string.find(s, string.lower(n), 1, true) then return "up" end
+            end
+            return "unknown"
+        end
+
+        -- The island its words name, and a point over it.
+        local function eliteIsle(r)
+            if type(r) ~= "string" then return nil, nil end
+            local s = string.lower(r)
+            for _, i in ipairs(ELITE_ISLES) do
+                if string.find(s, i[1], 1, true) then return i[1], i[2] end
+            end
+            return nil, nil
+        end
+
+        -- One page of the game's server browser into rows. Returns how many.
+        local function browserRows(res, out)
+            if type(res) ~= "table" then return 0 end
+            local n = 0
+            for id, d in pairs(res) do
+                if type(id) == "string" and type(d) == "table" then
+                    n += 1
+                    table.insert(out, {
+                        id = id, count = d.Count or d.Players or d.count,
+                        max = d.MaxPlayers or d.Max, region = d.Region,
+                    })
+                end
+            end
+            return n
+        end
+
+        -- The servers worth joining, best first: not this one, not full, not looked
+        -- at in the last revisitSecs. "fewest": fewest players first (fewer hunters,
+        -- the elite more likely still standing); "random": any order. rand() breaks
+        -- ties so two runs do not pile into the same server.
+        local function pickServers(rows, here, visited, now, revisitSecs, order, rand)
+            local out, seen = {}, {}
+            for _, s in ipairs(rows) do
+                local id = s.id
+                if type(id) == "string" and id ~= here and not seen[id] then
+                    seen[id] = true
+                    local cnt = tonumber(s.count) or 0
+                    local max = tonumber(s.max) or 12
+                    local at = visited[id]
+                    if cnt < max and not (type(at) == "number" and now - at < revisitSecs) then
+                        table.insert(out, { id = id, count = cnt, region = s.region, key = rand() })
+                    end
+                end
+            end
+            if order == "random" then
+                table.sort(out, function(a, b) return a.key < b.key end)
+            else
+                table.sort(out, function(a, b)
+                    if a.count ~= b.count then return a.count < b.count end
+                    return a.key < b.key
+                end)
+            end
+            return out
+        end
+
+        -- Servers looked at more than keepSecs ago are forgotten.
+        local function pruneVisited(visited, now, keepSecs)
+            for id, at in pairs(visited) do
+                if type(at) ~= "number" or now - at > keepSecs then visited[id] = nil end
+            end
+            return visited
+        end
+
+        -- Everything the hunt knows. `tally` and `visited` survive the hop.
+        local E = {
+            visited = {},
+            tally = { joins = 0, found = 0, kills = 0, chalices = 0, joinSecs = 0, fails = 0, since = os.time() },
+            used = false,            -- the hunt was on at some point in this server
+            carried = nil,           -- how this server's copy got its state: "queued reload" / "file"
+            queued = false,          -- the reload is queued once per server (each call would add a copy)
+            hopping = false,
+            chalice = false,         -- seen in this server: no hop here, ever
+            safeAt = nil,
+            lookStart = nil, foundHere = false,
+            asks = 0, askAt = -100, questAskAt = -100, reply = nil, replyText = nil,
+            npcVisited = false, dropped = false, isleTried = false,
+            missSince = nil, progress = nil, lastKill = nil, lastList = nil,
+            note = "elite hunt off",
+        }
+        P.elite = E
+
+        local HttpService     = game:GetService("HttpService")
+        local TeleportService = game:GetService("TeleportService")
+
+        local function holdingChalice()
+            return findTool(CHALICE) ~= nil
+        end
+        P.holdingChalice = holdingChalice
+
+        local function queueFn()
+            local q = (syn and syn.queue_on_teleport) or queue_on_teleport or queueonteleport
+                or (fluxus and fluxus.queue_on_teleport)
+            return type(q) == "function" and q or nil
+        end
+
+        -- How the next server gets this script back, in words for the panel.
+        function P.reloadWay()
+            local q = queueFn() and "queue_on_teleport (your executor has it)"
+                or "NO queue_on_teleport on this executor - put the README's loader in its autoexec folder"
+            local f = writefile and "file: yes" or "file: this executor cannot write one"
+            return q .. "  ·  " .. f
+        end
+
+        local function fileRead()
+            if not readfile then return nil end
+            local ok, s = pcall(readfile, HOP_FILE)
+            return (ok and type(s) == "string") and s or nil
+        end
+
+        local function fileWrite(s)
+            if not writefile or not s then return false end
+            return (pcall(writefile, HOP_FILE, s))
+        end
+
+        -- The state that goes to the next server. resume = the hunt starts there by
+        -- itself. Only for 5 minutes: a hunt you left an hour ago is not resumed.
+        local function carryState(resume)
+            local cfg = {}
+            for k, v in pairs(CFG) do cfg[k] = v end
+            local t = {
+                v = 1, resume = resume and true or false,
+                freshUntil = os.time() + 300, hopAt = os.time(), fromJob = game.JobId,
+                visited = E.visited, tally = E.tally, cfg = cfg,
+            }
+            local ok, s = pcall(function() return HttpService:JSONEncode(t) end)
+            if not ok then
+                -- Something in your settings will not go into JSON: the hunt
+                -- still goes on over there, on that copy's defaults.
+                t.cfg = nil
+                ok, s = pcall(function() return HttpService:JSONEncode(t) end)
+            end
+            return ok and s or nil
+        end
+
+        local function queueReload(carry)
+            if E.queued then return end
+            local q = queueFn()
+            if not q then return end
+            local url = _G.BFF_SOURCE or SOURCE_URL
+            local code = "repeat task.wait() until game:IsLoaded()\n"
+                .. (carry and string.format("_G.BFF_CARRY = %q\n", carry) or "")
+                .. string.format("_G.BFF_SOURCE = %q\n", url)
+                .. string.format("pcall(function() loadstring(game:HttpGet(%q .. \"?cb=\" .. tostring(tick())))() end)\n", url)
+            if pcall(q, code) then E.queued = true end
+        end
+
+        -- On load: state carried from the server before. The file (written at every
+        -- teleport attempt) is newer than the queued copy (queued once), so it wins
+        -- when both are there. Returns true when the hunt should start by itself.
+        local function takeCarry()
+            local queued = _G.BFF_CARRY
+            _G.BFF_CARRY = nil
+            local s, via = fileRead(), "file"
+            local t
+            if s then
+                local ok, d = pcall(function() return HttpService:JSONDecode(s) end)
+                if ok and type(d) == "table" then t = d end
+            end
+            if not t and type(queued) == "string" then
+                local ok, d = pcall(function() return HttpService:JSONDecode(queued) end)
+                if ok and type(d) == "table" then t, via = d, "queued reload" end
+            end
+            if not t then return false end
+            if type(t.visited) == "table" then E.visited = t.visited end
+            if type(t.tally) == "table" then
+                for k, v in pairs(t.tally) do
+                    if type(v) == "number" then E.tally[k] = v end
+                end
+            end
+            local fresh = tonumber(t.freshUntil) and os.time() <= t.freshUntil
+            -- Written in THIS server: nothing hopped (a copy run again by hand).
+            if not fresh or t.fromJob == game.JobId then return false end
+            if type(t.cfg) == "table" then
+                for k, v in pairs(t.cfg) do
+                    if CFG[k] ~= nil or k == "QuestName" or k == "QuestTier" then CFG[k] = v end
+                end
+            end
+            if not t.resume then return false end
+            -- Two loaders in one server (autoexec AND the queue): count the join once.
+            if t.arrivedJob ~= game.JobId then
+                E.tally.joins += 1
+                local secs = os.time() - (tonumber(t.hopAt) or os.time())
+                if secs >= 0 and secs < 300 then E.tally.joinSecs += secs end
+                t.arrivedJob = game.JobId
+                t.tally = E.tally          -- with this join in it
+                pcall(function() fileWrite(HttpService:JSONEncode(t)) end)
+            end
+            CFG.EliteHunt, CFG.RaidMode, CFG.RandomMode = true, false, false
+            E.used, E.carried = true, via
+            return true
+        end
+        P.takeCarry = takeCarry
+
+        -- The next server's copy must not start by itself (you stopped it, or the
+        -- chalice came in).
+        local function carryOff()
+            if E.used then fileWrite(carryState(false)) end
+        end
+        P.carryOff = carryOff
+
+        local function notify(text)
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = "Fast Farm", Text = text, Duration = 30,
+                })
+            end)
+        end
+
+        -- THE CHALICE: the hunt is over in this server, for good -- not even
+        -- turning it off and on hops again here. Marking it is safe from any
+        -- thread (the panel's Hop now); the hover is the main loop's.
+        local function markChalice()
+            if E.chalice then return end
+            E.chalice = true
+            E.tally.chalices += 1
+            carryOff()
+            notify("God's Chalice! Elite hunt stopped - no server hop.")
+            print("[BFF] God's Chalice - elite hunt stopped in this server, no hop.")
+        end
+
+        -- Up out of reach and held there; no hop, no fight. Stop gives you the
+        -- character back.
+        local function chaliceStop()
+            markChalice()
+            releasePile()
+            local _, r = parts()
+            if r and not E.safeAt then
+                E.safeAt = r.Position + Vector3.new(0, 300, 0)
+                flyTo(E.safeAt)
+            end
+            setState("CHALICE")
+            E.note = holdingChalice()
+                and "GOD'S CHALICE - hunt stopped, no hop in this server. Dying or leaving loses it."
+                or "the chalice came in this server - the hunt stays stopped here (Stop to take over)"
+            say(E.note)
+        end
+
+        -- Every server the game's browser lists, a page at a time, until a page adds
+        -- nothing new.
+        local function browserList(myEpoch)
+            local sb = RS:FindFirstChild("__ServerBrowser")
+            if not sb then return nil end
+            local out, seen = {}, {}
+            for page = 1, 40 do
+                if stale(myEpoch) then break end
+                local rows = {}
+                local ok, res = pcall(function() return sb:InvokeServer(page) end)
+                if not ok or browserRows(res, rows) == 0 then break end
+                local new = 0
+                for _, row in ipairs(rows) do
+                    if not seen[row.id] then
+                        seen[row.id] = true
+                        new += 1
+                        table.insert(out, row)
+                    end
+                end
+                if new == 0 or #out >= 150 then break end
+                say(string.format("hop: reading the server list  %d", #out))
+            end
+            return out
+        end
+
+        local function robloxList(myEpoch)
+            local out, cursor = {}, ""
+            for _ = 1, 3 do
+                if stale(myEpoch) then break end
+                local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
+                    game.PlaceId, (cursor ~= "") and ("&cursor=" .. cursor) or "")
+                local ok, body = pcall(function() return game:HttpGet(url) end)
+                if not ok or type(body) ~= "string" then break end
+                local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
+                if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then break end
+                for _, s in ipairs(data.data) do
+                    table.insert(out, { id = s.id, count = s.playing, max = s.maxPlayers })
+                end
+                cursor = data.nextPageCursor
+                if type(cursor) ~= "string" or cursor == "" then break end
+            end
+            return out
+        end
+
+        -- One join. Returns only if it did not happen (a teleport that works ends
+        -- this script mid-wait).
+        local function joinServer(id, via, myEpoch)
+            local failed = false
+            local c1, c2
+            pcall(function()
+                c1 = TeleportService.TeleportInitFailed:Connect(function(p)
+                    if p == player then failed = true end
+                end)
+            end)
+            pcall(function()
+                c2 = player.OnTeleport:Connect(function(st)
+                    if st == Enum.TeleportState.Failed then failed = true end
+                end)
+            end)
+            local called = pcall(function()
+                if via == "browser" then
+                    RS:FindFirstChild("__ServerBrowser"):InvokeServer("teleport", id)
+                else
+                    TeleportService:TeleportToPlaceInstance(game.PlaceId, id, player)
+                end
+            end)
+            local t0 = os.clock()
+            while called and not failed and os.clock() - t0 < 15 and not stale(myEpoch) do
+                task.wait(0.25)
+            end
+            if c1 then pcall(function() c1:Disconnect() end) end
+            if c2 then pcall(function() c2:Disconnect() end) end
+            return false
+        end
+
+        -- THE HOP. Refused outright with the chalice; looked at again right before
+        -- every teleport call.
+        local function hop(why)
+            if E.chalice or holdingChalice() then
+                if holdingChalice() then markChalice() end
+                E.note = "hop refused - the God's Chalice is in this server with you"
+                say(E.note)
+                return false
+            end
+            if E.hopping then return false end
+            E.hopping = true
+            local myEpoch = epoch
+            releasePile()
+            setState("HOP")
+            local now = os.time()
+            E.visited[game.JobId] = now
+            pruneVisited(E.visited, now, 3600)
+            for round = 1, 3 do
+                say("hop: reading the server list  (" .. tostring(why) .. ")")
+                local rows, via = browserList(myEpoch), "browser"
+                if not rows or #rows == 0 then rows, via = robloxList(myEpoch), "roblox" end
+                local cands = pickServers(rows or {}, game.JobId, E.visited, os.time(),
+                    (CFG.EliteRevisit or 10) * 60, CFG.EliteOrder, math.random)
+                E.lastList = string.format("%d listed, %d worth joining  ·  %s", #(rows or {}), #cands,
+                    via == "browser" and "the game's server browser" or "the Roblox server list")
+                for i, s in ipairs(cands) do
+                    if i > 5 or stale(myEpoch) then break end
+                    if holdingChalice() then
+                        E.hopping = false
+                        markChalice()
+                        return false
+                    end
+                    E.visited[s.id] = os.time()
+                    local carry = carryState(CFG.EliteHunt and P.running)
+                    fileWrite(carry)
+                    queueReload(carry)
+                    E.note = string.format("hop: joining a server with %d players  (%s)", s.count, tostring(why))
+                    say(E.note)
+                    joinServer(s.id, via, myEpoch)
+                    -- Still here: that one refused (full, gone, or teleports throttled).
+                    E.tally.fails += 1
+                    task.wait(1)
+                end
+                if stale(myEpoch) then break end
+                task.wait(3 * round)
+            end
+            E.hopping = false
+            E.note = "hop failed three times - trying again shortly  (" .. tostring(E.lastList) .. ")"
+            say(E.note)
+            return false
+        end
+
+        function P.hopNow()
+            task.spawn(function() hop("by hand") end)
+        end
+
+        -- Is one up? The first of the elites the game has loaded or parked.
+        local function eliteUp()
+            for _, n in ipairs(ELITES) do
+                local at, where = bossUp(n)
+                if at then return n, at, where end
+            end
+            return nil, nil, nil
+        end
+
+        -- The quest tracker's title (Main.Quest, what the public hubs read). Second
+        -- value: it is an elite's.
+        local function eliteQuestShown()
+            local ok, txt = pcall(function()
+                local q = player.PlayerGui.Main.Quest
+                if not q.Visible then return nil end
+                return q.Container.QuestTitle.Title.Text
+            end)
+            if not ok or type(txt) ~= "string" then return nil, false end
+            for _, n in ipairs(ELITES) do
+                if string.find(txt, n, 1, true) then return txt, true end
+            end
+            return txt, false
+        end
+
+        local function askHunter()
+            local cf = commF()
+            E.asks += 1
+            E.askAt = os.clock()
+            if not cf then E.reply, E.replyText = "unknown", "no CommF_ remote" return "unknown" end
+            local ok, r = pcall(function() return cf:InvokeServer("EliteHunter") end)
+            E.reply = eliteReply(ok and r or nil)
+            E.replyText = ok and tostring(r) or "error"
+            return E.reply
+        end
+
+        local function readProgress()
+            local cf = commF()
+            if not cf then return end
+            local ok, r = pcall(function() return cf:InvokeServer("EliteHunter", "Progress") end)
+            if ok and tonumber(r) then E.progress = tonumber(r) end
+        end
+
+        -- The elite's quest, while it is still up (it counts toward Yama only if held
+        -- when it dies). Asked from where you stand; if that gets no answer at all,
+        -- once per server from in front of the Elite Hunter.
+        local function takeEliteQuest(myEpoch)
+            local shown, isElite = eliteQuestShown()
+            if isElite then return true end
+            if os.clock() - E.questAskAt < 6 then return false end
+            E.questAskAt = os.clock()
+            if shown and not E.dropped then
+                E.dropped = true
+                abandonQuest("the elite's quest instead")
+            end
+            local cls = askHunter()
+            shown, isElite = eliteQuestShown()
+            if isElite then return true end
+            if cls == "unknown" and not E.npcVisited then
+                E.npcVisited = true
+                setState("FLY")
+                say("to the Elite Hunter for the quest (asking from here got no answer)")
+                flyTo(ELITE_NPC + Vector3.new(0, 3, 0))
+                if stale(myEpoch) then return false end
+                task.wait(0.5)
+                askHunter()
+                shown, isElite = eliteQuestShown()
+                return isElite
+            end
+            return false
+        end
+
+        -- A fresh look in this server (arrival, or after the last one went down).
+        local function lookAgain()
+            E.lookStart, E.foundHere, E.asks, E.reply, E.replyText = os.clock(), false, 0, nil, nil
+            E.isleTried, E.missSince = false, nil
+        end
+
+        local function eliteFight(name, at, where, myEpoch)
+            activeName = name
+            if CFG.EliteQuest then takeEliteQuest(myEpoch) end
+            if stale(myEpoch) then return end
+            local e = nearestLoaded(name)
+            local _, r = parts()
+            if not r then return end
+            local target = e and e.root.Position or at
+            local over = target + Vector3.new(0, CFG.HeightSafe or 20, 0)
+            if (r.Position - over).Magnitude > 150 and not (pileCentre and pileFor == name) then
+                releasePile()
+                setState("FLY")
+                say(string.format("flying to %s  (%s)", name, where == "parked" and "parked by the game" or "loaded"))
+                flyTo(over, { stream = name })
+                if stale(myEpoch) then return end
+                e = nearestLoaded(name)
+            end
+            if not e then
+                -- Listed as up, not here. A parked entry that does not turn up in
+                -- 10 s at its spot is not believed for a minute (bossUp's rule).
+                E.missSince = E.missSince or os.clock()
+                if os.clock() - E.missSince > 10 then
+                    P.bossStale[name] = os.clock() + 60
+                    E.missSince = nil
+                end
+                say(name .. " is listed as up but is not here yet")
+                task.wait(0.3)
+                return
+            end
+            E.missSince = nil
+            local model, hum = e.model, e.hum
+            local why = fight({ name = name, elite = true }, { [name] = true })
+            if why ~= "empty" then return end                 -- hurt / 30 s sweep: the next step
+            if not (hum.Health <= 0 or model.Parent == nil) then return end   -- walked off / parked: look again
+            E.tally.kills += 1
+            releasePile()
+            say(name .. " is down - looking for the chalice")
+            local t0 = os.clock()
+            while os.clock() - t0 < 4 and not stale(myEpoch) do
+                if holdingChalice() then chaliceStop() return end
+                task.wait(0.2)
+            end
+            pcall(readProgress)
+            E.lastKill = name .. " down, no chalice"
+            lookAgain()
+            if CFG.EliteHop and not stale(myEpoch) then hop(name .. " down, no chalice") end
+        end
+
+        function eliteStep()
+            local myEpoch = epoch
+            local sea = mySea()
+            if sea and sea ~= 3 then
+                E.note = "elite hunt: Third Sea only - you are in sea " .. sea
+                say(E.note)
+                setState("WAIT")
+                task.wait(1)
+                return
+            end
+            if E.chalice or holdingChalice() then
+                chaliceStop()
+                task.wait(0.5)
+                return
+            end
+            E.used = true
+            if not E.lookStart then
+                lookAgain()
+                pcall(readProgress)
+            end
+
+            local name, at, where = eliteUp()
+            -- The Elite Hunter: once on arrival, then every 15 s while nothing is
+            -- seen. Its word is the second opinion, and asking takes the quest.
+            if E.asks == 0 or (not name and os.clock() - E.askAt > 15) then askHunter() end
+
+            if name then
+                if not E.foundHere then
+                    E.foundHere = true
+                    E.tally.found += 1
+                end
+                E.note = string.format("%s is up (%s)", name, where == "parked" and "parked by the game" or "loaded")
+                eliteFight(name, at, where, myEpoch)
+                return
+            end
+
+            local waited = os.clock() - E.lookStart
+            if E.reply == "up" then
+                -- It names one nobody can see: over the island it names, and look.
+                local isle, pos = eliteIsle(E.replyText)
+                if pos and not E.isleTried then
+                    E.isleTried = true
+                    releasePile()
+                    setState("FLY")
+                    say("the Elite Hunter says " .. isle .. " - flying over it")
+                    flyTo(pos)
+                    return
+                end
+                if waited < 45 then
+                    E.note = string.format("the Elite Hunter says one is up - looking  %.0fs", waited)
+                    say(E.note)
+                    setState("LOOK")
+                    task.wait(0.5)
+                    return
+                end
+            else
+                local need = (E.reply == "none") and math.min(3, CFG.EliteLook or 8) or (CFG.EliteLook or 8)
+                if waited < need then
+                    E.note = string.format("looking for an elite  %.0fs  ·  Elite Hunter: %s", waited, E.reply or "asking")
+                    say(E.note)
+                    setState("LOOK")
+                    task.wait(0.25)
+                    return
+                end
+            end
+
+            if CFG.EliteHop then
+                hop((E.reply == "none") and "none up here" or "none seen here")
+                task.wait(2)          -- still here: the hop failed; do not hammer it
+            else
+                E.note = "no elite up here - waiting for the next spawn (hop is off)"
+                say(E.note)
+                setState("WAIT")
+                task.wait(1)
+            end
+        end
+
+        -- The Home switch. Off: the next server's copy does not start by itself.
+        function P.setEliteHunt(x)
+            CFG.EliteHunt = x and true or false
+            releasePile()
+            if x then
+                CFG.RaidMode, CFG.RandomMode = false, false
+                E.used = true
+                lookAgain()
+                E.note = "elite hunt on"
+            else
+                carryOff()
+                E.note = "elite hunt off"
+            end
+            say(E.note)
+        end
+    end
+    build()
+end
+
+-- =========================================================
 -- MAIN LOOP
 -- =========================================================
 local function step()
@@ -4039,6 +4732,7 @@ local function step()
     end
     pcall(keepHaki)
 
+    if CFG.EliteHunt then eliteStep() return end
     if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
 
@@ -4369,6 +5063,7 @@ local function buildUI()
         home = "Fast Farm", target = "Targets", attack = "Attack", weapon = "Weapon",
         magnet = "Magnet", position = "Position", travel = "Travel",
         quest = "Quest circuit", safety = "Safety", stats = "Stats",
+        elite = "Elite hunt",
     }
 
     local function show(name, back)
@@ -4837,6 +5532,7 @@ local function buildUI()
             "Every enemy near you, any kind - no quests, no Observation",
             function() return CFG.RaidMode end,
             function(x)
+                if x and CFG.EliteHunt then P.setEliteHunt(false) end
                 CFG.RaidMode = x
                 if x then CFG.RandomMode = false end
                 releasePile()
@@ -4846,15 +5542,25 @@ local function buildUI()
             "Any enemy near you, every one damaged - Castle on the Sea raid",
             function() return CFG.RandomMode end,
             function(x)
+                if x and CFG.EliteHunt then P.setEliteHunt(false) end
                 CFG.RandomMode = x
                 if x then CFG.RaidMode = false end
                 releasePile()
                 say(x and "random mode on" or "random mode off - back to the circuit")
             end)
+        switchRow(v, "Elite hunt",
+            "Third Sea elites, last hit, next server - stops on the Chalice",
+            function() return CFG.EliteHunt end,
+            function(x) P.setEliteHunt(x) end)
         readout(v, function()
+            if CFG.EliteHunt then
+                local t = P.elite.tally
+                return string.format("%s\n%d joined  ·  %d had one  ·  %d down  ·  %d chalice",
+                    tostring(P.elite.note), t.joins, t.found, t.kills, t.chalices)
+            end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
-            return "raid mode off  ·  random mode off"
+            return "raid mode off  ·  random mode off  ·  elite hunt off"
         end)
 
         gap(v, 8)
@@ -4901,6 +5607,12 @@ local function buildUI()
         navRow(v, "Safety", function()
             return "out under " .. math.floor(CFG.EscapeBelow * 100) .. "%"
         end, "safety")
+        hairline(v)
+        navRow(v, "Elite hunt", function()
+            if P.elite.chalice then return "CHALICE - stopped" end
+            if not CFG.EliteHunt then return "Off" end
+            return CFG.EliteHop and "On, hopping" or "On, this server"
+        end, "elite")
         hairline(v)
         navRow(v, "Stats", function()
             local m = meas
@@ -5578,6 +6290,85 @@ local function buildUI()
     end
 
     -- =====================================================
+    -- ELITE HUNT
+    -- =====================================================
+    do
+        local v = makeView("elite")
+        gap(v, 6)
+        switchRow(v, "Elite hunt",
+            "Diablo, Deandre, Urban, Tyrant of the Skies",
+            function() return CFG.EliteHunt end,
+            function(x) P.setEliteHunt(x) end)
+        readout(v, function()
+            local el = P.elite
+            local t = el.tally
+            local avg = (t.joins > 0) and string.format("%.0fs", t.joinSecs / t.joins) or "-"
+            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
+            return table.concat({
+                "now       " .. tostring(el.note),
+                "Elite Hunter  " .. tostring(el.reply or "not asked")
+                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
+                string.format("joined    %d   ·   had one %d (%s)   ·   join %s", t.joins, t.found, rate, avg),
+                string.format("down      %d   ·   chalices %d   ·   failed joins %d", t.kills, t.chalices, t.fails),
+                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
+                "last      " .. tostring(el.lastKill or "-"),
+                "servers   " .. tostring(el.lastList or "not read yet"),
+                "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
+            }, "\n")
+        end)
+        caption(v, "The God's Chalice ends the hunt in the server it came in: "
+            .. "no hop there, ever - leaving or dying with it loses it. You are "
+            .. "held 300 up; Stop gives the character back.")
+
+        heading2(v, "when none is up here")
+        switchRow(v, "Hop to find one",
+            "Off: wait in this server for the next spawn",
+            function() return CFG.EliteHop end,
+            function(x) CFG.EliteHop = x end)
+        radio(v, 82, {
+            { "fewest", "Fewest players first", "fewer hunters" },
+            { "random", "Any order",            "" },
+        }, function() return CFG.EliteOrder end, function(x) CFG.EliteOrder = x end)
+        sliderRow(v, "Look for", 3, 30, 1,
+            function() return CFG.EliteLook end,
+            function(x) CFG.EliteLook = x end, " s")
+        caption(v, "After a join: this long for one to show before leaving. "
+            .. "When the Elite Hunter says none is up, 3 s is enough.")
+        sliderRow(v, "Try a server again after", 5, 60, 1,
+            function() return CFG.EliteRevisit end,
+            function(x) CFG.EliteRevisit = x end, " min")
+        caption(v, "One killed there is back 8 min 45 s later.")
+
+        heading2(v, "the quest")
+        switchRow(v, "Take the Elite Hunter's quest",
+            "Progress toward Yama - the chalice does not need it",
+            function() return CFG.EliteQuest end,
+            function(x) CFG.EliteQuest = x end)
+        caption(v, "Asked from where you stand. If that gets no answer, once per "
+            .. "server from in front of the Elite Hunter. A different quest "
+            .. "running is dropped for it.")
+
+        heading2(v, "after a hop")
+        readout(v, function() return P.reloadWay() end)
+        caption(v, "Your settings, the servers already looked at and these "
+            .. "counts go with you. Without queue_on_teleport, the README's "
+            .. "three-line loader in the executor's autoexec folder does the same.")
+
+        heading2(v, "by hand")
+        actionRow(v, "Hop now", nil, function() P.hopNow() end)
+        actionRow(v, "Forget the servers looked at", nil, function()
+            table.clear(P.elite.visited)
+            P.elite.note = "servers looked at: forgotten"
+        end)
+        actionRow(v, "Reset the elite counts", nil, function()
+            local t = P.elite.tally
+            for k in pairs(t) do t[k] = 0 end
+            t.since = os.time()
+            P.elite.note = "elite counts reset"
+        end)
+    end
+
+    -- =====================================================
     -- STATS
     -- =====================================================
     do
@@ -5736,7 +6527,10 @@ function P.start()
     print("[BFF] running. _G.BFF.stop() to halt.")
 end
 
-function P.stop()
+-- why = "reload": a new copy of the script is replacing this one (the top of
+-- the file) -- not you stopping, so a hunt carried over a hop stays carried.
+function P.stop(why)
+    if why ~= "reload" then pcall(P.carryOff) end
     P.running = false
     epoch += 1                 -- everything in flight gives up on this line
     moveEnabled = false
@@ -5760,9 +6554,16 @@ end
 function P.stats() return stats end
 function P.state() return state, statusLine end
 
-pcall(syncWeapons)
-say("loaded - pick targets, then press Start")
-pcall(buildUI)
+-- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
+do
+    local resumed = false
+    pcall(function() resumed = P.takeCarry() end)
+    pcall(syncWeapons)
+    say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
+        or "loaded - pick targets, then press Start")
+    pcall(buildUI)
+    if resumed then task.defer(P.start) end
+end
 -- Water is land from load, farm running or not (farm_pro's, unchanged).
 task.spawn(function()
     while _G.BFF == P do

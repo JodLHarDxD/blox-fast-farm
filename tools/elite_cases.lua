@@ -1,0 +1,73 @@
+
+-- ---------------------------------------------------------------- cases
+local all = true
+local function check(name, cond, detail)
+    print((cond and "PASS " or "FAIL ") .. name)
+    if not cond then print("  " .. tostring(detail)) all = false end
+end
+
+-- eliteReply: what the Elite Hunter said
+check("no answer = unknown", eliteReply(nil) == "unknown" and eliteReply("") == "unknown"
+    and eliteReply(5) == "unknown")
+check("hub string = none",
+    eliteReply("I don't have anything for you right now. Come back later.") == "none")
+check("wiki string = none", eliteReply("I don't have anything for you right now.") == "none")
+check("quest given = up", eliteReply("We heard some news about Diablo roaming around. Find and "
+    .. "capture him, he was last seen near Floating Turtle.") == "up")
+check("a bare elite name = up", eliteReply("Deandre") == "up" and eliteReply("URBAN!") == "up")
+check("Tyrant = up", eliteReply("Tyrant of the Skies appeared") == "up")
+check("greeting = unknown", eliteReply("Aye aye aye, looking for any difficult tasks?") == "unknown")
+
+-- eliteIsle: where the words send you
+local isle, pos = eliteIsle("he was last seen near Floating Turtle.")
+check("Floating Turtle named", isle == "floating turtle" and pos and pos.X == -12000, tostring(isle))
+check("Hydra Island named", (eliteIsle("last seen near Hydra Island")) == "hydra")
+check("Port Town named", (eliteIsle("near Port Town")) == "port town")
+check("Liberation of Tiki Outpost named", (eliteIsle("Liberation of Tiki Outpost")) == "tiki")
+check("no island / no text", eliteIsle("somewhere") == nil and eliteIsle(nil) == nil)
+
+-- browserRows: one page of the game's server browser
+local rows = {}
+check("not a table = 0 rows", browserRows(nil, rows) == 0 and browserRows("x", rows) == 0 and #rows == 0)
+local n = browserRows({
+    ["job-a"] = { Count = 3, Region = "Singapore" },
+    ["job-b"] = { Count = 12 },
+    [7] = { Count = 1 },
+    ["job-c"] = 5,
+}, rows)
+local byId = {}
+for _, r in ipairs(rows) do byId[r.id] = r end
+check("string JobId + table entry only", n == 2 and byId["job-a"] and byId["job-b"] and not byId["job-c"], n)
+check("count and region read", byId["job-a"].count == 3 and byId["job-a"].region == "Singapore")
+
+-- pickServers: which servers, in what order
+local seq = 0
+local function rnd() seq += 1 return seq / 1000 end
+local list = {
+    { id = "a", count = 5 }, { id = "b", count = 1 }, { id = "here", count = 0 },
+    { id = "full", count = 12 }, { id = "small", count = 8, max = 8 },
+    { id = "seen", count = 0 }, { id = "old", count = 2 }, { id = "b", count = 1 },
+    { id = 9, count = 0 }, { id = "nocount" },
+}
+local visited = { seen = 1000 - 60, old = 1000 - 700 }
+local out = pickServers(list, "here", visited, 1000, 600, "fewest", rnd)
+local ids = {}
+for _, s in ipairs(out) do table.insert(ids, s.id) end
+local got = table.concat(ids, ",")
+check("fewest first; not here, not full, not seen in 10 min, no duplicates",
+    got == "nocount,b,old,a", got)
+seq = 0
+out = pickServers({ { id = "x", count = 4 }, { id = "y", count = 4 } }, "h", {}, 0, 600, "fewest", function()
+    seq += 1 return 10 - seq end)
+check("equal counts: the random key decides", out[1].id == "y", out[1].id)
+seq = 0
+out = pickServers({ { id = "p", count = 1 }, { id = "q", count = 9 } }, "h", {}, 0, 600, "random", function()
+    seq += 1 return 10 - seq end)
+check("random order ignores the count", out[1].id == "q", out[1].id)
+
+-- pruneVisited
+local v = { a = 100, b = 5000, c = "x" }
+pruneVisited(v, 5000, 3600)
+check("older than an hour and junk forgotten", v.a == nil and v.b == 5000 and v.c == nil)
+
+print(all and "ALL PASS" or "SOME FAILED")

@@ -1,0 +1,77 @@
+
+-- ---------------------------------------------------------------- cases
+local all = true
+local function check(name, cond, detail)
+    print((cond and "PASS " or "FAIL ") .. name)
+    if not cond then print("  " .. tostring(detail)) all = false end
+end
+local function state(over)
+    local t = {
+        resume = true, freshUntil = NOW + 100, hopAt = NOW - 12, fromJob = "old",
+        visited = { x = NOW - 5 }, tally = { joins = 4, found = 2, kills = 1, chalices = 0, joinSecs = 40, fails = 1, since = 1 },
+        cfg = { TravelSpeed = 500, EliteHunt = true, NotAField = 1, QuestName = "Q" },
+    }
+    for k, v in pairs(over or {}) do t[k] = v end
+    return t
+end
+
+-- 1. nothing carried
+reset()
+check("nothing: no resume", takeCarry() == false and E.carried == nil)
+
+-- 2. a hop from another server, 12 s ago: resumed from the file
+reset()
+DB.f1 = state()
+FILE = "f1"
+local r = takeCarry()
+check("resumed", r == true and CFG.EliteHunt and not CFG.RaidMode and E.carried == "file")
+check("join counted with its time", E.tally.joins == 5 and E.tally.joinSecs == 52, E.tally.joins)
+check("settings back; unknown keys ignored; QuestName allowed",
+    CFG.TravelSpeed == 500 and CFG.NotAField == nil and CFG.QuestName == "Q")
+check("servers looked at carried", E.visited.x == NOW - 5)
+check("file marked arrived here", #WRITES == 1 and DB[FILE].arrivedJob == "new")
+
+-- 3. a second loader in the same server (autoexec AND the queue): no double count
+r = takeCarry()
+check("second copy here: resumes, join not counted twice", r == true and E.tally.joins == 5, E.tally.joins)
+
+-- 4. written in THIS server (script run again by hand, nothing hopped)
+reset()
+DB.f1 = state({ fromJob = "new" })
+FILE = "f1"
+r = takeCarry()
+check("same server: no resume, settings not touched", r == false and CFG.TravelSpeed == 330
+    and not CFG.EliteHunt)
+
+-- 5. an old hunt (over 5 minutes): not resumed, counts still kept
+reset()
+DB.f1 = state({ freshUntil = NOW - 1 })
+FILE = "f1"
+r = takeCarry()
+check("stale: no resume, no settings, tally kept", r == false and CFG.TravelSpeed == 330
+    and E.tally.found == 2)
+
+-- 6. carried but stopped (resume false): settings yes, start no
+reset()
+DB.f1 = state({ resume = false })
+FILE = "f1"
+r = takeCarry()
+check("resume off: settings carried, hunt not started", r == false and CFG.TravelSpeed == 500
+    and E.tally.joins == 4)
+
+-- 7. only the queued copy (no file functions)
+reset()
+DB.q1 = state()
+_G.BFF_CARRY = "q1"
+r = takeCarry()
+check("queued copy only: resumed, marked, queue emptied", r == true and E.carried == "queued reload"
+    and _G.BFF_CARRY == nil)
+
+-- 8. a broken file and a good queued copy: the queued one
+reset()
+DB.q1 = state()
+FILE, _G.BFF_CARRY = "garbage", "q1"
+r = takeCarry()
+check("broken file: the queued copy is used", r == true and E.carried == "queued reload")
+
+print(all and "ALL PASS" or "SOME FAILED")
