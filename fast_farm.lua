@@ -1894,36 +1894,10 @@ local function buildPile(cur, names)
     return group, centre
 end
 
--- RAID MODE's pile: every living enemy, any kind, within RaidRadius of the
--- newest raid island (P.raidAt), or of you outside a raid. Piled at the
--- middle of where they spawned.
-P.raidAt, P.raidNote = nil, "raid mode: starting"
-local function buildRaidPile()
-    local _, r = parts()
-    if not r then return {}, nil end
-    local around = P.raidAt or r.Position
-    local list = {}
-    for _, e in ipairs(liveEnemies(nil)) do
-        if not isPutBack(e.model) and (e.root.Position - around).Magnitude <= (CFG.RaidRadius or 450) then
-            table.insert(list, e)
-        end
-    end
-    if #list == 0 then return {}, nil end
-    table.sort(list, function(a, b)
-        return (a.root.Position - around).Magnitude < (b.root.Position - around).Magnitude
-    end)
-    if not CFG.Magnet then return { list[1] }, list[1].root.Position end
-    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
-    while #list > cap do table.remove(list) end
-    local homes = {}
-    for _, e in ipairs(list) do table.insert(homes, homeOf(e)) end
-    local centre, reach = middleOf(homes)
-    P.pileReach = reach
-    return list, centre
-end
-
--- RANDOM MODE's pile. Every living enemy, any kind, within RandomRadius of
--- P.randomAt (the Castle on the Sea raid area there, else you).
+-- RANDOM MODE's pile -- and RAID MODE's (buildRaidPile, below, is this with
+-- the raid island as the centre). Every living enemy, any kind, within the
+-- radius of `around` (random: P.randomAt, the Castle on the Sea raid area
+-- there, else you).
 --   pile   : the nearest free one picks the spot; only the ones whose spawn is
 --            within THEIR OWN kind's pull limit of it are pulled -- a far or
 --            diagonal one is its own pile, in turn. So everyone pulled is
@@ -1932,12 +1906,14 @@ end
 --            alone: once no free one is left it is fought where it stands
 --            (third return value true = do not move it).
 P.randomAt, P.randomNote, P.randomSkip, P.randomCant = nil, "random mode: starting", {}, 0
-local function buildRandomPile()
+local function buildRandomPile(around, radius)
     local _, r = parts()
     if not r then return {}, nil, false end
-    local around = P.randomAt or r.Position
-    local radius = CFG.RandomRadius or 750
-    if P.randomAt then radius = math.max(radius, 800) end   -- the raid area is 750 round its centre
+    if not around then
+        around = P.randomAt or r.Position
+        radius = CFG.RandomRadius or 750
+        if P.randomAt then radius = math.max(radius, 800) end   -- the raid area is 750 round its centre
+    end
     local now = os.clock()
     local free, solo = {}, {}
     for _, e in ipairs(liveEnemies(nil)) do
@@ -1985,6 +1961,18 @@ local function buildRandomPile()
     return {}, nil, false
 end
 
+-- RAID MODE's pile: random mode's rules round the newest raid island
+-- (P.raidAt), or round you outside a raid, within RaidRadius. It used to pull
+-- everyone to one middle with no limit: one dragged out of its area took no
+-- damage, was put back and then left out -- the wave stuck with it alive
+-- while the farm waited over the island (2026-09-28, "2 of 5 never hurt").
+P.raidAt, P.raidNote = nil, "raid mode: starting"
+local function buildRaidPile()
+    local _, r = parts()
+    if not r then return {}, nil, false end
+    return buildRandomPile(P.raidAt or r.Position, CFG.RaidRadius or 450)
+end
+
 -- ELITE HUNT's pile: the one elite, nearest you, fought WHERE IT STANDS. Never
 -- pulled: a pulled one that took no damage would be put back and left alone
 -- for thirty seconds -- on the one target the hunt is for.
@@ -2007,9 +1995,13 @@ local function refreshPile()
     if not pileCur then return end
     pileScanAt = os.clock()
     local list, centre
-    if pileCur.random then
+    if pileCur.random or pileCur.raid then
         local inPlace
-        list, centre, inPlace = buildRandomPile()
+        if pileCur.raid then
+            list, centre, inPlace = buildRaidPile()
+        else
+            list, centre, inPlace = buildRandomPile()
+        end
         -- A new in-place target starts from the height you set again.
         local model = inPlace and list[1] and list[1].model or nil
         if model ~= P.inPlaceTarget then P.forceClose = false end
@@ -2021,9 +2013,6 @@ local function refreshPile()
         if model ~= P.inPlaceTarget then P.forceClose = false end
         P.pileInPlace = true
         P.inPlaceTarget = model
-    elseif pileCur.raid then
-        P.pileInPlace = false
-        list, centre = buildRaidPile()
     else
         P.pileInPlace = false
         list, centre = buildPile(pileCur, pileNames)
@@ -2082,7 +2071,7 @@ end
 local function checkPutBack()
     if not attacking or probing then return end
     local now = os.clock()
-    -- FOUGHT IN PLACE (random mode): never moved or put back. No damage from
+    -- FOUGHT IN PLACE (random and raid mode): never moved or put back. No damage from
     -- the height you set for 6 s: down close for it. None for 15 s even
     -- close: it cannot be hurt by this setup -- left for a minute, counted.
     if P.pileInPlace then
@@ -4005,6 +3994,10 @@ do
             P.raidNote = string.format("not in a raid  ·  everything within %d studs of you  ·  %d enemies",
                 math.floor(CFG.RaidRadius or 450), #list)
         end
+        -- The damage check at work: fought where it stands (it took no damage
+        -- when pulled), and how many could not be hurt at all.
+        if P.pileInPlace then P.raidNote = P.raidNote .. "  ·  one fought where it stands" end
+        if P.randomCant > 0 then P.raidNote = P.raidNote .. "  ·  could not hurt " .. P.randomCant end
         if #list > 0 then
             activeName = "raid"
             fight({ name = "raid", raid = true }, nil)

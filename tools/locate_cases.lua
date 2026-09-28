@@ -189,11 +189,18 @@ reset()
 CFG.RaidRadius = 450
 P.raidAt = nil
 ME.Position = v3(0, 20, 0)
-table.insert(WORLD.loaded, enemy("Pirate", v3(100, 0, 0)))
+local pirate19 = enemy("Pirate", v3(100, 0, 0))
+table.insert(WORLD.loaded, pirate19)
 table.insert(WORLD.loaded, enemy("Brute", v3(-200, 0, 50)))
 table.insert(WORLD.loaded, enemy("Sea Beast", v3(900, 0, 0)))
 pl = buildRaidPile()
-check("outside a raid: everything near you, any kind (2), not the far one", #pl == 2, "held " .. #pl)
+-- The Brute spawned 304 from the Pirate: past the 300 pull limit, so it is
+-- not dragged into the Pirate's pile (that drag was the stuck-wave bug); it
+-- is the next pile.
+check("outside a raid: near you, one per pile when 304 apart (limit 300)", #pl == 1 and pl[1] == pirate19, "held " .. #pl)
+WORLD.loaded = { WORLD.loaded[2], WORLD.loaded[3] }
+pl = buildRaidPile()
+check("then the Brute; the one 900 away never", #pl == 1 and pl[1].name == "Brute", "held " .. #pl)
 
 -- 20. nobody near: empty
 reset()
@@ -207,8 +214,12 @@ reset()
 CFG.RaidRadius, CFG.GrabMax = 450, 5
 P.raidAt = v3(0, 0, 0)
 for i = 1, 9 do table.insert(WORLD.loaded, enemy("Raider " .. i, v3(i * 20, 0, 0))) end
-pl = buildRaidPile()
-check("raid: capped at Most in one pile, nearest first", #pl == 5 and pl[5].name == "Raider 5", "held " .. #pl)
+pl, centre = buildRaidPile()
+-- Capped, and the ones kept are those nearest the pile's middle (the
+-- shortest pulls), not the ones nearest the island's point.
+local worst = 0
+for _, e in ipairs(pl) do worst = math.max(worst, (e.root.Position - centre).Magnitude) end
+check("raid: capped at Most in one pile, the shortest pulls kept", #pl == 5 and worst <= 41, "held " .. #pl .. " worst " .. worst)
 CFG.GrabMax = 12
 P.raidAt = nil
 
@@ -329,5 +340,42 @@ WORLD.loaded = { ghost }
 P.randomSkip[ghost.model] = 1e9
 check("random: an unhurtable one (skipped) is left out", #buildRandomPile() == 0)
 P.randomSkip = {}
+
+-- ---------------------------------------------------------------- RAID: THE STUCK WAVE (user, 2026-09-28)
+-- "5 in the raid, 2 never take damage; sometimes it stops and I finish them
+-- by hand, then the next wave works." Raid pulled everyone to one middle with
+-- no limit; one dragged out of its area took no damage, was put back, and
+-- was IGNORED - so the pile went empty while it lived and the farm waited.
+
+-- 32. two groups on the raid island ~560 apart: the near group piled, the far
+--     one NOT dragged past its limit (it gets its own pile next)
+rreset()
+CFG.RaidRadius = 450
+P.raidAt = v3(0, 0, 0)
+ME.Position = v3(-200, 40, -200)
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raid Brute", v3(-200 + i * 10, 0, -200))) end
+for i = 1, 3 do table.insert(WORLD.loaded, enemy("Raid Brute", v3(200 + i * 10, 0, 200))) end
+pl2 = buildRaidPile()
+local dragged = false
+for _, e in ipairs(pl2) do if e.root.Position.X > 0 then dragged = true end end
+check("raid: far group not dragged past the pull limit", #pl2 == 3 and not dragged, "held " .. #pl2)
+
+-- 33. the one put back (no damage when pulled) is fought IN PLACE once the
+--     free ones are dead - never left alive while the farm waits
+rreset()
+CFG.RaidRadius = 450
+P.raidAt = v3(0, 0, 0)
+ME.Position = v3(0, 40, 0)
+local stuck = enemy("Raid Archer", v3(150, 5, 0))
+local free1 = enemy("Raid Archer", v3(10, 0, 0))
+WORLD.loaded = { stuck, free1 }
+putBack[stuck.model] = 1e9
+pl2, c2, inPlace = buildRaidPile()
+check("raid: free ones first", #pl2 == 1 and pl2[1] == free1 and not inPlace)
+WORLD.loaded = { stuck }
+pl2, c2, inPlace = buildRaidPile()
+check("raid: then the put-back one, in place at its own spot (the wave is not left stuck)",
+    #pl2 == 1 and pl2[1] == stuck and inPlace and near(c2, v3(150, 5, 0), 0.1), "held " .. #pl2 .. " " .. tostring(inPlace))
+P.raidAt = nil
 
 print(all and "ALL PASS" or "SOME FAILED")
