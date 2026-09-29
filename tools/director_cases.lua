@@ -10,8 +10,8 @@ local KITSUNE = { orig = "Kitsune-Kitsune" }
 local PIG = { names = { "Pink Pig Berry" } }
 
 -- THE CHALICE, whichever hunt is on
-for _, k in ipairs({ "elite", "fruit", "berry" }) do
-    reset() CFG.HuntKind = k HOLD = true FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
+for _, k in ipairs({ "elite", "fruit", "berry", "recipe" }) do
+    reset() CFG.HuntKind = k HOLD = true FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true RECIPE_BUSY = true
     check("THE CHALICE (" .. k .. " hunt): nothing else runs, no hop", run() == "chalice")
 end
 
@@ -25,6 +25,13 @@ check("fruit hunt: the fruit - no elite looked for, no berry", got == "grab Kits
 reset() CFG.HuntKind = "berry" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
 got = run()
 check("berry hunt: the berry - no fruit, no elite", got == "berry Pink Pig Berry", got)
+
+reset() CFG.HuntKind = "recipe" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true RECIPE_BUSY = true
+got = run()
+check("recipe hunt: the Barista Cousin only - no fruit, berry, elite", got == "recipe", got)
+reset() CFG.HuntKind = "recipe" FRUIT = KITSUNE
+got = run()
+check("recipe hunt, not the one picked: hop, naming it", got == "recipe | hop: he teaches Pure Red here - not one you picked", got)
 
 -- nothing for the chosen hunt: hop, saying why
 reset()

@@ -170,7 +170,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -186,6 +186,13 @@ local CFG = {
         ["Pink Pig Berry"] = true, ["White Cloud Berry"] = true, ["Red Cherry Berry"] = true,
         ["Blue Icicle Berry"] = true, ["Green Toad Berry"] = true, ["Orange Berry"] = true,
         ["Purple Jelly Berry"] = true, ["Yellow Star Berry"] = true,
+    },
+    -- AURA RECIPE HUNT: the Barista Cousin (Second and Third Sea) teaches
+    -- ONE recipe per server. The ones switched on here are learned when he
+    -- teaches them; anything else = the next server. A recipe learned is
+    -- switched off by itself. Needs Aura stage 5 ("Iron Man" title).
+    RecipeWant         = {
+        ["Winter Sky"] = true, ["Snow White"] = true, ["Pure Red"] = true,
     },
     -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
     -- the Skies while he is up): one per server, back 8 min 45 s after the
@@ -3306,6 +3313,24 @@ do
             return best
         end
 
+        -- AURA RECIPES the Barista Cousin teaches (the Berries and Aura/Skins
+        -- pages, 2026-09): Legendary first.
+        local RECIPES = {
+            "Winter Sky", "Snow White", "Pure Red",
+            "Bright Yellow", "Slimy Green", "Orange Soda", "Yellow Sunshine", "Absolute Zero",
+            "Plump Purple", "Green Lizard", "Blue Jeans", "Fiery Rose", "Heat Wave",
+        }
+        P.RECIPES = RECIPES
+
+        -- What ("ColorsDealer", "2") answered, in words (the public hubs: 1 or
+        -- 2 = done, 0 = cannot pay).
+        local function buyWords(res)
+            if res == 1 then return "learned" end
+            if res == 2 then return "learned (or already yours)" end
+            if res == 0 then return "not enough to pay" end
+            return "the game said " .. tostring(res)
+        end
+
         -- Everything the hunt knows. `tally` and `visited` survive the hop.
         local E = {
             visited = {},
@@ -3328,6 +3353,8 @@ do
             fruitNote = "no fruit gone for yet", fruitSkip = setmetatable({}, { __mode = "k" }),
             berryNote = "no berry gone for yet", berrySkip = setmetatable({}, { __mode = "k" }),
             have = {},               -- berries you hold, from the inventory ([name] = count; read = true)
+            offer = nil,             -- what the Barista Cousin teaches in this server, in words
+            recipeNote = "no recipe gone for yet",
             note = "hunt off",
         }
         P.elite = E
@@ -3980,6 +4007,100 @@ do
             say(E.berryNote)
         end
 
+        -- AURA RECIPES: the Barista Cousin (Second and Third Sea) teaches ONE
+        -- recipe per server. He comes 20 min after a server starts, stays 20,
+        -- is gone 2, and again. Asking works from anywhere (the public hubs'
+        -- own check): CommF_("ColorsDealer", "1") -> the recipe's name (and a
+        -- rarity, 3 and up = Legendary) while he is there, anything else
+        -- while he is not; ("ColorsDealer", "2") learns it.
+        local function cousinOffer()
+            local cf = commF()
+            if not cf then return nil, nil end
+            -- Not `cf and cf:InvokeServer(...)`: `and` keeps only the first
+            -- value, and the rarity is the second.
+            local ok, name, rarity = pcall(function() return cf:InvokeServer("ColorsDealer", "1") end)
+            if ok and type(name) == "string" and name ~= "" then return name, tonumber(rarity) end
+            return nil, nil
+        end
+
+        -- Where he stands, if the game has him loaded (or parked).
+        local function cousinAt()
+            local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
+            for i = 1, 2 do
+                local m = folders[i] and folders[i]:FindFirstChild("Barista Cousin")
+                if m then
+                    local ok, p = pcall(function() return m:GetPivot().Position end)
+                    if ok and p then return p end
+                end
+            end
+            return nil
+        end
+
+        -- true = busy with it here; false = nothing for it here (E.why says).
+        -- Learned = its switch goes off and the hunt goes on for the others.
+        -- Not learned = the hunt STOPS and says why: another server would not
+        -- change fragments or Aura stage.
+        local function recipeStep(myEpoch)
+            local any = false
+            for _, on in pairs(CFG.RecipeWant or {}) do
+                if on then any = true break end
+            end
+            if not any then
+                E.recipeNote = "every recipe you picked is learned - pick another"
+                E.note = E.recipeNote
+                P.stop("recipes done")
+                return true
+            end
+            if mySea() == 1 then
+                E.why = "no Barista Cousin in the First Sea"
+                return false
+            end
+            local name, rarity = cousinOffer()
+            E.offer = name and (name .. (((rarity or 0) >= 3) and "  (Legendary)" or "")) or "he is not here now"
+            if not name then
+                E.why = "the Barista Cousin is not here now"
+                return false
+            end
+            if not CFG.RecipeWant[name] then
+                E.why = "he teaches " .. name .. " here - not one you picked"
+                return false
+            end
+            E.recipeNote = "he teaches " .. name .. " here - learning it"
+            E.note = E.recipeNote
+            say(E.note)
+            setState("RECIPE")
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("ColorsDealer", "2") end)
+            if not (ok and (res == 1 or res == 2)) then
+                -- Not from here: from in front of him.
+                local at = cousinAt()
+                if at then
+                    releasePile()
+                    flyTo(at + Vector3.new(0, 3, 0))
+                    if stale(myEpoch) then return true end
+                    ok, res = pcall(function() return cf and cf:InvokeServer("ColorsDealer", "2") end)
+                end
+            end
+            local words = ok and buyWords(res) or ("error: " .. tostring(res))
+            if ok and (res == 1 or res == 2) then
+                CFG.RecipeWant[name] = false
+                E.tally.recipes = (E.tally.recipes or 0) + 1
+                E.recipeNote = name .. ": " .. words
+                notify("Aura recipe: " .. name)
+            else
+                E.recipeNote = name .. ": NOT learned - " .. words .. "  (Aura stage 5 and the price are needed)"
+                print("[BFF] recipe: " .. E.recipeNote)
+                E.note = E.recipeNote
+                P.stop("recipe not learned")
+                return true
+            end
+            E.note = E.recipeNote
+            say(E.note)
+            print("[BFF] recipe: " .. E.recipeNote)
+            return true
+        end
+        P.cousinOffer = cousinOffer
+
         local function eliteFight(name, at, where, myEpoch)
             activeName = name
             if CFG.EliteQuest then takeEliteQuest(myEpoch) end
@@ -4121,6 +4242,8 @@ do
                     return
                 end
                 E.why = "no berry you want here"
+            elseif kind == "recipe" then
+                if recipeStep(myEpoch) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -4687,6 +4810,7 @@ local function buildUI()
         { "elite", "Elite pirate hunt", "Diablo, Deandre, Urban - last hit, God's Chalice" },
         { "fruit", "Fruit hunt",        "Fruits on the ground - grabbed and STORED, never eaten" },
         { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
+        { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -4988,6 +5112,8 @@ local function buildUI()
                 local k = CFG.HuntKind
                 local count = (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
+                    or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
+                        tostring(P.elite.offer or "not asked yet"))
                     or string.format("%d elites down  ·  %d chalice", t.kills, t.chalices)
                 return string.format("%s\n%d joined  ·  %s", tostring(P.elite.note), t.joins, count)
             end
@@ -5707,6 +5833,26 @@ local function buildUI()
         caption(v, "At most 4 in a server, a new one every 15 min, gone after an "
             .. "hour - anyone can take one. The Barista makes the colors "
             .. "(+ 7,500 fragments for a Legendary).")
+
+        heading2(v, "aura recipe hunt  -  which recipes")
+        for i, n in ipairs(P.RECIPES) do
+            switchRow(v, n, (i <= 3) and "Legendary - rip_indra's buttons need all three" or "Rare",
+                function() return CFG.RecipeWant[n] == true end,
+                function(x) CFG.RecipeWant[n] = x and true or false end)
+        end
+        readout(v, function()
+            local el = P.elite
+            return table.concat({
+                "here      " .. tostring(el.offer or "not asked yet"),
+                "last      " .. tostring(el.recipeNote),
+                string.format("learned   %d", el.tally.recipes or 0),
+            }, "\n")
+        end)
+        caption(v, "He teaches ONE recipe per server, asked from anywhere - no "
+            .. "flight to find out. He comes 20 min after a server starts, "
+            .. "stays 20, is gone 2. Switch off the ones you already have. A "
+            .. "recipe learned goes off by itself; not learned (fragments, Aura "
+            .. "stage 5) stops the hunt and says why.")
 
         heading2(v, "elite pirate hunt  (Third Sea)")
         readout(v, function()

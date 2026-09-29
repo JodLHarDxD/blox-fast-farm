@@ -114,4 +114,10 @@ check("none wanted / none on: nil", pickBerry({ nearBlue }, { ["Pink Pig Berry"]
     and pickBerry({}, { ["Pink Pig Berry"] = true }, here) == nil
     and pickBerry({ nearPig }, {}, here) == nil)
 
+-- buyWords: the Barista Cousin's answer to a learn
+check("buy answers in words", buyWords(1) == "learned" and buyWords(0) == "not enough to pay"
+    and buyWords(2):find("learned", 1, true) == 1 and buyWords(nil) == "the game said nil")
+check("recipe list: the three Legendary first", P.RECIPES[1] == "Winter Sky" and P.RECIPES[2] == "Snow White"
+    and P.RECIPES[3] == "Pure Red" and #P.RECIPES == 13)
+
 print(all and "ALL PASS" or "SOME FAILED")

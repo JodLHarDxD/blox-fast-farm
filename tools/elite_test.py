@@ -9,9 +9,12 @@ run in luau.exe:
          why a join or a list failed, in words
   carry  takeCarry(): what the next server's copy takes over, and when it
          starts by itself
-  director  huntStep(): the chalice stops everything; a fruit before an
-         elite; nothing here = hop (a moment after a join first); hop off =
-         wait; a target switched off is not looked at
+  recipe recipeStep(): the Barista Cousin's recipe - not here / not picked =
+         hop; picked = learned (from afar, else from in front of him), its
+         switch off; cannot learn = the hunt stops, saying why
+  director  huntStep(): the chalice stops everything, in every hunt; ONLY
+         the hunt switched on runs; nothing for it here = hop (a moment
+         after a join first); hop off = wait
 
 usage: python tools/elite_test.py [path-to-luau.exe]
 """
@@ -44,6 +47,7 @@ carry = cut("local function takeCarry()", "P.takeCarry = takeCarry")
 director = cut("function huntStep()", "-- The hunt switches.")
 listing = cut("-- What a page came back as, in words", "local function robloxList(")
 join = cut("-- One join. Returns only if", "-- THE HOP.")
+recipe = cut("-- AURA RECIPES: the Barista Cousin (Second", "P.cousinOffer = cousinOffer")
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
@@ -51,6 +55,7 @@ runs = [
     ("join", read("elite_stubs.lua") + pure + read("join_stubs.lua") + listing + join
         + read("join_cases.lua")),
     ("carry", read("carry_stubs.lua") + carry + read("carry_cases.lua")),
+    ("recipe", read("elite_stubs.lua") + pure + read("recipe_stubs.lua") + recipe + read("recipe_cases.lua")),
     ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
 ]
 ok = True
