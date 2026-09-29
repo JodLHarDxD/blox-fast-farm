@@ -1,7 +1,8 @@
-"""Test the team pick every join asks for (Pirates / Marines): SetTeam first,
-the ChooseTeam screen's own button when that does not take, the one you
-picked (not the default), never a switch of the team you are on, nothing
-when picking is off.
+"""Test the team pick every join asks for (Pirates / Marines): SetTeam until
+you are on one, NEVER the ChooseTeam screen's button through getconnections
+(a native call an executor can crash on), the one you picked (not the
+default), never a switch of the team you are on, nothing when picking is
+off.
 
 The REAL P.pickTeam is cut out of fast_farm.lua every run and run in
 luau.exe between team_stubs.lua and team_cases.lua.

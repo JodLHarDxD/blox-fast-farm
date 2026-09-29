@@ -6112,9 +6112,11 @@ function P.state() return state, statusLine end
 -- =========================================================
 -- Every join asks Pirates or Marines before your character spawns -- so
 -- every hop does. Picked for you (CFG.AutoTeam, CFG.Team): CommF_("SetTeam",
--- team), as the public hubs do (2026-04 .. 2026-09-29); still none a second
--- later, the game's own button on its ChooseTeam screen. Only while you have
--- no team: the one you are on is never switched.
+-- team), as the public hubs do (2026-04 .. 2026-09-29), every 2 s until you
+-- are on one. Only while you have no team: the one you are on is never
+-- switched. NOT the screen's own button through getconnections -- firing a
+-- game's connections natively is the one call here an executor can crash
+-- on (removed 2026-09-30 while client crashes on join were being traced).
 P.teamNote = "not needed yet"
 function P.pickTeam()
     while _G.BFF == P and player.Team == nil do
@@ -6122,27 +6124,7 @@ function P.pickTeam()
         if CFG.AutoTeam and (team == "Pirates" or team == "Marines") then
             local cf = commF()
             if cf then pcall(function() cf:InvokeServer("SetTeam", team) end) end
-            task.wait(1)
-            if player.Team == nil then
-                pcall(function()
-                    local box = player.PlayerGui.Main.ChooseTeam.Container:FindFirstChild(team)
-                    for _, b in ipairs(box:GetDescendants()) do
-                        if b:IsA("GuiButton") then
-                            if getconnections then
-                                for _, c in ipairs(getconnections(b.Activated)) do
-                                    pcall(function()
-                                        if c.Fire then c:Fire() elseif c.Function then c.Function() end
-                                    end)
-                                end
-                            elseif firesignal then
-                                firesignal(b.Activated)
-                            end
-                            break
-                        end
-                    end
-                end)
-                task.wait(1)
-            end
+            task.wait(2)
             P.teamNote = (player.Team == nil) and ("asking for " .. team .. " ...") or P.teamNote
         else
             P.teamNote = "choose your team - picking it is off"

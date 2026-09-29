@@ -14,8 +14,10 @@ check("no team: SetTeam Pirates, on it, screen closed", table.concat(CALLS, ",")
 
 reset() REMOTE_WORKS = false BUTTON_WORKS = true
 P.pickTeam()
-check("remote ignored: the screen's own Pirates button", table.concat(CALLS, ",") == "SetTeam Pirates,button Pirates"
-    and player.Team.Name == "Pirates", table.concat(CALLS, ","))
+local fired = false
+for _, c in ipairs(CALLS) do if c:find("button", 1, true) then fired = true end end
+check("remote ignored: asked again, the screen's button NEVER fired (crash risk)",
+    not fired and #CALLS > 1 and player.Team == nil, table.concat(CALLS, ","))
 
 reset() CFG.Team = "Marines"
 P.pickTeam()
