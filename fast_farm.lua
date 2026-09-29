@@ -198,6 +198,10 @@ local CFG = {
     -- the Skies while he is up): one per server, back 8 min 45 s after the
     -- last one died. Only the LAST hit gets the drops -- the God's Chalice
     -- among them. Fought where it stands, never pulled.
+    -- THE TEAM a new server asks for before you spawn (every hop): picked
+    -- for you. Never switches the team you are already on.
+    AutoTeam           = true,
+    Team               = "Pirates",  -- "Pirates" | "Marines"
     -- Nothing worth doing here: the next server. Off: wait in this one.
     -- With the chalice in your backpack or hand there is no hop at all,
     -- whatever this says.
@@ -5897,6 +5901,15 @@ local function buildUI()
             .. "running is dropped for it.")
 
         heading2(v, "after a hop")
+        switchRow(v, "Pick my team on join",
+            "The Pirates / Marines screen every new server shows",
+            function() return CFG.AutoTeam end,
+            function(x) CFG.AutoTeam = x end)
+        radio(v, 82, {
+            { "Pirates", "Pirates", "" },
+            { "Marines", "Marines", "" },
+        }, function() return CFG.Team end, function(x) CFG.Team = x end)
+        readout(v, function() return "team      " .. tostring(P.teamNote) end)
         readout(v, function() return P.reloadWay() end)
         caption(v, "Your settings, the servers already looked at and these "
             .. "counts go with you. Without queue_on_teleport, the README's "
@@ -6094,10 +6107,65 @@ end
 function P.stats() return stats end
 function P.state() return state, statusLine end
 
+-- =========================================================
+-- THE TEAM
+-- =========================================================
+-- Every join asks Pirates or Marines before your character spawns -- so
+-- every hop does. Picked for you (CFG.AutoTeam, CFG.Team): CommF_("SetTeam",
+-- team), as the public hubs do (2026-04 .. 2026-09-29); still none a second
+-- later, the game's own button on its ChooseTeam screen. Only while you have
+-- no team: the one you are on is never switched.
+P.teamNote = "not needed yet"
+function P.pickTeam()
+    while _G.BFF == P and player.Team == nil do
+        local team = CFG.Team
+        if CFG.AutoTeam and (team == "Pirates" or team == "Marines") then
+            local cf = commF()
+            if cf then pcall(function() cf:InvokeServer("SetTeam", team) end) end
+            task.wait(1)
+            if player.Team == nil then
+                pcall(function()
+                    local box = player.PlayerGui.Main.ChooseTeam.Container:FindFirstChild(team)
+                    for _, b in ipairs(box:GetDescendants()) do
+                        if b:IsA("GuiButton") then
+                            if getconnections then
+                                for _, c in ipairs(getconnections(b.Activated)) do
+                                    pcall(function()
+                                        if c.Fire then c:Fire() elseif c.Function then c.Function() end
+                                    end)
+                                end
+                            elseif firesignal then
+                                firesignal(b.Activated)
+                            end
+                            break
+                        end
+                    end
+                end)
+                task.wait(1)
+            end
+            P.teamNote = (player.Team == nil) and ("asking for " .. team .. " ...") or P.teamNote
+        else
+            P.teamNote = "choose your team - picking it is off"
+            task.wait(1)
+        end
+    end
+    if player.Team then
+        P.teamNote = "on " .. player.Team.Name
+        -- The team is set; its screen is not needed (the remote does not
+        -- always close it).
+        pcall(function()
+            local ct = player.PlayerGui.Main.ChooseTeam
+            if ct.Visible then ct.Visible = false end
+        end)
+    end
+end
+
 -- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
 do
     local resumed = false
     pcall(function() resumed = P.takeCarry() end)
+    -- The team AFTER the carried settings: the one you picked, not the default.
+    task.spawn(function() pcall(P.pickTeam) end)
     pcall(syncWeapons)
     say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
         or "loaded - pick targets, then press Start")
