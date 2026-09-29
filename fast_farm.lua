@@ -1702,10 +1702,14 @@ local function checkPutBack()
             P.forceClose = true          -- poseTarget takes you close from the next frame
         elseif now - j.at > 15 and actions - j.act >= 15 then
             P.noteNoDamage(e, "in place, close")
-            -- An elite is never skipped: it is the only one there is.
+            -- An elite is never skipped: it is the only one there is. The M1
+            -- way found for it is doubted instead and looked for again (it may
+            -- have been "found" while another player's hits took the HP off).
             if not (pileCur and pileCur.elite) then
                 P.randomSkip[e.model] = now + 60
                 P.randomCant += 1
+            elseif P.reprobe then
+                P.reprobe()
             end
             pileJoin[e.model] = nil
         end
@@ -2035,9 +2039,17 @@ end
 -- keys   : the mouse click farm_pro uses. Slow, needs you close, but proven.
 -- Any of these can stop working with a game update, so none is trusted:
 -- each is fired at the pile for a moment and the first that takes HP off is
--- kept, per weapon. The panel says which.
+-- kept, per weapon. The panel says which. The game's own hit sender
+-- (_G.SendHitsToServer), when it can be reached, is tried first.
 local m1Plan  = {}           -- [weapon] = chosen way, or false (nothing landed)
+local m1Retry = {}           -- [weapon] = when a "nothing landed" is tried again
 P.m1Notes     = {}
+
+-- Try the ways now? Never tried, or a "nothing landed" whose wait is over.
+local function m1Due(name)
+    local way = m1Plan[name]
+    return way == nil or (way == false and os.clock() >= (m1Retry[name] or 0))
+end
 local lastProbeMethod = CFG.M1Method
 
 local fireM1
@@ -2069,9 +2081,64 @@ do
         return out
     end
 
+    -- THE GAME'S OWN HIT SENDER. The game's client sends its hits through
+    -- its own function, _G.SendHitsToServer (in its PlayerScripts); a server
+    -- whose Flags module has COMBAT_REMOTE_THREAD on appears to take hits
+    -- only that way. The 2026-04 and 2026-09-29 public hubs both call it
+    -- first and fire RegisterHit themselves only without it. Flags come with
+    -- the SERVER's version: servers started after an update run the new
+    -- combat, older ones the old -- a raw RegisterHit then lands in some
+    -- servers and not in others. Looked for once per server (again every 5 s
+    -- while missing).
+    local gameHit, gameHitAt = nil, -1e9
+    P.hitSender, P.combatFlag = "not looked for yet", nil
+    local function findGameHit()
+        if gameHit then return gameHit end
+        if os.clock() - gameHitAt < 5 then return nil end
+        gameHitAt = os.clock()
+        pcall(function()
+            local fl = RS:FindFirstChild("Modules") and RS.Modules:FindFirstChild("Flags")
+            if fl then P.combatFlag = require(fl).COMBAT_REMOTE_THREAD end
+        end)
+        if getrenv then
+            local ok, f = pcall(function() return getrenv()._G.SendHitsToServer end)
+            if ok and type(f) == "function" then
+                gameHit, P.hitSender = f, "the game's SendHitsToServer (getrenv)"
+            end
+        end
+        if not gameHit and getsenv then
+            local ps = player:FindFirstChild("PlayerScripts")
+            for _, c in ipairs(ps and ps:GetChildren() or {}) do
+                if c:IsA("LocalScript") then
+                    local ok, f = pcall(function() return getsenv(c)._G.SendHitsToServer end)
+                    if ok and type(f) == "function" then
+                        gameHit, P.hitSender = f, "the game's SendHitsToServer (" .. c.Name .. ")"
+                        break
+                    end
+                end
+            end
+        end
+        if not gameHit then
+            P.hitSender = (getrenv or getsenv) and "raw RegisterHit - the game has no SendHitsToServer here"
+                or "raw RegisterHit - this executor has no getrenv / getsenv"
+        end
+        print(string.format("[BFF] hits: %s  ·  COMBAT_REMOTE_THREAD = %s", P.hitSender, tostring(P.combatFlag)))
+        return gameHit
+    end
+    P.findGameHit = findGameHit
+
     local function m1Remote(variant, list)
         local ra = netRemote("RE", "RegisterAttack")
         local rh = netRemote("RE", "RegisterHit")
+        if variant == "game" then
+            local f = findGameHit()
+            if not f or #list == 0 then return false end
+            local hits = {}
+            for _, e in ipairs(list) do table.insert(hits, { e.model, e.root }) end
+            if ra then pcall(function() ra:FireServer(0) end) end
+            pcall(f, list[1].root, hits)
+            return true
+        end
         if not (ra and rh) or #list == 0 then return false end
         local head = list[1].model:FindFirstChild("Head") or list[1].root
         local hits = {}
@@ -2145,6 +2212,9 @@ do
         local t = toolType(tool)
         local all = {}
         if t == "Melee" or t == "Sword" then
+            if P.findGameHit() then
+                table.insert(all, { path = "remote", variant = "game", pose = "safe" })
+            end
             table.insert(all, { path = "remote", variant = "new", pose = "safe" })
             table.insert(all, { path = "remote", variant = "old", pose = "safe" })
             table.insert(all, { path = "keys", pose = "melee" })
@@ -2215,18 +2285,24 @@ do
                 m1Plan[name] = way
                 P.m1Notes[name] = describeWay(way)
                 say(name .. " M1: " .. describeWay(way))
+                print("[BFF] M1 " .. name .. ": " .. describeWay(way))
                 return way
             end
         end
         probing = false
         if #tried == 0 then return nil end              -- interrupted: try again later
+        -- NOT FINAL: one bad moment (just arrived, the target turning away)
+        -- used to leave M1 off for the rest of the server. Tried again soon.
         m1Plan[name] = false
-        P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. ")"
+        m1Retry[name] = os.clock() + 12
+        P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. ")  - trying again in 12 s"
+        print("[BFF] M1 " .. name .. ": " .. P.m1Notes[name])
         return false
     end
 end
 
 function P.reprobe()
+    table.clear(m1Retry)
     table.clear(m1Plan)
     table.clear(P.m1Notes)
     say("M1 ways forgotten - each weapon is tried again on the next pile")
@@ -2342,7 +2418,7 @@ local function attackTick()
     if m1u then
         if not equip(m1u.name) then task.wait(0.1) return end
         local way = m1Plan[m1u.name]
-        if way == nil then
+        if m1Due(m1u.name) then
             way = probeM1(m1u.name, m1u.tool)
             if way == nil then return end
         end
@@ -5220,7 +5296,9 @@ local function buildUI()
                     table.insert(lines, n .. ":  " .. tostring(P.m1Notes[n] or "not tried yet"))
                 end
             end
-            if #lines == 0 then return "no weapon has M1 on" end
+            if #lines == 0 then table.insert(lines, "no weapon has M1 on") end
+            table.insert(lines, "hits sent by  " .. tostring(P.hitSender))
+            table.insert(lines, "this server's COMBAT_REMOTE_THREAD  " .. tostring(P.combatFlag))
             return table.concat(lines, "\n")
         end)
         actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)

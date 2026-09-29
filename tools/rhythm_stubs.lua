@@ -40,5 +40,6 @@ local function usedWeapons()
     return out
 end
 local m1Plan = {}
+local function m1Due(name) return m1Plan[name] == nil end
 local function probeM1(name, _) m1Plan[name] = { path = "remote", variant = "new", pose = "safe" } return m1Plan[name] end
 local function fireM1(_, _) ev("M1 " .. held) end

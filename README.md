@@ -86,6 +86,7 @@ counted once.
 6. **Fruits:** Hunt page, "fruits on the ground" - the list of what is lying in the server (name, price, server spawn / dropped by). When it goes for one: does "last" end in STORED? If it says "NOT stored", send the words in brackets (inventory full? already stored?).
 7. **Berries:** switch on **Berry hunt**. Hunt page, "berry hunt" - does it list what is on the bushes here (e.g. "Pink Pig Berry   820 studs")? "on the bushes here: none" in every server = the `BerryBush` tag or its attributes changed. When it goes for one: "PICKED ..." = done. "gone from the bush, your count did not go up" = picked but `getInventory` did not show it (send the words); "could not pick" = the prompt did not fire.
 8. Switch between the three hunts mid-fight: the elite fight should stop at once when Elite pirate hunt goes off.
+9. **Elite not taking damage** (it was all-or-nothing per server): the console prints `[BFF] hits: <sender>  ·  COMBAT_REMOTE_THREAD = <true/false/nil>` once per server, and `[BFF] M1 <weapon>: <way>` after each probe. Send those lines from a server where it hit and one where it did not. The M1 page shows the same ("hits sent by", "this server's COMBAT_REMOTE_THREAD").
 
 ## First in-game test (each answer decides the next fix)
 
@@ -109,6 +110,7 @@ python tools/circuit_test.py                     # the circuit, real code: your 
 python tools/locate_test.py                      # where a species is + the pile, real code, 40 scenarios (Sky Bandit, new spawns, raid pile, sides, random mode)
 python tools/raid_test.py                        # raid mode's view of the game: both timer paths, newest Island N
 python tools/pose_test.py                        # where you hang + the remote hit's reach, real code: Port Town, ledge, 120 up, stay above
+python tools/probe_test.py                       # the M1 probe, real code: the game's own hit sender tried first; "nothing landed" tried again after 12 s, not final for the server
 python tools/leash_test.py                       # checkPutBack: pull limit measured (contrast rule), random mode's in-place escalation
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
