@@ -87,4 +87,31 @@ check("price unknown: taken only when the minimum is 0", pickFruit({ unknown }, 
     and pickFruit({ unknown }, 1, false) == nil)
 check("nothing lying: nil", pickFruit({}, 0, true) == nil)
 
+-- berryNames: what a bush's attributes say is on it
+check("berry names read from attribute values, sorted, junk ignored",
+    table.concat(berryNames({ a = "Red Cherry Berry", b = "Pink Pig Berry", c = 5, d = "Rock" }), ",")
+        == "Pink Pig Berry,Red Cherry Berry")
+check("no attributes / not a table: none", #berryNames({}) == 0 and #berryNames(nil) == 0)
+
+-- pickBerry: the nearest bush holding one you want
+local VM = {}
+VM.__sub = function(a, b)
+    local x, y, z = a.X - b.X, a.Y - b.Y, a.Z - b.Z
+    return { Magnitude = math.sqrt(x * x + y * y + z * z) }
+end
+local function V(x, y, z) return setmetatable({ X = x, Y = y, Z = z }, VM) end
+local here = V(0, 0, 0)
+local nearPig   = { names = { "Pink Pig Berry" }, pos = V(10, 0, 0) }
+local farPig    = { names = { "Pink Pig Berry" }, pos = V(500, 0, 0) }
+local nearBlue  = { names = { "Blue Icicle Berry" }, pos = V(5, 0, 0) }
+local mixed     = { names = { "Blue Icicle Berry", "Red Cherry Berry" }, pos = V(300, 0, 0) }
+check("nearest wanted bush", pickBerry({ farPig, nearPig }, { ["Pink Pig Berry"] = true }, here) == nearPig)
+check("an unwanted berry is passed, however near",
+    pickBerry({ nearBlue, farPig }, { ["Pink Pig Berry"] = true }, here) == farPig)
+check("a bush with one wanted among others counts",
+    pickBerry({ nearBlue, mixed }, { ["Red Cherry Berry"] = true }, here) == mixed)
+check("none wanted / none on: nil", pickBerry({ nearBlue }, { ["Pink Pig Berry"] = true }, here) == nil
+    and pickBerry({}, { ["Pink Pig Berry"] = true }, here) == nil
+    and pickBerry({ nearPig }, {}, here) == nil)
+
 print(all and "ALL PASS" or "SOME FAILED")

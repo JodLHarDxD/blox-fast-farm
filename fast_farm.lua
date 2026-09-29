@@ -21,10 +21,11 @@
                the game's own cooldown bars; M1 fills the gaps between them.
       CIRCUIT  the species on the Targets page: A's pile, B's pile, back to A,
                respawned by now. No quests (max level; removed 2026-09-28).
-      HUNT     the best thing in this server first - a fruit lying on the
-               ground (grabbed, STORED, never eaten), then an Elite Pirate
-               (God's Chalice) - nothing worth doing here = the next server.
-               The God's Chalice ends it: no hop, ever, in the server it came in.
+      HUNT     ONE hunt, the one you switch on: elite pirates (God's
+               Chalice), fruits on the ground (grabbed, STORED, never eaten)
+               or berries (the Haki colors). Nothing for it here = the next
+               server. The God's Chalice ends it: no hop, ever, in the server
+               it came in.
 
     TAKEN FROM FARM_PRO UNCHANGED: the level table, Enhancement + Observation,
     walk on water. Its panel too -- made opaque, because farm_pro's background was
@@ -166,22 +167,30 @@ local CFG = {
     RandomRadius       = 750,
 
     -- ---------- THE HUNT ----------
-    -- One loop, several targets, the best one present first: a fruit lying
-    -- on the ground (gone within 20 min or to another player), then an Elite
-    -- Pirate (God's Chalice). Nothing worth doing here = the next server.
-    -- Every target has its own switch.
+    -- ONE hunt at a time, the one you switch on; it does only that, then the
+    -- next server. Nothing picks for you.
     Hunt               = false,
-    -- FRUITS ON THE GROUND: grabbed and STORED, never eaten. Worth it = the
-    -- game's own price at least this (0 = any). Player drops are mostly
-    -- trades (dropped and picked up within a second): off = server spawns only.
-    HuntFruit          = true,
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry"
+    -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
+    -- Worth it = the game's own price at least this (0 = any). Player drops
+    -- are mostly trades (dropped and picked up within a second): off =
+    -- server spawns only.
     FruitMinPrice      = 0,
     FruitPlayerDrops   = false,
-    -- ELITE PIRATES (Third Sea). Diablo, Deandre, Urban (and Tyrant of the
-    -- Skies while he is up): one per server, back 8 min 45 s after the last
-    -- one died. Only the LAST hit gets the drops -- the God's Chalice among
-    -- them. Fought where it stands, never pulled.
-    HuntElite          = true,
+    -- BERRY HUNT: the Haki colors. The Barista turns berries into Aura
+    -- colors: Snow White 10 White Cloud, Winter Sky 15 Pink Pig, Pure Red 15
+    -- Red Cherry (Legendary, + 7,500 fragments each). At most 4 in a server,
+    -- a new one every 15 min, gone after an hour, anyone can take one. Only
+    -- the ones switched on here are flown to.
+    BerryWant          = {
+        ["Pink Pig Berry"] = true, ["White Cloud Berry"] = true, ["Red Cherry Berry"] = true,
+        ["Blue Icicle Berry"] = true, ["Green Toad Berry"] = true, ["Orange Berry"] = true,
+        ["Purple Jelly Berry"] = true, ["Yellow Star Berry"] = true,
+    },
+    -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
+    -- the Skies while he is up): one per server, back 8 min 45 s after the
+    -- last one died. Only the LAST hit gets the drops -- the God's Chalice
+    -- among them. Fought where it stands, never pulled.
     -- Nothing worth doing here: the next server. Off: wait in this one.
     -- With the chalice in your backpack or hand there is no hop at all,
     -- whatever this says.
@@ -2829,7 +2838,6 @@ local function fight(cur, names)
     pileCur, pileNames = cur, names
     local pileStart = nil
     local lastHaki = 0
-    local lastPre = 0
     local sweepEnd = os.clock() + 30
     m1Count = (CFG.StartWith == "M1") and 0 or (CFG.M1Between or 0)
 
@@ -2871,14 +2879,11 @@ local function fight(cur, names)
             pcall(keepHaki)
         end
 
-        -- THE HUNT: a fruit lying on the ground outranks the elite being
-        -- fought (it is gone within 20 min, or to someone else).
-        if cur.elite and P.fruitWanted and now - lastPre > 0.5 then
-            lastPre = now
-            if P.fruitWanted() then
-                attacking = false
-                return "preempt"
-            end
+        -- THE HUNT: the elite hunt switched off, or another hunt picked:
+        -- this fight ends now, not at the end of its 30 s.
+        if cur.elite and not (CFG.Hunt and CFG.HuntKind == "elite") then
+            attacking = false
+            return "preempt"
         end
 
         pileActive = true
@@ -3186,6 +3191,45 @@ do
             return best
         end
 
+        -- BERRIES. The game tags every berry bush "BerryBush"; a bush with
+        -- berries on it carries their names as attribute values (read from the
+        -- public hubs, 2026-04 and 2026-09-29).
+        local BERRIES = {
+            "Pink Pig Berry", "White Cloud Berry", "Red Cherry Berry", "Blue Icicle Berry",
+            "Green Toad Berry", "Orange Berry", "Purple Jelly Berry", "Yellow Star Berry",
+        }
+        P.BERRIES = BERRIES
+        local IS_BERRY = {}
+        for _, n in ipairs(BERRIES) do IS_BERRY[n] = true end
+
+        -- The berries a bush's attributes name, sorted.
+        local function berryNames(attrs)
+            local out = {}
+            if type(attrs) ~= "table" then return out end
+            for _, v in pairs(attrs) do
+                if type(v) == "string" and IS_BERRY[v] then table.insert(out, v) end
+            end
+            table.sort(out)
+            return out
+        end
+
+        -- The nearest bush { names, pos } holding a berry in `want`
+        -- ([name] = true), or nil.
+        local function pickBerry(list, want, here)
+            local best, bd = nil, math.huge
+            for _, b in ipairs(list) do
+                local wanted = false
+                for _, n in ipairs(b.names) do
+                    if want and want[n] then wanted = true break end
+                end
+                if wanted then
+                    local d = (b.pos - here).Magnitude
+                    if d < bd then best, bd = b, d end
+                end
+            end
+            return best
+        end
+
         -- Everything the hunt knows. `tally` and `visited` survive the hop.
         local E = {
             visited = {},
@@ -3206,6 +3250,8 @@ do
             eliteDoneUntil = 0,      -- this server's elite is down: not looked for till then
             why = nil,               -- why the last "nothing here" said so
             fruitNote = "no fruit gone for yet", fruitSkip = setmetatable({}, { __mode = "k" }),
+            berryNote = "no berry gone for yet", berrySkip = setmetatable({}, { __mode = "k" }),
+            have = {},               -- berries you hold, from the inventory ([name] = count; read = true)
             note = "hunt off",
         }
         P.elite = E
@@ -3674,7 +3720,7 @@ do
         P.fruitsLying = fruitsLying
 
         local function fruitWanted()
-            if not (CFG.Hunt and CFG.HuntFruit) then return nil end
+            if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
             return pickFruit(fruitsLying(), CFG.FruitMinPrice, CFG.FruitPlayerDrops)
         end
         P.fruitWanted = fruitWanted
@@ -3733,6 +3779,129 @@ do
             end
             E.note = E.fruitNote
             say(E.fruitNote)
+        end
+
+        -- BERRIES in this server: every tagged bush with one on it. The berry
+        -- is a Model inside the bush; no Model = the bush's own spot.
+        local CollectionService = game:GetService("CollectionService")
+        local function berriesLying()
+            local out, now = {}, os.clock()
+            local ok, tagged = pcall(function() return CollectionService:GetTagged("BerryBush") end)
+            if not ok or type(tagged) ~= "table" then return out end
+            for _, bush in ipairs(tagged) do
+                if not (E.berrySkip[bush] and now < E.berrySkip[bush]) then
+                    local okA, attrs = pcall(function() return bush:GetAttributes() end)
+                    local names = berryNames(okA and attrs or nil)
+                    if #names > 0 then
+                        local okP, pos = pcall(function()
+                            local m = bush:FindFirstChildOfClass("Model")
+                            return (m and m:GetPivot().Position) or bush.Parent:GetPivot().Position
+                        end)
+                        if okP and pos then table.insert(out, { bush = bush, names = names, pos = pos }) end
+                    end
+                end
+            end
+            return out
+        end
+        P.berriesLying = berriesLying
+
+        -- How many of each berry you hold (the game's inventory list: Name,
+        -- Count). Read by the hunt, never by the panel (a server call).
+        local function berryCounts()
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if not (ok and type(inv) == "table") then return E.have end
+            local t = { read = true }
+            for _, it in pairs(inv) do
+                if type(it) == "table" and IS_BERRY[it.Name] then t[it.Name] = tonumber(it.Count) or 0 end
+            end
+            E.have = t
+            return t
+        end
+
+        -- The nearest bush with a berry you switched on. One you hold 99 of
+        -- (the most the game keeps) is not wanted.
+        local function berryWanted()
+            if not (CFG.Hunt and CFG.HuntKind == "berry") then return nil end
+            local _, r = parts()
+            if not r then return nil end
+            local want = {}
+            for n, on in pairs(CFG.BerryWant or {}) do
+                if on and not (E.have.read and (E.have[n] or 0) >= 99) then want[n] = true end
+            end
+            return pickBerry(berriesLying(), want, r.Position)
+        end
+        P.berryWanted = berryWanted
+
+        -- Fly to the bush and fire each berry's prompt (as the hubs do, from
+        -- within 15 studs) until the bush names none. Picked = your count went
+        -- up; gone without that = someone else, or the count cannot be read.
+        local function grabBerry(b, myEpoch)
+            E.berryNote = "going for " .. table.concat(b.names, " + ")
+            E.note = E.berryNote
+            say(E.berryNote)
+            releasePile()
+            setState("BERRY")
+            local had = {}
+            for k, v in pairs(berryCounts()) do had[k] = v end
+            flyTo(b.pos + Vector3.new(0, 3, 0))
+            if stale(myEpoch) then return end
+            local t0 = os.clock()
+            while os.clock() - t0 < 6 and not stale(myEpoch) do
+                local okA, attrs = pcall(function() return b.bush:GetAttributes() end)
+                if not okA or #berryNames(attrs) == 0 then break end
+                local prompts = {}
+                pcall(function()
+                    for _, d in ipairs(b.bush:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") then table.insert(prompts, d) end
+                    end
+                end)
+                for _, pr in ipairs(prompts) do
+                    local at = b.pos
+                    pcall(function()
+                        local p = pr.Parent
+                        if p:IsA("BasePart") then at = p.Position
+                        elseif p:IsA("Attachment") then at = p.WorldPosition
+                        elseif p:IsA("Model") then at = p:GetPivot().Position end
+                    end)
+                    lockAt(at + Vector3.new(0, 3, 0))
+                    task.wait(0.05)
+                    if fireproximityprompt then
+                        pcall(fireproximityprompt, pr)
+                    else
+                        pcall(function()
+                            pr:InputHoldBegin()
+                            task.wait((pr.HoldDuration or 0) + 0.05)
+                            pr:InputHoldEnd()
+                        end)
+                    end
+                end
+                task.wait(0.3)
+            end
+            local okA, attrs = pcall(function() return b.bush:GetAttributes() end)
+            local left = berryNames(okA and attrs or nil)
+            local now = berryCounts()
+            local got, n = {}, 0
+            for _, name in ipairs(b.names) do
+                local up = (now[name] or 0) - (had[name] or 0)
+                if up > 0 and not table.find(got, name) then
+                    table.insert(got, name)
+                    n += up
+                end
+            end
+            if n > 0 then
+                E.tally.berries = (E.tally.berries or 0) + n
+                E.berryNote = "PICKED " .. table.concat(got, " + ")
+                notify("Berry: " .. table.concat(got, " + "))
+            elseif #left == 0 then
+                E.berryNote = table.concat(b.names, " + ") .. ": gone from the bush, your count did not go up"
+                    .. (now.read and "" or " (inventory not readable)")
+            else
+                E.berrySkip[b.bush] = os.clock() + 60
+                E.berryNote = table.concat(left, " + ") .. ": could not pick - left for a minute"
+            end
+            E.note = E.berryNote
+            say(E.berryNote)
         end
 
         local function eliteFight(name, at, where, myEpoch)
@@ -3843,10 +4012,9 @@ do
             return false
         end
 
-        -- THE DIRECTOR. Every step: the chalice stops everything; then the
-        -- best target present, in the user's order - a fruit on the ground
-        -- (gone within 20 min, or to someone else), then an elite; nothing
-        -- worth doing here = the next server (or, hop off, wait here).
+        -- THE DIRECTOR. Every step: the chalice stops everything; then ONLY
+        -- the hunt you switched on (the user picks, nothing is ranked for
+        -- them); nothing for it here = the next server (or, hop off, wait).
         function huntStep()
             local myEpoch = epoch
             if E.chalice or holdingChalice() then
@@ -3855,17 +4023,31 @@ do
                 return
             end
             E.used = true
+            local kind = CFG.HuntKind
             if not E.lookStart then
                 lookAgain()
-                pcall(readProgress)
+                if kind == "elite" then pcall(readProgress) end
+                if kind == "berry" then pcall(berryCounts) end
             end
 
-            local f = fruitWanted()
-            if f then
-                grabFruit(f, myEpoch)
+            -- ONLY the hunt you switched on.
+            if kind == "fruit" then
+                local f = fruitWanted()
+                if f then
+                    grabFruit(f, myEpoch)
+                    return
+                end
+                E.why = "no fruit worth it here"
+            elseif kind == "berry" then
+                local b = berryWanted()
+                if b then
+                    grabBerry(b, myEpoch)
+                    return
+                end
+                E.why = "no berry you want here"
+            elseif eliteLook(myEpoch) then
                 return
             end
-            if CFG.HuntElite and eliteLook(myEpoch) then return end
 
             -- Nothing worth doing here. A moment after a join first: the
             -- world is still arriving.
@@ -3877,7 +4059,6 @@ do
                 task.wait(0.25)
                 return
             end
-            if not CFG.HuntElite then E.why = "no fruit worth it here" end
             if CFG.HuntHop then
                 hop(E.why or "nothing worth doing here")
                 task.wait(2)          -- still here: the hop failed; do not hammer it
@@ -3889,15 +4070,18 @@ do
             end
         end
 
-        -- The Home switch. Off: the next server's copy does not start by itself.
-        function P.setHunt(x)
+        -- The hunt switches. `kind` = which hunt ("elite" / "fruit" / "berry");
+        -- one on turns the others off. Off: the next server's copy does not
+        -- start by itself.
+        function P.setHunt(x, kind)
+            if kind then CFG.HuntKind = kind end
             CFG.Hunt = x and true or false
             releasePile()
             if x then
                 CFG.RaidMode, CFG.RandomMode = false, false
                 E.used = true
                 lookAgain()
-                E.note = "hunt on"
+                E.note = tostring(CFG.HuntKind) .. " hunt on"
             else
                 carryOff()
                 E.note = "hunt off"
@@ -4421,6 +4605,25 @@ local function buildUI()
         return f
     end
 
+    -- THE HUNTS: one switch each, one at a time. On = that hunt and nothing
+    -- else (the others go off); off = no hunt.
+    local HUNTS = {
+        { "elite", "Elite pirate hunt", "Diablo, Deandre, Urban - last hit, God's Chalice" },
+        { "fruit", "Fruit hunt",        "Fruits on the ground - grabbed and STORED, never eaten" },
+        { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
+    }
+    local function huntSwitches(view)
+        for _, h in ipairs(HUNTS) do
+            local kind = h[1]
+            switchRow(view, h[2], h[3],
+                function() return CFG.Hunt and CFG.HuntKind == kind end,
+                function(x)
+                    if x then P.setHunt(true, kind)
+                    elseif CFG.HuntKind == kind then P.setHunt(false) end
+                end)
+        end
+    end
+
     local dragTarget = nil
     UIS.InputChanged:Connect(function(i)
         if dragTarget and (i.UserInputType == Enum.UserInputType.MouseMovement
@@ -4702,15 +4905,15 @@ local function buildUI()
                 releasePile()
                 say(x and "random mode on" or "random mode off - back to the circuit")
             end)
-        switchRow(v, "Hunt",
-            "Fruits on the ground, elites - best first, then the next server",
-            function() return CFG.Hunt end,
-            function(x) P.setHunt(x) end)
+        huntSwitches(v)
         readout(v, function()
             if CFG.Hunt then
                 local t = P.elite.tally
-                return string.format("%s\n%d joined  ·  %d fruits stored  ·  %d elites down  ·  %d chalice",
-                    tostring(P.elite.note), t.joins, t.fruits or 0, t.kills, t.chalices)
+                local k = CFG.HuntKind
+                local count = (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
+                    or (k == "berry") and string.format("%d berries picked", t.berries or 0)
+                    or string.format("%d elites down  ·  %d chalice", t.kills, t.chalices)
+                return string.format("%s\n%d joined  ·  %s", tostring(P.elite.note), t.joins, count)
             end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
@@ -4758,7 +4961,7 @@ local function buildUI()
         navRow(v, "Hunt", function()
             if P.elite.chalice then return "CHALICE - stopped" end
             if not CFG.Hunt then return "Off" end
-            return CFG.HuntHop and "On, hopping" or "On, this server"
+            return tostring(CFG.HuntKind) .. (CFG.HuntHop and ", hopping" or ", this server")
         end, "elite")
         hairline(v)
         navRow(v, "Stats", function()
@@ -5335,10 +5538,7 @@ local function buildUI()
     do
         local v = makeView("elite")
         gap(v, 6)
-        switchRow(v, "Hunt",
-            "The best thing here first, then the next server",
-            function() return CFG.Hunt end,
-            function(x) P.setHunt(x) end)
+        huntSwitches(v)
         readout(v, function()
             local el = P.elite
             local t = el.tally
@@ -5355,11 +5555,7 @@ local function buildUI()
             .. "no hop there, ever - leaving or dying with it loses it. You are "
             .. "held 300 up; Stop gives the character back.")
 
-        heading2(v, "1  fruits on the ground")
-        switchRow(v, "Fruits on the ground",
-            "Grabbed and STORED - never eaten",
-            function() return CFG.HuntFruit end,
-            function(x) CFG.HuntFruit = x end)
+        heading2(v, "fruit hunt")
         sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
             function() return CFG.FruitMinPrice end,
             function(x) CFG.FruitMinPrice = x end, " Beli")
@@ -5390,11 +5586,51 @@ local function buildUI()
             .. "standing by their drop is trading it: never taken, even with "
             .. "player drops on.")
 
-        heading2(v, "2  elite pirates (Third Sea)")
-        switchRow(v, "Elite pirates",
-            "Diablo, Deandre, Urban, Tyrant - last hit, God's Chalice",
-            function() return CFG.HuntElite end,
-            function(x) CFG.HuntElite = x end)
+        heading2(v, "berry hunt  -  which berries")
+        -- What each one makes at the Barista (recipes from the Barista Cousin).
+        local BERRY_USE = {
+            ["Pink Pig Berry"]     = "Winter Sky: 15  (Legendary)",
+            ["White Cloud Berry"]  = "Snow White: 10  (Legendary)",
+            ["Red Cherry Berry"]   = "Pure Red: 15  (Legendary)",
+            ["Blue Icicle Berry"]  = "Absolute Zero 5, Blue Jeans 3",
+            ["Green Toad Berry"]   = "Slimy Green 1, Green Lizard 1",
+            ["Orange Berry"]       = "Orange Soda 1, Heat Wave 2",
+            ["Purple Jelly Berry"] = "Plump Purple 3",
+            ["Yellow Star Berry"]  = "Bright Yellow 1, Yellow Sunshine 1",
+        }
+        for _, n in ipairs(P.BERRIES) do
+            switchRow(v, n, BERRY_USE[n],
+                function() return CFG.BerryWant[n] == true end,
+                function(x) CFG.BerryWant[n] = x and true or false end)
+        end
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.berryNote),
+                string.format("picked    %d", el.tally.berries or 0) }
+            if el.have.read then
+                local bits = {}
+                for _, n in ipairs(P.BERRIES) do
+                    table.insert(bits, string.format("%s %d", (string.gsub(n, " Berry$", "")), el.have[n] or 0))
+                end
+                table.insert(lines, "you have  " .. table.concat(bits, " · "))
+            end
+            local _, r = parts()
+            local ok, list = pcall(P.berriesLying)
+            if ok and type(list) == "table" and #list > 0 then
+                for _, b in ipairs(list) do
+                    table.insert(lines, string.format("   %s   %s", table.concat(b.names, " + "),
+                        r and string.format("%.0f studs", (b.pos - r.Position).Magnitude) or ""))
+                end
+            else
+                table.insert(lines, "on the bushes here: none")
+            end
+            return table.concat(lines, "\n")
+        end)
+        caption(v, "At most 4 in a server, a new one every 15 min, gone after an "
+            .. "hour - anyone can take one. The Barista makes the colors "
+            .. "(+ 7,500 fragments for a Legendary).")
+
+        heading2(v, "elite pirate hunt  (Third Sea)")
         readout(v, function()
             local el = P.elite
             local t = el.tally
