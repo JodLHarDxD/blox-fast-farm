@@ -26,6 +26,26 @@ weapon and switch on what it fires → **Start**.
 _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 ```
 
+## Executor: Wave (since 2026-09-30)
+
+Solara was removed: since 2026-09-29 the client freezes and closes on every
+join with it attached (the game's own teleports too, no script needed). Wave
+(getwave.gg, needs the .NET 9 Desktop Runtime) has every function this script
+can use: `queueonteleport` (the hop carry-over), `getrenv` / `getsenv` (the
+game's own hit sender), `fireproximityprompt` (berries), `firetouchinterest`
+(fruits), `sethiddenproperty`, `isnetworkowner`, `readfile` / `writefile`.
+
+| What | Where |
+|---|---|
+| Wave | `%LOCALAPPDATA%\Wave` (desktop / Start menu shortcut "Wave") |
+| The loader above, saved | `%LOCALAPPDATA%\Wave\scripts\fast_farm.lua` |
+| Hop files, `fruit_probe.txt` | `%LOCALAPPDATA%\Wave\workspace` |
+| Installers (Wave, .NET 9 Desktop, Bloxstrap) | `D:\scripting` |
+
+No autoexec loader is needed: Wave has `queueonteleport`. The Hunt page's
+"after a hop" line confirms it; the M1 page's "hits sent by" line says whether
+the game's hit sender was reached.
+
 ## What each part does
 
 | part | how |
