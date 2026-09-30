@@ -3940,9 +3940,15 @@ do
         end
         P.berryWanted = berryWanted
 
-        -- Fly to the bush and fire each berry's prompt (as the hubs do, from
-        -- within 15 studs) until the bush names none. Picked = your count went
-        -- up; gone without that = someone else, or the count cannot be read.
+        -- Fly to the bush and HOLD each berry's prompt the way a player does
+        -- (InputHoldBegin, the prompt's own HoldDuration, InputHoldEnd),
+        -- standing at it, until the bush names none. NOT the executor's
+        -- fireproximityprompt first: by the sUNC spec it triggers INSTANTLY,
+        -- skipping the hold and the distance, and a game's server can refuse
+        -- exactly that (2026-09-30: on Velocity about half the berries were
+        -- never picked; Solara's version held). It stays the fallback, every
+        -- third try. ~15 s while the berry is still there. Picked = your count
+        -- went up; gone without that = someone else, or the count cannot be read.
         local function grabBerry(b, myEpoch)
             E.berryNote = "going for " .. table.concat(b.names, " + ")
             E.note = E.berryNote
@@ -3953,17 +3959,30 @@ do
             for k, v in pairs(berryCounts()) do had[k] = v end
             flyTo(b.pos + Vector3.new(0, 3, 0))
             if stale(myEpoch) then return end
-            local t0 = os.clock()
-            while os.clock() - t0 < 6 and not stale(myEpoch) do
+            local function hold(pr)
+                local d = tonumber(pr.HoldDuration) or 0
+                if not pcall(function() pr:InputHoldBegin() end) then return end
+                local th = os.clock()
+                while os.clock() - th < d + 0.25 and not stale(myEpoch) do task.wait(0.05) end
+                pcall(function() pr:InputHoldEnd() end)
+            end
+            local t0, tries, way, sawPrompt = os.clock(), 0, "hold", false
+            while os.clock() - t0 < 15 and not stale(myEpoch) do
                 local okA, attrs = pcall(function() return b.bush:GetAttributes() end)
                 if not okA or #berryNames(attrs) == 0 then break end
+                tries += 1
+                -- hold, hold, the instant fire; again
+                local useFire = fireproximityprompt and tries % 3 == 0
+                way = useFire and "fireproximityprompt" or "hold"
                 local prompts = {}
                 pcall(function()
                     for _, d in ipairs(b.bush:GetDescendants()) do
                         if d:IsA("ProximityPrompt") then table.insert(prompts, d) end
                     end
                 end)
+                sawPrompt = sawPrompt or #prompts > 0
                 for _, pr in ipairs(prompts) do
+                    if stale(myEpoch) then break end
                     local at = b.pos
                     pcall(function()
                         local p = pr.Parent
@@ -3972,16 +3991,8 @@ do
                         elseif p:IsA("Model") then at = p:GetPivot().Position end
                     end)
                     lockAt(at + Vector3.new(0, 3, 0))
-                    task.wait(0.05)
-                    if fireproximityprompt then
-                        pcall(fireproximityprompt, pr)
-                    else
-                        pcall(function()
-                            pr:InputHoldBegin()
-                            task.wait((pr.HoldDuration or 0) + 0.05)
-                            pr:InputHoldEnd()
-                        end)
-                    end
+                    task.wait(0.1)
+                    if useFire then pcall(fireproximityprompt, pr) else hold(pr) end
                 end
                 task.wait(0.3)
             end
@@ -3998,17 +4009,20 @@ do
             end
             if n > 0 then
                 E.tally.berries = (E.tally.berries or 0) + n
-                E.berryNote = "PICKED " .. table.concat(got, " + ")
+                E.berryNote = "PICKED " .. table.concat(got, " + ") .. "  (by " .. way .. ", try " .. tries .. ")"
                 notify("Berry: " .. table.concat(got, " + "))
             elseif #left == 0 then
                 E.berryNote = table.concat(b.names, " + ") .. ": gone from the bush, your count did not go up"
                     .. (now.read and "" or " (inventory not readable)")
             else
                 E.berrySkip[b.bush] = os.clock() + 60
-                E.berryNote = table.concat(left, " + ") .. ": could not pick - left for a minute"
+                E.berryNote = table.concat(left, " + ") .. ": could not pick in " .. tries
+                    .. (tries == 1 and " try" or " tries")
+                    .. (sawPrompt and "" or " (no prompt on the bush)") .. " - left for a minute"
             end
             E.note = E.berryNote
             say(E.berryNote)
+            print("[BFF] berry: " .. E.berryNote)
         end
 
         -- AURA RECIPES: the Barista Cousin (Second and Third Sea) teaches ONE
