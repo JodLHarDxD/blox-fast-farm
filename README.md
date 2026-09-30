@@ -44,11 +44,20 @@ every function this script can use: `queue_on_teleport` (the hop carry-over),
 | Velocity | `D:\Velocity` (`VelocityLite.exe`; excluded from Windows Defender) |
 | The loader above, saved | `D:\Velocity\Scripts\fast_farm.lua` |
 | Hop files, `fruit_probe.txt` | `D:\Velocity\Workspace` |
+| `autoexec_team.lua` (team at every join) | `D:\Velocity\AutoExec\bff_team.lua` |
 | Installers | `D:\scripting` (.NET 9 Desktop, Bloxstrap); Velocity's archive is `D:\Velocity.7z` |
 
 No autoexec loader is needed: Velocity has `queue_on_teleport`. The Hunt page's
 "after a hop" line confirms it; the M1 page's "hits sent by" line says whether
 the game's hit sender was reached.
+
+The script comes back by itself only after a hop IT made (a hunt's hop, the
+panel's "Hop now"). A hop through the game's own server menu, or a fresh join,
+arrives without it -- so `autoexec_team.lua` sits in the executor's autoexec
+folder: at every Blox Fruits join it asks for Pirates (`TEAM` at its top) until
+you are on a team, then hides the team screen; the console says
+`[BFF] autoexec team: on Pirates`. It never loads the farm, does nothing in
+other games, and never switches a team you are on.
 
 ## What each part does
 
@@ -139,6 +148,7 @@ python tools/raid_test.py                        # raid mode's view of the game:
 python tools/pose_test.py                        # where you hang + the remote hit's reach, real code: Port Town, ledge, 120 up, stay above
 python tools/probe_test.py                       # the M1 probe, real code: the game's own hit sender tried first; "nothing landed" tried again after 12 s, not final for the server
 python tools/team_test.py                        # the team pick, real code: SetTeam until on a team, the screen's button never fired, Marines when picked, never a switch, off = nothing
+python tools/autoexec_test.py                    # autoexec_team.lua, real file: Pirates at every join, other games untouched, never a switch, a minute at most, place read after load, call errors survived
 python tools/leash_test.py                       # checkPutBack: pull limit measured (contrast rule), random mode's in-place escalation
 python tools/aim_test.py                         # the aim lock's camera solve, real code, every cursor pixel lands on the pile
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
