@@ -104,6 +104,20 @@ check("ours + in reach + no damage: 'held, ours', 'in reach', its place in the p
     P.noDamage[1] and P.noDamage[1]:find("held, ours", 1, true) and P.noDamage[1]:find("in reach (20 of 60)", 1, true)
         and P.noDamage[1]:find("pile 2 of 2", 1, true), P.noDamage[1])
 
+-- 9b. the far one is NOT OURS (the server has it elsewhere) while a nearer
+--     one is hit: that is not a distance - no limit learned from it
+reset()
+table.clear(P.noDamage)
+local nearer = enemy("Marine", v3(20, 0, 0))
+local farNot = enemy("Marine", v3(200, 0, 0))
+lastDest[nearer.model], lastDest[farNot.model] = v3(0, 0, 0), v3(0, 0, 0)
+farNot.root.Position = v3(150, 0, 0)          -- replication: it is really over there
+pile = { nearer, farNot }
+run(4, { nearer })
+check("far one not ours + near one hit: put back, but NO pull limit learned",
+    putBack[farNot.model] ~= nil and (P.leash["Marine"] or {}).bad == nil,
+    tostring((P.leash["Marine"] or {}).bad))
+
 -- 10. fought in place: no ownership claim (lastDest is an old pull's), the stage named
 reset()
 table.clear(P.noDamage)

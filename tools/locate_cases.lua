@@ -374,4 +374,112 @@ check("raid: then the put-back one, in place at its own spot (the wave is not le
     #pl2 == 1 and pl2[1] == stuck and inPlace and near(c2, v3(150, 5, 0), 0.1), "held " .. #pl2 .. " " .. tostring(inPlace))
 P.raidAt = nil
 
+-- ---------------------------------------------------------------- THE PILE HOLDS (user, 2026-09-30)
+-- "It pulls the whole camp, then in the middle of the camp they scatter
+-- again; with 'Learn how far each kind can go' off it holds better." A
+-- learned limit narrower than the camp splits it into sides, and the side was
+-- worked out again ten times a second from whichever PULLED one stood nearest
+-- the middle -- on the ring they all do, so it flipped, the centre jumped, and
+-- living members past the new limit were let go mid-fight.
+-- Driven through the real refreshPile, as the frame loop does.
+local function inPile(e)
+    for _, o in ipairs(pile) do if o.model == e.model then return true end end
+    return false
+end
+local function ring(c, first)            -- the magnet's work: all on the ring, `first` at the middle
+    for _, e in ipairs(pile) do e.root.Position = c + v3(0, 0, 3) end
+    if first then first.root.Position = c end
+end
+local function row(name, xs)
+    local out = {}
+    for _, x in ipairs(xs) do
+        local e = enemy(name, v3(x, 0, 0))
+        table.insert(WORLD.loaded, e)
+        table.insert(out, e)
+    end
+    return out
+end
+
+-- 34. a camp one wide stretch (0..300), limit 100: the pile at 30 keeps its
+--     three while the one from 120 happens to stand nearest the middle
+reset()
+table.clear(P.leash)
+CFG.PullAll, CFG.MaxPull, CFG.GrabMax = true, 100, 12
+for _, x in ipairs({ 0, 60, 120, 180, 240, 300 }) do table.insert(WORLD.spawns, part("Marine", v3(x, 0, 0))) end
+ME.Position = v3(0, 20, 0)
+local ms = row("Marine", { 0, 60, 120, 180, 240, 300 })
+releasePile()
+pileCur, pileNames = { name = "Marine" }, { Marine = true }
+refreshPile()
+local c34 = pileCentre
+check("split camp: first pile = the three within 100 of 30", #pile == 3 and near(c34, v3(30, 0, 0)),
+    "held " .. #pile .. " at " .. tostring(c34 and c34.X))
+ring(c34, ms[3])
+refreshPile()
+check("split camp: the pile does not move while its members live (was: jumped to 120)",
+    near(pileCentre, c34), pileCentre and pileCentre.X)
+check("split camp: no living member let go mid-fight (was: the one from 0 dropped)",
+    inPile(ms[1]) and inPile(ms[2]) and inPile(ms[3]), "held " .. #pile)
+ring(pileCentre, ms[2])
+refreshPile()
+check("split camp: still held, whoever stands nearest", near(pileCentre, c34) and #pile == 3,
+    "held " .. #pile .. " at " .. tostring(pileCentre and pileCentre.X))
+
+-- 35. a respawn within the limit joins the held pile; the far side waits
+local back = enemy("Marine", v3(60, 0, 0))
+table.insert(WORLD.loaded, back)
+refreshPile()
+check("held pile: a new spawn within the limit joins", inPile(back) and near(pileCentre, c34))
+check("held pile: the far side (180) is not dragged past the limit", not inPile(ms[4]))
+
+-- 36. every member dead: the next pile is chosen fresh (the far side)
+WORLD.loaded = { ms[4], ms[5], ms[6] }
+refreshPile()
+check("pile empty: a new centre for the rest", #pile > 0 and not near(pileCentre, c34) and inPile(ms[4]),
+    "held " .. #pile .. " at " .. tostring(pileCentre and pileCentre.X))
+CFG.MaxPull = 300
+
+-- 37. RANDOM MODE, same camp shape: the same hold
+reset()
+table.clear(putBack)
+table.clear(P.leash)
+P.randomSkip, P.randomAt = {}, nil
+CFG.RandomRadius, CFG.MaxPull = 750, 100
+ME.Position = v3(0, 40, 0)
+local rs = row("Raider", { 0, 60, 120, 180 })
+releasePile()
+pileCur = { name = "random", random = true }
+refreshPile()
+local c37 = pileCentre
+check("random: first pile = the three within 100 of 30", #pile == 3 and near(c37, v3(30, 0, 0)),
+    "held " .. #pile .. " at " .. tostring(c37 and c37.X))
+ring(c37, rs[3])
+refreshPile()
+check("random: held - no jump, nobody let go (was: the one from 0 dropped)",
+    near(pileCentre, c37) and inPile(rs[1]) and inPile(rs[2]) and inPile(rs[3]),
+    "held " .. #pile .. " at " .. tostring(pileCentre and pileCentre.X))
+CFG.MaxPull = 300
+
+-- 38. RAID MODE: a death does not slide the whole pile to a new middle
+reset()
+table.clear(putBack)
+P.randomSkip = {}
+CFG.RaidRadius = 450
+P.raidAt = v3(0, 0, 0)
+ME.Position = v3(0, 40, 0)
+local rd = row("Raid Brute", { -100, 0, 100, 250 })
+releasePile()
+pileCur = { name = "raid", raid = true }
+refreshPile()
+local c38 = pileCentre
+check("raid: one pile of 4 at their middle (75)", #pile == 4 and near(c38, v3(75, 0, 0)),
+    "held " .. #pile .. " at " .. tostring(c38 and c38.X))
+ring(c38, rd[2])
+WORLD.loaded = { rd[1], rd[2], rd[3] }
+refreshPile()
+check("raid: one died - the pile stays where it is (was: slid to 0)", near(pileCentre, c38) and #pile == 3,
+    "held " .. #pile .. " at " .. tostring(pileCentre and pileCentre.X))
+P.raidAt = nil
+releasePile()
+
 print(all and "ALL PASS" or "SOME FAILED")

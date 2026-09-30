@@ -84,9 +84,12 @@ local CFG = {
     -- Nobody publishes the game's number; the hubs pull within 250-350. A camp
     -- wider than this (Port Town) is piled one side at a time. LearnLeash
     -- lowers it per species when a pulled one stops taking damage further out
-    -- than others that still do.
+    -- than others that still do. OFF by default (user, 2026-09-30: "with it
+    -- off the pile holds"): it only ever lowers, and a hit that never reached
+    -- the back of the pile looked exactly like a limit -- the camp was then
+    -- split into sides and piled a few at a time.
     MaxPull            = 300,
-    LearnLeash         = true,
+    LearnLeash         = false,
     GrabRadius         = 300,    -- PullAll off: spawned this close to the camp = pulled
     GrabMax            = 30,     -- most enemies in one pile
     PileSpread         = 3,      -- the pile is a ring this wide, not one point
@@ -1373,6 +1376,37 @@ local pileFor                -- declared here, set by buildPile's caller
 local pileCur, pileNames     -- what the pile is being kept for (set by the fight)
 local pileWatch  = {}        -- model -> Humanoid of every one that was in the pile
 local pileScanAt = 0
+
+-- THE PILE HOLDS. While one pulled into the pile being hit is alive, the pile
+-- stays where it is and keeps every living member; new ones are only added to
+-- it. The centre used to be worked out again ten times a second from whichever
+-- member stood nearest it -- on the ring that is any of them -- so in a camp
+-- piled one side at a time it jumped, and every living member whose spawn was
+-- now past the limit was let go mid-fight: the scatter (user, 2026-09-30). A
+-- new centre is chosen only once the pile is empty.
+-- Splits `list` into the ones already in the `name` pile (in the pile's own
+-- order) and the rest. held = nil: no pile to hold, choose afresh.
+local function splitHeld(list, name)
+    if not (CFG.Magnet and name and pileCentre and pileFor == name and #pile > 0) then
+        return nil, list
+    end
+    local byModel = {}
+    for _, e in ipairs(list) do byModel[e.model] = e end
+    local held, taken = {}, {}
+    for _, o in ipairs(pile) do
+        local e = byModel[o.model]
+        if e and not taken[e.model] then
+            taken[e.model] = true
+            table.insert(held, e)
+        end
+    end
+    if #held == 0 then return nil, list end
+    local fresh = {}
+    for _, e in ipairs(list) do
+        if not taken[e.model] then table.insert(fresh, e) end
+    end
+    return held, fresh
+end
 local function releasePile()
     releaseCamera()          -- the view must not stay on a pile being left
     pileActive, attacking = false, false
@@ -1418,6 +1452,32 @@ local function buildPile(cur, names)
         return { anchor }, anchor.root.Position
     end
 
+    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
+    -- Other picked species that spawned in this camp, while there is room.
+    local function withOthers(group, centre)
+        for _, e in ipairs(others) do
+            if #group >= cap then break end
+            if (homeOf(e) - centre).Magnitude <= (CFG.OthersRadius or 100) then
+                table.insert(group, e)
+            end
+        end
+        return group, centre
+    end
+
+    local held, fresh = splitHeld(quest, cur.name)
+    if held then
+        -- The pile holds: a new one joins if it spawned within the limit of it.
+        local limit = CFG.PullAll and pullLimit(cur.name) or (CFG.GrabRadius or 300)
+        table.sort(fresh, function(a, b)
+            return (homeOf(a) - pileCentre).Magnitude < (homeOf(b) - pileCentre).Magnitude
+        end)
+        for _, e in ipairs(fresh) do
+            if #held >= cap then break end
+            if (homeOf(e) - pileCentre).Magnitude <= limit then table.insert(held, e) end
+        end
+        return withOthers(held, pileCentre)
+    end
+
     local home = homeOf(anchor)
     local group = {}
     for _, e in ipairs(quest) do
@@ -1428,7 +1488,6 @@ local function buildPile(cur, names)
     table.sort(group, function(a, b)
         return (homeOf(a) - home).Magnitude < (homeOf(b) - home).Magnitude
     end)
-    local cap = math.max(1, math.floor(CFG.GrabMax or 12))
 
     local centre
     local camp = CFG.PullAll and campFor(cur.name, home) or nil
@@ -1467,14 +1526,7 @@ local function buildPile(cur, names)
         centre = sum / #group
         P.pileReach, P.pileSplit = nil, nil
     end
-
-    for _, e in ipairs(others) do
-        if #group >= cap then break end
-        if (homeOf(e) - centre).Magnitude <= (CFG.OthersRadius or 100) then
-            table.insert(group, e)
-        end
-    end
-    return group, centre
+    return withOthers(group, centre)
 end
 
 -- RANDOM MODE's pile -- and RAID MODE's (buildRaidPile, below, is this with
@@ -1518,6 +1570,22 @@ local function buildRandomPile(around, radius, pullAll)
     if #free > 0 then
         local anchor = nearest(free)
         if not CFG.Magnet then return { anchor }, anchor.root.Position, true end
+        local cap = math.max(1, math.floor(CFG.GrabMax or 12))
+        -- The pile holds (buildPile): a new one joins within its own pull
+        -- limit of it; raid mode, any distance.
+        local held, fresh = splitHeld(free, pileCur and pileCur.name)
+        if held then
+            table.sort(fresh, function(a, b)
+                return (homeOf(a) - pileCentre).Magnitude < (homeOf(b) - pileCentre).Magnitude
+            end)
+            for _, e in ipairs(fresh) do
+                if #held >= cap then break end
+                if pullAll or (homeOf(e) - pileCentre).Magnitude <= pullLimit(e.name) then
+                    table.insert(held, e)
+                end
+            end
+            return held, pileCentre, false
+        end
         local home = homeOf(anchor)
         local lim = pullAll and math.huge or pullLimit(anchor.name)
         local pts = {}
@@ -1534,7 +1602,6 @@ local function buildRandomPile(around, radius, pullAll)
         table.sort(list, function(a, b)
             return (homeOf(a) - centre).Magnitude < (homeOf(b) - centre).Magnitude
         end)
-        local cap = math.max(1, math.floor(CFG.GrabMax or 12))
         while #list > cap do table.remove(list) end
         P.pileReach = reach
         return list, centre, false
@@ -1615,28 +1682,63 @@ local function refreshPile()
 end
 
 -- Every frame, after physics.
-local function magnetTick()
-    if not (P.running and pileActive and CFG.Magnet and pileCentre) then return end
-    local now = os.clock()
-    if now - pileScanAt > 0.1 then refreshPile() end
-    if P.pileInPlace then P.pileHeld = 0 return end   -- fought where it stands
-    if now - simAt > 1 then
-        simAt = now
-        if sethiddenproperty then
-            pcall(sethiddenproperty, player, "SimulationRadius", math.huge)
+-- ITS OWN PLACE. Each one keeps its spot on the ring for as long as it is in
+-- the pile: the lowest spot free when it joined, spots a golden angle apart
+-- (any number spread round, a newcomer never lands on another). The spot used
+-- to be its index in the pile list, so every death moved every other one
+-- across the ring.
+-- FROZEN while held, the way the public hubs freeze the ones they bring
+-- (WalkSpeed 0, JumpPower 0, PlatformStand), and frozen again any frame it
+-- is found unfrozen (the game may set its speed back): held only by this
+-- write, one frame without it -- an ownership blip, a rebuild -- and it walked
+-- off. They are the Humanoid's own fields on YOUR client: they stop only the
+-- simulation you run for it, never the server's.
+local magnetTick
+do
+    local GOLDEN = math.pi * (3 - math.sqrt(5))
+    local slotOf = setmetatable({}, { __mode = "k" })
+
+    function magnetTick()
+        if not (P.running and pileActive and CFG.Magnet and pileCentre) then return end
+        local now = os.clock()
+        if now - pileScanAt > 0.1 then refreshPile() end
+        if P.pileInPlace then P.pileHeld = 0 return end   -- fought where it stands
+        if now - simAt > 1 then
+            simAt = now
+            if sethiddenproperty then
+                pcall(sethiddenproperty, player, "SimulationRadius", math.huge)
+            end
         end
-    end
-    local n = #pile
-    local held, owned = 0, 0
-    for i, e in ipairs(pile) do
-        if e.model.Parent and e.hum.Health > 0 then
+        local live = {}
+        for _, e in ipairs(pile) do
+            if e.model.Parent and e.hum.Health > 0 then table.insert(live, e) end
+        end
+        -- Spots in use; a spot two claim (one came back to a spot since
+        -- given away) goes to the first, the other gets a new one.
+        local used = {}
+        for _, e in ipairs(live) do
+            local s = slotOf[e.model]
+            if s and not used[s] then used[s] = true else slotOf[e.model] = nil end
+        end
+        local rad = (#live > 1) and (CFG.PileSpread or 3) or 0
+        local held, owned = 0, 0
+        for _, e in ipairs(live) do
             -- Owned = where we wrote it last frame is where it still is.
             local prev = lastDest[e.model]
             if prev and (e.root.Position - prev).Magnitude < 4 then owned += 1 end
-            local a    = (i - 1) / math.max(n, 1) * math.pi * 2
-            local rad  = (n > 1) and (CFG.PileSpread or 3) or 0
+            local s = slotOf[e.model]
+            if not s then
+                s = 1
+                while used[s] do s += 1 end
+                used[s], slotOf[e.model] = true, s
+            end
+            local a    = s * GOLDEN
             local dest = pileCentre + Vector3.new(math.cos(a) * rad, 0, math.sin(a) * rad)
             pcall(function()
+                local hum = e.hum
+                if hum.WalkSpeed ~= 0 or not hum.PlatformStand then
+                    hum.WalkSpeed, hum.JumpPower, hum.PlatformStand = 0, 0, true
+                end
                 e.root.CFrame = CFrame.new(dest)
                 e.root.AssemblyLinearVelocity  = Vector3.zero
                 e.root.AssemblyAngularVelocity = Vector3.zero
@@ -1649,8 +1751,8 @@ local function magnetTick()
             lastDest[e.model] = dest
             held += 1
         end
+        P.pileHeld, P.pileOwned = held, owned
     end
-    P.pileHeld, P.pileOwned = held, owned
 end
 
 -- WHY NO DAMAGE. The moment one stops taking damage, what was true then is
@@ -1662,17 +1764,23 @@ end
 --   ours, in reach, no shield, no damage: the server refused the hit itself
 --              (its place in the pile shows a cap on how many one hit takes)
 P.noDamage = {}
+-- Returns false when it was NOT OURS (moved only on your screen).
 function P.noteNoDamage(e, how)
     local bits = {}
+    local ours = true
     -- Only while it is being pulled: in place, lastDest is an old pull's.
     local dest = (not P.pileInPlace) and lastDest[e.model] or nil
     if dest then
         local gap = (e.root.Position - dest).Magnitude
+        if gap > 4 then ours = false end
         table.insert(bits, (gap > 4) and string.format("NOT OURS (really %.0f from where it was put)", gap) or "held, ours")
     end
     if isnetworkowner then
         local ok, own = pcall(isnetworkowner, e.root)
-        if ok then table.insert(bits, own and "network owner you" or "network owner NOT you") end
+        if ok then
+            if not own then ours = false end
+            table.insert(bits, own and "network owner you" or "network owner NOT you")
+        end
     end
     local _, r = parts()
     if r then
@@ -1691,6 +1799,7 @@ function P.noteNoDamage(e, how)
     end
     table.insert(P.noDamage, 1, tostring(e.name or "?") .. " - " .. how .. ": " .. table.concat(bits, ", "))
     while #P.noDamage > 6 do table.remove(P.noDamage) end
+    return ours
 end
 
 -- Held, hit, and not losing HP: out of its area, or not ours to move.
@@ -1742,11 +1851,15 @@ local function checkPutBack()
                 if not l.ok or d > l.ok then l.ok = d end
             end
         elseif now - j.at > (CFG.PutBackAfter or 3) and actions - j.act >= 6 then
+            -- Written down first: whether it was really ours decides below.
+            local ours = P.noteNoDamage(e, "pulled")
             -- No damage. If one pulled from NEARER its spawn in this same pile
             -- did take damage, the distance is why: that is the limit for its
-            -- kind. (Without that contrast it may just not be ours to move.)
+            -- kind. (Without that contrast it may just not be ours to move --
+            -- and one that is NOT OURS teaches nothing about distance: the
+            -- server has it elsewhere, it takes no damage however near.)
             local spawnAt = homePos[e.model]
-            if CFG.LearnLeash and spawnAt and pileCentre and e.name then
+            if CFG.LearnLeash and ours and spawnAt and pileCentre and e.name then
                 local d = (spawnAt - pileCentre).Magnitude
                 for _, o in ipairs(pile) do
                     local jo = pileJoin[o.model]
@@ -1759,7 +1872,6 @@ local function checkPutBack()
                     end
                 end
             end
-            P.noteNoDamage(e, "pulled")
             putBack[e.model] = now + 30
             pileJoin[e.model] = nil
             stats.putBack += 1
@@ -2078,6 +2190,13 @@ do
         end
         return range
     end
+    -- WHO IS NAMED FIRST TAKES TURNS, one swing each. The pile is ordered
+    -- nearest-spawn first; a way that lands on the first names only (a fruit
+    -- click per enemy, a cap per call) never reached the back of the pile --
+    -- 3 s there with no damage = put back to its spawn mid-fight, and the ones
+    -- in front "proved" a pull limit. Same names, same swing, same moment:
+    -- only the order turns.
+    local hitTurn = 0
     local function hitTargets()
         local _, r = parts()
         if not r then return {} end
@@ -2087,6 +2206,14 @@ do
             if e.model.Parent and e.hum.Health > 0
                 and (e.root.Position - r.Position).Magnitude <= range then
                 table.insert(out, e)
+            end
+        end
+        if #out > 1 then
+            hitTurn += 1
+            local k = hitTurn % #out
+            if k > 0 then
+                local turned = table.move(out, k + 1, #out, 1, {})
+                out = table.move(out, 1, k, #turned + 1, turned)
             end
         end
         return out
@@ -5557,7 +5684,7 @@ local function buildUI()
             function() return CFG.MaxPull end,
             function(x) CFG.MaxPull = x end, " studs")
         switchRow(v, "Learn how far each kind can go",
-            "One that stops taking damage further out lowers its limit",
+            "Off by default: it only ever lowers the limit, and split camps",
             function() return CFG.LearnLeash end,
             function(x) CFG.LearnLeash = x end)
         readout(v, function()
@@ -5577,10 +5704,11 @@ local function buildUI()
         end)
         actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
         caption(v, "A camp wider than the limit is piled one side at a time: "
-            .. "the side nearest you, then the other when it is empty. How far "
-            .. "the game lets one go is published nowhere - the farm measures "
-            .. "it: pulled ones that stop taking damage while nearer ones still "
-            .. "do lower the limit for their kind.")
+            .. "the side nearest you, then the other when it is empty. A pile "
+            .. "holds: it does not move and lets nobody go while one of it is "
+            .. "alive. Learning on: pulled ones that stop taking damage while "
+            .. "nearer ones still do lower the limit for their kind (never one "
+            .. "that is NOT OURS).")
         sliderRow(v, "When that is off: within", 50, 600, 10,
             function() return CFG.GrabRadius end,
             function(x) CFG.GrabRadius = x end, " studs")
@@ -5615,9 +5743,11 @@ local function buildUI()
         heading2(v, "keeping them hittable")
         caption(v, "The pile sits at the middle of the camp's spawn points - the "
             .. "spot where the farthest pull is shortest, so every one stays "
-            .. "inside its own area (an enemy dragged out of it takes no damage). One that is held and hit with no HP change goes back "
-            .. "where it came from and is left alone for 30 s. 'Staying put' is "
-            .. "how many are really yours to move.")
+            .. "inside its own area (an enemy dragged out of it takes no damage). Each "
+            .. "one held is frozen (cannot walk) and keeps its own spot. One that is "
+            .. "held and hit with no HP change goes back where it came from and is "
+            .. "left alone for 30 s. 'Staying put' is how many are really yours to "
+            .. "move - fewer than 'held' = another player is nearer those.")
         sliderRow(v, "Put back after no damage for", 1, 10, 0.5,
             function() return CFG.PutBackAfter end,
             function(x) CFG.PutBackAfter = x end, " s")

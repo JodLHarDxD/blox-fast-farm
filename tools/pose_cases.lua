@@ -55,4 +55,22 @@ pileCentre = v3(0, 40, 0)
 pile = { enemy(v3(3, 40, 0)) }
 check("only pile members are named", #hitTargets() == 1)
 
+-- 9. WHO IS NAMED FIRST TAKES TURNS. The pile is ordered nearest-spawn first,
+--    so a hit path that lands on the first few only (one fruit click per
+--    swing, a cap per call) starved the back of the pile: 3 s with no damage
+--    = put back to its spawn mid-fight (the scatter), and the nearer ones
+--    that were hit "proved" a pull limit that was never there.
+pileCentre = v3(0, 40, 0)
+ME.Position = v3(0, 100, 0)
+local a9, b9, c9 = enemy(v3(3, 40, 0)), enemy(v3(-3, 40, 0)), enemy(v3(0, 40, 3))
+pile = { a9, b9, c9 }
+local firsts = {}
+for _ = 1, 3 do
+    local t9 = hitTargets()
+    firsts[t9[1]] = true
+    if #t9 ~= 3 then firsts.short = true end
+end
+check("three swings: each of the three is named first once, all three named every time",
+    firsts[a9] and firsts[b9] and firsts[c9] and not firsts.short)
+
 print(all and "ALL PASS" or "SOME FAILED")

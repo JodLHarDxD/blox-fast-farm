@@ -40,6 +40,7 @@ local function enemy(name, pos)
     return { model = { Name = name }, hum = { Health = 100 }, root = { Position = pos }, name = name }
 end
 local function releaseCamera() end
+local countedDead = {}        -- refreshPile clears a living one's death record
 local P = {}
 local CFG = { Magnet = true, GrabRadius = 300, GrabMax = 12, PullOthers = true, OthersRadius = 100, MaxPull = 300, LearnLeash = true }
 
