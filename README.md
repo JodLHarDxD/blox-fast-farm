@@ -26,23 +26,27 @@ weapon and switch on what it fires → **Start**.
 _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 ```
 
-## Executor: Wave (since 2026-09-30)
+## Executor: Velocity (since 2026-09-30)
 
 Solara was removed: since 2026-09-29 the client freezes and closes on every
 join with it attached (the game's own teleports too, no script needed). Wave
-(getwave.gg, needs the .NET 9 Desktop Runtime) has every function this script
-can use: `queueonteleport` (the hop carry-over), `getrenv` / `getsenv` (the
-game's own hit sender), `fireproximityprompt` (berries), `firetouchinterest`
-(fruits), `sethiddenproperty`, `isnetworkowner`, `readfile` / `writefile`.
+was tried next and removed: it has no free tier (every plan is a paid
+license). Velocity (getvelocity.llc, the product "Roblox", NOT "Roblox
+(External)", which is an aimbot/ESP tool) is free with a 48-hour key from
+getvelocity.llc/keysystem and needs the .NET 10 Desktop Runtime. Its docs list
+every function this script can use: `queue_on_teleport` (the hop carry-over),
+`getrenv` / `getsenv` (the game's own hit sender), `fireproximityprompt`
+(berries), `firetouchinterest` (fruits), `sethiddenproperty`,
+`readfile` / `writefile`.
 
 | What | Where |
 |---|---|
-| Wave | `%LOCALAPPDATA%\Wave` (desktop / Start menu shortcut "Wave") |
-| The loader above, saved | `%LOCALAPPDATA%\Wave\scripts\fast_farm.lua` |
-| Hop files, `fruit_probe.txt` | `%LOCALAPPDATA%\Wave\workspace` |
-| Installers (Wave, .NET 9 Desktop, Bloxstrap) | `D:\scripting` |
+| Velocity | `D:\Velocity` (`VelocityLite.exe`; excluded from Windows Defender) |
+| The loader above, saved | `D:\Velocity\Scripts\fast_farm.lua` |
+| Hop files, `fruit_probe.txt` | `D:\Velocity\Workspace` |
+| Installers | `D:\scripting` (.NET 9 Desktop, Bloxstrap); Velocity's archive is `D:\Velocity.7z` |
 
-No autoexec loader is needed: Wave has `queueonteleport`. The Hunt page's
+No autoexec loader is needed: Velocity has `queue_on_teleport`. The Hunt page's
 "after a hop" line confirms it; the M1 page's "hits sent by" line says whether
 the game's hit sender was reached.
 
