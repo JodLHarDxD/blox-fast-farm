@@ -182,7 +182,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "prehistoric" | "mirage"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric" | "mirage"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -211,6 +211,12 @@ local CFG = {
     -- the moment it lies there, then the next server. None this long after
     -- the FIRST kill in a server (not the join): the next server.
     FlowerGiveUp       = 2.5,        -- minutes, from the first kill (respawn waits count)
+    -- BLAZE EMBER HUNT (Third Sea): the Dragon Hunter's quests on Hydra
+    -- Island, over and over - 3 Hydra Enforcers / 3 Venomous Assailants /
+    -- 10 trees - and the 3 embers each one drops. Needs Dragon Talon 500
+    -- mastery + the Dojo's Yellow Belt.
+    EmberStopAt        = 99,         -- stop with this many (99 = the most you can hold)
+    EmberTreeMax       = 120,        -- trees taller than this are never tried (the two giants)
     -- PREHISTORIC HUNT (Third Sea): a boat bought at Tiki Outpost's BACK boat
     -- dealer and driven west into Sea Danger 6 until the island comes. None
     -- by SeaSearchTo = the next server. The island up = the hunt's job done;
@@ -4730,6 +4736,9 @@ do
                 if recipeStep(myEpoch) then return end
             elseif kind == "flower" then
                 if flowerStep(myEpoch) then return end
+            elseif kind == "ember" then
+                -- BLAZE EMBERS: always busy (never hops) - EMBER HUNT.
+                if (P :: any).ember.step(myEpoch) then return end
             elseif kind == "prehistoric" or kind == "mirage" then
                 -- SEA HUNT: true while it sails (or holds the island); false
                 -- = nothing came by the far edge, E.why says so.
@@ -5900,14 +5909,15 @@ do
         -- one (best rate first), then untried, then tried < 4 times, then the
         -- ones that never did - still fired when nothing else is ready.
         S.learn = {}
-        local function keyScore(key)
-            local L = S.learn[key]
+        local function keyScore(key, learn)
+            local L = (learn or S.learn)[key]
             if not L or L.casts == 0 then return 1 end
             if L.closed > 0 then return 2 + L.closed / L.casts end
             if L.casts < 4 then return 0.5 end
             return 0
         end
         S.keyScore = keyScore
+        -- (S.castAt = ventCast, below: the ember hunt breaks trees with it.)
 
         -- A skill whose bar did not start after the key is not one this weapon
         -- has (or not unlocked): left out for 30 s.
@@ -5921,18 +5931,23 @@ do
             aimUntil = 0
             P.aimAt, P.aimPart = nil, nil
         end
-        -- Did the vent go out within `secs`?
+        -- Did the vent (or v.alive's thing: a tree) go within `secs`?
         local function watchClosed(v, secs)
+            local function live()
+                if v.alive then return v.alive() end
+                return ventLive(v.model)
+            end
             local t0 = os.clock()
             repeat
-                if not ventLive(v.model) then return true end
+                if not live() then return true end
                 task.wait(0.1)
             until os.clock() - t0 >= secs
-            return not ventLive(v.model)
+            return not live()
         end
-        local function credit(key, closed)
-            local L = S.learn[key] or { casts = 0, closed = 0 }
-            S.learn[key] = L
+        local function credit(key, closed, learn)
+            learn = learn or S.learn
+            local L = learn[key] or { casts = 0, closed = 0 }
+            learn[key] = L
             L.casts += 1
             if closed then L.closed += 1 end
         end
@@ -5948,7 +5963,7 @@ do
                 for ki, k in ipairs(VENT_KEYS) do
                     if (CFG.VentKeys or {})[k] then
                         local key = t.Name .. " " .. k
-                        table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key), order = ti * 10 + ki })
+                        table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key, v.learn), order = ti * 10 + ki })
                     end
                 end
             end
@@ -5970,8 +5985,8 @@ do
                     local closed = watchClosed(v, 0.75)
                     aimOff()
                     if not fired then ventSkip[c.key] = os.clock() + 30 end
-                    credit(c.key, closed)
-                    S.lastVent = c.key
+                    credit(c.key, closed, v.learn)
+                    if not v.learn then S.lastVent = c.key end
                     return c.key, closed
                 end
             end
@@ -5989,8 +6004,8 @@ do
             end
             local closed = watchClosed(v, 0.3)
             aimOff()
-            credit(key, closed)
-            S.lastVent = key .. " (every key cooling)"
+            credit(key, closed, v.learn)
+            if not v.learn then S.lastVent = key .. " (every key cooling)" end
             task.wait(0.05)
             return key, closed
         end
@@ -6252,6 +6267,478 @@ do
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
         }
+        -- Any thing to break, aimed: v = { pos, part, model, alive = fn, learn = table }.
+        S.castAt = ventCast
+    end
+    build()
+end
+
+-- =========================================================
+-- EMBER HUNT
+-- =========================================================
+-- THE BLAZE EMBER HUNT (Third Sea; HuntKind "ember"). The Dragon Hunter in
+-- the Dragon Dojo (Hydra Island) gives "Hunt" quests, one at a time, no
+-- limit (the wiki, 2026-10): defeat 3 Hydra Enforcers, defeat 3 Venomous
+-- Assailants, or destroy 10 trees on Hydra Island. A quest drops 3 Blaze
+-- Embers that drift toward you; run through one to take it. He gives
+-- nothing without Dragon Talon at 500 mastery and the Dojo's Yellow Belt.
+-- Two public hubs (2026) agree on the game's side:
+--   Modules.Net["RF/DragonHunter"]:InvokeServer({ Context = "RequestQuest" })
+--   Modules.Net["RF/DragonHunter"]:InvokeServer({ Context = "Check" })
+--       -> { Text = "Defeat 3 Hydra Enforcers" / "Destroy 10 ..." }, or no Text
+--   workspace.EmberTemplate (its Part)        an ember lying there
+--   notification "Head back to the Dojo to complete more tasks."   done
+-- THE QUEST is asked for from wherever you are (user: "remotely ... no
+-- problem"). No quest that way, or one taken that way never finishes (more
+-- kills than it asks, no "Head back"), = to the Dragon Hunter from then on.
+-- THE TREES (user, 2026-10-04): the medium trees on the ground break, NOT
+-- the two giant ones, and the bamboo maybe not. The hubs break the bamboo
+-- ("Tree" / Group / "Meshes/bambootree"), so: every tree-like model on the
+-- island, the giants left out by height (EmberTreeMax), bamboo LAST, and a
+-- tree that stands through 8 casts is left alone for 5 min. Which key breaks
+-- trees is learned (as the vents'). Every candidate is written to
+-- workspace/bff_ember_trees.txt the first time - to pin the real kind.
+do
+    local function build()
+        local M: { [string]: any } = {
+            note = "off", quest = nil, kind = nil, mob = nil, need = nil,
+            have = nil, haveAt = 0, progress = 0, back = false,
+            mustVisit = false, visits = 0, checkAt = 0,
+            tally = { quests = 0, embers = 0, trees = 0 },
+            learn = {},          -- which key breaks trees: key -> { casts, closed }
+            skip = setmetatable({}, { __mode = "k" }),        -- embers given up on
+            treeSkip = setmetatable({}, { __mode = "k" }),    -- tree model -> until when
+            treeTries = setmetatable({}, { __mode = "k" }),
+            probed = false,
+        }
+        P.ember = M
+        local HUNTER_AT = Vector3.new(5864, 1209, 810)    -- by the Dragon Hunter (redz-style hub)
+        local CAMPS = {
+            ["Hydra Enforcer"]     = Vector3.new(4620, 1002, 399),
+            ["Venomous Assailant"] = Vector3.new(4697, 1100, 946),
+        }
+
+        -- ---------- pure (tools/ember_test.py) ----------
+        -- What a Check reply asks for: kind ("defeat" | "trees" | "unknown"),
+        -- the enemy, how many. nil = no quest.
+        local function parseQuest(text)
+            if type(text) ~= "string" or text == "" then return nil end
+            local low = string.lower(text)
+            local n = tonumber(string.match(text, "%d+"))
+            if string.find(low, "venom", 1, true) then return "defeat", "Venomous Assailant", n or 3 end
+            if string.find(low, "enforcer", 1, true) or (string.find(low, "hydra", 1, true)
+                and not string.find(low, "tree", 1, true)) then
+                return "defeat", "Hydra Enforcer", n or 3
+            end
+            if string.find(low, "tree", 1, true) or string.find(low, "destroy", 1, true) then
+                return "trees", nil, n or 10
+            end
+            return "unknown", nil, n
+        end
+
+        -- A quest taken from afar that never finishes: more done than it asks
+        -- (+3 spare) and no "Head back" = it was not really taken.
+        local function remoteFailed(progress, need)
+            return need ~= nil and progress >= need + 3
+        end
+
+        -- Trees in the order to break them: not too tall (the giants never
+        -- break), bamboo last (user), a kind that broke one first, then nearest.
+        -- t = { height, bamboo, kind, dist }; kinds = kind -> { tries, broke }.
+        local function treeOrder(list, maxH, kinds)
+            local out = {}
+            for _, t in ipairs(list) do
+                if t.height <= maxH then
+                    local k = kinds[t.kind]
+                    if not (k and k.tries >= 3 and k.broke == 0) then table.insert(out, t) end
+                end
+            end
+            local function rank(t)
+                local k = kinds[t.kind]
+                if k and k.broke > 0 then return 0 end
+                return t.bamboo and 2 or 1
+            end
+            table.sort(out, function(a, b)
+                local ra, rb = rank(a), rank(b)
+                if ra ~= rb then return ra < rb end
+                return a.dist < b.dist
+            end)
+            return out
+        end
+        M.kinds = {}
+
+        -- ---------- the game ----------
+        local function hunterRF() return netRemote("RF", "DragonHunter") end
+        local function check()
+            local rf = hunterRF()
+            if not rf then return nil end
+            local ok, res = pcall(function() return rf:InvokeServer({ Context = "Check" }) end)
+            if ok and type(res) == "table" and type(res.Text) == "string" and res.Text ~= "" then return res.Text end
+            return nil
+        end
+        local function request()
+            local rf = hunterRF()
+            if rf then pcall(function() return rf:InvokeServer({ Context = "RequestQuest" }) end) end
+        end
+
+        local function hunterAt()
+            for _, f in ipairs({ workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }) do
+                local m = f and f:FindFirstChild("Dragon Hunter")
+                if m then
+                    local ok, p = pcall(function() return m:GetPivot().Position end)
+                    if ok and p then return p end
+                end
+            end
+            return HUNTER_AT
+        end
+
+        local function notify(text)
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = "Fast Farm", Text = text, Duration = 20,
+                })
+            end)
+        end
+
+        -- The game's notification: this quest is done. It stays on screen a
+        -- while, so not believed in the first 12 s of a quest just taken.
+        local function headBack()
+            if os.clock() - (M.takenAt or -100) < 12 then return false end
+            local ok, hit = pcall(function()
+                local n = player.PlayerGui:FindFirstChild("Notifications")
+                for _, d in ipairs(n and n:GetDescendants() or {}) do
+                    if (d:IsA("TextLabel") or d:IsA("TextButton"))
+                        and string.find(d.Text, "Head back to the Dojo", 1, true) then
+                        return true
+                    end
+                end
+                return false
+            end)
+            return ok and hit
+        end
+
+        local function emberCount()
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if not (ok and type(inv) == "table") then return nil end
+            local n = 0
+            for _, it in pairs(inv) do
+                if type(it) == "table" and it.Name == "Blaze Ember" then n = tonumber(it.Count) or 0 end
+            end
+            M.have, M.haveAt = n, os.clock()
+            return n
+        end
+
+        local function embersLying()
+            local out = {}
+            for _, d in ipairs(workspace:GetChildren()) do
+                if d.Name == "EmberTemplate" and not M.skip[d] then
+                    local p = d:FindFirstChild("Part")
+                    if p and p:IsA("BasePart") and p.Position.Y > 0 then
+                        table.insert(out, { model = d, part = p })
+                    end
+                end
+            end
+            return out
+        end
+        P.embersLying = embersLying
+
+        -- Onto it and stay on it (it drifts) till it goes; 8 s, else left.
+        local function grabEmber(em, myEpoch)
+            releasePile()
+            setState("EMBER")
+            M.note = "a Blaze Ember - going through it"
+            say(M.note)
+            local _, r = parts()
+            if r and (r.Position - em.part.Position).Magnitude > 150 then
+                flyTo(em.part.Position)
+                if stale(myEpoch) then return end
+            end
+            local t0 = os.clock()
+            while em.model.Parent and em.part.Parent and os.clock() - t0 < 8 and not stale(myEpoch) do
+                lockAt(em.part.Position)
+                task.wait(0.05)
+            end
+            if stale(myEpoch) then return end
+            if em.model.Parent and em.part.Parent then
+                M.skip[em.model] = true
+                M.note = "an ember would not be taken in 8 s - left"
+            else
+                M.tally.embers += 1
+                M.note = string.format("Blaze Ember taken  ·  %d this session", M.tally.embers)
+                print("[BFF] ember: " .. M.note)
+            end
+            say(M.note)
+        end
+
+        -- ---------- the trees ----------
+        local function mainPart(m)
+            local best, bv = nil, -1
+            for _, d in ipairs(m:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    local v = d.Size.X * d.Size.Y * d.Size.Z
+                    if v > bv then best, bv = d, v end
+                end
+            end
+            return best
+        end
+        -- Every tree-like model on Hydra Island (the outermost one of a nest).
+        local function treesHere()
+            local map = workspace:FindFirstChild("Map")
+            local isle = map and map:FindFirstChild("Waterfall")
+            if not isle then return {} end
+            local _, r = parts()
+            local from = r and r.Position or hunterAt()
+            local out = {}
+            for _, m in ipairs(isle:GetDescendants()) do
+                if m:IsA("Model") and string.find(string.lower(m.Name), "tree", 1, true) then
+                    local outer = m.Parent
+                    local nested = false
+                    while outer and outer ~= isle do
+                        if outer:IsA("Model") and string.find(string.lower(outer.Name), "tree", 1, true) then
+                            nested = true
+                            break
+                        end
+                        outer = outer.Parent
+                    end
+                    local part = (not nested) and mainPart(m) or nil
+                    if part and part.Anchored and os.clock() >= (M.treeSkip[m] or 0) then
+                        local okS, size = pcall(function() return m:GetExtentsSize() end)
+                        local h = okS and size.Y or part.Size.Y
+                        local bamboo = false
+                        for _, d in ipairs(m:GetDescendants()) do
+                            if string.find(string.lower(d.Name), "bamboo", 1, true) then bamboo = true break end
+                        end
+                        local kind = m.Name .. "/" .. part.Name
+                        table.insert(out, { model = m, part = part, height = h, bamboo = bamboo,
+                            kind = kind, dist = (part.Position - from).Magnitude, at = part.Position })
+                    end
+                end
+            end
+            return out
+        end
+        P.treesHere = treesHere
+
+        local function probeTrees(list)
+            if M.probed then return end
+            M.probed = true
+            local lines = { "[BFF] ember hunt - tree-like models on Hydra Island (" .. #list .. ")",
+                "name / main part | height | bamboo | position" }
+            for _, t in ipairs(list) do
+                table.insert(lines, string.format("%s | %.0f | %s | %.0f, %.0f, %.0f", t.kind, t.height,
+                    tostring(t.bamboo), t.at.X, t.at.Y, t.at.Z))
+            end
+            local text = table.concat(lines, "\n")
+            if writefile then pcall(writefile, "bff_ember_trees.txt", text) end
+            print(string.format("[BFF] ember: %d tree-like models on the island - list in workspace/bff_ember_trees.txt", #list))
+        end
+
+        -- One cast at the first tree in order. true = it broke.
+        local function breakTree(myEpoch)
+            local all = treesHere()
+            probeTrees(all)
+            local list = treeOrder(all, CFG.EmberTreeMax or 120, M.kinds)
+            local t = list[1]
+            if not t then
+                M.note = "no tree to break here (all down, too tall, or given up) - waiting"
+                say(M.note)
+                task.wait(1)
+                return false
+            end
+            local _, r = parts()
+            if not r then return false end
+            local out = Vector3.new(r.Position.X - t.at.X, 0, r.Position.Z - t.at.Z)
+            if out.Magnitude < 1 then out = Vector3.new(1, 0, 0) end
+            local stand = t.at + out.Unit * (CFG.VentDistance or 12) + Vector3.new(0, 6, 0)
+            if (r.Position - stand).Magnitude > 4 then
+                releasePile()
+                setState("FLY")
+                flyTo(stand, { face = t.at })
+                if stale(myEpoch) then return false end
+            end
+            lockAt(stand, t.at)
+            setState("TREE")
+            M.note = string.format("breaking trees  ·  %d / %s  ·  %s", M.progress, tostring(M.need or "?"), t.kind)
+            say(M.note)
+            local pos0 = t.part.Position
+            local v = {
+                pos = t.at, part = t.part, model = t.model, learn = M.learn,
+                alive = function()
+                    local p = t.part
+                    return t.model.Parent ~= nil and p.Parent ~= nil and p.Anchored
+                        and p.Transparency < 1 and (p.Position - pos0).Magnitude < 3
+                end,
+            }
+            local _, broke = (P :: any).sea.castAt(v)
+            local k = M.kinds[t.kind] or { tries = 0, broke = 0 }
+            M.kinds[t.kind] = k
+            if broke then
+                k.broke += 1
+                M.progress += 1
+                M.tally.trees += 1
+                M.treeTries[t.model] = nil
+                print(string.format("[BFF] ember: tree broken (%s)  ·  %d / %s", t.kind, M.progress, tostring(M.need or "?")))
+                return true
+            end
+            local n = (M.treeTries[t.model] or 0) + 1
+            M.treeTries[t.model] = n
+            if n >= 8 then
+                k.tries += 1
+                M.treeTries[t.model] = nil
+                M.treeSkip[t.model] = os.clock() + 300
+                print("[BFF] ember: a tree stood through 8 casts, left 5 min (" .. t.kind .. ")")
+            end
+            return false
+        end
+
+        -- ---------- the quest ----------
+        local function takeQuest(text, how)
+            local kind, mob, need = parseQuest(text)
+            if text ~= M.quest or how then
+                M.progress = 0
+                if how then M.tally.quests += 1 end
+            end
+            M.quest, M.kind, M.mob, M.need = text, kind, mob, need
+            M.back = false
+            M.takenAt = os.clock()
+            if how then
+                M.how = how
+                print(string.format("[BFF] ember: quest (%s): %s", how, text))
+            end
+        end
+
+        -- The quest to do now, or nil (M.note says why).
+        local function quest(myEpoch)
+            local now = os.clock()
+            if M.quest and not M.back and now - M.checkAt < 15 then return M.quest end
+            M.checkAt = now
+            local text = check()
+            if text and not M.back then
+                if text ~= M.quest then takeQuest(text, nil) end
+                return text
+            end
+            -- None, or the last one is done: a new one.
+            if not M.mustVisit then
+                request()
+                task.wait(0.5)
+                text = check()
+                if text then takeQuest(text, "asked from here") return text end
+            end
+            local at = hunterAt()
+            local _, r = parts()
+            if r and (r.Position - at).Magnitude > 8 then
+                releasePile()
+                setState("FLY")
+                M.note = "to the Dragon Hunter (Dragon Dojo) for a quest"
+                say(M.note)
+                flyTo(at + Vector3.new(0, 3, 0))
+                if stale(myEpoch) then return nil end
+            end
+            lockAt(at + Vector3.new(0, 3, 0))
+            request()
+            task.wait(0.5)
+            text = check()
+            if text then
+                M.visits = 0
+                takeQuest(text, "at the Dragon Hunter")
+                return text
+            end
+            M.visits += 1
+            M.note = "the Dragon Hunter gave no quest (" .. M.visits .. ")"
+            say(M.note)
+            task.wait(2)
+            return nil
+        end
+
+        local function fightBreak()
+            return not (CFG.Hunt and CFG.HuntKind == "ember") or #embersLying() > 0 or headBack()
+        end
+
+        -- true = busy here (the director's contract; this hunt never hops).
+        function M.step(myEpoch)
+            local sea = mySea()
+            if sea and sea ~= 3 then
+                M.note = "Blaze Embers come only from the Third Sea - hunt stopped"
+                say(M.note)
+                P.stop("Blaze Embers: not the Third Sea")
+                return true
+            end
+            local now = os.clock()
+            if now - (M.haveAt or 0) > 20 then pcall(emberCount) end
+            local stopAt = CFG.EmberStopAt or 99
+            if M.have and M.have >= stopAt then
+                M.note = string.format("you have %d Blaze Embers (stop at %d) - hunt done", M.have, stopAt)
+                say(M.note)
+                notify("Blaze Embers: " .. M.have)
+                P.stop("Blaze Embers: enough")
+                return true
+            end
+            -- 1. An ember lying there: through it.
+            local em = embersLying()[1]
+            if em then
+                grabEmber(em, myEpoch)
+                return true
+            end
+            -- 2. Done?
+            if headBack() and M.quest and not M.back then
+                M.back = true
+                if M.how == "asked from here" then M.remoteOk = true end
+                print("[BFF] ember: quest done - " .. tostring(M.quest))
+            end
+            if not M.back and M.how == "asked from here" and not M.remoteOk
+                and remoteFailed(M.progress, M.need) then
+                M.mustVisit, M.back = true, true
+                print("[BFF] ember: a quest asked for from afar never finished - to the Dragon Hunter from now on")
+            end
+            -- 3. The quest.
+            local text = quest(myEpoch)
+            if stale(myEpoch) then return true end
+            if not text then
+                if M.visits >= 3 then
+                    M.note = "the Dragon Hunter gives no quest - he needs Dragon Talon at 500 mastery "
+                        .. "and the Dojo Trainer's Yellow Belt - hunt stopped"
+                    say(M.note)
+                    notify("Blaze Embers: no quest (Dragon Talon 500 + Yellow Belt?)")
+                    P.stop("Blaze Embers: no quest")
+                end
+                return true
+            end
+            if M.kind == "defeat" then
+                local mob = M.mob
+                if not nearestLoaded(mob) then
+                    local dest = campOf(mob, CAMPS[mob])
+                    if not dest then
+                        M.note = "cannot find where " .. mob .. " lives"
+                        say(M.note)
+                        task.wait(1)
+                        return true
+                    end
+                    releasePile()
+                    setState("FLY")
+                    M.note = string.format("to the %ss  ·  %d / %s", mob, M.progress, tostring(M.need))
+                    say(M.note)
+                    flyTo(dest + Vector3.new(0, CFG.HeightSafe or 20, 0), { stream = mob })
+                    task.wait(0.5)
+                    return true
+                end
+                M.note = string.format("defeating %ss  ·  %d / %s", mob, M.progress, tostring(M.need))
+                activeName = "Blaze Embers"
+                local k0 = stats.kills
+                fight({ name = mob, breakIf = fightBreak }, { [mob] = true })
+                M.progress += math.max(0, stats.kills - k0)
+                return true
+            end
+            if M.kind == "trees" then
+                breakTree(myEpoch)
+                return true
+            end
+            M.note = "a quest this script does not know: " .. tostring(text) .. " - abandon it at the Dragon Hunter"
+            say(M.note)
+            task.wait(2)
+            return true
+        end
+
+        M._t = { parseQuest = parseQuest, remoteFailed = remoteFailed, treeOrder = treeOrder }
     end
     build()
 end
@@ -7370,6 +7857,7 @@ local function buildUI()
         { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
+        { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
         { "prehistoric", "Prehistoric hunt", "Boat to Sea Danger 6, sail till the island comes, else next server" },
         { "mirage", "Mirage hunt", "Same boat - the Mirage up = your turn at the moon, the Blue Gear picked for you" },
     }
@@ -7692,6 +8180,8 @@ local function buildUI()
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
                     or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
                         tostring(P.elite.offer or "not asked yet"))
+                    or (k == "ember") and string.format("%d Blaze Embers  ·  you have %s", P.ember.tally.embers,
+                        P.ember.have and tostring(P.ember.have) or "?")
                     or (k == "flower") and string.format("%d Fire Flowers picked  ·  you have %s", t.flowers or 0,
                         P.elite.flowerHave and tostring(P.elite.flowerHave) or "?")
                     or string.format("%d elites down  ·  %d chalice", t.kills, t.chalices)
@@ -8472,6 +8962,37 @@ local function buildUI()
             .. "stand (no magnet: the flower comes up where one dies). Picked "
             .. "the moment it lies there, then the next server - that one gives "
             .. "none for 5-15 min. Nothing dies for 3 min: the next server too.")
+
+        heading2(v, "blaze ember hunt  (Third Sea)")
+        readout(v, function()
+            local m = P.ember
+            local lines = {
+                "now       " .. tostring(m.note),
+                "quest     " .. tostring(m.quest or "none yet") .. (m.how and ("  (" .. m.how .. ")") or ""),
+                string.format("embers    %d taken   ·   you have %s", m.tally.embers, m.have and tostring(m.have) or "not read yet"),
+                string.format("quests    %d   ·   trees broken %d%s", m.tally.quests, m.tally.trees,
+                    m.mustVisit and "   ·   asked AT the Dragon Hunter" or ""),
+            }
+            local best, bn = nil, -1
+            for key, L in pairs(m.learn) do
+                if L.closed > bn then best, bn = key, L.closed end
+            end
+            if best then table.insert(lines, string.format("trees     best key %s (%d of %d)", best, m.learn[best].closed, m.learn[best].casts)) end
+            return table.concat(lines, "\n")
+        end)
+        sliderRow(v, "Stop when you have", 15, 99, 1,
+            function() return CFG.EmberStopAt end,
+            function(x) CFG.EmberStopAt = x end, " embers")
+        sliderRow(v, "Trees taller than this are skipped", 30, 300, 10,
+            function() return CFG.EmberTreeMax end,
+            function(x) CFG.EmberTreeMax = x end, " studs")
+        caption(v, "Needs Dragon Talon at 500 mastery and the Dojo's Yellow Belt. "
+            .. "The quest is asked for from where you are; if that does not take, "
+            .. "at the Dragon Hunter. Enforcers / Assailants are pulled and killed; "
+            .. "trees are broken with your Z/X/C aimed at them (the medium ground "
+            .. "trees first, bamboo last, the giants never). Each quest drops 3 "
+            .. "embers - run through. The tree list goes to "
+            .. "workspace/bff_ember_trees.txt.")
 
         heading2(v, "elite pirate hunt  (Third Sea)")
         readout(v, function()
