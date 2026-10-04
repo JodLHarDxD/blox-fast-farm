@@ -82,6 +82,7 @@ other games, and never switches a team you are on.
 | **Fruit guard** | A physical fruit ("Kitsune Fruit", or anything with an `EatRemote`) is **never a weapon**: never listed on the Attack page, never equipped, and **nothing is clicked while one is in your hand** (it is put away) - a click with a fruit held EATS it and replaces yours. Your eaten fruit's power ("Kitsune-Kitsune") is a weapon as always. |
 | Safety | under 35 % HP: fly 250 up, wait for 80 %. Enhancement (J) + Observation (E) kept on. No real god mode exists — health is server-side. |
 | Stats | kills per minute of FIGHTING and average pile time for the current attack setup; changing any attack switch files it under "tried" so setups can be compared. |
+| **Server news** | The strip under the panel's title - **Hide keeps it** (the panel folds to the title + the strip). Read once a second from load, from what the game sends every client, at whatever moment you join (nothing counted from the server's start): **the moon** = `Lighting:GetAttribute("MoonPhase")`, 1-8, **5 = the full moon** (public hubs 2024-26), else the moon decal (the game's eight are named moon1..moon8 on Roblox); `IsBlueMoon`. **Night** = `Lighting.ClockTime` 18:00-05:00. The phase turns at noon, so a day carries the number of the night it leads into (night 4, day 5, night 5 = full). The chip: `DAY 5` / `NIGHT 4` / `FULL MOON` / `BLUE MOON` / `FULL IN` + m:ss to the next dusk or dawn; `BREAKING` 8 s after news. The crawl: the moon (night N/8, the full moon tonight / next night / in N nights, in real minutes), **Mirage** and **Prehistoric** (up or not, every lap; age since this client saw it come - already up at the join = age unknown; Mirage/Kitsune live 15 min at most; studs away), Kitsune (when up, or on a full-moon night), the Frozen Dimension, the elite, Dough King / Cake Prince / rip_indra / Soul Reaper, Cake Prince's kills to go (`CommF_("CakePrinceSpawner", true)` - a question, never the summon - once a minute, only while the strip is on screen), a fruit lying on the map, players. News (an island, the full moon rising, an elite or raid boss, a fruit) starts the crawl over with it in front, marked BREAKING for a minute. **Real minutes are measured:** the clock's speed day and night apart (20 s samples), the hour the phase turns and the order it turns in - kept in `workspace/bff_sky.json` so the next server starts knowing them (until measured: a game hour a minute, which is what makes the wiki's "first full moon 54 min after a server starts" come out). |
 
 ## Elite hunt without queue_on_teleport
 
@@ -125,6 +126,16 @@ counted once.
 11. **Fire Flower hunt:** be in the Third Sea with the Dragon Wizard's V2 quest taken, switch on **Fire Flower hunt**. It flies to Floating Turtle and kills the pirates one at a time. When a flower comes: "PICKED a Fire Flower - you have N" = done, then the next server. "could not pick it" / "(no prompt in it)" / "the flower went, your count did not go up" = send the console's `[BFF] flower:` lines. "lying now none" for ages while kills climb = the quest is not running, or the flowers moved out of `workspace.FireFlowers`.
 9. **Elite not taking damage** (it was all-or-nothing per server): the console prints `[BFF] hits: <sender>  ·  COMBAT_REMOTE_THREAD = <true/false/nil>` once per server, and `[BFF] M1 <weapon>: <way>` after each probe. Send those lines from a server where it hit and one where it did not. The M1 page shows the same ("hits sent by", "this server's COMBAT_REMOTE_THREAD").
 
+## Server news: first test
+
+Load the script anywhere in the Third Sea and leave it a few minutes (Stop is fine - the news runs with the farm off).
+
+1. The chip: `DAY n` / `NIGHT n` - does n match the moon you see (5 = full; 1 = no moon, 3 = half, 4 = almost full)? `SKY` that never changes, or a crawl saying "moon phase not readable here" = the attribute and the decal both moved: send the words in brackets.
+2. Console `[BFF] sky: the clock runs X game hours a minute by day, Y by night` (after ~1 min). X and Y are the real speed - send them.
+3. Console `[BFF] sky: the moon turned a -> b at HH:MM` (once per in-game day). Expected: b = a + 1, at 12:00. Anything else is learned automatically, but send it.
+4. A Mirage / Prehistoric / Kitsune island or the Frozen Dimension: `[BFF] news: ... SPAWNED` / `IS UP` and `[BFF] sky: Workspace.Map.<island> attributes: ...` - send that line (a spawn time there would give the age of one already up when you join).
+5. Elite or raid boss up: the crawl's `ELITE UP` should match the Elite Hunter's answer. Cake Prince: "N kills to go" should match the game's own message at the Cake Island.
+
 ## First in-game test (each answer decides the next fix)
 
 1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
@@ -158,6 +169,7 @@ python tools/aim_test.py                         # the aim lock's camera solve, 
 python tools/hidden_test.py                      # camera-free aim, real camera block in a simulated frame loop: drawn = your view, keys see the aim
 python tools/fruitguard_test.py                  # the fruit guard, real code: never a weapon, never equipped, no click with one in hand
 python tools/elite_test.py                       # the hunt, real code, 95 checks: Elite Hunter words, server pick, pickFruit (price, drops, traders), berries (names, nearest wanted), the Barista Cousin's recipe (not here / not picked / learned / cannot pay), hop() refusing on the chalice, the join (always the game's; a token refusal remembered; why in words), carry-over, the director (the chalice in every hunt; ONLY the hunt switched on)
+python tools/news_test.py                        # the server news, real code, 96 checks: MoonPhase attribute / decal / blue, day+night number round the clock (the noon turn, midnight), the full moon tonight / now / in N nights in real minutes, the measured speed (jumps, stops, gaps ignored), the turn learned + bff_sky.json, islands (up at the join / spawned / gone / lasted), elites + raid bosses, Cake Prince asked only on screen, fruit, order + BREAKING, the chip
 ```
 
 The main chunk is at Luau's 200-local register limit: a new section goes in

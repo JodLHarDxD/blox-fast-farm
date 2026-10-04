@@ -3321,6 +3321,9 @@ do
     -- would still count against the main chunk's.
     local function build()
         local ELITES    = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" }
+        -- The server news says which one is up. Through `any`: the type
+        -- checker would otherwise bend ELITES to fit P.
+        (P :: any).ELITES = ELITES
         local ELITE_NPC = Vector3.new(-5418.9, 313.7, -2826.2)   -- the Elite Hunter (public hubs' spot)
         local CHALICE   = "God's Chalice"
         -- One file PER ACCOUNT: two accounts share the executor's folder, and
@@ -4864,6 +4867,485 @@ end
 
 
 -- =========================================================
+-- SERVER NEWS
+-- =========================================================
+-- The strip under the panel's title: what THIS server is doing, read from
+-- what the game sends every client, at whatever moment you join -- nothing
+-- is counted from the server's start (user, 2026-10-04).
+--   MOON       Lighting attribute "MoonPhase", 1-8, 5 = the full moon (the
+--              public hubs 2024-26), and "IsBlueMoon". The moon decal when the
+--              attribute is missing: Roblox's asset list names the game's
+--              eight moon1..moon8, moon5 the full one.
+--   DAY/NIGHT  Lighting.ClockTime; night is 18:00 -> 05:00. The phase turns at
+--              noon, so a day carries the number of the night it leads into:
+--              night 4, (noon) day 5, night 5 = the full moon.
+--   MINUTES    how fast that clock runs is MEASURED, day and night apart, and
+--              so are the hour the phase turns and the order it turns in --
+--              kept in bff_sky.json, so the next server starts knowing them.
+--              Until measured: a game hour a minute (what makes the wiki's
+--              "first full moon 54 min after a server starts" come out).
+--   ISLANDS    Mirage, Prehistoric, Kitsune, the Frozen Dimension, where the
+--              hubs find them: workspace.Map and _WorldOrigin.Locations. Age =
+--              since this client saw one come; one already up when you joined
+--              has no known age, and says so.
+--   BOSSES     the elites and the raid bosses through bossUp (loaded, or
+--              parked in ReplicatedStorage). Cake Prince's count is the game's
+--              own answer to "CakePrinceSpawner" -- asked, never summoned --
+--              once a minute while the strip is on screen.
+-- Read once a second from load, panel open or not. Only P.news leaves the
+-- block (the main chunk is at Luau's 200-register limit).
+do
+    local function build()
+        -- Typed open: its fields come as the news is read.
+        local N: { [string]: any } = { isles = {}, bosses = {}, fruits = {}, events = {} }
+        P.news = N
+        local Lighting    = game:GetService("Lighting")
+        local HttpService = game:GetService("HttpService")
+        local SKY_FILE    = "bff_sky.json"
+        local DUSK, DAWN  = 18, 5
+        local FULL        = 5
+        local HOUR_A_MIN  = 1 / 60           -- game hours a real second, until measured
+        local MOON_DECAL  = {
+            ["9709135895"] = 1, ["9709139597"] = 2, ["9709143733"] = 3, ["9709149052"] = 4,
+            ["9709149431"] = 5, ["9709149680"] = 6, ["9709150086"] = 7, ["9709150401"] = 8,
+        }
+        local BLUE_DECAL  = "15493317929"
+        local PHASE = { "no moon", "crescent", "half moon", "gibbous", "full moon",
+            "gibbous, waning", "half moon, waning", "crescent, waning" }
+        -- always = said every lap even when not up (the two you look for).
+        local ISLES = {
+            { key = "mirage", title = "MIRAGE ISLAND", map = "MysticIsland", loc = "Mirage Island",
+                life = 900, always = true, why = "Advanced Fruit Dealer, Blue Gear at night" },
+            { key = "prehistoric", title = "PREHISTORIC ISLAND", map = "PrehistoricIsland",
+                always = true, why = "volcano, Dragon Egg, bones" },
+            { key = "kitsune", title = "KITSUNE ISLAND", map = "KitsuneIsland", loc = "Kitsune Island",
+                life = 900, why = "Azure Embers, the shrine" },
+            { key = "frozen", title = "FROZEN DIMENSION", map = "FrozenDimension", loc = "Frozen Dimension",
+                why = "Leviathan" },
+        }
+        local RAID = { "Dough King", "Cake Prince", "rip_indra True Form", "Soul Reaper" }
+        for _, d in ipairs(ISLES) do N.isles[d.key] = { up = false } end
+
+        -- What was learned about the clock and the moon (bff_sky.json).
+        local cal: { [string]: any } = { flipAt = 12, succ = {}, flips = 0 }
+        N.cal = cal
+
+        local function clockText(c)
+            local m = math.floor(c * 60 + 0.5) % 1440
+            return string.format("%02d:%02d", m // 60, m % 60)
+        end
+        -- m:ss under an hour, then 1h 05m (the chip)
+        local function dur(s)
+            s = math.max(0, math.floor(s + 0.5))
+            if s >= 3600 then return string.format("%dh %02dm", s // 3600, (s % 3600) // 60) end
+            return string.format("%d:%02d", s // 60, s % 60)
+        end
+        -- Whole minutes (the crawl: a number changing every second would
+        -- make the text after it twitch).
+        local function mins(s)
+            local m = math.floor(math.max(0, s) / 60 + 0.5)
+            if m < 1 then return "under a minute" end
+            if m >= 60 then return string.format("%d h %02d min", m // 60, m % 60) end
+            return m .. " min"
+        end
+        N.dur, N.mins, N.clockText = dur, mins, clockText
+
+        local function saveCal()
+            if not writefile then return end
+            local succ = {}
+            for a, b in pairs(cal.succ) do succ[tostring(a)] = b end
+            local ok, s = pcall(function()
+                return HttpService:JSONEncode({ rateDay = cal.rateDay, rateNight = cal.rateNight,
+                    flipAt = cal.flipAt, succ = succ, flips = cal.flips })
+            end)
+            if ok then pcall(writefile, SKY_FILE, s) end
+        end
+        local function loadCal()
+            if not readfile then return end
+            local ok, s = pcall(readfile, SKY_FILE)
+            if not ok or type(s) ~= "string" then return end
+            local ok2, d = pcall(function() return HttpService:JSONDecode(s) end)
+            if not ok2 or type(d) ~= "table" then return end
+            local function rate(v)
+                v = tonumber(v)
+                return (v and v > 0 and v <= 0.2) and v or nil
+            end
+            cal.rateDay, cal.rateNight = rate(d.rateDay), rate(d.rateNight)
+            local f = tonumber(d.flipAt)
+            if f and f >= DAWN and f <= DUSK then cal.flipAt = f end
+            cal.flips = tonumber(d.flips) or 0
+            if type(d.succ) == "table" then
+                for a, b in pairs(d.succ) do
+                    a, b = tonumber(a), tonumber(b)
+                    if a and b and a >= 1 and a <= 8 and b >= 1 and b <= 8 and a ~= b then cal.succ[a] = b end
+                end
+            end
+        end
+        N.save = saveCal
+        loadCal()
+
+        -- THE SKY ---------------------------------------------------------
+        local function isNight(c) return c >= DUSK or c < DAWN end
+        local function untilClock(c, h)
+            local d = h - c
+            if d <= 0 then d += 24 end
+            return d
+        end
+        -- One side measured: the other uses it too, before the default.
+        local function rateAt(night)
+            return (night and cal.rateNight or cal.rateDay) or cal.rateNight or HOUR_A_MIN
+        end
+        -- Real seconds for `hours` of game time from clock c, day and night
+        -- each at its own speed.
+        local function realSpan(c, hours)
+            local sec, guard = 0, 0
+            while hours > 1e-9 and guard < 64 do
+                guard += 1
+                local night = isNight(c)
+                local step = math.min(hours, untilClock(c, night and DAWN or DUSK))
+                sec += step / rateAt(night)
+                c = (c + step) % 24
+                hours -= step
+            end
+            return sec
+        end
+        local function succOf(p) return cal.succ[p] or (p % 8 + 1) end
+        local function nightsToFull(p)
+            local k = 0
+            while p ~= FULL do
+                p = succOf(p)
+                k += 1
+                if k > 8 then return nil end
+            end
+            return k
+        end
+
+        -- The sky at clock c with the server's phase p (nil = not readable).
+        --   night   it is night now
+        --   no      the number to show: this night's, or the night this day
+        --           leads into (before the turn, the next phase)
+        --   full    a full moon is up now
+        --   edge    real seconds to the next dusk (day) or dawn (night)
+        --   nights  0 = the full moon is up / rises tonight, 1 = next night ...
+        --   toFull  real seconds until it rises (0 = up)
+        local function skyAt(c, p)
+            local s = { clock = c, phase = p, night = isNight(c) }
+            s.edge = realSpan(c, untilClock(c, s.night and DAWN or DUSK))
+            if not p then return s end
+            if s.night then
+                s.no = p
+            else
+                s.no = (c >= cal.flipAt) and p or succOf(p)
+            end
+            s.full = s.night and s.no == FULL
+            if s.full then
+                s.nights, s.toFull = 0, 0
+                return s
+            end
+            local k = nightsToFull(s.night and succOf(s.no) or s.no)
+            if k then
+                s.nights = k + (s.night and 1 or 0)
+                s.toFull = realSpan(c, untilClock(c, DUSK) + 24 * k)
+            end
+            return s
+        end
+        N.skyAt = skyAt
+
+        -- The server's phase: its attribute, else the moon decal shown.
+        local function moonRead()
+            local raw = Lighting:GetAttribute("MoonPhase")
+            local blue = Lighting:GetAttribute("IsBlueMoon") == true
+            local n = tonumber(raw)
+            if n and n >= 1 and n <= 8 and n % 1 == 0 then return n, blue, "server" end
+            local sky = Lighting:FindFirstChild("Sky") or Lighting:FindFirstChild("FantasySky")
+                or Lighting:FindFirstChildOfClass("Sky")
+            local id = sky and string.match(tostring(sky.MoonTextureId), "(%d+)%D*$")
+            if id == BLUE_DECAL then return FULL, true, "decal" end
+            if id and MOON_DECAL[id] then return MOON_DECAL[id], blue, "decal" end
+            return nil, blue, (raw ~= nil) and ("MoonPhase = " .. tostring(raw)) or "nothing"
+        end
+        N.moonRead = moonRead
+
+        -- The clock's speed: 20 s samples, each counted for the part of the
+        -- day it lies in. A jump, a stop or a long gap (loading) is no speed.
+        local lastC, lastT
+        local function feedClock(c, t)
+            if not lastC then lastC, lastT = c, t return end
+            local dt = t - lastT
+            if dt < 20 then return end
+            local dc = c - lastC
+            if dc < -12 then dc += 24 end
+            local mid = (lastC + dc / 2) % 24
+            lastC, lastT = c, t
+            if dt > 120 or dc <= 0 then return end
+            local r = dc / dt
+            if r > 0.2 then return end
+            local key = isNight(mid) and "rateNight" or "rateDay"
+            cal[key] = cal[key] and (cal[key] * 0.6 + r * 0.4) or r
+            N.samples = (N.samples or 0) + 1
+            if N.samples == 3 or N.samples % 30 == 0 then
+                print(string.format("[BFF] sky: the clock runs %.2f game hours a minute by day, %.2f by night",
+                    rateAt(false) * 60, rateAt(true) * 60))
+                saveCal()
+            end
+        end
+
+        -- A turn of the moon seen while here: what it turned to, at what hour.
+        local lastPhase
+        local function feedPhase(p, c)
+            if p and lastPhase and p ~= lastPhase then
+                cal.succ[lastPhase] = p
+                cal.flips += 1
+                local inDay = c >= DAWN and c <= DUSK
+                if inDay then cal.flipAt = math.floor(c * 10 + 0.5) / 10 end
+                print(string.format("[BFF] sky: the moon turned %d -> %d at %s%s%s", lastPhase, p, clockText(c),
+                    (p == lastPhase % 8 + 1) and "" or " (not the next number)",
+                    inDay and "" or " (at night: night numbers may be off)"))
+                saveCal()
+            end
+            if p then lastPhase = p end
+        end
+
+        -- ISLANDS, BOSSES, FRUITS ----------------------------------------
+        local function isleFind(d)
+            local map = workspace:FindFirstChild("Map")
+            local m = (map and map:FindFirstChild(d.map)) or workspace:FindFirstChild(d.map)
+            if m then return m end
+            if not d.loc then return nil end
+            local wo = workspace:FindFirstChild("_WorldOrigin")
+            local locs = wo and wo:FindFirstChild("Locations")
+            return locs and locs:FindFirstChild(d.loc) or nil
+        end
+        local function posOf(inst)
+            local ok, pos = pcall(function()
+                if inst:IsA("BasePart") then return inst.Position end
+                return inst:GetPivot().Position
+            end)
+            return ok and pos or nil
+        end
+        -- One island from one look: came (at the join = age unknown), or
+        -- left (how long it lasted, when its start was seen).
+        local function isleFeed(st, there, now, atJoin)
+            if there and not st.up then
+                st.up, st.since, st.atJoin, st.goneAt, st.lasted = true, now, atJoin, nil, nil
+                return "up"
+            elseif not there and st.up then
+                st.up, st.goneAt = false, now
+                st.lasted = (not st.atJoin) and (now - st.since) or nil
+                return "gone"
+            end
+            return nil
+        end
+
+        local function breaking(key, text, now)
+            table.insert(N.events, { key = key, text = text, at = now })
+            if #N.events > 16 then table.remove(N.events, 1) end
+            N.breakAt = now
+            print("[BFF] news: " .. text)
+        end
+
+        -- The game's answer to "CakePrinceSpawner", true (a question).
+        local function cakeNote(r)
+            if type(r) ~= "string" or r == "" then return nil end
+            local n = tonumber(string.match(r, "%d+"))
+            if n then return { left = n } end
+            if string.find(string.lower(r), "portal", 1, true) then return { ready = true } end
+            return nil
+        end
+        N.cakeNote = cakeNote
+
+        local first, cakeAt = true, -1e9
+        local fruitSeen = setmetatable({}, { __mode = "k" })
+        -- One look at everything. Once a second, from load.
+        function N.tick()
+            local now = os.clock()
+            local c = tonumber(Lighting.ClockTime) or 0
+            local p, blue, src = moonRead()
+            feedClock(c, now)
+            feedPhase(p, c)
+            local s = skyAt(c, p)
+            s.blue, s.src = blue, src
+            local was = N.sky
+            if s.full and not (was and was.full) then
+                breaking("moon", first and ((blue and "BLUE" or "FULL") .. " MOON IS UP") or "FULL MOON RISING", now)
+            elseif s.blue and not (was and was.blue) and not first then
+                breaking("moon", "BLUE MOON", now)
+            end
+            N.sky = s
+            local sea = mySea()
+            N.sea = sea
+            if sea ~= 1 and sea ~= 2 then             -- the Third Sea, or a place id not known yet
+                for _, d in ipairs(ISLES) do
+                    local st = N.isles[d.key]
+                    local inst = isleFind(d)
+                    st.inst = inst
+                    if isleFeed(st, inst ~= nil, now, first) == "up" then
+                        breaking(d.key, d.title .. (first and " IS UP" or " SPAWNED"), now)
+                        -- What the game put on it, once: a spawn time may be there.
+                        pcall(function()
+                            local list = {}
+                            for k, v in pairs(inst:GetAttributes()) do table.insert(list, k .. "=" .. tostring(v)) end
+                            print("[BFF] sky: " .. inst:GetFullName() .. " attributes: "
+                                .. (#list > 0 and table.concat(list, ", ") or "none"))
+                        end)
+                    end
+                end
+                local found = {}
+                local elites: { string } = (P :: any).ELITES or {}
+                for _, list in ipairs({ elites, RAID }) do
+                    for _, n in ipairs(list) do
+                        local at, where = bossUp(n)
+                        if at then
+                            found[n] = (where == "here") and "near you" or "far off"
+                            if not N.bosses[n] then breaking("boss:" .. n, string.upper(n) .. " IS UP", now) end
+                        end
+                    end
+                end
+                N.bosses = found
+                local g = N.shown
+                if g and g.Parent and now - cakeAt > 60 then
+                    cakeAt = now
+                    task.spawn(function()
+                        local cf = commF()
+                        local ok, r = pcall(function() return cf and cf:InvokeServer("CakePrinceSpawner", true) end)
+                        if ok then N.cake = cakeNote(r) end
+                    end)
+                end
+            end
+            local fr = {}
+            for _, ch in ipairs(workspace:GetChildren()) do
+                if ch:IsA("Tool") and ch:GetAttribute("OriginalName") and ch:FindFirstChild("Handle") then
+                    table.insert(fr, ch.Name)
+                    if not fruitSeen[ch] then
+                        fruitSeen[ch] = true
+                        breaking("fruit", "FRUIT ON THE MAP: " .. ch.Name, now)
+                    end
+                end
+            end
+            N.fruits = fr
+            first = false
+        end
+
+        -- THE NEWS --------------------------------------------------------
+        -- { key, tone, title, body, breaking }, most important first; what
+        -- happened in the last minute leads.
+        function N.headlines(now)
+            now = now or os.clock()
+            local out, s = {}, N.sky
+            local function add(key, tone, title, body)
+                table.insert(out, { key = key, tone = tone, title = title, body = body })
+            end
+            if s then
+                if not s.phase then
+                    add("moon", "dim", s.night and "NIGHT" or "DAY", "moon phase not readable here ("
+                        .. tostring(s.src) .. ") · " .. (s.night and "day in " or "night in ") .. mins(s.edge))
+                elseif s.full then
+                    add("moon", "full", s.blue and "BLUE MOON" or "FULL MOON", string.format(
+                        "night %d/8 · %s left · race trials, Kitsune Island (Sea Danger 6), Skull Guitar",
+                        s.no, mins(s.edge)))
+                else
+                    local when = "full moon: order not known"
+                    if s.nights == 0 then when = "FULL MOON TONIGHT, rises in " .. mins(s.toFull)
+                    elseif s.nights == 1 then when = "full moon NEXT NIGHT, in " .. mins(s.toFull)
+                    elseif s.nights then when = string.format("full moon in %d nights, %s", s.nights, mins(s.toFull)) end
+                    if s.night then
+                        add("moon", "night", string.format("NIGHT %d/8", s.no),
+                            string.format("%s · day in %s · %s", PHASE[s.no], mins(s.edge), when))
+                    else
+                        add("moon", (s.nights == 0) and "full" or "day", string.format("DAY %d/8", s.no),
+                            string.format("tonight %s · night in %s · %s", PHASE[s.no], mins(s.edge), when))
+                    end
+                end
+            end
+            if N.sea ~= 1 and N.sea ~= 2 then
+                local _, root = parts()
+                local here = root and root.Position
+                for _, d in ipairs(ISLES) do
+                    local st = N.isles[d.key]
+                    if st.up then
+                        local bits = { st.atJoin and "already up when you joined" or ("came " .. mins(now - st.since) .. " ago") }
+                        if d.life then
+                            local left = d.life - (now - st.since)
+                            table.insert(bits, st.atJoin and ("lives " .. mins(d.life) .. " at most")
+                                or (left > 0 and ("gone within " .. mins(left)) or ("up longer than " .. mins(d.life))))
+                        end
+                        local pos = st.inst and posOf(st.inst)
+                        if pos and here then
+                            table.insert(bits, string.format("%d studs away", math.floor((pos - here).Magnitude + 0.5)))
+                        end
+                        table.insert(bits, d.why)
+                        add(d.key, "up", d.title .. " UP", table.concat(bits, " · "))
+                    elseif st.goneAt and now - st.goneAt < 300 then
+                        add(d.key, "dim", d.title .. " GONE", "left " .. mins(now - st.goneAt) .. " ago"
+                            .. (st.lasted and (", after " .. mins(st.lasted)) or ""))
+                    elseif d.always then
+                        add(d.key, "dim", "NO " .. d.title, "")
+                    elseif d.key == "kitsune" and s and (s.full or s.nights == 0) then
+                        add(d.key, "dim", "NO KITSUNE ISLAND", s.full and "full moon up: a boat in Sea Danger 6 spawns it"
+                            or "it comes only with the full moon - tonight")
+                    end
+                end
+                local anyElite = false
+                local elites: { string } = (P :: any).ELITES or {}
+                for _, n in ipairs(elites) do
+                    if N.bosses[n] then
+                        anyElite = true
+                        add("boss:" .. n, "up", "ELITE UP", n .. ", " .. N.bosses[n])
+                    end
+                end
+                if not anyElite then add("elite", "dim", "NO ELITE", "Diablo, Deandre, Urban: none up") end
+                for _, n in ipairs(RAID) do
+                    if N.bosses[n] then add("boss:" .. n, "up", string.upper(n) .. " UP", N.bosses[n]) end
+                end
+                local ck = N.cake
+                if ck and not N.bosses["Cake Prince"] and not N.bosses["Dough King"] then
+                    if ck.left then add("cake", "dim", "CAKE PRINCE", ck.left .. " kills to go")
+                    elseif ck.ready then add("cake", "up", "CAKE PRINCE", "ready - the portal can open") end
+                end
+            end
+            if #N.fruits > 0 then
+                local names = {}
+                for i = 1, math.min(3, #N.fruits) do names[i] = N.fruits[i] end
+                add("fruit", "up", "FRUIT ON THE MAP", table.concat(names, ", ")
+                    .. ((#N.fruits > 3) and (" +" .. (#N.fruits - 3)) or ""))
+            end
+            add("server", "dim", "SERVER", string.format("%d/%d players · you joined %s ago",
+                #Players:GetPlayers(), Players.MaxPlayers, mins(workspace.DistributedGameTime)))
+            local hot = {}
+            for _, e in ipairs(N.events) do
+                if now - e.at < 60 then hot[e.key] = true end
+            end
+            local lead, rest = {}, {}
+            for _, it in ipairs(out) do
+                if hot[it.key] then
+                    it.breaking = true
+                    table.insert(lead, it)
+                else
+                    table.insert(rest, it)
+                end
+            end
+            for _, it in ipairs(rest) do table.insert(lead, it) end
+            return lead
+        end
+
+        -- The chip: word, time (m:ss), tone. BREAKING for 8 s after news,
+        -- else the full moon's time left / the day's time to it, else the
+        -- day or night number and the time to the next dusk or dawn.
+        function N.chip(now)
+            now = now or os.clock()
+            if N.breakAt and now - N.breakAt < 8 then return "BREAKING", "", "breaking" end
+            local s = N.sky
+            if not s then return "SKY", "", "dim" end
+            if s.full then return s.blue and "BLUE MOON" or "FULL MOON", dur(s.edge), "full" end
+            if not s.night and s.nights == 0 then return "FULL IN", dur(s.edge), "full" end
+            return (s.night and "NIGHT" or "DAY") .. (s.no and (" " .. s.no) or ""), dur(s.edge),
+                s.night and "night" or "day"
+        end
+    end
+    build()
+end
+
+-- =========================================================
 -- PANEL
 -- =========================================================
 -- farm_pro's panel piece for piece -- the same switches that say On or Off,
@@ -4923,8 +5405,9 @@ local function buildUI()
         DisplayOrder = 45, Parent = pg,
     })
 
+    -- 30 px taller than farm_pro's: the server news strip under the title.
     local panel = mk("Frame", {
-        Size = UDim2.fromOffset(342, 540),
+        Size = UDim2.fromOffset(342, 570),
         Position = UDim2.new(1, -360, 0, 18),
         BackgroundColor3 = C.base, BorderSizePixel = 0,
         Active = true, Draggable = true, Parent = gui,
@@ -4960,16 +5443,123 @@ local function buildUI()
     })
 
     local bodyFrame = mk("Frame", {
-        Size = UDim2.new(1, 0, 1, -52), Position = UDim2.fromOffset(0, 52),
+        Size = UDim2.new(1, 0, 1, -82), Position = UDim2.fromOffset(0, 82),
         BackgroundTransparency = 1, ClipsDescendants = true, Parent = panel,
     })
+
+    -- THE NEWS STRIP (P.news): under the title, outside the body, so Hide
+    -- keeps it. A chip that holds still -- the day or night number and the
+    -- time to the next dusk or dawn, or the full moon's -- and a crawl
+    -- moving left. News starts the crawl over with it in front. Its own
+    -- function: buildUI's registers are its own business.
+    local function newsStrip()
+        local N = P.news
+        if not N then return end
+        local W, H, CHIP = 314, 26, 122
+        local strip = mk("Frame", {
+            Size = UDim2.fromOffset(W, H), Position = UDim2.fromOffset(14, 50),
+            BackgroundColor3 = C.row, BorderSizePixel = 0, ClipsDescendants = true, Parent = panel,
+        })
+        corner(strip, 8)
+        local chip = mk("Frame", {
+            Size = UDim2.fromOffset(CHIP, H), BackgroundColor3 = C.pressed,
+            BorderSizePixel = 0, Parent = strip,
+        })
+        corner(chip, 8)
+        local word = mk("TextLabel", {
+            Size = UDim2.new(1, -8, 1, 0), Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = chip,
+        })
+        -- Code: its digits are all one width, so the seconds do not jitter.
+        local clock = mk("TextLabel", {
+            Size = UDim2.new(1, -8, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Code,
+            TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.text,
+            Text = "", Parent = chip,
+        })
+        local clip = mk("Frame", {
+            Size = UDim2.fromOffset(W - CHIP - 6, H), Position = UDim2.fromOffset(CHIP + 6, 0),
+            BackgroundTransparency = 1, ClipsDescendants = true, Parent = strip,
+        })
+        -- Two copies of the crawl, one after the other: it loops seamlessly.
+        local function crawlLine()
+            return mk("TextLabel", {
+                Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 12,
+                RichText = true, TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = C.text, Text = "", Parent = clip,
+            })
+        end
+        local lineA, lineB = crawlLine(), crawlLine()
+
+        local TONES = {
+            day = { C.ivory, C.base }, night = { Color3.fromRGB(52, 56, 84), C.ivory },
+            full = { C.warn, C.base }, breaking = { C.stop, C.text }, dim = { C.pressed, C.second },
+        }
+        local HEX = { breaking = "#E85C4E", full = "#F0A63C", up = "#3FD07E", night = "#B4BAE6",
+            day = "#E8E0D4", dim = "#9A958D" }
+        local SEP = '   <font color="#6B665F">·</font>   '
+        local function esc(s)
+            return (string.gsub(tostring(s), "[&<>]", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;" }))
+        end
+        local function compose()
+            local bits = {}
+            for _, it in ipairs(N.headlines()) do
+                local t = string.format('<font color="%s"><b>%s</b></font>', HEX[it.tone] or "#F2EFEA", esc(it.title))
+                if it.body and it.body ~= "" then t = t .. "  " .. esc(it.body) end
+                if it.breaking then t = '<font color="#E85C4E"><b>BREAKING</b></font>  ' .. t end
+                table.insert(bits, t)
+            end
+            return table.concat(bits, SEP) .. SEP
+        end
+
+        local myGui = gui
+        N.shown = myGui                 -- Cake Prince is asked only while this is on screen
+        local SPEED = 42                -- px a second
+        local x, text, seenBreak, since = W - CHIP - 6, nil, N.breakAt, 1
+        local conn
+        conn = RunService.RenderStepped:Connect(function(dt)
+            if not (myGui and myGui.Parent) then
+                conn:Disconnect()
+                return
+            end
+            since += dt
+            if since >= 0.5 then
+                since = 0
+                pcall(function()
+                    local w, t, tone = N.chip()
+                    local tt = TONES[tone] or TONES.dim
+                    word.Text, clock.Text = w, t
+                    chip.BackgroundColor3, word.TextColor3, clock.TextColor3 = tt[1], tt[2], tt[2]
+                    local nt = compose()
+                    if nt ~= text then
+                        text = nt
+                        lineA.Text, lineB.Text = nt, nt
+                    end
+                    if N.breakAt ~= seenBreak then
+                        seenBreak = N.breakAt
+                        x = clip.AbsoluteSize.X           -- start over from the right, the news in front
+                    end
+                end)
+            end
+            local wA = lineA.TextBounds.X
+            if wA > 0 then
+                x -= SPEED * dt
+                if x < -wA then x += wA end
+                lineA.Position = UDim2.fromOffset(math.floor(x), 0)
+                lineB.Position = UDim2.fromOffset(math.floor(x + wA), 0)
+            end
+        end)
+    end
+    newsStrip()
 
     local folded = false
     foldBtn.Activated:Connect(function()
         folded = not folded
         bodyFrame.Visible = not folded
         foldBtn.Text = folded and "Show" or "Hide"
-        tween(panel, { Size = UDim2.fromOffset(342, folded and 52 or 540) })
+        -- Folded: the title and the news strip stay.
+        tween(panel, { Size = UDim2.fromOffset(342, folded and 82 or 570) })
     end)
 
     local live = {}
@@ -6585,6 +7175,13 @@ task.spawn(function()
     while _G.BFF == P do
         pcall(keepWater)
         task.wait(0.25)
+    end
+end)
+-- The server news: one look a second from load, farm running or not.
+task.spawn(function()
+    while _G.BFF == P do
+        pcall(P.news.tick)
+        task.wait(1)
     end
 end)
 do
