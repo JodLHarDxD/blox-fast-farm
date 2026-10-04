@@ -218,6 +218,13 @@ local CFG = {
     -- came ~5,000 m = 50k studs). The panel shows both.
     SeaStudsPerM       = 10,
     SeaWobble          = 10,         -- degrees the heading wanders, now and then
+    -- WHO STEERS. "manual" (user, 2026-10-04: the spawn wants time on the sea,
+    -- so you keep the boat where you want): your keys at the wheel - A / D
+    -- (or the arrows) turn, W goes (and keeps going), S stops - at SeaSpeed;
+    -- never the next server by distance. "auto": west, the heading wandering,
+    -- the next server at SeaSearchTo.
+    SeaSteer           = "manual",
+    SeaTurnRate        = 60,         -- degrees a second while A / D is held
     -- MIRAGE HUNT: the same boat and search. The Mirage up = off the boat, onto
     -- it, and the character is YOURS (no lock, no noclip): you climb, face the
     -- moon, press T. The Blue Gear is picked the moment it shows. Which Mirage
@@ -5046,9 +5053,26 @@ do
             return any
         end
         S.myBoat = myBoat
+        -- THE WHEEL. A Beast Hunter has TWO VehicleSeats (probe, 2026-10-04):
+        -- Harpoon.Seat - the hook at the bow, it turns as it aims - and the
+        -- boat's own VehicleSeat by the steering wheel. The first one found
+        -- was the harpoon (user, the same day: "I am sitting on the hook").
+        -- So: the boat's direct child "VehicleSeat"; else any VehicleSeat
+        -- that is not part of a harpoon or a cannon.
         local function seatOf(b)
+            local own = b:FindFirstChild("VehicleSeat")
+            if own and own:IsA("VehicleSeat") then return own end
             for _, d in ipairs(b:GetDescendants()) do
-                if d:IsA("VehicleSeat") then return d end
+                if d:IsA("VehicleSeat") then
+                    local gun = false
+                    local x = d.Parent
+                    while x and x ~= b do
+                        local n = string.lower(tostring(x.Name))
+                        if string.find(n, "harpoon", 1, true) or string.find(n, "cannon", 1, true) then gun = true break end
+                        x = x.Parent
+                    end
+                    if not gun then return d end
+                end
             end
             return nil
         end
@@ -5059,10 +5083,28 @@ do
             return tonumber(v), tonumber(b:GetAttribute("MaxHealth"))
         end
 
-        local drive = { want = 0, wobbleAt = 0, waterY = nil, boat = nil, sitAt = 0 }
+        local drive = { want = 0, wobbleAt = 0, waterY = nil, boat = nil, sitAt = 0, cruise = true }
 
-        -- Every frame at the wheel: turn toward the heading (45 deg/s at most),
-        -- move along it at SeaSpeed, at the water line the boat had.
+        -- Your keys at the wheel (none while you type in chat): steer +1 =
+        -- left (A / Left), -1 = right (D / Right); go = W / Up; stop = S / Down.
+        local function keysDown()
+            local out = { steer = 0, go = false, stop = false }
+            pcall(function()
+                local UIS = game:GetService("UserInputService")
+                if UIS:GetFocusedTextBox() then return end
+                local function down(a, b) return UIS:IsKeyDown(a) or UIS:IsKeyDown(b) end
+                if down(Enum.KeyCode.A, Enum.KeyCode.Left) then out.steer += 1 end
+                if down(Enum.KeyCode.D, Enum.KeyCode.Right) then out.steer -= 1 end
+                out.go = down(Enum.KeyCode.W, Enum.KeyCode.Up)
+                out.stop = down(Enum.KeyCode.S, Enum.KeyCode.Down)
+            end)
+            return out
+        end
+
+        -- Every frame at the wheel, at the water line the boat had. Auto: turn
+        -- toward the heading (45 deg/s at most), move along it at SeaSpeed.
+        -- Manual: your A / D turn the boat, it moves the way it faces, W / S
+        -- start and stop it.
         local function driveTick(dt)
             if not (P.running and S.driving) then return end
             local b, seat = S.boat, S.seat
@@ -5081,23 +5123,36 @@ do
                 end
                 return
             end
-            local now = os.clock()
-            if now >= drive.wobbleAt then
-                drive.wobbleAt = now + 15 + math.random() * 15
-                local w = CFG.SeaWobble or 10
-                drive.want = (math.random() * 2 - 1) * w
-            end
-            local heading = headingFor(drive.want)
             local step = math.min(dt, 0.1)
             local speed = math.clamp(tonumber(CFG.SeaSpeed) or 300, 100, 350)
             local pv = b:GetPivot()
             local look = flat(seat.CFrame.LookVector)
-            local turn = 0
-            if look.Magnitude > 0.1 then
-                turn = turnStep(yawOf(look), yawOf(heading), math.rad(45) * step)
+            local turn, dir = 0, nil
+            if CFG.SeaSteer == "manual" then
+                local k = keysDown()
+                if k.go then drive.cruise = true elseif k.stop then drive.cruise = false end
+                turn = k.steer * math.rad(tonumber(CFG.SeaTurnRate) or 60) * step
+                if look.Magnitude > 0.1 then
+                    local yaw = yawOf(look) + turn
+                    dir = Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
+                else
+                    dir = headingFor(0)
+                end
+                if not drive.cruise then speed = 0 end
+            else
+                local now = os.clock()
+                if now >= drive.wobbleAt then
+                    drive.wobbleAt = now + 15 + math.random() * 15
+                    local w = CFG.SeaWobble or 10
+                    drive.want = (math.random() * 2 - 1) * w
+                end
+                dir = headingFor(drive.want)
+                if look.Magnitude > 0.1 then
+                    turn = turnStep(yawOf(look), yawOf(dir), math.rad(45) * step)
+                end
             end
             local y = drive.waterY or pv.Position.Y
-            local nextPos = Vector3.new(pv.Position.X, y, pv.Position.Z) + heading * speed * step
+            local nextPos = Vector3.new(pv.Position.X, y, pv.Position.Z) + dir * speed * step
             b:PivotTo(CFrame.new(nextPos) * CFrame.Angles(0, turn, 0) * (pv - pv.Position))
             pcall(function()
                 seat.AssemblyLinearVelocity = Vector3.zero
@@ -5412,6 +5467,7 @@ do
             if not S.driving then
                 drive.waterY = drive.waterY or b:GetPivot().Position.Y
                 drive.wobbleAt = 0
+                drive.cruise = true
                 flying = true            -- seated already (a Stop and Start): the lock still lets go
                 S.driving, S.everDriven = true, true
             end
@@ -5422,12 +5478,14 @@ do
             S.hp, S.maxHp = boatHP(b)
             local to = tonumber(CFG.SeaSearchTo) or 8000
             setState("SAIL")
-            S.note = string.format("sailing west  ·  %d m from Tiki (of %d)  ·  danger %s%s",
-                math.floor(S.meters), to, tostring(S.danger or "?"),
+            local manual = CFG.SeaSteer == "manual"
+            S.note = string.format("%s  ·  %d m from Tiki%s  ·  danger %s%s",
+                manual and ("YOU STEER: A/D turn, W go, S stop" .. (drive.cruise and "" or "  (stopped)")) or "sailing west",
+                math.floor(S.meters), manual and "" or string.format(" (of %d)", to), tostring(S.danger or "?"),
                 S.hp and string.format("  ·  boat %d/%s HP", S.hp, tostring(S.maxHp or "?")) or "")
             E.note = S.note
             say(S.note)
-            if S.meters >= to then
+            if not manual and S.meters >= to then
                 stopDrive()
                 S.everDriven = false
                 E.why = string.format("no Prehistoric Island by %d m", to)
@@ -5809,7 +5867,7 @@ do
             metersFrom = metersFrom, headingFor = headingFor, yawOf = yawOf, turnStep = turnStep,
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
-            mirageFits = mirageFits, blueGear = blueGear,
+            mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
         }
     end
     build()
@@ -8124,10 +8182,17 @@ local function buildUI()
                 string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
             }, "\n")
         end)
+        radio(v, 122, {
+            { "manual", "I steer (A/D, W go, S stop)", "no hop by distance" },
+            { "auto",   "Auto: west, next server at the edge", "" },
+        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
+        sliderRow(v, "Turn speed (A / D)", 20, 120, 5,
+            function() return CFG.SeaTurnRate end,
+            function(x) CFG.SeaTurnRate = x end, " deg/s")
         sliderRow(v, "Boat speed", 250, 350, 5,
             function() return CFG.SeaSpeed end,
             function(x) CFG.SeaSpeed = x end, " studs/s")
-        sliderRow(v, "No island by: next server", 3000, 15000, 500,
+        sliderRow(v, "Auto: no island by, next server", 3000, 15000, 500,
             function() return CFG.SeaSearchTo end,
             function(x) CFG.SeaSearchTo = x end, " m")
         sliderRow(v, "One compass meter", 5, 15, 0.5,

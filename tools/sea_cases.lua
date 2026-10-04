@@ -109,6 +109,12 @@ local function makeBoat(pos, yaw)
     b:add(inst("Owner", "ObjectValue", { Value = player }))
     b:add(inst("Humanoid", "IntValue", { Value = 2500 }))
     b.attrs.MaxHealth = 2500
+    -- The harpoon's own VehicleSeat, found FIRST by name order (the bug).
+    local hp = b:add(inst("Harpoon", "Model"))
+    local hook = hp:add(inst("Seat", "VehicleSeat"))
+    hook.CFrame, hook.Position = cf(pos + vec(0, 0, -40), 1.2), pos + vec(0, 0, -40)
+    function hook:Sit(h) h.SeatPart = self end
+    b.hook = hook
     local seat = b:add(inst("VehicleSeat", "VehicleSeat"))
     seat.CFrame = cf(pos, yaw)
     seat.Position = pos
@@ -149,6 +155,23 @@ T.driveTick(0.1)
 check("the boat gone: the wheel lets go", S.driving == false)
 boat.Parent = true
 
+-- ---------------------------------------------------------------- THE SEAT
+local b1 = inst("Boat", "Model")
+local hpn = b1:add(inst("Harpoon", "Model"))
+hpn:add(inst("Seat", "VehicleSeat"))
+local deck = b1:add(inst("Deck", "Model"))
+local wheel1 = deck:add(inst("VehicleSeat", "VehicleSeat"))
+check("seat: no direct wheel seat - the one that is not the harpoon's", T.seatOf(b1) == wheel1)
+local b2 = inst("Boat", "Model")
+local aft = b2:add(inst("Aft", "Model"))
+aft:add(inst("Seat", "VehicleSeat"))
+local own2 = b2:add(inst("VehicleSeat", "VehicleSeat"))
+check("seat: the boat's own VehicleSeat before any other", T.seatOf(b2) == own2)
+local b3 = inst("Boat", "Model")
+local cn = b3:add(inst("Cannon", "Model"))
+cn:add(inst("Seat", "VehicleSeat"))
+check("seat: only a cannon's seat = no wheel", T.seatOf(b3) == nil)
+
 -- ---------------------------------------------------------------- THE HUNT
 local BOATS = WS:add(inst("Boats", "Folder"))
 local MAP = WS:add(inst("Map", "Folder"))
@@ -180,6 +203,7 @@ reset()
 local ok = S.huntStep(epoch)
 check("no boat: to the back dealer, BuyBoat \"Beast Hunter\"", ok == true and BUY_CALLS[1] and BUY_CALLS[1][1] == "BuyBoat"
     and BUY_CALLS[1][2] == "Beast Hunter" and vnear(FLIGHTS[1], TIKI + vec(0, 4, 0)), BUY_CALLS[1] and BUY_CALLS[1][2])
+check("bought: at the WHEEL, not on the harpoon's seat", HUM.SeatPart == NEW_SEAT and HUM.SeatPart ~= NEW_BOAT.hook)
 check("bought: in the seat, the wheel on, the body lock let go", HUM.SeatPart == NEW_SEAT and S.driving and flying == true
     and S.everDriven, tostring(S.driving) .. " " .. tostring(flying))
 check("sailing: the note says meters and danger", string.find(S.note, "m from Tiki", 1, true) ~= nil, S.note)
@@ -533,5 +557,55 @@ reset()
 S.huntStep(epoch, "mirage")
 check("a Prehistoric on the Mirage hunt: not stopped for, still at the wheel", S.driving == true and #FLIGHTS == 0)
 LOCS.kids["Prehistoric Island"] = nil
+
+
+-- ---------------------------------------------------------------- YOU STEER
+MAP.kids.PrehistoricIsland = nil         -- the event's last island: not on this sea
+CFG.SeaSteer = "manual"
+local sb, ss = makeBoat(vec(-40000, 5, 0), 0)          -- facing -Z
+S.boat, S.seat, S.driving = sb, ss, true
+HUM.SeatPart = ss
+T.drive.waterY, T.drive.cruise = 5, true
+P.running = true
+KEYS_DOWN = {}
+T.driveTick(0.1)
+check("you steer, no key: straight on the way it faces, 30 studs", vnear(sb.pivot.Position, vec(-40000, 5, -30))
+    and near(sb.pivot.yaw, 0), vs(sb.pivot.Position))
+ss.CFrame = sb.pivot
+KEYS_DOWN = { A = true }
+T.driveTick(0.1)
+check("A held: turns left (6 deg in 0.1 s at 60/s)", near(sb.pivot.yaw, math.rad(6), 1e-6), sb.pivot.yaw)
+ss.CFrame = sb.pivot
+KEYS_DOWN = { Right = true }
+T.driveTick(0.1)
+check("the right arrow: back right", near(sb.pivot.yaw, 0, 1e-6), sb.pivot.yaw)
+ss.CFrame = sb.pivot
+KEYS_DOWN = { S = true }
+local at = sb.pivot.Position
+T.driveTick(0.1)
+KEYS_DOWN = {}
+T.driveTick(0.1)
+check("S: stops, and stays stopped with no key", vnear(sb.pivot.Position, at), vs(sb.pivot.Position))
+KEYS_DOWN = { W = true }
+T.driveTick(0.1)
+KEYS_DOWN = {}
+T.driveTick(0.1)
+check("W: goes, and keeps going", vnear(sb.pivot.Position, at + vec(0, 0, -60)), vs(sb.pivot.Position))
+TYPING = true
+KEYS_DOWN = { S = true, A = true }
+at = sb.pivot.Position
+T.driveTick(0.1)
+TYPING = false
+KEYS_DOWN = {}
+check("typing in chat: your keys do not steer", vnear(sb.pivot.Position, at + vec(0, 0, -30)) and near(sb.pivot.yaw, 0, 1e-6))
+-- Never the next server by distance while you steer.
+BOATS:add(sb)
+sb.pivot = cf(TIKI + vec(-120000, 0, 0), 0)
+S.driving, S.mirage = false, nil
+reset()
+ok = S.huntStep(epoch, "prehistoric")
+check("you steer past the far edge: no hop, the note says the keys", ok == true and P.elite.why == nil
+    and string.find(S.note, "A/D turn", 1, true) ~= nil, S.note)
+CFG.SeaSteer = "auto"
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

@@ -136,6 +136,7 @@ local function parts() return {}, ROOT, HUM end
 local CFG = {
     Magnet = true, GrabMax = 30, CastWait = 0.45, Weapons = {},
     SeaBoat = "Beast Hunter", SeaSpeed = 300, SeaSearchTo = 8000, SeaStudsPerM = 10, SeaWobble = 0,
+    SeaSteer = "auto", SeaTurnRate = 60,
     Volcano = false, VentKeys = { Z = true, X = true, C = true, V = false },
     VentDistance = 12, GolemCage = 60, VolcanoLoot = true,
 }
@@ -216,5 +217,12 @@ local RunService = {
         Wait = function() CLOCK += 1 / 60 return 1 / 60 end,
     },
 }
-local game = { GetService = function() return { SetCore = function() end } end }
+local KEYS_DOWN, TYPING = {}, false
+local Enum = { KeyCode = { W = "W", A = "A", S = "S", D = "D", Up = "Up", Down = "Down", Left = "Left", Right = "Right" } }
+local INPUT = {
+    SetCore = function() end,
+    IsKeyDown = function(_, k) return KEYS_DOWN[k] == true end,
+    GetFocusedTextBox = function() return TYPING and {} or nil end,
+}
+local game = { GetService = function() return INPUT end }
 local fireproximityprompt = function(p) p.fired = (p.fired or 0) + 1 end
