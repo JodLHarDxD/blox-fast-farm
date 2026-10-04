@@ -145,7 +145,7 @@ local function parts() return {}, ROOT, HUM end
 local CFG = {
     Magnet = true, GrabMax = 30, CastWait = 0.45, Weapons = {},
     SeaBoat = "Beast Hunter", SeaSpeed = 300, SeaSearchTo = 8000, SeaStudsPerM = 10, SeaWobble = 0,
-    SeaSteer = "auto", SeaTurnRate = 60,
+    SeaSteer = "auto", SeaTurnRate = 60, MirageGear = true, MirageNeed = "night",
     Volcano = false, VentKeys = { Z = true, X = true, C = true, V = false },
     VentDistance = 12, GolemCage = 60, VolcanoLoot = true,
 }
@@ -240,5 +240,8 @@ local INPUT = {
     IsKeyDown = function(_, k) return KEYS_DOWN[k] == true end,
     GetFocusedTextBox = function() return TYPING and {} or nil end,
 }
+local TAGGED = {}
+INPUT.GetTagged = function(_, tag) return TAGGED[tag] or {} end
 local game = { GetService = function() return INPUT end }
+local RS = inst("ReplicatedStorage", "Folder")
 local fireproximityprompt = function(p) p.fired = (p.fired or 0) + 1 end

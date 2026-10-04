@@ -688,4 +688,141 @@ check("you steer past the far edge: no hop, the note says the keys", ok == true 
     and string.find(S.note, "A/D turn", 1, true) ~= nil, S.note)
 CFG.SeaSteer = "auto"
 
+
+-- ---------------------------------------------------------------- ON THE MIRAGE: THE THREE JOBS
+(function()
+-- A fresh Mirage with 3 chests (2 in its Chests folder, 1 only tagged), one
+-- already taken, the dealer parked in ReplicatedStorage, the gear hidden.
+local function freshMirage()
+    S.mirage = nil
+    MAP.kids.MysticIsland = nil
+    local isle, g = mysticIsle({ t = 1 })
+    local chests = isle:add(inst("Chests", "Folder"))
+    local c1 = chests:add(inst("DiamondChest", "Model", { Position = vec(-40050, 305, 3000) }))
+    local c2 = chests:add(inst("FragChest", "Model", { Position = vec(-40100, 305, 3000) }))
+    local taken = chests:add(inst("OldChest", "Model", { Position = vec(-40010, 305, 3000), attrs = { IsDisabled = true } }))
+    local deep = isle:add(inst("Ruins", "Folder"))
+    local c3 = deep:add(inst("Chest3", "Model", { Position = vec(-40200, 305, 3000) }))
+    local elsewhere = inst("FarChest", "Model", { Position = vec(0, 5, 0) })
+    TAGGED["_ChestTagged"] = { c1, c3, elsewhere }
+    MAP:add(isle)
+    return isle, g, { c1, c2, c3 }, taken, elsewhere
+end
+-- Touching a chest takes it (the game sets IsDisabled).
+local CHESTS_NOW = {}
+local function touchTakes(pos)
+    for _, c in ipairs(CHESTS_NOW) do
+        if (pos - c.Position).Magnitude < 3 then c.attrs.IsDisabled = true end
+    end
+end
+LOCS.kids["Mirage Island"] = nil
+
+-- 1. Chests only.
+CFG.MirageChests, CFG.MirageDealer, CFG.MirageGear = true, false, false
+P.news.sky = { night = false, edge = 1200 }       -- day, night far off: fine without the gear
+local isleC, _, cs, takenC, farC = freshMirage()
+CHESTS_NOW = cs
+ON_FLY = function(pos) touchTakes(pos) end
+reset()
+STOPPED, P.handsOff = 0, false
+for _ = 1, 6 do S.huntStep(epoch, "mirage") end
+ON_FLY = nil
+check("chests only: taken without night (only the gear needs it)", S.mirage.fits == true, S.mirage.why)
+check("chests: all three taken (folder + tagged), the taken one and the far one never flown to",
+    cs[1].attrs.IsDisabled and cs[2].attrs.IsDisabled and cs[3].attrs.IsDisabled and S.mirage.chests == 3, S.mirage.chests)
+local toTaken, toFar = false, false
+for _, f in ipairs(FLIGHTS) do
+    if (f - takenC.Position).Magnitude < 4 then toTaken = true end
+    if (f - farC.Position).Magnitude < 4 then toFar = true end
+end
+check("chests: never to one already taken or off the Mirage", not toTaken and not toFar)
+check("chests: nearest first", vnear(FLIGHTS[2], cs[1].Position + vec(0, 2, 0)), vs(FLIGHTS[2]))
+check("chests done, nothing else on: hunt off, farm stopped (the character yours)",
+    S.mirage.done and SET_HUNT[#SET_HUNT] == false and STOPPED == 1, S.mirage.note)
+
+-- 2. A chest that will not go: 3 tries, then left.
+S.chestSkip, S.chestTries = {}, {}
+local _, _, cs2 = freshMirage()
+CHESTS_NOW = { cs2[1], cs2[3] }                   -- cs2[2] never takes
+ON_FLY = function(pos) touchTakes(pos) end
+reset()
+STOPPED, P.handsOff = 0, false
+for _ = 1, 10 do S.huntStep(epoch, "mirage") end
+ON_FLY = nil
+local stuckFlights = 0
+for _, f in ipairs(FLIGHTS) do if (f - (cs2[2].Position + vec(0, 2, 0))).Magnitude < 1 then stuckFlights += 1 end end
+check("a chest that will not open: 3 tries, then left, the hunt still ends", stuckFlights == 3 and S.mirage.done, stuckFlights)
+
+-- 3. The dealer: flown to (parked in ReplicatedStorage), the note says so.
+CFG.MirageChests, CFG.MirageDealer, CFG.MirageGear = false, true, false
+local npcs = RS:add(inst("NPCs", "Folder"))
+local dealer = npcs:add(inst("Advanced Fruit Dealer", "Model", { Position = vec(-40030, 310, 3020) }))
+freshMirage()
+reset()
+STOPPED, P.handsOff = 0, false
+S.huntStep(epoch, "mirage")
+check("dealer: flown to, beside him", vnear(FLIGHTS[#FLIGHTS], dealer.Position + vec(0, 2, 6)), vs(FLIGHTS[#FLIGHTS]))
+check("dealer: then done - you are left by him", S.mirage.done and S.tally.dealers >= 1
+    and string.find(S.mirage.note, "Advanced Fruit Dealer", 1, true) ~= nil, S.mirage.note)
+-- No dealer anywhere: said, not waited for.
+RS.kids.NPCs = nil
+freshMirage()
+reset()
+S.huntStep(epoch, "mirage")
+check("no dealer on this Mirage: said, the hunt ends", S.mirage.done
+    and string.find(S.mirage.note, "no Advanced Fruit Dealer", 1, true) ~= nil, S.mirage.note)
+
+-- 4. All three: chests, dealer, then YOUR turn for the moon; the gear when it shows.
+CFG.MirageChests, CFG.MirageDealer, CFG.MirageGear = true, true, true
+P.news.sky = { night = true, edge = 600 }
+npcs = RS:add(inst("NPCs", "Folder"))
+dealer = npcs:add(inst("Advanced Fruit Dealer", "Model", { Position = vec(-40030, 310, 3020) }))
+local _, gear4, cs4 = freshMirage()
+CHESTS_NOW = cs4
+ON_FLY = function(pos) touchTakes(pos) end
+reset()
+STOPPED, P.handsOff = 0, false
+for _ = 1, 5 do S.huntStep(epoch, "mirage") end
+check("all on: chests first, then the dealer, then your turn (hands off), not stopped",
+    S.mirage.chests == 3 and S.mirage.dealerSeen and P.handsOff == true and STOPPED == 0
+    and string.find(S.note, "your turn", 1, true) ~= nil, S.note)
+gear4.Transparency = 0
+ON_FLY = function(pos) if (pos - gear4.Position).Magnitude < 1 then gear4.Transparency = 1 end end
+S.huntStep(epoch, "mirage")
+ON_FLY = nil
+check("all on: the gear shows - picked, then everything done, the farm stopped",
+    S.mirage.got and S.mirage.done and STOPPED == 1, S.mirage.note)
+
+-- 5. The gear already showing on arrival: taken FIRST (it does not wait), then the chests.
+local _, gear5, cs5 = freshMirage()
+gear5.Transparency = 1
+S.huntStep(epoch, "mirage")              -- land; seen hidden
+S.mirage = nil
+gear5.Transparency = 0
+CHESTS_NOW = cs5
+local gotAt = nil
+ON_FLY = function(pos)
+    touchTakes(pos)
+    if (pos - gear5.Position).Magnitude < 1 then gear5.Transparency = 1 gotAt = gotAt or #FLIGHTS end
+end
+reset()
+STOPPED, P.handsOff = 0, false
+for _ = 1, 6 do S.huntStep(epoch, "mirage") end
+ON_FLY = nil
+check("the gear showing on arrival: taken before any chest", gotAt == 2 and S.mirage.got and S.mirage.chests == 3, gotAt)
+
+-- 6. Nothing on: just onto the Mirage, then it is yours.
+CFG.MirageChests, CFG.MirageDealer, CFG.MirageGear = false, false, false
+freshMirage()
+reset()
+STOPPED, P.handsOff = 0, false
+S.huntStep(epoch, "mirage")
+check("all three off: onto the Mirage and the character is yours", #FLIGHTS == 1 and S.mirage.done
+    and STOPPED == 1, #FLIGHTS .. " " .. tostring(S.mirage.done) .. " " .. STOPPED)
+CFG.MirageChests, CFG.MirageDealer, CFG.MirageGear = nil, nil, true
+MAP.kids.MysticIsland = nil
+RS.kids.NPCs = nil
+S.mirage = nil
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

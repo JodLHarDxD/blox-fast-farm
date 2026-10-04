@@ -242,6 +242,11 @@ local CFG = {
     -- is worth stopping for (it lives 15 min; the gear needs night):
     --   "any" every one  ·  "night" one that sees night  ·  "full" a full-moon night
     MirageNeed         = "night",
+    -- ON THE MIRAGE (user, 2026-10-04): three jobs, each its own switch. The
+    -- moon is yours (a high point, face it, T) - never the script's.
+    MirageChests       = true,       -- every chest on the island, nearest first
+    MirageDealer       = true,       -- to the Advanced Fruit Dealer, his shop opened
+    MirageGear         = true,       -- the Blue Gear: taken if it shows (MirageNeed judges only for it)
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -4854,7 +4859,7 @@ do
             driving = false, note = "off", boatNote = "no boat yet",
             meters = nil, danger = nil, hp = nil, maxHp = nil, ev = nil,
             tally = { found = 0, events = 0, vents = 0, golems = 0, bones = 0, eggs = 0, buys = 0,
-                mirages = 0, gears = 0 },
+                mirages = 0, gears = 0, chests = 0, dealers = 0 },
             mirage = nil,            -- the Mirage being handled: { seenAt, fits, why, landed, got, note }
         }
         P.sea = S
@@ -5366,12 +5371,10 @@ do
             if got then
                 m.got = true
                 S.tally.gears += 1
-                m.note = "BLUE GEAR COLLECTED - the farm stopped, you are on the Mirage"
+                m.note = "BLUE GEAR COLLECTED"
                     .. (okD and ("  (temple door: " .. tostring(door) .. ")") or "")
                 print("[BFF] mirage: " .. m.note)
                 notify("Blue Gear collected!")
-                P.setHunt(false)
-                task.defer(function() pcall((P :: any).stop) end)
                 return
             end
             m.tries = (m.tries or 0) + 1
@@ -5381,23 +5384,151 @@ do
             handsOff()
         end
 
+        -- ---------- the Mirage's chests ----------
+        -- The hubs (2026) agree: Map.MysticIsland.Chests, and every chest the
+        -- game tags "_ChestTagged"; a taken one has the attribute IsDisabled.
+        -- Touch to take. Nearest first; one that will not go in 3 tries is left.
+        S.chestSkip = setmetatable({}, { __mode = "k" })
+        S.chestTries = setmetatable({}, { __mode = "k" })
+        local function chestTaken(c)
+            if not c.Parent then return true end
+            local ok, off = pcall(function() return c:GetAttribute("IsDisabled") end)
+            return ok and off == true
+        end
+        local function mirageChests(isle)
+            local out, seen = {}, {}
+            if not isle then return out end
+            local function consider(c)
+                if seen[c] or S.chestSkip[c] or chestTaken(c) then return end
+                seen[c] = true
+                local ok, p = pcall(function() return c:GetPivot().Position end)
+                if ok and p then table.insert(out, { inst = c, pos = p }) end
+            end
+            local f = isle:FindFirstChild("Chests")
+            for _, c in ipairs(f and f:GetChildren() or {}) do consider(c) end
+            local ok, tagged = pcall(function() return game:GetService("CollectionService"):GetTagged("_ChestTagged") end)
+            for _, c in ipairs((ok and type(tagged) == "table") and tagged or {}) do
+                local okD, inIsle = pcall(function() return c:IsDescendantOf(isle) end)
+                if okD and inIsle then consider(c) end
+            end
+            return out
+        end
+        S.mirageChests = mirageChests
+
+        -- One chest. true = busy with them; false = none left.
+        local function chestStep(isle, m, myEpoch)
+            local list = mirageChests(isle)
+            if #list == 0 then
+                m.chestsDone = true
+                print(string.format("[BFF] mirage: chests done - %d taken", m.chests))
+                return false
+            end
+            if P.handsOff then handsOn() end
+            local _, r = parts()
+            local c = nearestOf(list, r and r.Position or list[1].pos, function(x) return x.pos end)
+            m.note = string.format("Mirage chests  ·  %d taken  ·  %d left", m.chests, #list)
+            S.note = m.note
+            P.elite.note = S.note
+            say(m.note)
+            setState("CHEST")
+            flyTo(c.pos + UP * 2)
+            if stale(myEpoch) then return true end
+            local t0 = os.clock()
+            while not chestTaken(c.inst) and os.clock() - t0 < 2 and not stale(myEpoch) do
+                lockAt(c.pos)
+                task.wait(0.1)
+            end
+            if chestTaken(c.inst) then
+                m.chests += 1
+                S.tally.chests += 1
+            else
+                local n = (S.chestTries[c.inst] or 0) + 1
+                S.chestTries[c.inst] = n
+                if n >= 3 then S.chestSkip[c.inst] = true end
+            end
+            return true
+        end
+
+        -- ---------- the Advanced Fruit Dealer ----------
+        -- NPCs["Advanced Fruit Dealer"], in workspace or parked in
+        -- ReplicatedStorage (the hubs look in both); his shop opens through
+        -- the game's own FruitShop controller (one hub, 2026).
+        local function dealerAt()
+            -- Not ipairs: it stops at the first nil (no workspace.NPCs).
+            local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
+            for i = 1, 2 do
+                local f = folders[i]
+                local d = f and f:FindFirstChild("Advanced Fruit Dealer")
+                if d then
+                    local ok, p = pcall(function() return d:GetPivot().Position end)
+                    if ok and p then return p end
+                end
+            end
+            return nil
+        end
+        S.dealerAt = dealerAt
+        local function dealerStep(m, myEpoch)
+            m.dealerDone = true
+            local at = dealerAt()
+            if not at then
+                m.dealerNote = "no Advanced Fruit Dealer found on this Mirage"
+                print("[BFF] mirage: " .. m.dealerNote)
+                return
+            end
+            if P.handsOff then handsOn() end
+            m.note = "to the Advanced Fruit Dealer"
+            say(m.note)
+            setState("DEALER")
+            local stand = at + Vector3.new(0, 2, 6)
+            flyTo(stand)
+            if stale(myEpoch) then return end
+            lockAt(stand)
+            local opened = pcall(function()
+                require(player.PlayerGui.Main.UIController.FruitShop):Open("AdvancedFruitDealer")
+            end)
+            m.dealerSeen = true
+            S.tally.dealers += 1
+            m.dealerNote = "by the Advanced Fruit Dealer" .. (opened and " - his shop is open" or " - talk to him")
+            print("[BFF] mirage: " .. m.dealerNote)
+            notify("Advanced Fruit Dealer" .. (opened and " - shop open" or " - here"))
+        end
+
+        -- Every job you switched on is done: the character is yours, the farm stops.
+        local function mirageDone(m)
+            m.done = true
+            local bits = {}
+            if CFG.MirageChests then table.insert(bits, m.chests .. " chests") end
+            if CFG.MirageDealer then table.insert(bits, tostring(m.dealerNote or "no dealer")) end
+            if CFG.MirageGear then table.insert(bits, "Blue Gear collected") end
+            m.note = "MIRAGE DONE - " .. ((#bits > 0) and table.concat(bits, "  ·  ") or "you are on it")
+                .. " - the farm stopped, you are on the Mirage"
+            print("[BFF] mirage: " .. m.note)
+            handsOff()
+            P.setHunt(false)
+            task.defer(function() pcall((P :: any).stop) end)
+        end
+
         -- One step with a Mirage up. true = handled; false = not worth it
-        -- (sailed past).
+        -- (sailed past). On it: the gear first if it already shows (it does not
+        -- wait), then the chests, the dealer, then your turn at the moon while
+        -- the gear is watched. Each job only when its switch is on.
         local function mirageStep(isle, mk, myEpoch)
             local m = S.mirage
             if not m then
-                m = { seenAt = os.clock(), tries = 0 }
+                m = { seenAt = os.clock(), tries = 0, chests = 0 }
                 S.mirage = m
                 S.tally.mirages += 1
                 local news = (P :: any).news
-                m.fits, m.why = mirageFits(CFG.MirageNeed, news and news.sky, MIRAGE_LIFE, GEAR_MARGIN)
+                -- Only the gear needs night: without it, every Mirage is worth it.
+                local need = CFG.MirageGear and CFG.MirageNeed or "any"
+                m.fits, m.why = mirageFits(need, news and news.sky, MIRAGE_LIFE, GEAR_MARGIN)
                 print(string.format("[BFF] mirage: MIRAGE ISLAND at %d m from Tiki - %s%s",
                     math.floor(S.meters or 0), m.why, m.fits and "" or " - sailing on"))
-                notify(m.fits and "Mirage Island is up - your turn at the moon!"
+                notify(m.fits and "Mirage Island is up!"
                     or ("Mirage Island - " .. m.why .. ": sailing on"))
             end
             if not m.fits then return false end
-            if m.got then
+            if m.done then
                 say(m.note)
                 task.wait(0.5)
                 return true
@@ -5412,17 +5543,29 @@ do
                     if stale(myEpoch) then return true end
                 end
                 m.landed = true
-                handsOff()
             end
             local g, byMesh = blueGear(isle)
-            if g then
+            if CFG.MirageGear and not m.got and g then
                 local hidden = (tonumber(g.Transparency) or 1) >= 1
                 if hidden then m.sawHidden = true end
                 if not hidden and (byMesh or m.sawHidden) and (m.tries or 0) < 3 then
                     collectGear(g, m, myEpoch)
-                    return true
+                    if stale(myEpoch) then return true end
                 end
             end
+            if CFG.MirageChests and not m.chestsDone then
+                if chestStep(isle, m, myEpoch) then return true end
+            end
+            if CFG.MirageDealer and not m.dealerDone then
+                dealerStep(m, myEpoch)
+                if stale(myEpoch) then return true end
+            end
+            if not CFG.MirageGear or m.got then
+                mirageDone(m)
+                return true
+            end
+            -- Your turn at the moon; the gear is watched.
+            handsOff()
             local left = MIRAGE_LIFE - (os.clock() - m.seenAt)
             local news = (P :: any).news
             local sky = news and news.sky
@@ -5458,7 +5601,7 @@ do
                     if mirageStep(mi, mmk, myEpoch) then return true end
                 elseif S.mirage then
                     -- Gone (15 min, or its spawner left): back to the boat.
-                    if S.mirage.fits and not S.mirage.got then print("[BFF] mirage: the Mirage went") end
+                    if S.mirage.fits and not S.mirage.done then print("[BFF] mirage: the Mirage went") end
                     S.mirage = nil
                     if P.handsOff then handsOn() end
                 end
@@ -6382,7 +6525,10 @@ do
         end
 
         local function hunterAt()
-            for _, f in ipairs({ workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }) do
+            -- Not ipairs: it stops at the first nil (no workspace.NPCs).
+            local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
+            for i = 1, 2 do
+                local f = folders[i]
                 local m = f and f:FindFirstChild("Dragon Hunter")
                 if m then
                     local ok, p = pcall(function() return m:GetPivot().Position end)
@@ -7859,7 +8005,7 @@ local function buildUI()
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
         { "prehistoric", "Prehistoric hunt", "Boat to Sea Danger 6, sail till the island comes, else next server" },
-        { "mirage", "Mirage hunt", "Same boat - the Mirage up = your turn at the moon, the Blue Gear picked for you" },
+        { "mirage", "Mirage hunt", "Same boat - on the Mirage: chests, Advanced Fruit Dealer, Blue Gear (Sea page)" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -8171,8 +8317,8 @@ local function buildUI()
             if CFG.Hunt then
                 local t = P.elite.tally
                 local k = CFG.HuntKind
-                local count = (k == "mirage") and string.format("%d Mirages  ·  %d Blue Gears  ·  %s", P.sea.tally.mirages,
-                        P.sea.tally.gears, P.handsOff and "YOUR TURN - the character is yours"
+                local count = (k == "mirage") and string.format("%d Mirages  ·  %d Blue Gears  ·  %d chests  ·  %s", P.sea.tally.mirages,
+                        P.sea.tally.gears, P.sea.tally.chests, P.handsOff and "YOUR TURN - the character is yours"
                             or (P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing"))
                     or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
@@ -9115,14 +9261,30 @@ local function buildUI()
             .. "or nothing by the far edge: the next server.")
 
         heading2(v, "mirage hunt")
+        switchRow(v, "Chests", "Every chest on the Mirage, nearest first",
+            function() return CFG.MirageChests end,
+            function(x) CFG.MirageChests = x end)
+        switchRow(v, "Advanced Fruit Dealer", "Flown to him, his shop opened - you buy",
+            function() return CFG.MirageDealer end,
+            function(x) CFG.MirageDealer = x end)
+        switchRow(v, "Blue Gear", "Taken if it shows; else your turn at the moon, then taken",
+            function() return CFG.MirageGear end,
+            function(x) CFG.MirageGear = x end)
         readout(v, function()
             local s = P.sea
             local m = s.mirage
             local lines = {
-                string.format("found     %d Mirages  ·  %d Blue Gears", s.tally.mirages, s.tally.gears),
+                string.format("found     %d Mirages  ·  %d Blue Gears  ·  %d chests  ·  %d dealers",
+                    s.tally.mirages, s.tally.gears, s.tally.chests, s.tally.dealers),
             }
             if m then
                 table.insert(lines, "this one  " .. tostring(m.why) .. (m.fits and "" or "  - sailed past"))
+                if m.landed then
+                    table.insert(lines, string.format("jobs      chests %s  ·  dealer %s  ·  gear %s",
+                        not CFG.MirageChests and "off" or (m.chestsDone and (m.chests .. " taken") or (m.chests .. " so far")),
+                        not CFG.MirageDealer and "off" or (m.dealerDone and (m.dealerSeen and "visited" or "not found") or "next"),
+                        not CFG.MirageGear and "off" or (m.got and "TAKEN" or "watching")))
+                end
                 if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
             end
             if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours; the gear is watched") end
@@ -9133,12 +9295,14 @@ local function buildUI()
             { "full",  "A full-moon night only", "" },
             { "any",   "Every Mirage", "" },
         }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
-        caption(v, "A Mirage lives 15 min. Judged the moment it comes, off the "
-            .. "server news' sky: one that is gone before night (with 2 min to "
-            .. "climb and resonate) is sailed past. Up and worth it: you are put "
-            .. "on it and the character is yours - a high point, face the moon, "
-            .. "T. The Blue Gear is run over the moment it shows, then the farm "
-            .. "stops and leaves you there. Dying or leaving makes the Mirage go.")
+        caption(v, "On the Mirage: the gear first if it already shows, then the "
+            .. "chests, then the dealer, then - Blue Gear on - the character is "
+            .. "yours for the moon (a high point, face it, T) and the gear is run "
+            .. "over the moment it shows. Every job you switched on done = the "
+            .. "farm stops and leaves you there. The sky choice above judges a "
+            .. "Mirage only for the gear (it needs night, 2 min to climb); with "
+            .. "Blue Gear off every Mirage is taken. A Mirage lives 15 min; dying "
+            .. "or leaving makes it go.")
 
         heading2(v, "volcano event")
         switchRow(v, "Volcano event",
