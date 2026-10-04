@@ -7,6 +7,7 @@ local os = { clock = function() return CLOCK end, time = function() return 0 end
 local task = {
     wait = function(s) CLOCK += (s or 0.03) end,
     spawn = function(f, ...) f(...) end,
+    defer = function(f, ...) f(...) end,
 }
 local realPrint = print
 local PRINTED = {}
@@ -140,7 +141,10 @@ local CFG = {
 }
 local SET_HUNT = {}
 local P = { running = true, elite = { note = "", why = nil } }
-function P.setHunt(x) table.insert(SET_HUNT, x) end
+function P.setHunt(x) table.insert(SET_HUNT, x) P.handsOff = false end
+local STOPPED = 0
+function P.stop() STOPPED += 1 end
+P.news = { sky = nil }
 local _G = { BFF = P }
 
 local SEA = 3
@@ -162,6 +166,9 @@ local flying, lastWritten, aimUntil, aimPixel = false, nil, 0, nil
 local pileCur, pileNames, pileActive, activeName = nil, nil, false, nil
 local RELEASED, REFRESHED, FIGHTS = 0, 0, {}
 local function releasePile() RELEASED += 1 pileCur, pileNames, pileActive = nil, nil, false end
+local RESTORED, CAM_RELEASED = 0, 0
+local function restoreBody() RESTORED += 1 end
+local function releaseCamera() CAM_RELEASED += 1 end
 local function refreshPile()
     REFRESHED += 1
     if pileCur and pileCur.build then pileCur.build() end

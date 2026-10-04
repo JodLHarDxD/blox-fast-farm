@@ -177,7 +177,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "prehistoric"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "prehistoric" | "mirage"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -218,6 +218,12 @@ local CFG = {
     -- came ~5,000 m = 50k studs). The panel shows both.
     SeaStudsPerM       = 10,
     SeaWobble          = 10,         -- degrees the heading wanders, now and then
+    -- MIRAGE HUNT: the same boat and search. The Mirage up = off the boat, onto
+    -- it, and the character is YOURS (no lock, no noclip): you climb, face the
+    -- moon, press T. The Blue Gear is picked the moment it shows. Which Mirage
+    -- is worth stopping for (it lives 15 min; the gear needs night):
+    --   "any" every one  ·  "night" one that sees night  ·  "full" a full-moon night
+    MirageNeed         = "night",
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -270,7 +276,7 @@ local CFG = {
     Debug              = false,
 }
 
-local P = { running = false, config = CFG }
+local P = { running = false, config = CFG, handsOff = false }
 _G.BFF = P
 
 -- =========================================================
@@ -707,7 +713,7 @@ local function charParts(char)
 end
 
 local function bodyStepped()
-    if not P.running then return end
+    if not P.running or P.handsOff then return end
     local char = player.Character
     if not char then return end
     if char ~= bodyChar or os.clock() - bodyListAt > 0.5 then
@@ -722,7 +728,7 @@ local function bodyStepped()
 end
 
 local function bodyHeartbeat()
-    if not P.running then return end
+    if not P.running or P.handsOff then return end
     local _, r, h = parts()
     if not r or not h then return end
     h.AutoRotate = false
@@ -4681,10 +4687,10 @@ do
                 if recipeStep(myEpoch) then return end
             elseif kind == "flower" then
                 if flowerStep(myEpoch) then return end
-            elseif kind == "prehistoric" then
+            elseif kind == "prehistoric" or kind == "mirage" then
                 -- SEA HUNT: true while it sails (or holds the island); false
                 -- = nothing came by the far edge, E.why says so.
-                if (P :: any).sea.huntStep(myEpoch) then return end
+                if (P :: any).sea.huntStep(myEpoch, kind) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -4715,6 +4721,7 @@ do
         -- start by itself.
         function P.setHunt(x, kind)
             if kind then CFG.HuntKind = kind end
+            P.handsOff = false           -- a hunt changed: the farm drives again
             CFG.Hunt = x and true or false
             releasePile()
             if x then
@@ -4747,6 +4754,16 @@ end
 -- boat is left and you go onto the island: it despawns with nobody on it.
 -- Nothing by SeaSearchTo = the next server.
 --
+-- THE MIRAGE HUNT (HuntKind "mirage"): the same boat and search. The Mirage
+-- up (Map.MysticIsland / Locations "Mirage Island") and one worth it
+-- (MirageNeed: it lives 15 min, the gear needs night - judged off the server
+-- news' sky) = off the boat, onto it, and the character is handed back to you
+-- (P.handsOff: no lock, no noclip, no keys): you climb, face the moon, T.
+-- The Blue Gear -- the island's MeshPart 10153114969 (every hub 2024-26),
+-- hidden until the moon resonates -- is run over the moment it shows ("run
+-- over it", the wiki), then the farm stops and leaves you there. Not worth
+-- it: sailed past.
+--
 -- THE VOLCANO EVENT (CFG.Volcano, its own switch, any mode). The public
 -- hubs (2026-03 .. 2026-09) and the wiki agree on the island's insides:
 --   Core.ActivationPrompt         the relic's ProximityPrompt: starts it
@@ -4771,7 +4788,9 @@ do
         local S: { [string]: any } = {
             driving = false, note = "off", boatNote = "no boat yet",
             meters = nil, danger = nil, hp = nil, maxHp = nil, ev = nil,
-            tally = { found = 0, events = 0, vents = 0, golems = 0, bones = 0, eggs = 0, buys = 0 },
+            tally = { found = 0, events = 0, vents = 0, golems = 0, bones = 0, eggs = 0, buys = 0,
+                mirages = 0, gears = 0 },
+            mirage = nil,            -- the Mirage being handled: { seenAt, fits, why, landed, got, note }
         }
         P.sea = S
         local TIKI_DEALER = Vector3.new(-16928.9, 7.8, 434.6)   -- the back boat dealer (probe)
@@ -4882,6 +4901,59 @@ do
             return posOf(loc and loc:FindFirstChild("Prehistoric Island"))
         end
         local function core(isle) return isle and isle:FindFirstChild("Core") end
+        local function mirageIsle()
+            local map = workspace:FindFirstChild("Map")
+            return (map and map:FindFirstChild("MysticIsland")) or workspace:FindFirstChild("MysticIsland")
+        end
+        local function mirageMarker()
+            local wo = workspace:FindFirstChild("_WorldOrigin")
+            local loc = wo and wo:FindFirstChild("Locations")
+            return posOf(loc and loc:FindFirstChild("Mirage Island"))
+        end
+
+        -- THE BLUE GEAR: the island's MeshPart with the gear's mesh; second
+        -- value true when found by that mesh. Else its child MeshPart named
+        -- "Part" (two hubs find it so) - trusted only once seen hidden first.
+        local GEAR_MESH = "10153114969"
+        local function blueGear(isle)
+            if not isle then return nil, false end
+            local named = nil
+            for _, c in ipairs(isle:GetChildren()) do
+                if c:IsA("MeshPart") then
+                    local ok, id = pcall(function() return tostring(c.MeshId) end)
+                    if ok and string.find(id, GEAR_MESH, 1, true) then return c, true end
+                    if c.Name == "Part" then named = named or c end
+                end
+            end
+            return named, false
+        end
+
+        local function mmss(sec)
+            sec = math.max(0, math.floor(sec or 0))
+            return string.format("%d:%02d", sec // 60, sec % 60)
+        end
+
+        -- IS THIS MIRAGE WORTH STOPPING FOR? It lives `life` more seconds; the
+        -- gear needs night (and the full moon, "full") with `margin` seconds to
+        -- climb and resonate. sky = the server news' (night, edge = real
+        -- seconds to the next dusk / dawn, full, nights = 0: the full moon
+        -- rises tonight).
+        local function mirageFits(need, sky, life, margin)
+            if need == "any" then return true, "every Mirage is taken" end
+            if not sky or sky.edge == nil then return true, "the sky is not read yet - taken" end
+            if sky.night then
+                if need == "full" and not sky.full then return false, "night, but not the full moon" end
+                local usable = math.min(life, sky.edge)
+                if usable >= margin then return true, "night now - " .. mmss(usable) .. " to use" end
+                return false, "night ends in " .. mmss(sky.edge) .. " - too soon"
+            end
+            if need == "full" and sky.nights ~= 0 then return false, "tonight is not the full moon" end
+            local spare = life - sky.edge
+            if spare >= margin then
+                return true, "night in " .. mmss(sky.edge) .. ", the Mirage lasts " .. mmss(spare) .. " into it"
+            end
+            return false, "night in " .. mmss(sky.edge) .. " - the Mirage is gone before (15 min at most)"
+        end
 
         local function relicPos(isle)
             local rel = core(isle) and core(isle):FindFirstChild("PrehistoricRelic")
@@ -5114,9 +5186,128 @@ do
             return nil
         end
 
+        -- ---------- the Mirage ----------
+        local MIRAGE_LIFE, GEAR_MARGIN = 900, 120
+
+        -- The character back to you: no lock, no noclip, your collisions back.
+        local function handsOff()
+            if P.handsOff then return end
+            stopDrive()
+            releasePile()
+            P.handsOff = true
+            flying = false
+            pcall(restoreBody)
+            releaseCamera()
+        end
+        -- The farm drives again, from where you are now (not where it left you).
+        local function handsOn()
+            local _, r = parts()
+            if r then
+                lastWritten = r.Position
+                lockAt(r.Position)
+            end
+            P.handsOff = false
+        end
+
+        -- Run over the gear: onto it, then a few small steps on it, until it
+        -- goes (a found gear is not shown to you any more - the wiki).
+        local function collectGear(g, m, myEpoch)
+            handsOn()
+            m.note = "THE BLUE GEAR IS UP - going for it"
+            say(m.note)
+            print("[BFF] mirage: the Blue Gear showed - going for it")
+            flyTo(g.Position)
+            local t0, i = os.clock(), 0
+            while os.clock() - t0 < 4 and not stale(myEpoch) do
+                if not g.Parent or (tonumber(g.Transparency) or 1) >= 1 then break end
+                i += 1
+                lockAt(g.Position + Vector3.new(((i % 3) - 1) * 1.5, (i % 2 == 0) and 1 or -1, 0))
+                task.wait(0.15)
+            end
+            local got = not g.Parent or (tonumber(g.Transparency) or 1) >= 1
+            local cf = commF()
+            local okD, door = false, nil
+            if cf then okD, door = pcall(function() return cf:InvokeServer("CheckTempleDoor") end) end
+            if got then
+                m.got = true
+                S.tally.gears += 1
+                m.note = "BLUE GEAR COLLECTED - the farm stopped, you are on the Mirage"
+                    .. (okD and ("  (temple door: " .. tostring(door) .. ")") or "")
+                print("[BFF] mirage: " .. m.note)
+                notify("Blue Gear collected!")
+                P.setHunt(false)
+                task.defer(function() pcall((P :: any).stop) end)
+                return
+            end
+            m.tries = (m.tries or 0) + 1
+            m.note = (m.tries >= 3) and "the gear did not pick up 3 times - walk over it yourself"
+                or "the gear is still there - trying again"
+            print("[BFF] mirage: " .. m.note)
+            handsOff()
+        end
+
+        -- One step with a Mirage up. true = handled; false = not worth it
+        -- (sailed past).
+        local function mirageStep(isle, mk, myEpoch)
+            local m = S.mirage
+            if not m then
+                m = { seenAt = os.clock(), tries = 0 }
+                S.mirage = m
+                S.tally.mirages += 1
+                local news = (P :: any).news
+                m.fits, m.why = mirageFits(CFG.MirageNeed, news and news.sky, MIRAGE_LIFE, GEAR_MARGIN)
+                print(string.format("[BFF] mirage: MIRAGE ISLAND at %d m from Tiki - %s%s",
+                    math.floor(S.meters or 0), m.why, m.fits and "" or " - sailing on"))
+                notify(m.fits and "Mirage Island is up - your turn at the moon!"
+                    or ("Mirage Island - " .. m.why .. ": sailing on"))
+            end
+            if not m.fits then return false end
+            if m.got then
+                say(m.note)
+                task.wait(0.5)
+                return true
+            end
+            if not m.landed then
+                local at = mk or posOf(isle)
+                if at then
+                    stopDrive()
+                    setState("FLY")
+                    say("onto the Mirage")
+                    flyTo(at + UP * 20)
+                    if stale(myEpoch) then return true end
+                end
+                m.landed = true
+                handsOff()
+            end
+            local g, byMesh = blueGear(isle)
+            if g then
+                local hidden = (tonumber(g.Transparency) or 1) >= 1
+                if hidden then m.sawHidden = true end
+                if not hidden and (byMesh or m.sawHidden) and (m.tries or 0) < 3 then
+                    collectGear(g, m, myEpoch)
+                    return true
+                end
+            end
+            local left = MIRAGE_LIFE - (os.clock() - m.seenAt)
+            local news = (P :: any).news
+            local sky = news and news.sky
+            local skyText = (sky and sky.edge) and (sky.night and ("night, dawn in " .. mmss(sky.edge))
+                or ("day, night in " .. mmss(sky.edge))) or "sky not read"
+            if (m.tries or 0) < 3 then
+                m.note = "MIRAGE UP - your turn: a high point, face the moon, T. The gear is picked the moment it shows"
+            end
+            S.note = string.format("%s  ·  %s  ·  Mirage ~%s left", m.note, skyText, mmss(left))
+            P.elite.note = S.note
+            say(S.note)
+            setState("MIRAGE")
+            task.wait(0.2)
+            return true
+        end
+
         -- THE HUNT, one step. true = keep going here; false = the next server
-        -- (E.why says why).
-        function S.huntStep(myEpoch)
+        -- (E.why says why). kind: "prehistoric" (default) or "mirage".
+        function S.huntStep(myEpoch, kind)
+            kind = kind or "prehistoric"
             local E = P.elite
             local sea = mySea()
             if sea and sea ~= 3 then
@@ -5126,10 +5317,21 @@ do
                 say(S.note)
                 return true
             end
+            if kind == "mirage" then
+                local mi, mmk = mirageIsle(), mirageMarker()
+                if mi or mmk then
+                    if mirageStep(mi, mmk, myEpoch) then return true end
+                elseif S.mirage then
+                    -- Gone (15 min, or its spawner left): back to the boat.
+                    if S.mirage.fits and not S.mirage.got then print("[BFF] mirage: the Mirage went") end
+                    S.mirage = nil
+                    if P.handsOff then handsOn() end
+                end
+            end
             -- The island is up: the hunt's job is done. Never leave it (it
             -- despawns with nobody on it); the Volcano switch does the event.
             local isle, mk = island(), marker()
-            if isle or mk then
+            if kind == "prehistoric" and (isle or mk) then
                 if S.driving then stopDrive() end
                 if not S.foundAt then
                     S.foundAt = os.clock()
@@ -5607,6 +5809,7 @@ do
             metersFrom = metersFrom, headingFor = headingFor, yawOf = yawOf, turnStep = turnStep,
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
+            mirageFits = mirageFits, blueGear = blueGear,
         }
     end
     build()
@@ -5622,15 +5825,18 @@ local function step()
         task.wait(0.5)
         return
     end
+    -- HANDS OFF (the Mirage: your turn at the moon): nothing but the hunt's
+    -- own watch runs - no escape, no haki keys, no other island.
+    local off = P.handsOff
     -- At the wheel the boat outruns what hurts you; flying up would leave it.
-    if healthPct() < (CFG.EscapeBelow or 0.35) and not (P.sea and P.sea.driving) then
+    if not off and healthPct() < (CFG.EscapeBelow or 0.35) and not (P.sea and P.sea.driving) then
         escape()
         return
     end
-    pcall(keepHaki)
+    if not off then pcall(keepHaki) end
 
     -- The volcano event goes before every mode while its island is up.
-    if P.sea and P.sea.volcanoStep() then return end
+    if not off and P.sea and P.sea.volcanoStep() then return end
     if CFG.Hunt then huntStep() return end
     if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
@@ -6724,6 +6930,7 @@ local function buildUI()
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "prehistoric", "Prehistoric hunt", "Boat to Sea Danger 6, sail till the island comes, else next server" },
+        { "mirage", "Mirage hunt", "Same boat - the Mirage up = your turn at the moon, the Blue Gear picked for you" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -7035,7 +7242,10 @@ local function buildUI()
             if CFG.Hunt then
                 local t = P.elite.tally
                 local k = CFG.HuntKind
-                local count = (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
+                local count = (k == "mirage") and string.format("%d Mirages  ·  %d Blue Gears  ·  %s", P.sea.tally.mirages,
+                        P.sea.tally.gears, P.handsOff and "YOUR TURN - the character is yours"
+                            or (P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing"))
+                    or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
                     or (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
@@ -7935,6 +8145,32 @@ local function buildUI()
             .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
             .. "or nothing by the far edge: the next server.")
 
+        heading2(v, "mirage hunt")
+        readout(v, function()
+            local s = P.sea
+            local m = s.mirage
+            local lines = {
+                string.format("found     %d Mirages  ·  %d Blue Gears", s.tally.mirages, s.tally.gears),
+            }
+            if m then
+                table.insert(lines, "this one  " .. tostring(m.why) .. (m.fits and "" or "  - sailed past"))
+                if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
+            end
+            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours; the gear is watched") end
+            return table.concat(lines, "\n")
+        end)
+        radio(v, 122, {
+            { "night", "One that sees night", "the gear needs it" },
+            { "full",  "A full-moon night only", "" },
+            { "any",   "Every Mirage", "" },
+        }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
+        caption(v, "A Mirage lives 15 min. Judged the moment it comes, off the "
+            .. "server news' sky: one that is gone before night (with 2 min to "
+            .. "climb and resonate) is sailed past. Up and worth it: you are put "
+            .. "on it and the character is yours - a high point, face the moon, "
+            .. "T. The Blue Gear is run over the moment it shows, then the farm "
+            .. "stops and leaves you there. Dying or leaving makes the Mirage go.")
+
         heading2(v, "volcano event")
         switchRow(v, "Volcano event",
             "Whenever a Prehistoric Island is up in this server",
@@ -8087,6 +8323,7 @@ function P.start()
     releasePile()
     table.clear(pileWatch)
     lockCF, lastWritten, flying = nil, nil, false
+    P.handsOff = false
     wantPose = "safe"
     P.running   = true
     moveEnabled = true
@@ -8162,6 +8399,7 @@ function P.stop(why)
     aimUntil = 0
     P.aimAt = nil
     if P.sea then P.sea.driving = false end    -- the boat stops; you stay in your seat
+    P.handsOff = false
     pcall(hiddenAim, false)
     pcall(releaseCamera)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end

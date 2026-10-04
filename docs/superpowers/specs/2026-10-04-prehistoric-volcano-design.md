@@ -39,3 +39,12 @@ loot: nearest `workspace.DinoBone` (touch: fly onto it; 3 tries), then `Core.Spa
 - The meter unit (slider "One compass meter").
 - Golems: owned and damageable at the cage, or put back (Magnet page "why no damage")?
 - Which skills close vents from 12 out, and does the hidden aim land them on the vent?
+
+## Mirage hunt (added 2026-10-04, user: "your job is hunt the Mirage; I do the moon")
+
+- Same drive (`S.huntStep(myEpoch, "mirage")`); Prehistoric islands ignored on this hunt.
+- First sight: `mirageFits(MirageNeed, news.sky, 900, 120)` - night now with >= 2 min usable, or night starting >= 2 min before the 15-min life ends; "full" also needs sky.full / sky.nights == 0. Not fit = sailed past (remembered until it despawns).
+- Fit: stop, fly to the marker + 20, `P.handsOff = true` (bodyStepped/bodyHeartbeat return, restoreBody, step() skips escape/haki/volcano).
+- Gear: island child MeshPart with MeshId 10153114969 (or a child MeshPart "Part", only after seen hidden). Transparency < 1 = shown -> hands on, fly onto it, small steps 4 s, gone/hidden = got -> CheckTempleDoor printed, hunt off, P.stop deferred. 3 misses = left to the user.
+- Mirage gone during hands off -> hands on, back to the boat.
+

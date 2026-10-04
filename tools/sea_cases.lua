@@ -161,8 +161,9 @@ end
 
 -- Buying: the game puts the boat in workspace.Boats when BuyBoat answers.
 local NEW_BOAT, NEW_SEAT
-CF_REMOTE.InvokeServer = function(_, ...)
-    table.insert(BUY_CALLS, { ... })
+CF_REMOTE.InvokeServer = function(_, what, ...)
+    if what ~= "BuyBoat" then return true end
+    table.insert(BUY_CALLS, { what, ... })
     NEW_BOAT, NEW_SEAT = makeBoat(vec(-16950, 4, 470), 0)
     BOATS:add(NEW_BOAT)
     return 1
@@ -389,5 +390,148 @@ MAP.kids.PrehistoricIsland = nil
 local isle2 = makeIsland(false, false)
 S.volcanoStep()
 check("another island: its own counts", S.ev.isle == isle2 and S.ev.vents == 0 and S.ev.golems == 0)
+
+
+-- ---------------------------------------------------------------- THE MIRAGE
+local fits, why = T.mirageFits("any", nil, 900, 120)
+check("mirage: \"every\" takes it, sky or not", fits)
+fits = T.mirageFits("night", nil, 900, 120)
+check("mirage: sky not read yet = taken", fits)
+fits, why = T.mirageFits("night", { night = true, edge = 600 }, 900, 120)
+check("mirage at night, 10 min of it left: taken", fits, why)
+fits, why = T.mirageFits("night", { night = true, edge = 60 }, 900, 120)
+check("mirage at night, dawn in 1 min: sailed past", not fits and string.find(why, "too soon", 1, true) ~= nil, why)
+fits, why = T.mirageFits("night", { night = false, edge = 600 }, 900, 120)
+check("mirage by day, night in 10 min: it lasts 5 min into it - taken", fits and string.find(why, "5:00", 1, true) ~= nil, why)
+fits, why = T.mirageFits("night", { night = false, edge = 800 }, 900, 120)
+check("mirage by day, night in 13:20: only 1:40 of night - sailed past", not fits, why)
+fits = T.mirageFits("full", { night = true, edge = 600, full = false }, 900, 120)
+check("full moon only: a plain night is sailed past", not fits)
+fits = T.mirageFits("full", { night = true, edge = 600, full = true }, 900, 120)
+check("full moon only: the full moon up - taken", fits)
+fits = T.mirageFits("full", { night = false, edge = 300, nights = 1 }, 900, 120)
+check("full moon only: by day, tonight not full - sailed past", not fits)
+fits = T.mirageFits("full", { night = false, edge = 300, nights = 0 }, 900, 120)
+check("full moon only: by day, the full moon rises tonight in time - taken", fits)
+
+local function mysticIsle(gearOpts, named)
+    local isle = inst("MysticIsland", "Model", { Position = vec(-40000, 300, 3000) })
+    isle:add(inst("Rock", "MeshPart", { MeshId = "rbxassetid://123", Transparency = 0, Position = vec(-40000, 300, 3000) }))
+    if gearOpts then
+        local g = inst(named and "Part" or "Gear", "MeshPart", {
+            MeshId = named and "rbxassetid://999" or "rbxassetid://10153114969",
+            Transparency = gearOpts.t, Position = gearOpts.pos or vec(-40010, 320, 3005) })
+        isle:add(g)
+        return isle, g
+    end
+    return isle, nil
+end
+local gi, gg = mysticIsle({ t = 1 })
+local gp, by = T.blueGear(gi)
+check("blue gear: found by its mesh", gp == gg and by == true)
+gi, gg = mysticIsle({ t = 1 }, true)
+gp, by = T.blueGear(gi)
+check("blue gear: a MeshPart named Part as the fallback, flagged as such", gp == gg and by == false)
+gi = mysticIsle(nil)
+check("blue gear: none on the island", T.blueGear(gi) == nil)
+
+-- The hunt: a boat at the wheel, far from Tiki.
+local mboat, mseat = makeBoat(TIKI + vec(-20000, 0, 0), math.pi / 2)
+BOATS:add(mboat)
+HUM.SeatPart = mseat
+S.driving, S.everDriven, S.mirage = false, true, nil
+P.handsOff = false
+ROOT.Position = TIKI + vec(-20000, 5, 0)
+reset()
+check("mirage hunt, nothing up: sailing", S.huntStep(epoch, "mirage") == true and S.driving == true, S.note)
+-- One that will not see night: sailed past.
+P.news.sky = { night = false, edge = 1200 }
+local mm = LOCS:add(inst("Mirage Island", "Part", { Position = vec(-40000, 300, 3000) }))
+reset()
+ok = S.huntStep(epoch, "mirage")
+local said = false
+for _, l in ipairs(PRINTED) do if string.find(l, "sailing on", 1, true) then said = true end end
+check("a Mirage gone before night: sailed past, still at the wheel, says why", ok == true and S.driving == true
+    and not P.handsOff and said and S.mirage and S.mirage.fits == false)
+LOCS.kids["Mirage Island"] = nil
+S.huntStep(epoch, "mirage")
+check("it went: forgotten", S.mirage == nil)
+-- One that sees night: onto it, the character handed back.
+P.news.sky = { night = true, edge = 600 }
+local isleM, gear = mysticIsle({ t = 1 })
+MAP:add(isleM)
+LOCS:add(mm)
+reset()
+RESTORED = 0
+ok = S.huntStep(epoch, "mirage")
+check("a Mirage that sees night: off the boat, onto it", ok == true and S.driving == false
+    and vnear(FLIGHTS[1], vec(-40000, 320, 3000)), vs(FLIGHTS[1]))
+check("...and the character is yours: hands off, your collisions back", P.handsOff == true and RESTORED == 1 and flying == false)
+reset()
+S.huntStep(epoch, "mirage")
+check("gear hidden: nothing moves, your turn", #FLIGHTS == 0 and P.handsOff and string.find(S.note, "your turn", 1, true) ~= nil, S.note)
+-- The moon resonates: the gear shows.
+gear.Transparency = 0
+ON_FLY = function(pos) if (pos - gear.Position).Magnitude < 1 then gear.Transparency = 1 end end
+reset()
+STOPPED = 0
+S.huntStep(epoch, "mirage")
+ON_FLY = nil
+check("the gear shows: run over at once, picked", vnear(FLIGHTS[1], gear.Position) and S.mirage.got
+    and S.tally.gears == 1, vs(FLIGHTS[1]))
+check("...then the hunt off and the farm stopped, you left on the Mirage", SET_HUNT[1] == false and STOPPED == 1)
+-- A gear that will not pick up: back to you, tried again, then left to you.
+S.mirage = nil
+local isleN, gear2 = mysticIsle({ t = 1 })
+MAP.kids.MysticIsland = nil
+MAP:add(isleN)
+S.huntStep(epoch, "mirage")
+gear2.Transparency = 0
+reset()
+S.huntStep(epoch, "mirage")
+check("a gear that stays: hands back to you, tried again", S.mirage.tries == 1 and P.handsOff == true and not S.mirage.got)
+S.huntStep(epoch, "mirage")
+S.huntStep(epoch, "mirage")
+reset()
+S.huntStep(epoch, "mirage")
+check("three tries: left to you, no more flights", S.mirage.tries == 3 and #FLIGHTS == 0
+    and string.find(S.mirage.note, "yourself", 1, true) ~= nil, S.mirage.note)
+-- The fallback "Part": not trusted when first seen visible.
+S.mirage = nil
+local isleP, part = mysticIsle({ t = 0 }, true)
+MAP.kids.MysticIsland = nil
+MAP:add(isleP)
+reset()
+S.huntStep(epoch, "mirage")
+reset()
+S.huntStep(epoch, "mirage")
+check("a visible \"Part\" never seen hidden: not the gear", #FLIGHTS == 0 and not S.mirage.got)
+part.Transparency = 1
+S.huntStep(epoch, "mirage")
+part.Transparency = 0
+ON_FLY = function(pos) if (pos - part.Position).Magnitude < 1 then part.Transparency = 1 end end
+reset()
+S.huntStep(epoch, "mirage")
+ON_FLY = nil
+check("...seen hidden, then shown: picked", S.mirage.got == true)
+-- The Mirage goes while it is your turn: the farm drives again.
+S.mirage = nil
+P.handsOff = false
+local isleG = mysticIsle({ t = 1 })
+MAP.kids.MysticIsland = nil
+MAP:add(isleG)
+S.huntStep(epoch, "mirage")
+check("(your turn again on a new one)", P.handsOff == true)
+MAP.kids.MysticIsland = nil
+LOCS.kids["Mirage Island"] = nil
+reset()
+S.huntStep(epoch, "mirage")
+check("the Mirage went on your turn: the farm drives again, back to the boat", P.handsOff == false and S.mirage == nil)
+-- A Prehistoric while hunting the Mirage: not this hunt's island.
+local pre = LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 55, 6800) }))
+reset()
+S.huntStep(epoch, "mirage")
+check("a Prehistoric on the Mirage hunt: not stopped for, still at the wheel", S.driving == true and #FLIGHTS == 0)
+LOCS.kids["Prehistoric Island"] = nil
 
 realPrint(all and "ALL PASS" or "SOME FAILED")
