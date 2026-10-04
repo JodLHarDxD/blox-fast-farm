@@ -970,4 +970,65 @@ end)()
     player.Character = nil
 end)()
 
+-- ---------------------------------------------------------------- THE LOOP: HUNT -> EVENT -> LOOT -> NEXT SERVER
+;(function()
+    local function fresh(active, promptOn)
+        MAP.kids.PrehistoricIsland = nil
+        S.ev = nil
+        return makeIsland(active, promptOn)
+    end
+    ENEMIES, TOOLS, READY, BARS = {}, {}, {}, {}
+    CFG.Volcano = false
+    CFG.Hunt, CFG.HuntKind, CFG.VolcanoAfter = true, "prehistoric", "hop"
+    -- 1. The hunt alone runs the event; the prompt does nothing -> E held.
+    local isleL, ppL = fresh(false, true)
+    ppL.onHold = nil
+    ON_KEY = function(code) if code == "E" then isleL.attrs.IsMinigameActive = true end end
+    reset()
+    check("loop: the Prehistoric hunt runs the event - no Volcano switch needed", S.volcanoStep() == true)
+    ON_KEY = nil
+    check("loop: the prompt did not start it - E held, the event on", KEYS_SENT[#KEYS_SENT] == "E"
+        and ppL.held == 1 and S.ev.note == "THE VOLCANO EVENT IS ON", tostring(S.ev.note))
+    -- 2. It runs, then ends; no loot: 8 s later DONE -> the hunt hops.
+    S.volcanoStep()
+    check("loop: event on - not done", not S.ev.complete)
+    isleL.attrs.IsMinigameActive = false
+    ppL.Enabled = false
+    S.volcanoStep()
+    check("loop: over, waiting for the loot to come", S.ev.overAt ~= nil and not S.ev.complete)
+    CLOCK += 9
+    check("loop: 8 s, nothing to pick - DONE, the event step lets go", S.volcanoStep() == false and S.ev.complete == true)
+    reset()
+    check("loop: the hunt says the next server", S.huntStep(epoch, "prehistoric") == false
+        and string.find(tostring(P.elite.why), "next server", 1, true) ~= nil, tostring(P.elite.why))
+    -- 3. "again": the same island, a fresh event.
+    CFG.VolcanoAfter = "again"
+    ppL.Enabled = true
+    ppL.onHold = function() isleL.attrs.IsMinigameActive = true end
+    reset()
+    S.volcanoStep()
+    check("again: the relic pressed once more, a second event", ppL.held == 2 and S.ev.ran == false
+        and isleL.attrs.IsMinigameActive == true, tostring(ppL.held))
+    CFG.VolcanoAfter = "hop"
+    -- 4. The game's start bug: 4 presses, nothing -> this island given up, the hunt hops.
+    local isleB, ppB = fresh(false, true)
+    ppB.onHold = nil
+    for _ = 1, 4 do reset() S.volcanoStep() end
+    check("start bug: 4 tries - given up", S.ev.stuck == true and S.ev.complete == true, S.ev.starts)
+    reset()
+    check("start bug: the hunt goes to the next server, says why", S.huntStep(epoch, "prehistoric") == false
+        and string.find(tostring(P.elite.why), "would not start", 1, true) ~= nil, tostring(P.elite.why))
+    -- 5. The Volcano switch alone (no hunt): done = held there, no hop.
+    CFG.Hunt, CFG.Volcano = false, true
+    local isleV, ppV = fresh(true, false)
+    S.volcanoStep()
+    isleV.attrs.IsMinigameActive = false
+    S.volcanoStep()
+    CLOCK += 9
+    check("switch alone: done - held on the island (no hunt, no hop)", S.volcanoStep() == true and S.ev.complete)
+    MAP.kids.PrehistoricIsland = nil
+    S.ev = nil
+    CFG.Hunt, CFG.HuntKind, CFG.Volcano, CFG.VolcanoAfter = false, nil, false, nil
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

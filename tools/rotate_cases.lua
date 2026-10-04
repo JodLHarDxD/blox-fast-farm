@@ -9,15 +9,16 @@ local R = P.rot
 CARRY = { ["Dragon-Dragon"] = "Blox Fruit", ["Hallow Scythe"] = "Sword", ["Dragon Talon"] = "Melee", ["Kabucha"] = "Gun" }
 local list = P.autoWeapons()
 check("auto: every weapon you carry is in", #list == 4, #list)
-check("auto: M1 with the fighting style (it hits the whole pile)", list[1].name == "Dragon Talon" and list[1].cfg.M1
-    and not list[2].cfg.M1 and not list[3].cfg.M1, list[1].name)
+check("auto: M1 with the SWORD (user: Hallow Scythe 3755 a swing, the fighting style far less)",
+    list[1].name == "Hallow Scythe" and list[1].cfg.M1 and not list[2].cfg.M1 and not list[3].cfg.M1, list[1].name)
+check("auto: the M1 sword is kept (never swapped by the rotation)", P.keepSword == "Hallow Scythe", P.keepSword)
 check("auto: Z X C on, V off, F (flight) never", list[2].cfg.Z and list[2].cfg.X and list[2].cfg.C
     and not list[2].cfg.V and not list[2].cfg.F)
 CFG.AutoKeys.V = true
 check("auto: V on when you switch it on", P.autoWeapons()[1].cfg.V == true)
 CFG.AutoKeys.V = false
-CARRY = { ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
-check("auto: no fighting style - M1 with the sword", P.autoWeapons()[1].name == "Hallow Scythe")
+CARRY = { ["Dragon Talon"] = "Melee", ["Kabucha"] = "Gun" }
+check("auto: no sword - M1 with the fighting style", P.autoWeapons()[1].name == "Dragon Talon" and P.keepSword == nil)
 
 -- ---------------------------------------------------------------- PICK NEXT (pure)
 local inv = { { name = "Yama", type = "Sword" }, { name = "Tushita", type = "Sword" }, { name = "Kabucha", type = "Gun" },
@@ -46,6 +47,14 @@ cd = {}
 INV = { { Name = "Yama", Type = "Sword" }, { Name = "Tushita", Type = "Sword" }, { Name = "Bazooka", Type = "Gun" },
     { Name = "Leather", Type = "Material" }, { Name = "Hallow Scythe", Type = "Sword" }, { Name = "Kabucha", Type = "Gun" } }
 CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
+P.keepSword = "Hallow Scythe"
+check("rotate: the M1 sword kept - a GUN is loaded, never a sword over it", P.rotate(false) == true
+    and LOADS[1] == "Bazooka" and CARRY["Hallow Scythe"] == "Sword", LOADS[1])
+P.keepSword = nil
+R.original, R.lastLoad, R.loadedAt = nil, -100, {}
+LOADS = {}
+CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
+T += 2
 check("rotate: loads the next sword from your inventory", P.rotate(false) == true and LOADS[1] == "Yama"
     and CARRY.Yama == "Sword" and CARRY["Hallow Scythe"] == nil, LOADS[1])
 check("rotate: what you carried is remembered", R.original and R.original.Sword == "Hallow Scythe" and R.original.Gun == "Kabucha")

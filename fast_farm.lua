@@ -126,7 +126,7 @@ local CFG = {
     -- "auto" tries each way of landing an M1 against the pile and keeps the
     -- first one that takes HP off. The others force one way.
     M1Method           = "auto", -- "auto" | "remote" | "click" | "keys"
-    M1Every            = 0.12,   -- seconds between M1s
+    M1Every            = 0.06,   -- seconds between M1s (user, 2026-10-05: 0.06)
     HitRange           = 60,     -- the remote hit names enemies this close
 
     -- ---------- RHYTHM (when M1 AND skills are on) ----------
@@ -276,6 +276,11 @@ local CFG = {
     -- Guitar: its own remote ("TAP", the vent) - no mouse. Its M1 costs 20
     -- energy: under that, the skills until it is back.
     VentGuitar         = true,
+    -- THE LOOP (user, 2026-10-05): the Prehistoric hunt runs the event itself
+    -- (the relic held, E as a fallback), and when it is over and the bones +
+    -- the egg are picked: "hop" = the next server, the hunt goes on there;
+    -- "again" = the event again on this island (the wiki: no cooldown).
+    VolcanoAfter       = "hop",
     VentM1Every        = 0.3,        -- seconds between shots
     VentM1Time         = 3,          -- seconds of shots at one vent per turn         -- stand this far out from a vent (and 8 up), aiming at it
     -- Magnet on: every golem is held this far from the relic (away from the
@@ -2301,8 +2306,10 @@ end
 -- WEAPON ROTATION
 -- =========================================================
 -- EVERY WEAPON YOU CARRY (CFG.AutoAttack): the attack list is simply what
--- you carry - M1 with a fighting style (else a sword, the fruit, a gun) and
--- CFG.AutoKeys of all of them, each fired when its bar says ready.
+-- you carry - M1 with your SWORD (user, 2026-10-05: Hallow Scythe hits 3755 a
+-- swing, the fighting style far less; else a fighting style, the fruit, a
+-- gun) and CFG.AutoKeys of all of them, each fired when its bar says ready.
+-- The M1 sword is never swapped out by the rotation (P.keepSword).
 -- FROM YOUR INVENTORY (CFG.InvSwap): a sword or gun's skills cool per
 -- weapon, so when every carried skill is cooling the next sword / gun in
 -- your inventory is put in your hands - CommF_("LoadItem", name), the game's
@@ -2317,7 +2324,7 @@ do
             loadedAt = {}, failUntil = {}, original = nil, originalText = nil,
         }
         P.rot = R
-        local M1_RANK = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
+        local M1_RANK = { Sword = 1, Melee = 2, ["Blox Fruit"] = 3, Gun = 4 }
 
         function P.autoWeapons()
             local tools = toolNames()
@@ -2327,6 +2334,7 @@ do
                 return a.Name < b.Name
             end)
             local keys = CFG.AutoKeys or {}
+            P.keepSword = (tools[1] and toolType(tools[1]) == "Sword") and tools[1].Name or nil
             local out = {}
             for i, t in ipairs(tools) do
                 local w = wcfg(t.Name)
@@ -2429,11 +2437,16 @@ do
             local carried = {}
             local tools = toolNames()
             for _, t in ipairs(tools) do carried[t.Name] = true end
+            -- Kept: the vent gun (P.keepGun), the M1 sword (P.keepSword) - their
+            -- slot is never swapped.
             local list = inventory()
-            if P.keepGun and carried[P.keepGun] then
+            local keep = {}
+            if P.keepGun and carried[P.keepGun] then keep.Gun = true end
+            if P.keepSword and carried[P.keepSword] then keep.Sword = true end
+            if next(keep) then
                 local only = {}
                 for _, it in ipairs(list) do
-                    if it.type ~= "Gun" then table.insert(only, it) end
+                    if not keep[it.type] then table.insert(only, it) end
                 end
                 list = only
             end
@@ -2740,7 +2753,7 @@ do
             local hp0, t0 = sumHP(), os.clock()
             while os.clock() - t0 < 1.6 and P.running and #pile > 0 do
                 fireM1(way, tool)
-                task.wait(math.max(CFG.M1Every or 0.12, 0.06))
+                task.wait(math.max(CFG.M1Every or 0.06, 0.06))
             end
             task.wait(0.2)
             local landed = (hp0 - sumHP()) > 0.5
@@ -2899,7 +2912,7 @@ local function attackTick()
                 or (m1u.name .. " M1")
             fireM1(way, m1u.tool)
             m1Count += 1
-            task.wait(math.max(CFG.M1Every or 0.12, 0.03))
+            task.wait(math.max(CFG.M1Every or 0.06, 0.03))
         else
             -- No way of landing this weapon's M1: let the skills carry it.
             m1Count = CFG.M1Between or 0
@@ -5828,6 +5841,13 @@ do
             local isle, mk = island(), marker()
             if kind == "prehistoric" and (isle or mk) then
                 if S.driving then stopDrive() end
+                local ev = S.ev
+                if ev and ev.complete and (ev.stuck or (CFG.VolcanoAfter or "hop") == "hop") then
+                    E.why = ev.stuck and "the volcano event would not start here (the game's bug) - the next server"
+                        or string.format("volcano done (%d vents, %d bones, %d egg) - the next server",
+                            ev.vents, ev.bones, ev.eggs)
+                    return false
+                end
                 if not S.foundAt then
                     S.foundAt = os.clock()
                     S.tally.found += 1
@@ -5836,7 +5856,7 @@ do
                 end
                 local at = relicPos(isle) or mk
                 if at then flyTo(at + UP * 40) end
-                S.note = "PREHISTORIC ISLAND UP - holding on it (the Volcano event switch does the event)"
+                S.note = "PREHISTORIC ISLAND UP - holding on it"
                 E.note = S.note
                 say(S.note)
                 setState("ISLAND")
@@ -6120,6 +6140,12 @@ do
 
         -- The fight's pile: a golem that cannot be held first, where it stands
         -- (it is on the relic); else the held ones, at the cage.
+        -- The event runs: its own switch, or the Prehistoric hunt (the loop).
+        local function volcanoOn()
+            return CFG.Volcano or (CFG.Hunt and CFG.HuntKind == "prehistoric")
+        end
+        S.volcanoOn = volcanoOn
+
         local function golemBuild()
             local now = os.clock()
             local all = liveEnemies(GOLEMS)
@@ -6178,7 +6204,7 @@ do
             -- The fight ends the moment something else goes first (a vent
             -- while every golem is held), or the event or the switch ends.
             breakIf = function()
-                if not (CFG.Volcano and P.running) then return true end
+                if not (volcanoOn() and P.running) then return true end
                 local isle = island()
                 local ev = S.ev
                 if not (eventOn(isle) and ev) then return true end
@@ -6193,7 +6219,7 @@ do
         local GOLDEN = math.pi * (3 - math.sqrt(5))
         local function cageTick()
             local ev = S.ev
-            if not (P.running and not P.handsOff and CFG.Volcano and CFG.Magnet and ev and ev.cage and ev.active) then
+            if not (P.running and not P.handsOff and volcanoOn() and CFG.Magnet and ev and ev.cage and ev.active) then
                 return
             end
             local now = os.clock()
@@ -6617,21 +6643,36 @@ do
             say(ev.note)
             flyTo(at + UP * 3)
             if stale(myEpoch) then return end
-            holdPrompt(pp, myEpoch)
-            local t0 = os.clock()
-            while os.clock() - t0 < 4 and not stale(myEpoch) do
-                if eventOn(isle) then
-                    ev.startedAt = os.clock()
-                    S.tally.events += 1
-                    ev.note = "THE VOLCANO EVENT IS ON"
-                    print("[BFF] volcano: event started")
-                    return
+            local function cameOn(secs)
+                local t0 = os.clock()
+                while os.clock() - t0 < secs and not stale(myEpoch) do
+                    if eventOn(isle) then
+                        ev.startedAt = os.clock()
+                        S.tally.events += 1
+                        ev.note = "THE VOLCANO EVENT IS ON"
+                        print("[BFF] volcano: event started")
+                        return true
+                    end
+                    task.wait(0.2)
                 end
-                task.wait(0.2)
+                return false
             end
+            holdPrompt(pp, myEpoch)
+            if cameOn(2) or stale(myEpoch) then return end
+            -- The key itself, as you would (one hub holds E 1.5 s after the
+            -- prompt): standing at it, facing the skull.
+            lockAt(at + UP * 3, at)
+            holdKey(Enum.KeyCode.E, math.max(1.5, (tonumber(pp.HoldDuration) or 1) + 0.4))
+            if cameOn(3) or stale(myEpoch) then return end
             ev.starts += 1
             ev.note = string.format("pressed the relic %d times - the event did not start (the game's own start bug?)", ev.starts)
             print("[BFF] volcano: " .. ev.note)
+            -- The wiki: "the event does not start, even after interacting" - a
+            -- known bug. Four tries: this island is given up (the hunt hops).
+            if ev.starts >= 4 then
+                ev.complete, ev.stuck = true, true
+                print("[BFF] volcano: the event will not start here - giving this island up")
+            end
         end
 
         local function defend(isle, ev, myEpoch)
@@ -6675,7 +6716,7 @@ do
         -- THE EVENT, one step. true = it is handling the island (nothing else
         -- runs); false = no island here, or the switch is off.
         function S.volcanoStep()
-            if not CFG.Volcano then
+            if not volcanoOn() then
                 letGolemsGo()
                 return false
             end
@@ -6728,6 +6769,33 @@ do
             local pp = promptOf(isle)
             local lootLeft = CFG.VolcanoLoot and not active
                 and (#bonesLying(isle) > 0 or eggPrompt(isle) ~= nil)
+            -- OVER: it ran here and is not on now. COMPLETE: over, nothing left
+            -- to pick (8 s for the bones and the egg to come).
+            if active then ev.ran = true end
+            if ev.ran and not active and not ev.overAt then
+                ev.overAt = os.clock()
+                print(string.format("[BFF] volcano: event over - %d vents, %d golems down", ev.vents, ev.golems))
+            end
+            if ev.overAt and not ev.complete and not lootLeft and os.clock() - ev.overAt > 8 then
+                ev.complete = true
+                S.tally.done = (S.tally.done or 0) + 1
+                print(string.format("[BFF] volcano: DONE - %d bones, %d egg", ev.bones, ev.eggs))
+            end
+            if ev.complete and (ev.stuck or (CFG.VolcanoAfter or "hop") == "hop") then
+                letGolemsGo()
+                if CFG.Hunt and CFG.HuntKind == "prehistoric" then
+                    return false        -- the hunt hops (huntStep: E.why)
+                end
+                ev.note = "event done - hunt off, so no hop; holding here"
+                S.note = ev.note
+                say(ev.note)
+                task.wait(0.5)
+                return true
+            end
+            if ev.complete then
+                -- "again": a fresh event on this island.
+                ev.complete, ev.ran, ev.overAt = false, false, nil
+            end
             local ph = phase(active, pp ~= nil and pp.Enabled, lootLeft)
             ev.phase = ph
             ev.counted = player:GetAttribute("PrehistoricIslandParticipant")
@@ -8418,7 +8486,7 @@ local function buildUI()
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
-        { "prehistoric", "Prehistoric hunt", "Boat to Sea Danger 6, sail till the island comes, else next server" },
+        { "prehistoric", "Prehistoric hunt", "Sail to the island, run the volcano event, loot, next server - the loop" },
         { "mirage", "Mirage hunt", "Same boat - on the Mirage: chests, Advanced Fruit Dealer, Blue Gear (Sea page)" },
     }
     local function huntSwitches(view)
@@ -9744,9 +9812,13 @@ local function buildUI()
 
         heading2(v, "volcano event")
         switchRow(v, "Volcano event",
-            "Whenever a Prehistoric Island is up in this server",
+            "Whenever a Prehistoric Island is up (the Prehistoric hunt runs it anyway)",
             function() return CFG.Volcano end,
             function(x) CFG.Volcano = x end)
+        radio(v, 82, {
+            { "hop",   "After the loot: the next server", "the hunt goes on there - the loop" },
+            { "again", "After the loot: again on this island", "the wiki: the event has no cooldown" },
+        }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
         readout(v, function()
             local ev = P.sea.ev
             local t = P.sea.tally

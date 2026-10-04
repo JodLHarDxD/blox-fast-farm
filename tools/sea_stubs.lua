@@ -234,7 +234,7 @@ local RunService = {
     },
 }
 local KEYS_DOWN, TYPING = {}, false
-local Enum = { KeyCode = { W = "W", A = "A", S = "S", D = "D", Up = "Up", Down = "Down", Left = "Left", Right = "Right" } }
+local Enum = { KeyCode = { W = "W", A = "A", S = "S", D = "D", Up = "Up", Down = "Down", Left = "Left", Right = "Right", E = "E" } }
 local INPUT = {
     SetCore = function() end,
     IsKeyDown = function(_, k) return KEYS_DOWN[k] == true end,
