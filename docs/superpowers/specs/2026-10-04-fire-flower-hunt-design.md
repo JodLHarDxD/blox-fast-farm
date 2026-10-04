@@ -36,8 +36,9 @@ once, and goes to the next server. Runs until switched off - no target count.
      went up (or, count unreadable, it left the folder). Up to 3 grabs.
   4. After a flower spawned (picked or not) -> hop. A server you picked one in is
      not rejoined for 10 min longer than the usual revisit (its 5-15 min cooldown).
-  5. **No flower 2 min after the FIRST KILL in the server** (user: the clock starts
-     at the first kill, not the join) -> hop. Slider 1-5 min.
+  5. **No flower 2.5 min after the FIRST KILL in the server** (user: the clock starts
+     at the first kill, not the join, and runs straight through - respawn waits
+     count; 2.5 min = 50-60+ kills, plenty) -> hop. Slider 1-5 min.
      Safety: nothing died 3 min after reaching the camp -> hop (else the clock
      would never start).
 - Hop switch off: never leaves; keeps farming here (the next flower comes after

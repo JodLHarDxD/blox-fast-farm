@@ -120,7 +120,7 @@ CLOCK = 219
 check("119 s after the first kill (219 s after arriving): stay", flowerStep(0) == true)
 CLOCK = 220
 busy = flowerStep(0)
-check("120 s after the first kill: leave, 'no Fire Flower in 2 min of killing'", busy == false
+check("120 s after the first kill: leave, 'no Fire Flower 2 min after the first kill'", busy == false
     and string.find(E.why or "", "2 min", 1, true) ~= nil and E.keepAway == nil, tostring(E.why))
 
 -- 13. the slider: 3 min
@@ -193,5 +193,24 @@ CLOCK = 181
 busy = flowerStep(0)
 check("never loaded, 181 s: leave ('nothing died here in 3 min')", busy == false
     and string.find(E.why or "", "nothing died", 1, true) ~= nil, tostring(E.why))
+
+-- 19. THE USER'S RULE (2026-10-04): 2.5 min from the FIRST KILL, straight
+--     through - a respawn wait in between counts too
+reset()
+CFG.FlowerGiveUp = 2.5
+LOADED["Forest Pirate"] = FOREST
+CLOCK = 10
+stats.kills = 1                                -- the first kill at 10 s
+flowerStep(0)
+LOADED["Forest Pirate"] = nil                  -- all dead: a respawn wait
+CLOCK = 100
+flowerStep(0)
+LOADED["Forest Pirate"] = FOREST
+CLOCK = 159
+check("2.5 min: 149 s after the first kill (a respawn wait in it): stay", flowerStep(0) == true)
+CLOCK = 160
+busy = flowerStep(0)
+check("2.5 min: 150 s after the first kill, the wait counted: leave", busy == false
+    and string.find(E.why or "", "2.5 min after the first kill", 1, true) ~= nil, tostring(E.why))
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

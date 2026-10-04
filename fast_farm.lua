@@ -201,7 +201,7 @@ local CFG = {
     -- killed one at a time where they stand (no magnet), the flower picked
     -- the moment it lies there, then the next server. None this long after
     -- the FIRST kill in a server (not the join): the next server.
-    FlowerGiveUp       = 2,          -- minutes
+    FlowerGiveUp       = 2.5,        -- minutes, from the first kill (respawn waits count)
     -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
     -- the Skies while he is up): one per server, back 8 min 45 s after the
     -- last one died. Only the LAST hit gets the drops -- the God's Chalice
@@ -4394,7 +4394,8 @@ do
         end
 
         -- THE CLOCK (user, 2026-10-04): from the FIRST kill in this server,
-        -- not the join - flying in and loading do not count. Nothing died 3
+        -- straight through (respawn waits count) - not from the join: flying
+        -- in and loading do not count. 2.5 min = 50-60+ kills. Nothing died 3
         -- min after reaching the camp: leave anyway, or it would never start.
         -- Why to leave this server without a flower, or nil.
         local function flowerGiveUp()
@@ -4403,9 +4404,9 @@ do
             end
             local now = os.clock()
             if E.flowerFirstKill then
-                local limit = (CFG.FlowerGiveUp or 2) * 60
+                local limit = (CFG.FlowerGiveUp or 2.5) * 60
                 if now - E.flowerFirstKill >= limit then
-                    return string.format("no Fire Flower in %g min of killing", limit / 60)
+                    return string.format("no Fire Flower %g min after the first kill", limit / 60)
                 end
             elseif E.flowerAtCamp and now - E.flowerAtCamp >= 180 then
                 return "nothing died here in 3 min"
@@ -6263,8 +6264,8 @@ local function buildUI()
             if CFG.Hunt and CFG.HuntKind == "flower" then
                 if el.flowerFirstKill then
                     local s = math.floor(os.clock() - el.flowerFirstKill)
-                    table.insert(lines, string.format("here      killing %d:%02d  ·  no flower = next server at %g min",
-                        s // 60, s % 60, CFG.FlowerGiveUp or 2))
+                    table.insert(lines, string.format("here      %d:%02d since the first kill  ·  no flower = next server at %g min",
+                        s // 60, s % 60, CFG.FlowerGiveUp or 2.5))
                 else
                     table.insert(lines, "here      the clock starts at the first kill")
                 end
@@ -6274,7 +6275,7 @@ local function buildUI()
                 and ("lying now " .. #list) or "lying now none")
             return table.concat(lines, "\n")
         end)
-        sliderRow(v, "No flower after the first kill: leave at", 1, 5, 0.5,
+        sliderRow(v, "No flower this long after the first kill: leave", 1, 5, 0.5,
             function() return CFG.FlowerGiveUp end,
             function(x) CFG.FlowerGiveUp = x end, " min")
         caption(v, "Needs the Dragon Wizard's V2 quest taken - flowers spawn only "
