@@ -57,4 +57,16 @@ local okDead = dead ~= nil and dead >= clock + 59
 print((okDead and "PASS " or "FAIL ") .. "...and marked: left alone for a minute")
 all = okDead and all
 holdKey = realHold
+-- The M1 weapon is the pick (P.m1Of), not the first in the list with M1 on.
+P.m1Of = function(used)
+    for _, u in ipairs(used) do if u.name == "Sword" then return u end end
+    return nil
+end
+all = run("M1: the picked sword swings although Kitsune is listed first with M1 on",
+    cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 2,
+    "swap Sword | M1 Sword | M1 Sword") and all
+local kept = P.keepSword == "Sword"
+print((kept and "PASS " or "FAIL ") .. "...and that sword is kept from the rotation (any attack mode)")
+all = kept and all
+P.m1Of, P.keepSword = nil, nil
 print(all and "ALL PASS" or "SOME FAILED")

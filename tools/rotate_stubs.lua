@@ -3,7 +3,7 @@ local T = 100
 local os = { clock = function() return T end }
 local task = { wait = function(s) T += (s or 0.03) end, spawn = function(f, ...) f(...) end }
 local CFG = { AutoAttack = true, AutoKeys = { Z = true, X = true, C = true, V = false },
-    InvSwap = true, InvSwapGap = 1.5, InvSkip = {}, Weapons = {}, WeaponOrder = {} }
+    InvSwap = true, InvSwapGap = 1.5, InvSkip = {}, Weapons = {}, WeaponOrder = {}, M1Weapon = "" }
 local P = {}
 local stats = { swaps = 0 }
 local KEYS = { "Z", "X", "C", "V", "F" }

@@ -157,11 +157,15 @@ local CFG = {
     -- load, M1 of whatever is in your hand.
     Weapons            = {},
     WeaponOrder        = {},
-    -- EVERY WEAPON YOU CARRY (user, 2026-10-04: whatever you hold should just
-    -- work, no Attack-page setup). On: M1 with a fighting style (else sword,
-    -- fruit, gun - a fighting style's M1 hits the whole pile), and the
-    -- AutoKeys of every weapon you carry. Off: the Attack page's own choices.
-    AutoAttack         = true,
+    -- EVERY WEAPON YOU CARRY: no Attack-page setup - M1 as M1Weapon picks, the
+    -- AutoKeys of every weapon you carry. OFF by default (user, 2026-10-05: it
+    -- was for the volcano, and two M1s do that now - Hallow Scythe on the
+    -- golems, Skull Guitar on the vents). Off: the Attack page's own choices.
+    AutoAttack         = false,
+    -- WHICH WEAPON SWINGS M1, in every fight (user, 2026-10-05: "I picked the
+    -- sword, it still swings the fighting style"). "" = auto: a sword first,
+    -- then a fighting style, the fruit, a gun. A name = that one, always.
+    M1Weapon           = "",
     AutoKeys           = { Z = true, X = true, C = true, V = false },
     -- FROM YOUR INVENTORY: every carried skill cooling = the next sword or gun
     -- in your inventory is put in your hands (CommF_ "LoadItem" - no menu)
@@ -2326,6 +2330,28 @@ do
         P.rot = R
         local M1_RANK = { Sword = 1, Melee = 2, ["Blox Fruit"] = 3, Gun = 4 }
 
+        -- THE M1 WEAPON of a fight, from `used` (the attack list): your pick
+        -- (CFG.M1Weapon) when you carry it, even if its own M1 switch is off;
+        -- else, of the ones with M1 on, a sword first. The old rule - the
+        -- FIRST in the weapon list with M1 on - put a fighting style (listed
+        -- before swords, and switched on for you on the first run) ahead of
+        -- the sword you picked.
+        function P.m1Of(used)
+            local want = CFG.M1Weapon
+            if type(want) == "string" and want ~= "" then
+                local t = findTool(want)
+                if t then return { name = want, cfg = wcfg(want), tool = t } end
+            end
+            local best, br = nil, math.huge
+            for _, u in ipairs(used) do
+                if u.cfg.M1 then
+                    local r = M1_RANK[toolType(u.tool)] or 9
+                    if r < br then best, br = u, r end
+                end
+            end
+            return best
+        end
+
         function P.autoWeapons()
             local tools = toolNames()
             table.sort(tools, function(a, b)
@@ -2334,14 +2360,16 @@ do
                 return a.Name < b.Name
             end)
             local keys = CFG.AutoKeys or {}
-            P.keepSword = (tools[1] and toolType(tools[1]) == "Sword") and tools[1].Name or nil
             local out = {}
-            for i, t in ipairs(tools) do
+            for _, t in ipairs(tools) do
                 local w = wcfg(t.Name)
-                local cfg = { use = true, M1 = (i == 1), hold = w.hold,
+                -- M1 allowed on all; P.m1Of picks the one that swings.
+                local cfg = { use = true, M1 = true, hold = w.hold,
                     Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true, F = false }
                 table.insert(out, { name = t.Name, cfg = cfg, tool = t })
             end
+            local m1 = P.m1Of(out)
+            P.keepSword = (m1 and toolType(m1.tool) == "Sword") and m1.name or nil
             return out
         end
 
@@ -2874,6 +2902,12 @@ local function attackTick()
         if u.cfg.M1 and not m1u then m1u = u end
         for _, k in ipairs(KEYS) do if u.cfg[k] then anySkill = true end end
     end
+    -- Your M1 pick, else a sword first (P.m1Of, WEAPON ROTATION). A sword
+    -- that swings M1 is never swapped out by the rotation (P.keepSword).
+    local m1Of = (P :: any).m1Of
+    if m1Of then m1u = m1Of(used) end
+    P.m1Now = m1u and m1u.name or nil
+    if m1u and m1u.tool and toolType(m1u.tool) == "Sword" then P.keepSword = m1u.name end
 
     if anySkill and (not m1u or m1Count >= (CFG.M1Between or 0)) then
         for _, u in ipairs(used) do
@@ -9041,8 +9075,44 @@ local function buildUI()
     do
         local v = makeView("attack")
         gap(v, 6)
+        heading2(v, "M1 with")
+        local m1box = chooser(v, 130)
+        local m1sig = nil
+        local function m1refresh()
+            local names = {}
+            for _, t in ipairs(toolNames()) do table.insert(names, t.Name) end
+            table.sort(names)
+            local cur = CFG.M1Weapon or ""
+            local sig = cur .. "|" .. table.concat(names, ",") .. "|" .. tostring(P.m1Now)
+            if sig == m1sig then return end
+            m1sig = sig
+            for _, c in ipairs(m1box:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            chooserRow(m1box, 1, "Auto - your sword first", (cur == "" and P.m1Now) and tostring(P.m1Now) or "",
+                cur == "", function()
+                    CFG.M1Weapon = ""
+                    m1sig = nil
+                    m1refresh()
+                end)
+            for i, n in ipairs(names) do
+                chooserRow(m1box, i + 1, n, toolType(findTool(n)), cur == n, function()
+                    CFG.M1Weapon = n
+                    m1sig = nil
+                    m1refresh()
+                end)
+            end
+            if cur ~= "" and not table.find(names, cur) then
+                chooserRow(m1box, #names + 2, cur, "not carried", true, function() end)
+            end
+        end
+        m1refresh()
+        addLive(m1refresh)
+        caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
+            .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
+
         heading2(v, "every weapon you carry")
-        switchRow(v, "Every weapon you carry", "No setup: M1 with a fighting style, the keys below of all",
+        switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
             function() return CFG.AutoAttack end,
             function(x) CFG.AutoAttack = x end)
         for _, k in ipairs({ "Z", "X", "C", "V" }) do

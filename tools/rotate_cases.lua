@@ -10,7 +10,27 @@ CARRY = { ["Dragon-Dragon"] = "Blox Fruit", ["Hallow Scythe"] = "Sword", ["Drago
 local list = P.autoWeapons()
 check("auto: every weapon you carry is in", #list == 4, #list)
 check("auto: M1 with the SWORD (user: Hallow Scythe 3755 a swing, the fighting style far less)",
-    list[1].name == "Hallow Scythe" and list[1].cfg.M1 and not list[2].cfg.M1 and not list[3].cfg.M1, list[1].name)
+    P.m1Of(list).name == "Hallow Scythe", P.m1Of(list).name)
+-- YOUR PICK (CFG.M1Weapon) beats everything.
+CFG.M1Weapon = "Dragon Talon"
+check("pick: the weapon you picked swings M1", P.m1Of(P.autoWeapons()).name == "Dragon Talon")
+CFG.M1Weapon = "Soul Cane"
+check("pick: one you do not carry - auto again (the sword)", P.m1Of(P.autoWeapons()).name == "Hallow Scythe")
+CFG.M1Weapon = ""
+-- The Attack page's own list (auto off): several with M1 on, the fighting
+-- style listed first and switched on for you - the sword still swings.
+local manual = {
+    { name = "Dragon Talon", tool = tool("Dragon Talon", "Melee"), cfg = { M1 = true } },
+    { name = "Dragon-Dragon", tool = tool("Dragon-Dragon", "Blox Fruit"), cfg = { M1 = true } },
+    { name = "Hallow Scythe", tool = tool("Hallow Scythe", "Sword"), cfg = { M1 = true } },
+}
+check("manual: fighting style first in the list, the sword still swings (the bug)", P.m1Of(manual).name == "Hallow Scythe")
+manual[3].cfg.M1 = false
+check("manual: the sword's M1 off - the fighting style", P.m1Of(manual).name == "Dragon Talon")
+CFG.M1Weapon = "Hallow Scythe"
+check("manual: picked even with its own M1 switch off", P.m1Of(manual).name == "Hallow Scythe")
+CFG.M1Weapon = ""
+list = P.autoWeapons()
 check("auto: the M1 sword is kept (never swapped by the rotation)", P.keepSword == "Hallow Scythe", P.keepSword)
 check("auto: Z X C on, V off, F (flight) never", list[2].cfg.Z and list[2].cfg.X and list[2].cfg.C
     and not list[2].cfg.V and not list[2].cfg.F)
