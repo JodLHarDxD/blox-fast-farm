@@ -4,7 +4,9 @@
     clicks nothing. Two questions are asked of the server (CheckTempleDoor,
     RaceV4Progress "Check") - both only answer, they change nothing.
 
-    Run it in the Third Sea. Sail your boat yourself (west of Tiki Outpost,
+    Run it in the Third Sea, at Tiki Outpost. BUY the Beast Hunter BY HAND at
+    the back boat dealer (the one you sail from): the exact call the game's
+    button sends is logged (boat name with or without a space). Then sail it yourself (west of Tiki Outpost,
     into Sea Danger 5-6) for a few minutes while it runs: every 5 s it writes
     where you are, how far from the Tiki boat dealer in studs, and every
     number the compass shows - that gives the game's meters-to-studs ratio.
@@ -57,6 +59,62 @@ end
 
 out("probe start " .. os.date("!%Y-%m-%d %H:%M:%S") .. "Z place " .. game.PlaceId .. " MAP attr " .. tostring(workspace:GetAttribute("MAP")))
 
+-- 0. BOAT DEALERS: every one the game has, where, and how far you are.
+-- Buy your boat BY HAND at the back dealer: the call the game's own button
+-- sends is logged below, with the exact boat name it uses.
+pcall(function()
+    for _, f in ipairs({ workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }) do
+        for _, npc in ipairs(f and f:GetChildren() or {}) do
+            if string.find(string.lower(npc.Name), "boat", 1, true) then
+                local ok, pos = pcall(function() return npc:GetPivot().Position end)
+                out(string.format("0 dealer '%s' in %s at %s", npc.Name, f.Name,
+                    ok and string.format("(%.1f, %.1f, %.1f)", pos.X, pos.Y, pos.Z) or "?"))
+            end
+        end
+    end
+end)
+local function nearestDealer()
+    local c = player.Character
+    local r = c and c:FindFirstChild("HumanoidRootPart")
+    if not r then return "no character" end
+    local best, bd = nil, math.huge
+    for _, f in ipairs({ workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }) do
+        for _, npc in ipairs(f and f:GetChildren() or {}) do
+            if string.find(string.lower(npc.Name), "boat", 1, true) then
+                local ok, pos = pcall(function() return npc:GetPivot().Position end)
+                if ok and (pos - r.Position).Magnitude < bd then best, bd = pos, (pos - r.Position).Magnitude end
+            end
+        end
+    end
+    return best and string.format("nearest dealer (%.1f, %.1f, %.1f), %.0f studs from you", best.X, best.Y, best.Z, bd) or "none found"
+end
+-- The game's own buy call, logged (nothing is changed or blocked).
+pcall(function()
+    if not (hookmetamethod and getnamecallmethod) then
+        out("0 this executor cannot listen to calls - the boat's model name below will have to do")
+        return
+    end
+    local old
+    old = hookmetamethod(game, "__namecall", function(self, ...)
+        local m = getnamecallmethod()
+        if m == "InvokeServer" and _G.BFF_SEA_PROBE and typeof(self) == "Instance" and self.Name == "CommF_" then
+            local a = { ... }
+            if type(a[1]) == "string" and string.find(string.lower(a[1]), "boat", 1, true) then
+                local res = { old(self, ...) }
+                task.spawn(function()
+                    local parts = {}
+                    for i, v in ipairs(a) do parts[i] = string.format("%q", tostring(v)) end
+                    out("0 YOUR CALL: CommF_:InvokeServer(" .. table.concat(parts, ", ") .. ") -> " .. tostring(res[1])
+                        .. " | " .. nearestDealer())
+                end)
+                return table.unpack(res)
+            end
+        end
+        return old(self, ...)
+    end)
+    out("0 listening for the boat buy call - buy your Beast Hunter by hand now")
+end)
+
 -- 1. BOATS: the names the dealer knows, your boat's insides
 pcall(function()
     local c = RS:FindFirstChild("BoatDisplayCache")
@@ -77,6 +135,7 @@ local function describeBoat()
     if not b or b == seenBoat then return end
     seenBoat = b
     out("1 your boat: " .. b.Name .. " (" .. b.ClassName .. ") attributes: " .. attrs(b))
+    out("1   bought near: " .. nearestDealer())
     out("1   children: " .. kids(b, 60))
     local seats, vs = 0, 0
     for _, d in ipairs(b:GetDescendants()) do
