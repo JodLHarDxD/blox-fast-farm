@@ -482,4 +482,54 @@ check("raid: one died - the pile stays where it is (was: slid to 0)", near(pileC
 P.raidAt = nil
 releasePile()
 
+-- ---------------------------------------------------------------- ONE AT A TIME, WHERE IT STANDS
+-- The Fire Flower hunt (user, 2026-10-04): NO magnet - a pile hangs in the
+-- air, and the flower comes up where the enemy dies. The nearest one of the
+-- two species, never pulled, kept until it dies.
+local FLOWER_SET = { ["Forest Pirate"] = true, ["Mythological Pirate"] = true }
+
+-- 39. the nearest of the two species only (a nearer Bandit is not theirs), in place
+reset()
+P.randomSkip = {}
+ME.Position = v3(0, 40, 0)
+local fpA = enemy("Forest Pirate", v3(10, 0, 5))
+local fpB = enemy("Forest Pirate", v3(30, 0, 0))
+local mp  = enemy("Mythological Pirate", v3(100, 0, 0))
+local bandit = enemy("Bandit", v3(3, 0, 0))
+WORLD.loaded = { fpB, mp, bandit, fpA }
+releasePile()
+pileCur, pileNames = { name = "Fire Flowers", flower = true }, FLOWER_SET
+refreshPile()
+check("flower hunt: the nearest Forest/Mythological Pirate, not the nearer Bandit",
+    #pile == 1 and pile[1] == fpA, pile[1] and pile[1].name)
+check("flower hunt: fought WHERE IT STANDS (no magnet), centre = its own position",
+    P.pileInPlace == true and near(pileCentre, v3(10, 0, 5), 0.01))
+
+-- 40. kept until it dies - you moving nearer another does not switch target
+ME.Position = v3(30, 40, 0)
+refreshPile()
+check("flower hunt: target kept while it lives (another is nearer now)", pile[1] == fpA,
+    pile[1] and tostring(pile[1].root.Position.X))
+WORLD.loaded = { fpB, mp, bandit }
+refreshPile()
+check("flower hunt: it died - the next nearest", pile[1] == fpB, pile[1] and pile[1].name)
+
+-- 41. one that took no damage (skipped for a minute) is left; the next one
+P.randomSkip[fpB.model] = clock + 60
+refreshPile()
+check("flower hunt: an unhurtable one (skipped) is left - the next", pile[1] == mp, pile[1] and pile[1].name)
+P.randomSkip = {}
+
+-- 42. the elite hunt: its one elite, nearest, in place - as before
+reset()
+P.randomSkip = {}
+ME.Position = v3(0, 40, 0)
+local el1 = enemy("Diablo", v3(50, 0, 0))
+WORLD.loaded = { enemy("Forest Pirate", v3(5, 0, 0)), el1 }
+releasePile()
+pileCur, pileNames = { name = "Diablo", elite = true }, { Diablo = true }
+refreshPile()
+check("elite hunt: its elite only, in place", #pile == 1 and pile[1] == el1 and P.pileInPlace == true)
+releasePile()
+
 print(all and "ALL PASS" or "SOME FAILED")

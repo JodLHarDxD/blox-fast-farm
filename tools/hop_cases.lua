@@ -59,4 +59,15 @@ AFTER_JOIN = function() epoch += 1 end
 r = hop("test")
 check("stop mid-hop: one try, then out", #log.joins == 1 and r == false and not E.hopping)
 
+-- 7. A FIRE FLOWER CAME HERE: this server is kept away 600 s longer (5-15 min cooldown)
+reset()
+ROWS = servers()
+hop("flower picked", 600)
+check("flower server: marked 600 s ahead, so it is skipped 10 min longer", E.visited.here == NOW + 600,
+    tostring(E.visited.here))
+reset()
+ROWS = servers()
+hop("no flower")
+check("no keep-away given: marked now, as before", E.visited.here == NOW)
+
 print(all and "ALL PASS" or "SOME FAILED")

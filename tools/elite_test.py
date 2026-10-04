@@ -42,7 +42,7 @@ def cut(start, end):
 
 
 pure = cut("local ELITES    = {", "-- Everything the hunt knows.")
-hop = cut("local function hop(why)", "function P.hopNow()")
+hop = cut("local function hop(why", "function P.hopNow()")
 carry = cut("local function takeCarry()", "P.takeCarry = takeCarry")
 director = cut("function huntStep()", "-- The hunt switches.")
 listing = cut("-- What a page came back as, in words", "local function robloxList(")

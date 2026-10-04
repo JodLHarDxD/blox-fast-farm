@@ -173,7 +173,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -197,6 +197,11 @@ local CFG = {
     RecipeWant         = {
         ["Winter Sky"] = true, ["Snow White"] = true, ["Pure Red"] = true,
     },
+    -- FIRE FLOWER HUNT (Draco V2, Third Sea): Forest + Mythological Pirates
+    -- killed one at a time where they stand (no magnet), the flower picked
+    -- the moment it lies there, then the next server. None this long after
+    -- the FIRST kill in a server (not the join): the next server.
+    FlowerGiveUp       = 2,          -- minutes
     -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
     -- the Skies while he is up): one per server, back 8 min 45 s after the
     -- last one died. Only the LAST hit gets the drops -- the God's Chalice
@@ -1626,16 +1631,25 @@ local function buildRaidPile()
     return buildRandomPile(P.raidAt or r.Position, CFG.RaidRadius or 450, true)
 end
 
--- ELITE HUNT's pile: the one elite, nearest you, fought WHERE IT STANDS. Never
--- pulled: a pulled one that took no damage would be put back and left alone
--- for thirty seconds -- on the one target the hunt is for.
-local function buildElitePile(cur)
+-- ONE AT A TIME, WHERE IT STANDS: the nearest living one of `names` (a set),
+-- never pulled.
+--   ELITE HUNT: its one elite. A pulled one that took no damage would be put
+--     back and left alone for thirty seconds -- on the one target the hunt is for.
+--   FIRE FLOWER HUNT (user, 2026-10-04): no magnet there - a pile hangs in the
+--     air, and the flower comes up where the enemy dies.
+-- Kept until it dies: this runs ten times a second, and two equally near must
+-- not take turns. skip: model -> until when it is left alone (no damage).
+local function buildNearestPile(names, skip)
     local _, r = parts()
     if not r then return {}, nil end
+    local now = os.clock()
     local best, bd = nil, math.huge
-    for _, e in ipairs(liveEnemies({ [cur.name] = true })) do
-        local d = (e.root.Position - r.Position).Magnitude
-        if d < bd then best, bd = e, d end
+    for _, e in ipairs(liveEnemies(names)) do
+        if not (skip and skip[e.model] and now < skip[e.model]) then
+            if e.model == P.inPlaceTarget then return { e }, e.root.Position end
+            local d = (e.root.Position - r.Position).Magnitude
+            if d < bd then best, bd = e, d end
+        end
     end
     if not best then return {}, nil end
     return { best }, best.root.Position
@@ -1660,8 +1674,12 @@ local function refreshPile()
         if model ~= P.inPlaceTarget then P.forceClose = false end
         P.pileInPlace = inPlace
         P.inPlaceTarget = model
-    elseif pileCur.elite then
-        list, centre = buildElitePile(pileCur)
+    elseif pileCur.elite or pileCur.flower then
+        if pileCur.elite then
+            list, centre = buildNearestPile({ [pileCur.name] = true })
+        else
+            list, centre = buildNearestPile(pileNames, P.randomSkip)
+        end
         local model = list[1] and list[1].model or nil
         if model ~= P.inPlaceTarget then P.forceClose = false end
         P.pileInPlace = true
@@ -3099,6 +3117,12 @@ local function fight(cur, names)
             attacking = false
             return "preempt"
         end
+        -- A hunt's own reason to stop now (the Fire Flower hunt: a flower
+        -- lies there, or this server has had its time).
+        if cur.breakIf and cur.breakIf() then
+            attacking = false
+            return "break"
+        end
 
         pileActive = true
         attacking  = true
@@ -3486,6 +3510,12 @@ do
             have = {},               -- berries you hold, from the inventory ([name] = count; read = true)
             offer = nil,             -- what the Barista Cousin teaches in this server, in words
             recipeNote = "no recipe gone for yet",
+            flowerNote = "no Fire Flower yet",
+            flowerHave = nil,        -- Fire Flowers you hold, from the inventory
+            flowerSkip = setmetatable({}, { __mode = "k" }),    -- given up on (3 grabs)
+            flowerTries = setmetatable({}, { __mode = "k" }),
+            flowerFirstKill = nil, flowerKills0 = 0, flowerAtCamp = nil, flowerTurn = 0,
+            keepAway = nil,          -- seconds this server stays off the list beyond the usual
             note = "hunt off",
         }
         P.elite = E
@@ -3773,8 +3803,9 @@ do
         end
 
         -- THE HOP. Refused outright with the chalice; looked at again right before
-        -- every teleport call.
-        local function hop(why)
+        -- every teleport call. keepAway: seconds this server stays off the
+        -- list beyond the usual (a Fire Flower came here: 5-15 min of none).
+        local function hop(why, keepAway)
             if E.chalice or holdingChalice() then
                 if holdingChalice() then markChalice() end
                 E.note = "hop refused - the God's Chalice is in this server with you"
@@ -3787,7 +3818,7 @@ do
             releasePile()
             setState("HOP")
             local now = os.time()
-            E.visited[game.JobId] = now
+            E.visited[game.JobId] = now + (tonumber(keepAway) or 0)
             pruneVisited(E.visited, now, 3600)
             for round = 1, 3 do
                 say("hop: reading the server list  (" .. tostring(why) .. ")")
@@ -3907,6 +3938,8 @@ do
         local function lookAgain()
             E.lookStart, E.foundHere, E.asks, E.reply, E.replyText = os.clock(), false, 0, nil, nil
             E.isleTried, E.missSince = false, nil
+            -- The Fire Flower clock starts again at the next kill.
+            E.flowerFirstKill, E.flowerKills0, E.flowerAtCamp = nil, stats.kills, nil
         end
 
         -- FRUITS ON THE GROUND (probed in game 2026-09-28): a Tool in
@@ -4067,6 +4100,16 @@ do
         end
         P.berryWanted = berryWanted
 
+        -- Hold a prompt the way a player does: InputHoldBegin, the prompt's own
+        -- HoldDuration (and a little), InputHoldEnd. Berries and Fire Flowers.
+        local function holdPrompt(pr, myEpoch)
+            local d = tonumber(pr.HoldDuration) or 0
+            if not pcall(function() pr:InputHoldBegin() end) then return end
+            local th = os.clock()
+            while os.clock() - th < d + 0.25 and not stale(myEpoch) do task.wait(0.05) end
+            pcall(function() pr:InputHoldEnd() end)
+        end
+
         -- Fly to the bush and HOLD each berry's prompt the way a player does
         -- (InputHoldBegin, the prompt's own HoldDuration, InputHoldEnd),
         -- standing at it, until the bush names none. NOT the executor's
@@ -4086,13 +4129,6 @@ do
             for k, v in pairs(berryCounts()) do had[k] = v end
             flyTo(b.pos + Vector3.new(0, 3, 0))
             if stale(myEpoch) then return end
-            local function hold(pr)
-                local d = tonumber(pr.HoldDuration) or 0
-                if not pcall(function() pr:InputHoldBegin() end) then return end
-                local th = os.clock()
-                while os.clock() - th < d + 0.25 and not stale(myEpoch) do task.wait(0.05) end
-                pcall(function() pr:InputHoldEnd() end)
-            end
             local t0, tries, way, sawPrompt = os.clock(), 0, "hold", false
             while os.clock() - t0 < 15 and not stale(myEpoch) do
                 local okA, attrs = pcall(function() return b.bush:GetAttributes() end)
@@ -4119,7 +4155,7 @@ do
                     end)
                     lockAt(at + Vector3.new(0, 3, 0))
                     task.wait(0.1)
-                    if useFire then pcall(fireproximityprompt, pr) else hold(pr) end
+                    if useFire then pcall(fireproximityprompt, pr) else holdPrompt(pr, myEpoch) end
                 end
                 task.wait(0.3)
             end
@@ -4246,6 +4282,216 @@ do
         end
         P.cousinOffer = cousinOffer
 
+        -- FIRE FLOWERS (Draco V2: the Dragon Wizard wants 5 and $1,000,000).
+        -- While his V2 quest runs, any Third Sea kill can drop one (Fandom,
+        -- 2026-10): it comes up from the ground a while after the kill, for
+        -- YOU only, and has to be picked like a berry. Then that server gives
+        -- none for 5-15 min; a new server, at once. Three public hubs (2026)
+        -- agree where it lies: a Model in workspace.FireFlowers (PrimaryPart,
+        -- or a MeshPart inside) with a ProximityPrompt in it. So: kill them one
+        -- at a time where they stand, pick the flower the moment it lies
+        -- there, next server. Forest + Mythological Pirates on Floating Turtle
+        -- (the user's two came from there; the hubs farm Forest Pirates).
+        local FLOWER_MOBS = { "Forest Pirate", "Mythological Pirate" }
+        local FLOWER_SET = {}
+        for _, n in ipairs(FLOWER_MOBS) do FLOWER_SET[n] = true end
+
+        -- Every flower lying there, but the ones given up on: { model, pos }.
+        local function flowersLying()
+            local out = {}
+            local folder = workspace:FindFirstChild("FireFlowers")
+            if not folder then return out end
+            for _, m in ipairs(folder:GetChildren()) do
+                local part = m:IsA("BasePart") and m or nil
+                if not part and m:IsA("Model") then
+                    part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart", true)
+                end
+                if part and not E.flowerSkip[m] then
+                    table.insert(out, { model = m, pos = part.Position })
+                end
+            end
+            return out
+        end
+        P.flowersLying = flowersLying
+
+        -- How many you hold (the game's inventory list). nil = not readable.
+        local function flowerCount()
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if not (ok and type(inv) == "table") then return nil end
+            local n = 0
+            for _, it in pairs(inv) do
+                if type(it) == "table" and it.Name == "Fire Flower" then n = tonumber(it.Count) or 0 end
+            end
+            E.flowerHave = n
+            return n
+        end
+
+        -- Onto it, and hold its prompt like a player (holdPrompt, as the
+        -- berries), the instant fireproximityprompt every third try; ~15 s.
+        -- "picked" = your count went up (unreadable: it left the folder);
+        -- "gone" = it went, the count did not; "stuck" = still there.
+        local function grabFlower(f, myEpoch)
+            releasePile()
+            setState("FLOWER")
+            E.flowerNote = "a Fire Flower is lying here - going for it"
+            E.note = E.flowerNote
+            say(E.note)
+            local had = flowerCount()
+            local over = f.pos + Vector3.new(0, 3, 0)
+            flyTo(over)
+            if stale(myEpoch) then return "stopped" end
+            local t0, tries, way, sawPrompt = os.clock(), 0, "hold", false
+            while os.clock() - t0 < 15 and f.model.Parent and not stale(myEpoch) do
+                tries += 1
+                local useFire = fireproximityprompt and tries % 3 == 0
+                way = useFire and "fireproximityprompt" or "hold"
+                local prompts = {}
+                pcall(function()
+                    for _, d in ipairs(f.model:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") then table.insert(prompts, d) end
+                    end
+                end)
+                sawPrompt = sawPrompt or #prompts > 0
+                lockAt(over)
+                task.wait(0.1)
+                for _, pr in ipairs(prompts) do
+                    if stale(myEpoch) or not f.model.Parent then break end
+                    if useFire then pcall(fireproximityprompt, pr) else holdPrompt(pr, myEpoch) end
+                end
+                task.wait(0.3)
+            end
+            if stale(myEpoch) then return "stopped" end
+            local now = flowerCount()
+            -- It flies to you before the inventory says so: a moment for that.
+            local settle = os.clock()
+            while had and now and now <= had and not f.model.Parent
+                and os.clock() - settle < 2 and not stale(myEpoch) do
+                task.wait(0.5)
+                now = flowerCount()
+            end
+            local res
+            if had and now then
+                res = (now > had) and "picked" or (f.model.Parent and "stuck" or "gone")
+            else
+                res = f.model.Parent and "stuck" or "picked"
+            end
+            if res == "picked" then
+                E.tally.flowers = (E.tally.flowers or 0) + 1
+                E.flowerNote = string.format("PICKED a Fire Flower - you have %s  (by %s, try %d)",
+                    now and tostring(now) or "?", way, tries)
+                notify("Fire Flower: " .. (now and tostring(now) or "+1"))
+            elseif res == "gone" then
+                E.flowerNote = "the flower went, your count did not go up"
+            else
+                E.flowerNote = string.format("could not pick it in %d %s%s", tries,
+                    tries == 1 and "try" or "tries", sawPrompt and "" or " (no prompt in it)")
+            end
+            E.note = E.flowerNote
+            say(E.note)
+            print("[BFF] flower: " .. E.flowerNote)
+            return res
+        end
+
+        -- THE CLOCK (user, 2026-10-04): from the FIRST kill in this server,
+        -- not the join - flying in and loading do not count. Nothing died 3
+        -- min after reaching the camp: leave anyway, or it would never start.
+        -- Why to leave this server without a flower, or nil.
+        local function flowerGiveUp()
+            if not E.flowerFirstKill and stats.kills > (E.flowerKills0 or 0) then
+                E.flowerFirstKill = os.clock()
+            end
+            local now = os.clock()
+            if E.flowerFirstKill then
+                local limit = (CFG.FlowerGiveUp or 2) * 60
+                if now - E.flowerFirstKill >= limit then
+                    return string.format("no Fire Flower in %g min of killing", limit / 60)
+                end
+            elseif E.flowerAtCamp and now - E.flowerAtCamp >= 180 then
+                return "nothing died here in 3 min"
+            end
+            return nil
+        end
+
+        -- The fight's reason to stop now: a flower lies there, or time is up.
+        local function flowerBreak()
+            return #flowersLying() > 0 or flowerGiveUp() ~= nil
+        end
+
+        -- No flower lying: the nearest Forest / Mythological Pirate, WHERE IT
+        -- STANDS, one at a time (refreshPile: pileCur.flower). None loaded: to
+        -- their camps in turn.
+        local function flowerFarm(myEpoch)
+            local any = false
+            for _, n in ipairs(FLOWER_MOBS) do
+                if nearestLoaded(n) then any = true break end
+            end
+            if not any then
+                E.flowerTurn = (E.flowerTurn or 0) % #FLOWER_MOBS + 1
+                local name = FLOWER_MOBS[E.flowerTurn]
+                local row = rowOf(name)
+                local dest = campOf(name, row and row[4])
+                if not dest then
+                    E.flowerNote = "cannot find where " .. name .. " lives"
+                    say(E.flowerNote)
+                    task.wait(1)
+                    return
+                end
+                releasePile()
+                setState("FLY")
+                say("to the " .. name .. "s for Fire Flowers")
+                flyTo(dest + Vector3.new(0, CFG.HeightSafe or 20, 0), { stream = name })
+                -- The no-kill clock runs from the first arrival: camps that never
+                -- load must not be flown between for ever.
+                if not stale(myEpoch) then E.flowerAtCamp = E.flowerAtCamp or os.clock() end
+                return
+            end
+            E.flowerAtCamp = E.flowerAtCamp or os.clock()
+            activeName = "Fire Flowers"
+            fight({ name = "Fire Flowers", flower = true, breakIf = flowerBreak }, FLOWER_SET)
+        end
+
+        -- true = busy here; false = leave this server (E.why says why). Hop
+        -- off: never leaves - the next flower comes after the cooldown.
+        local function flowerStep(myEpoch)
+            local sea = mySea()
+            if sea and sea ~= 3 then
+                E.flowerNote = "Fire Flowers drop only in the Third Sea - hunt stopped"
+                E.note = E.flowerNote
+                say(E.note)
+                P.stop("Fire Flowers: not the Third Sea")
+                return true
+            end
+            local f = flowersLying()[1]
+            if f then
+                local res = grabFlower(f, myEpoch)
+                if res == "stopped" then return true end
+                if res == "stuck" then
+                    local n = (E.flowerTries[f.model] or 0) + 1
+                    E.flowerTries[f.model] = n
+                    if n < 3 then return true end         -- again
+                    E.flowerSkip[f.model] = true
+                end
+                -- A flower came here: none for 5-15 min.
+                E.keepAway = 600
+                E.why = (res == "picked") and "Fire Flower picked - none here for 5-15 min"
+                    or "a Fire Flower came here - none for 5-15 min"
+                if CFG.HuntHop then return false end
+                E.flowerFirstKill, E.flowerKills0, E.flowerAtCamp = nil, stats.kills, nil
+                return true
+            end
+            local why = flowerGiveUp()
+            if why then
+                if CFG.HuntHop then
+                    E.why = why
+                    return false
+                end
+                E.flowerFirstKill, E.flowerKills0, E.flowerAtCamp = nil, stats.kills, nil
+            end
+            flowerFarm(myEpoch)
+            return true
+        end
+
         local function eliteFight(name, at, where, myEpoch)
             activeName = name
             if CFG.EliteQuest then takeEliteQuest(myEpoch) end
@@ -4370,6 +4616,7 @@ do
                 lookAgain()
                 if kind == "elite" then pcall(readProgress) end
                 if kind == "berry" then pcall(berryCounts) end
+                if kind == "flower" then pcall(flowerCount) end
             end
 
             -- ONLY the hunt you switched on.
@@ -4389,6 +4636,8 @@ do
                 E.why = "no berry you want here"
             elseif kind == "recipe" then
                 if recipeStep(myEpoch) then return end
+            elseif kind == "flower" then
+                if flowerStep(myEpoch) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -4404,7 +4653,7 @@ do
                 return
             end
             if CFG.HuntHop then
-                hop(E.why or "nothing worth doing here")
+                hop(E.why or "nothing worth doing here", E.keepAway)
                 task.wait(2)          -- still here: the hop failed; do not hammer it
             else
                 E.note = tostring(E.why or "nothing here") .. " - waiting (hop is off)"
@@ -4956,6 +5205,7 @@ local function buildUI()
         { "fruit", "Fruit hunt",        "Fruits on the ground - grabbed and STORED, never eaten" },
         { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
+        { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -5259,6 +5509,8 @@ local function buildUI()
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
                     or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
                         tostring(P.elite.offer or "not asked yet"))
+                    or (k == "flower") and string.format("%d Fire Flowers picked  ·  you have %s", t.flowers or 0,
+                        P.elite.flowerHave and tostring(P.elite.flowerHave) or "?")
                     or string.format("%d elites down  ·  %d chalice", t.kills, t.chalices)
                 return string.format("%s\n%d joined  ·  %s", tostring(P.elite.note), t.joins, count)
             end
@@ -6001,6 +6253,35 @@ local function buildUI()
             .. "stays 20, is gone 2. Switch off the ones you already have. A "
             .. "recipe learned goes off by itself; not learned (fragments, Aura "
             .. "stage 5) stops the hunt and says why.")
+
+        heading2(v, "fire flower hunt  (Draco V2, Third Sea)")
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.flowerNote),
+                string.format("picked    %d   ·   you have %s", el.tally.flowers or 0,
+                    el.flowerHave and tostring(el.flowerHave) or "not read yet") }
+            if CFG.Hunt and CFG.HuntKind == "flower" then
+                if el.flowerFirstKill then
+                    local s = math.floor(os.clock() - el.flowerFirstKill)
+                    table.insert(lines, string.format("here      killing %d:%02d  ·  no flower = next server at %g min",
+                        s // 60, s % 60, CFG.FlowerGiveUp or 2))
+                else
+                    table.insert(lines, "here      the clock starts at the first kill")
+                end
+            end
+            local ok, list = pcall(P.flowersLying)
+            table.insert(lines, (ok and type(list) == "table" and #list > 0)
+                and ("lying now " .. #list) or "lying now none")
+            return table.concat(lines, "\n")
+        end)
+        sliderRow(v, "No flower after the first kill: leave at", 1, 5, 0.5,
+            function() return CFG.FlowerGiveUp end,
+            function(x) CFG.FlowerGiveUp = x end, " min")
+        caption(v, "Needs the Dragon Wizard's V2 quest taken - flowers spawn only "
+            .. "then. Forest + Mythological Pirates, one at a time where they "
+            .. "stand (no magnet: the flower comes up where one dies). Picked "
+            .. "the moment it lies there, then the next server - that one gives "
+            .. "none for 5-15 min. Nothing dies for 3 min: the next server too.")
 
         heading2(v, "elite pirate hunt  (Third Sea)")
         readout(v, function()

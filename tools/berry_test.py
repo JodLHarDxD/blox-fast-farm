@@ -26,7 +26,7 @@ def read(name):
 
 
 src = read(os.path.join("..", "fast_farm.lua"))
-a = src.index("local function grabBerry(b, myEpoch)")
+a = src.index("local function holdPrompt(")       # shared with the Fire Flower hunt
 b = src.index("-- AURA RECIPES:", a)
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
