@@ -25,7 +25,11 @@
                Chalice), fruits on the ground (grabbed, STORED, never eaten)
                or berries (the Haki colors). Nothing for it here = the next
                server. The God's Chalice ends it: no hop, ever, in the server
-               it came in.
+               it came in. Or the Prehistoric Island: a boat driven into
+               Sea Danger 6 until it comes.
+      VOLCANO  its own switch: a Prehistoric Island up = its event, vents
+               closed with aimed skills, Lava Golems held off the relic and
+               killed, then the bones and the egg.
 
     TAKEN FROM FARM_PRO UNCHANGED: the level table, Enhancement + Observation,
     walk on water. Its panel too -- made opaque, because farm_pro's background was
@@ -173,7 +177,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "prehistoric"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -202,6 +206,33 @@ local CFG = {
     -- the moment it lies there, then the next server. None this long after
     -- the FIRST kill in a server (not the join): the next server.
     FlowerGiveUp       = 2.5,        -- minutes, from the first kill (respawn waits count)
+    -- PREHISTORIC HUNT (Third Sea): a boat bought at Tiki Outpost's BACK boat
+    -- dealer and driven west into Sea Danger 6 until the island comes. None
+    -- by SeaSearchTo = the next server. The island up = the hunt's job done;
+    -- the Volcano event switch (below) does the event.
+    SeaBoat            = "Beast Hunter",
+    SeaSpeed           = 300,        -- studs/s, 250-350 (the boat sails ~140 by itself)
+    SeaSearchTo        = 8000,       -- meters from Tiki: nothing by here = the next server
+    -- The compass meter in studs, counted from the Tiki boat dealer (user's
+    -- compass, 2026-10-04: Danger 6 ~2,600 m = 26.3k studs; the Prehistoric
+    -- came ~5,000 m = 50k studs). The panel shows both.
+    SeaStudsPerM       = 10,
+    SeaWobble          = 10,         -- degrees the heading wanders, now and then
+
+    -- ---------- THE VOLCANO EVENT ----------
+    -- Its own switch, any mode: whenever a Prehistoric Island is up in this
+    -- server - flown to, started at the relic, the vents closed (the volcano's
+    -- pressure points), the Lava Golems killed, then the bones and the egg.
+    Volcano            = false,
+    -- The keys fired at a vent, every carried weapon's (fruit, melee, sword,
+    -- gun). Only moves that break things close one.
+    VentKeys           = { Z = true, X = true, C = true, V = false },
+    VentDistance       = 12,         -- stand this far out from a vent (and 8 up), aiming at it
+    -- Magnet on: every golem is held this far from the relic (away from the
+    -- volcano) while the vents are closed - a held golem cannot hit the relic.
+    -- Magnet off: golems before vents, fought where they stand.
+    GolemCage          = 60,
+    VolcanoLoot        = true,       -- after a win: the bones, then the egg
     -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
     -- the Skies while he is up): one per server, back 8 min 45 s after the
     -- last one died. Only the LAST hit gets the drops -- the God's Chalice
@@ -1673,6 +1704,14 @@ local function refreshPile()
         local model = inPlace and list[1] and list[1].model or nil
         if model ~= P.inPlaceTarget then P.forceClose = false end
         P.pileInPlace = inPlace
+        P.inPlaceTarget = model
+    elseif pileCur.build then
+        -- A pile its own section builds (the Lava Golems: SEA HUNT).
+        local inPlace
+        list, centre, inPlace = pileCur.build()
+        local model = inPlace and list[1] and list[1].model or nil
+        if model ~= P.inPlaceTarget then P.forceClose = false end
+        P.pileInPlace = inPlace and true or false
         P.inPlaceTarget = model
     elseif pileCur.elite or pileCur.flower then
         if pileCur.elite then
@@ -4642,6 +4681,10 @@ do
                 if recipeStep(myEpoch) then return end
             elseif kind == "flower" then
                 if flowerStep(myEpoch) then return end
+            elseif kind == "prehistoric" then
+                -- SEA HUNT: true while it sails (or holds the island); false
+                -- = nothing came by the far edge, E.why says so.
+                if (P :: any).sea.huntStep(myEpoch) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -4690,6 +4733,886 @@ do
 end
 
 -- =========================================================
+-- SEA HUNT
+-- =========================================================
+-- THE PREHISTORIC HUNT (Third Sea; HuntKind "prehistoric"). The island
+-- spawns only round a boat in Sea Danger 6 (the wiki, 2026-09). So: a boat
+-- bought at Tiki Outpost's BACK dealer -- CommF_("BuyBoat", "Beast Hunter")
+-- answers 1 there (the user's probe, 2026-10-04) -- you put in its
+-- VehicleSeat, and the boat moved west every frame at SeaSpeed: its pivot
+-- written, its collisions off, the body lock let go (the seat holds you).
+-- Sea events are driven through, not fought. Distance is counted from that
+-- dealer, in the compass's meters (SeaStudsPerM). The island up (its
+-- _WorldOrigin.Locations marker, or workspace.Map.PrehistoricIsland) = the
+-- boat is left and you go onto the island: it despawns with nobody on it.
+-- Nothing by SeaSearchTo = the next server.
+--
+-- THE VOLCANO EVENT (CFG.Volcano, its own switch, any mode). The public
+-- hubs (2026-03 .. 2026-09) and the wiki agree on the island's insides:
+--   Core.ActivationPrompt         the relic's ProximityPrompt: starts it
+--   island attribute IsMinigameActive   the event is on
+--   Core.VolcanoRocks             one Model per vent; LIVE when its VFXLayer
+--                                 Specs / At0.Glow, an At1Beam, or its
+--                                 volcanorock's red (185,53,56) says so
+--   "Lava Golem"                  workspace.Enemies; one per vent closed, and
+--                                 only their M1s hurt the relic
+--   workspace.DinoBone, Core.SpawnedDragonEggs   the win's loot
+-- Vents are closed by moves that break things: every ready Z/X/C/V of every
+-- weapon you carry, aimed AT the vent (the hidden camera swap, P.aimAt),
+-- from VentDistance out and 8 up. Golems, magnet on: held in one pile
+-- GolemCage studs off the relic, away from the volcano, the whole time --
+-- held, they cannot reach the relic -- and killed when no vent is live (the
+-- Attack page's weapons, your M1). Magnet off: golems first. Lava parts are
+-- taken off your client (the hubs do), the vents' own excepted.
+-- Only P.sea leaves the block (the main chunk is at Luau's register limit).
+do
+    local function build()
+        -- Typed open: its fields come as the hunt runs.
+        local S: { [string]: any } = {
+            driving = false, note = "off", boatNote = "no boat yet",
+            meters = nil, danger = nil, hp = nil, maxHp = nil, ev = nil,
+            tally = { found = 0, events = 0, vents = 0, golems = 0, bones = 0, eggs = 0, buys = 0 },
+        }
+        P.sea = S
+        local TIKI_DEALER = Vector3.new(-16928.9, 7.8, 434.6)   -- the back boat dealer (probe)
+        local GOLEMS      = { ["Lava Golem"] = true }
+        local VENT_KEYS   = { "Z", "X", "C", "V" }
+        local TYPE_RANK   = { ["Blox Fruit"] = 1, Melee = 2, Sword = 3, Gun = 4 }
+        local UP          = Vector3.new(0, 1, 0)
+
+        -- ---------- the arithmetic (pure: tools/sea_test.py) ----------
+        local function flat(v) return Vector3.new(v.X, 0, v.Z) end
+
+        -- Meters from the Tiki dealer, the compass's unit.
+        local function metersFrom(pos, studsPerM)
+            return flat(pos - TIKI_DEALER).Magnitude / math.max(tonumber(studsPerM) or 10, 1)
+        end
+
+        -- West, turned `deg` degrees (positive = toward +Z).
+        local function headingFor(deg)
+            local a = math.rad(deg or 0)
+            return Vector3.new(-math.cos(a), 0, math.sin(a))
+        end
+
+        -- The yaw a direction faces (CFrame.Angles(0, yaw, 0).LookVector = d),
+        -- and the turn toward `want`, at most maxStep, the short way round.
+        local function yawOf(d) return math.atan2(-d.X, -d.Z) end
+        local function turnStep(cur, want, maxStep)
+            local d = (want - cur + math.pi) % (2 * math.pi) - math.pi
+            return math.clamp(d, -maxStep, maxStep)
+        end
+
+        -- Where the golems are held: `dist` off the relic, on the far side from
+        -- the volcano (the beach side).
+        local function cageSpot(relic, volcano, dist)
+            local away = flat(relic - volcano)
+            if away.Magnitude < 1 then away = Vector3.new(0, 0, 1) end
+            return relic + away.Unit * dist
+        end
+
+        -- Where to stand for a vent: out from the volcano's middle, and up.
+        local function standFor(vent, volcano, dist)
+            local out = flat(vent - volcano)
+            if out.Magnitude < 1 then out = Vector3.new(1, 0, 0) end
+            return vent + out.Unit * dist + UP * 8
+        end
+
+        -- What the event needs now.
+        local function phase(active, promptOn, lootLeft)
+            if active then return "defend" end
+            if lootLeft then return "loot" end
+            if promptOn then return "start" end
+            return "idle"
+        end
+
+        -- While it is on. Held golems cannot reach the relic, so the vents go
+        -- first; free ones can, so then they go first.
+        local function defendPick(hasVent, hasGolem, magnet)
+            if magnet then
+                if hasVent then return "vent" end
+                if hasGolem then return "golem" end
+            else
+                if hasGolem then return "golem" end
+                if hasVent then return "vent" end
+            end
+            return "wait"
+        end
+
+        local function enabled(x)
+            if not x then return false end
+            local ok, v = pcall(function() return x.Enabled end)
+            return ok and v == true
+        end
+
+        -- A vent is live: any of the four signs the public hubs read.
+        local function ventLive(c)
+            local vfx = c:FindFirstChild("VFXLayer")
+            if vfx then
+                if enabled(vfx:FindFirstChild("Specs")) then return true end
+                local at0 = vfx:FindFirstChild("At0")
+                if at0 and enabled(at0:FindFirstChild("Glow")) then return true end
+            end
+            if enabled(c:FindFirstChild("At1Beam", true)) then return true end
+            local rock = c:FindFirstChild("volcanorock", true)
+            if rock and rock:IsA("BasePart") then
+                local col = rock.Color
+                if math.abs(col.R * 255 - 185) < 1.5 and math.abs(col.G * 255 - 53) < 1.5
+                    and math.abs(col.B * 255 - 56.5) < 1.5 then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local function posOf(inst)
+            if not inst then return nil end
+            if inst:IsA("BasePart") then return inst.Position end
+            local ok, cf = pcall(function() return inst:GetPivot() end)
+            return ok and cf and cf.Position or nil
+        end
+
+        -- ---------- what the game shows ----------
+        local function island()
+            local map = workspace:FindFirstChild("Map")
+            return (map and map:FindFirstChild("PrehistoricIsland")) or workspace:FindFirstChild("PrehistoricIsland")
+        end
+        local function marker()
+            local wo = workspace:FindFirstChild("_WorldOrigin")
+            local loc = wo and wo:FindFirstChild("Locations")
+            return posOf(loc and loc:FindFirstChild("Prehistoric Island"))
+        end
+        local function core(isle) return isle and isle:FindFirstChild("Core") end
+
+        local function relicPos(isle)
+            local rel = core(isle) and core(isle):FindFirstChild("PrehistoricRelic")
+            return posOf(rel and (rel:FindFirstChild("Skull") or rel))
+        end
+        local function promptOf(isle)
+            local c = core(isle)
+            local ap = c and c:FindFirstChild("ActivationPrompt", true)
+            local pp = ap and ap:FindFirstChildWhichIsA("ProximityPrompt", true)
+            return pp, posOf(ap)
+        end
+        local function ventPos(c) return posOf(c:FindFirstChild("VFXLayer")) or posOf(c) end
+        local function rocks(isle)
+            local vr = core(isle) and core(isle):FindFirstChild("VolcanoRocks")
+            return vr and vr:GetChildren() or {}
+        end
+        local function liveVents(isle)
+            local out = {}
+            for _, c in ipairs(rocks(isle)) do
+                if ventLive(c) then
+                    local p = ventPos(c)
+                    if p then table.insert(out, { model = c, pos = p }) end
+                end
+            end
+            return out
+        end
+        -- The volcano's middle: the average of its vents, live or not.
+        local function volcanoCentre(isle)
+            local sum, n = Vector3.new(0, 0, 0), 0
+            for _, c in ipairs(rocks(isle)) do
+                local p = ventPos(c)
+                if p then sum += p n += 1 end
+            end
+            if n > 0 then return sum / n end
+            return posOf(core(isle)) or posOf(isle)
+        end
+
+        -- The compass's danger level 0-6 (its own label; the 0-600 attribute
+        -- behind it otherwise).
+        local function dangerNow()
+            local ok, t = pcall(function() return player.PlayerGui.Main.Compass.Frame.DangerLevel.TextLabel.Text end)
+            local n = ok and tonumber(t) or nil
+            if n then return n end
+            local a = tonumber(player:GetAttribute("DangerLevel"))
+            return a and math.floor(a / 100) or nil
+        end
+
+        local function notify(text)
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = "Fast Farm", Text = text, Duration = 20,
+                })
+            end)
+        end
+
+        local function nearestOf(list, from, at)
+            local best, bd = nil, math.huge
+            for _, x in ipairs(list) do
+                local d = (at(x) - from).Magnitude
+                if d < bd then best, bd = x, d end
+            end
+            return best
+        end
+
+        -- Hold a prompt the way a player does; the executor's instant fire
+        -- only when the hold did nothing.
+        local function holdPrompt(pr, myEpoch)
+            local d = tonumber(pr.HoldDuration) or 0
+            if pcall(function() pr:InputHoldBegin() end) then
+                local th = os.clock()
+                while os.clock() - th < d + 0.25 and not stale(myEpoch) do task.wait(0.05) end
+                pcall(function() pr:InputHoldEnd() end)
+            end
+            task.wait(0.4)
+            if pr.Parent and pr.Enabled and fireproximityprompt then pcall(fireproximityprompt, pr) end
+        end
+
+        -- ---------- the boat ----------
+        local function myBoat()
+            local f = workspace:FindFirstChild("Boats")
+            local any = nil
+            for _, b in ipairs(f and f:GetChildren() or {}) do
+                local o = b:FindFirstChild("Owner")
+                local v = o and o.Value
+                if v == player or tostring(v) == player.Name then
+                    if b.Name == CFG.SeaBoat then return b end
+                    any = any or b
+                end
+            end
+            return any
+        end
+        S.myBoat = myBoat
+        local function seatOf(b)
+            for _, d in ipairs(b:GetDescendants()) do
+                if d:IsA("VehicleSeat") then return d end
+            end
+            return nil
+        end
+        -- The boat's HP: its "Humanoid" is an IntValue (probe), MaxHealth an attribute.
+        local function boatHP(b)
+            local h = b:FindFirstChild("Humanoid")
+            local v = h and (h:IsA("Humanoid") and h.Health or h.Value)
+            return tonumber(v), tonumber(b:GetAttribute("MaxHealth"))
+        end
+
+        local drive = { want = 0, wobbleAt = 0, waterY = nil, boat = nil, sitAt = 0 }
+
+        -- Every frame at the wheel: turn toward the heading (45 deg/s at most),
+        -- move along it at SeaSpeed, at the water line the boat had.
+        local function driveTick(dt)
+            if not (P.running and S.driving) then return end
+            local b, seat = S.boat, S.seat
+            if not (b and b.Parent and seat and seat.Parent) then
+                S.driving = false
+                return
+            end
+            local _, r, h = parts()
+            if not (r and h) then return end
+            if h.SeatPart ~= seat then
+                -- Knocked off: back in the seat; the boat waits.
+                if os.clock() - drive.sitAt > 0.5 then
+                    drive.sitAt = os.clock()
+                    pcall(function() r.CFrame = seat.CFrame + UP * 3 end)
+                    pcall(function() seat:Sit(h) end)
+                end
+                return
+            end
+            local now = os.clock()
+            if now >= drive.wobbleAt then
+                drive.wobbleAt = now + 15 + math.random() * 15
+                local w = CFG.SeaWobble or 10
+                drive.want = (math.random() * 2 - 1) * w
+            end
+            local heading = headingFor(drive.want)
+            local step = math.min(dt, 0.1)
+            local speed = math.clamp(tonumber(CFG.SeaSpeed) or 300, 100, 350)
+            local pv = b:GetPivot()
+            local look = flat(seat.CFrame.LookVector)
+            local turn = 0
+            if look.Magnitude > 0.1 then
+                turn = turnStep(yawOf(look), yawOf(heading), math.rad(45) * step)
+            end
+            local y = drive.waterY or pv.Position.Y
+            local nextPos = Vector3.new(pv.Position.X, y, pv.Position.Z) + heading * speed * step
+            b:PivotTo(CFrame.new(nextPos) * CFrame.Angles(0, turn, 0) * (pv - pv.Position))
+            pcall(function()
+                seat.AssemblyLinearVelocity = Vector3.zero
+                seat.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+        do
+            local conn
+            conn = RunService.Heartbeat:Connect(function(dt)
+                if _G.BFF ~= P then conn:Disconnect() return end
+                if S.driving then pcall(driveTick, dt) end
+            end)
+        end
+
+        -- Out of the seat, the body lock back on, where you are.
+        local function stopDrive()
+            local was = S.driving
+            S.driving = false
+            local _, r, h = parts()
+            local sat = h and h.SeatPart ~= nil
+            if sat then
+                pcall(function() h.Sit = false end)
+                for _, w in ipairs(h.SeatPart:GetChildren()) do
+                    if w.Name == "SeatWeld" then pcall(function() w:Destroy() end) end
+                end
+            end
+            if was or sat then
+                flying = false
+                if r then
+                    local at = r.Position + UP * 6
+                    lastWritten = at
+                    lockAt(at)
+                end
+            end
+        end
+        S.stopDrive = stopDrive
+
+        local function sit(seat, myEpoch)
+            local _, r, h = parts()
+            if not (r and h) then return false end
+            flying = true            -- the lock lets go: the seat holds you now
+            for _ = 1, 3 do
+                pcall(function() r.CFrame = seat.CFrame + UP * 3 end)
+                pcall(function() seat:Sit(h) end)
+                local t0 = os.clock()
+                while os.clock() - t0 < 1.5 and not stale(myEpoch) do
+                    if h.SeatPart == seat then return true end
+                    task.wait(0.1)
+                end
+            end
+            if h.SeatPart == seat then return true end
+            flying = false
+            lastWritten = r.Position
+            lockAt(r.Position)
+            return false
+        end
+
+        -- To the back dealer, and buy. The boat you asked for, then two others.
+        local function buyBoat(myEpoch)
+            S.boatNote = "to the Tiki Outpost boat dealer (the back one)"
+            say(S.boatNote)
+            setState("FLY")
+            flyTo(TIKI_DEALER + UP * 4)
+            if stale(myEpoch) then return nil end
+            local cf = commF()
+            if not cf then S.boatNote = "no CommF_ remote" return nil end
+            local names, seen = {}, {}
+            for _, n in ipairs({ CFG.SeaBoat or "Beast Hunter", "Beast Hunter", "Guardian", "Lantern" }) do
+                if not seen[n] then seen[n] = true table.insert(names, n) end
+            end
+            for _, n in ipairs(names) do
+                local ok, res = pcall(function() return cf:InvokeServer("BuyBoat", n) end)
+                S.boatNote = string.format("BuyBoat \"%s\" -> %s", n, ok and tostring(res) or ("error " .. tostring(res)))
+                print("[BFF] sea: " .. S.boatNote)
+                local t0 = os.clock()
+                while os.clock() - t0 < 5 and not stale(myEpoch) do
+                    local b = myBoat()
+                    if b then
+                        S.tally.buys += 1
+                        return b
+                    end
+                    task.wait(0.25)
+                end
+                if stale(myEpoch) then return nil end
+            end
+            return nil
+        end
+
+        -- THE HUNT, one step. true = keep going here; false = the next server
+        -- (E.why says why).
+        function S.huntStep(myEpoch)
+            local E = P.elite
+            local sea = mySea()
+            if sea and sea ~= 3 then
+                S.note = "the Prehistoric Island is Third Sea only - hunt stopped"
+                P.setHunt(false)
+                E.note = S.note
+                say(S.note)
+                return true
+            end
+            -- The island is up: the hunt's job is done. Never leave it (it
+            -- despawns with nobody on it); the Volcano switch does the event.
+            local isle, mk = island(), marker()
+            if isle or mk then
+                if S.driving then stopDrive() end
+                if not S.foundAt then
+                    S.foundAt = os.clock()
+                    S.tally.found += 1
+                    print(string.format("[BFF] sea: PREHISTORIC ISLAND at %d m from Tiki", math.floor(S.meters or 0)))
+                    notify("Prehistoric Island is up!")
+                end
+                local at = relicPos(isle) or mk
+                if at then flyTo(at + UP * 40) end
+                S.note = "PREHISTORIC ISLAND UP - holding on it (the Volcano event switch does the event)"
+                E.note = S.note
+                say(S.note)
+                setState("ISLAND")
+                task.wait(0.5)
+                return true
+            end
+            S.foundAt = nil
+
+            local b = myBoat()
+            if not b then
+                local _, rr = parts()
+                local farOut = rr ~= nil and flat(rr.Position - TIKI_DEALER).Magnitude > 6000
+                if S.everDriven and farOut then
+                    -- Sunk far out: a new one is a long flight back - the
+                    -- next server. Near Tiki: just buy another.
+                    S.everDriven = false
+                    E.why = "the boat was lost at sea"
+                    return false
+                end
+                b = buyBoat(myEpoch)
+                if not b then
+                    S.buyFails = (S.buyFails or 0) + 1
+                    if S.buyFails >= 3 then
+                        S.note = "could not buy a boat 3 times (" .. tostring(S.boatNote) .. ") - hunt stopped"
+                        P.setHunt(false)
+                        E.note = S.note
+                        say(S.note)
+                    end
+                    task.wait(1)
+                    return true
+                end
+                S.buyFails = 0
+            end
+            local seat = seatOf(b)
+            if not seat then
+                S.boatNote = b.Name .. " has no VehicleSeat"
+                E.why = S.boatNote
+                return false
+            end
+            S.boat, S.seat = b, seat
+            if drive.boat ~= b then
+                drive.boat, drive.waterY = b, nil
+            end
+
+            local _, _, h = parts()
+            if not (h and h.SeatPart == seat) then
+                S.driving = false
+                local _, r = parts()
+                if r and (r.Position - seat.Position).Magnitude > 30 then
+                    flying = false
+                    S.boatNote = "to your boat"
+                    setState("FLY")
+                    say(S.boatNote)
+                    flyTo(seat.Position + UP * 6)
+                    if stale(myEpoch) then return true end
+                end
+                if not sit(seat, myEpoch) then
+                    S.boatNote = "could not sit in " .. b.Name .. " - trying again"
+                    say(S.boatNote)
+                    task.wait(0.5)
+                    return true
+                end
+                for _, d in ipairs(b:GetDescendants()) do
+                    if d:IsA("BasePart") then pcall(function() d.CanCollide = false end) end
+                end
+                S.boatNote = "at the wheel of " .. b.Name
+            end
+            if not S.driving then
+                drive.waterY = drive.waterY or b:GetPivot().Position.Y
+                drive.wobbleAt = 0
+                flying = true            -- seated already (a Stop and Start): the lock still lets go
+                S.driving, S.everDriven = true, true
+            end
+
+            local pos = b:GetPivot().Position
+            S.meters = metersFrom(pos, CFG.SeaStudsPerM)
+            S.danger = dangerNow()
+            S.hp, S.maxHp = boatHP(b)
+            local to = tonumber(CFG.SeaSearchTo) or 8000
+            setState("SAIL")
+            S.note = string.format("sailing west  ·  %d m from Tiki (of %d)  ·  danger %s%s",
+                math.floor(S.meters), to, tostring(S.danger or "?"),
+                S.hp and string.format("  ·  boat %d/%s HP", S.hp, tostring(S.maxHp or "?")) or "")
+            E.note = S.note
+            say(S.note)
+            if S.meters >= to then
+                stopDrive()
+                S.everDriven = false
+                E.why = string.format("no Prehistoric Island by %d m", to)
+                return false
+            end
+            task.wait(0.25)
+            return true
+        end
+
+        -- ---------- the golems ----------
+        local function golemBuild()
+            local free, put = {}, {}
+            for _, e in ipairs(liveEnemies(GOLEMS)) do
+                if S.seen then S.seen[e.model] = e.hum end
+                if isPutBack(e.model) then table.insert(put, e) else table.insert(free, e) end
+            end
+            local _, r = parts()
+            local from = r and r.Position or Vector3.new(0, 0, 0)
+            local cage = S.ev and S.ev.cage
+            if #free > 0 then
+                if not (CFG.Magnet and cage) then
+                    local e = nearestOf(free, from, function(x) return x.root.Position end)
+                    return { e }, e.root.Position, true
+                end
+                table.sort(free, function(a, b)
+                    return (a.root.Position - cage).Magnitude < (b.root.Position - cage).Magnitude
+                end)
+                local cap = math.max(1, math.floor(CFG.GrabMax or 30))
+                while #free > cap do table.remove(free) end
+                return free, cage, false
+            end
+            -- Put back (no damage when held): fought where it stands.
+            if #put > 0 then
+                local e = nearestOf(put, from, function(x) return x.root.Position end)
+                return { e }, e.root.Position, true
+            end
+            return {}, nil, false
+        end
+
+        local function eventOn(isle) return isle ~= nil and isle:GetAttribute("IsMinigameActive") == true end
+
+        local GOLEM_CUR = {
+            name = "Lava Golem", build = golemBuild,
+            -- The fight ends the moment a vent needs closing (magnet on: the
+            -- golems stay held), or the event or the switch ends.
+            breakIf = function()
+                if not (CFG.Volcano and P.running) then return true end
+                local isle = island()
+                if not eventOn(isle) then return true end
+                return CFG.Magnet and #liveVents(isle) > 0
+            end,
+        }
+        S.GOLEM_CUR = GOLEM_CUR
+
+        -- Held from the first one on, between fights too: the pile stays
+        -- active (refreshPile adds each new one) until the event ends.
+        local function holdGolems()
+            if not CFG.Magnet or not (S.ev and S.ev.cage) then return end
+            if pileCur == GOLEM_CUR then
+                pileActive = true
+                return
+            end
+            if #liveEnemies(GOLEMS) == 0 then return end
+            releasePile()
+            pileCur, pileNames = GOLEM_CUR, GOLEMS
+            pileActive = true
+            refreshPile()
+        end
+        local function letGolemsGo()
+            if pileCur == GOLEM_CUR then releasePile() end
+        end
+
+        local function countGolems(ev)
+            for m, hum in pairs(S.seen) do
+                if hum.Health <= 0 then
+                    S.seen[m] = nil
+                    ev.golems += 1
+                    S.tally.golems += 1
+                elseif not m.Parent then
+                    S.seen[m] = nil
+                end
+            end
+        end
+
+        -- ---------- the vents ----------
+        -- The weapons you carry, fruit first, then melee, sword, gun.
+        local function ventTools()
+            local list = toolNames()
+            table.sort(list, function(a, b)
+                local ra, rb = TYPE_RANK[toolType(a)] or 9, TYPE_RANK[toolType(b)] or 9
+                if ra ~= rb then return ra < rb end
+                return a.Name < b.Name
+            end)
+            return list
+        end
+
+        -- A skill whose bar did not start after the key is not one this weapon
+        -- has (or not unlocked): left out for 30 s.
+        local ventSkip = {}
+        local function ventCast(pos)
+            local now = os.clock()
+            local function aimIt()
+                RunService.Heartbeat:Wait()
+                pcall(aimSwapIn, pos, pos)
+            end
+            for _, t in ipairs(ventTools()) do
+                for _, k in ipairs(VENT_KEYS) do
+                    local key = t.Name .. " " .. k
+                    if (CFG.VentKeys or {})[k] and now >= (ventSkip[key] or 0) and skillReady(t.Name, k)
+                        and equip(t.Name) and barReady(t.Name, k) ~= false then
+                        local w = CFG.Weapons[t.Name]
+                        local hold = (w and w.hold and w.hold[k]) or 0.05
+                        P.aimAt = pos
+                        aimUntil = os.clock() + hold + (CFG.CastWait or 0.45) + 0.5
+                        holdKey(KEYCODE[k], hold, aimIt)
+                        cdOf(t.Name, k).lastCast = os.clock()
+                        stats.casts += 1
+                        task.wait(CFG.CastWait or 0.45)
+                        aimUntil = 0
+                        P.aimAt = nil
+                        if barReady(t.Name, k) == true then ventSkip[key] = os.clock() + 30 end
+                        S.lastVent = key
+                        return key
+                    end
+                end
+            end
+            -- Nothing ready: an aimed M1 with what is in hand (Skull Guitar,
+            -- Bazooka, Cannon and Gravity close vents with M1 - the wiki).
+            local cam = workspace.CurrentCamera
+            if cam then
+                aimPixel = cam.ViewportSize * 0.5
+                aimIt()
+                pressM1()
+                aimPixel = nil
+            end
+            S.lastVent = "M1 (every key cooling)"
+            task.wait(0.15)
+            return nil
+        end
+
+        local function patchVent(ev, v, myEpoch)
+            local stand = standFor(v.pos, ev.centre or v.pos, CFG.VentDistance or 12)
+            ev.note = string.format("closing a vent  ·  %d closed  ·  %d golems down", ev.vents, ev.golems)
+            say(ev.note)
+            local _, r = parts()
+            if not r then return end
+            if (r.Position - stand).Magnitude > 4 then
+                flyTo(stand, { face = v.pos })
+                if stale(myEpoch) then return end
+            end
+            lockAt(stand, v.pos)
+            ventCast(v.pos)
+            if not ventLive(v.model) then
+                ev.vents += 1
+                S.tally.vents += 1
+                print(string.format("[BFF] volcano: vent closed (%s)  ·  %d this event", tostring(S.lastVent), ev.vents))
+            end
+        end
+
+        -- Lava on the volcano kills; the hubs take it off the client. The
+        -- vents, the relic, the prompt, the eggs and the cave door stay.
+        local function clearLava(isle)
+            local c = core(isle)
+            local il = c and c:FindFirstChild("InteriorLava")
+            if il then pcall(function() il:Destroy() end) end
+            local keep = {}
+            for _, n in ipairs({ "VolcanoRocks", "PrehistoricRelic", "ActivationPrompt", "SpawnedDragonEggs" }) do
+                local x = c and c:FindFirstChild(n)
+                if x then table.insert(keep, x) end
+            end
+            local tt = isle:FindFirstChild("TrialTeleport")
+            if tt then table.insert(keep, tt) end
+            for _, d in ipairs(isle:GetDescendants()) do
+                if d:IsA("BasePart") and string.find(string.lower(d.Name), "lava", 1, true) then
+                    local kept = false
+                    for _, k in ipairs(keep) do
+                        if d:IsDescendantOf(k) then kept = true break end
+                    end
+                    if not kept then pcall(function() d:Destroy() end) end
+                end
+            end
+        end
+
+        -- ---------- the loot ----------
+        local function bonesLying(isle)
+            local c = posOf(isle)
+            local out = {}
+            for _, d in ipairs(workspace:GetChildren()) do
+                if d.Name == "DinoBone" and not S.boneSkip[d] then
+                    local p = d:IsA("BasePart") and d or d:FindFirstChildWhichIsA("BasePart", true)
+                    if p and (not c or (p.Position - c).Magnitude < 3000) then
+                        table.insert(out, { inst = d, part = p })
+                    end
+                end
+            end
+            return out
+        end
+        local function eggPrompt(isle)
+            local se = core(isle) and core(isle):FindFirstChild("SpawnedDragonEggs")
+            for _, d in ipairs(se and se:GetDescendants() or {}) do
+                if d:IsA("ProximityPrompt") and d.Enabled and not S.eggSkip[d] then return d end
+            end
+            return nil
+        end
+
+        local function lootStep(isle, ev, myEpoch)
+            local _, r = parts()
+            if not r then return end
+            local bones = bonesLying(isle)
+            if #bones > 0 then
+                local bn = nearestOf(bones, r.Position, function(x) return x.part.Position end)
+                ev.note = string.format("picking up dinosaur bones  ·  %d lying", #bones)
+                say(ev.note)
+                flyTo(bn.part.Position)
+                task.wait(0.3)
+                lockAt(bn.part.Position + UP * 2)
+                task.wait(0.4)
+                if bn.inst.Parent then
+                    local n = (S.boneTries[bn.inst] or 0) + 1
+                    S.boneTries[bn.inst] = n
+                    if n >= 3 then S.boneSkip[bn.inst] = true end
+                else
+                    ev.bones += 1
+                    S.tally.bones += 1
+                end
+                return
+            end
+            local pp = eggPrompt(isle)
+            if pp then
+                local at = posOf(pp.Parent)
+                ev.note = "the Dragon Egg"
+                say(ev.note)
+                if at then flyTo(at + UP * 3) end
+                if stale(myEpoch) then return end
+                holdPrompt(pp, myEpoch)
+                task.wait(0.8)
+                if pp.Parent and pp.Enabled then
+                    local n = (S.eggTries[pp] or 0) + 1
+                    S.eggTries[pp] = n
+                    if n >= 2 then
+                        S.eggSkip[pp] = true
+                        ev.note = "the egg will not come - it needs the Dragon Tether, a hit on a golem or vent, and the relic over 90%"
+                        print("[BFF] volcano: " .. ev.note)
+                    end
+                else
+                    ev.eggs += 1
+                    S.tally.eggs += 1
+                    notify("Dragon Egg picked up!")
+                    print("[BFF] volcano: Dragon Egg picked up")
+                end
+            end
+        end
+
+        local function startEvent(isle, ev, myEpoch)
+            local pp, at = promptOf(isle)
+            if not (pp and at) then return end
+            ev.note = "starting the event at the relic"
+            say(ev.note)
+            flyTo(at + UP * 3)
+            if stale(myEpoch) then return end
+            holdPrompt(pp, myEpoch)
+            local t0 = os.clock()
+            while os.clock() - t0 < 4 and not stale(myEpoch) do
+                if eventOn(isle) then
+                    ev.startedAt = os.clock()
+                    S.tally.events += 1
+                    ev.note = "THE VOLCANO EVENT IS ON"
+                    print("[BFF] volcano: event started")
+                    return
+                end
+                task.wait(0.2)
+            end
+            ev.starts += 1
+            ev.note = string.format("pressed the relic %d times - the event did not start (the game's own start bug?)", ev.starts)
+            print("[BFF] volcano: " .. ev.note)
+        end
+
+        local function defend(isle, ev, myEpoch)
+            if os.clock() - (S.lavaAt or 0) > 2 then
+                S.lavaAt = os.clock()
+                pcall(clearLava, isle)
+            end
+            holdGolems()
+            local vents = liveVents(isle)
+            local golems = liveEnemies(GOLEMS)
+            ev.liveVents, ev.liveGolems = #vents, #golems
+            local pick = defendPick(#vents > 0, #golems > 0, CFG.Magnet)
+            if pick == "vent" then
+                local _, r = parts()
+                local from = r and r.Position or ev.centre or vents[1].pos
+                patchVent(ev, nearestOf(vents, from, function(x) return x.pos end), myEpoch)
+            elseif pick == "golem" then
+                activeName = "Lava Golem"
+                ev.note = string.format("Lava Golems: %d  ·  %d down  ·  %d vents closed", #golems, ev.golems, ev.vents)
+                say(ev.note)
+                fight(GOLEM_CUR, GOLEMS)
+            else
+                local at = ev.relic or relicPos(isle)
+                if at then flyTo(at + UP * 25) end
+                ev.note = string.format("event on - waiting for a vent or a golem  ·  %d closed  ·  %d down", ev.vents, ev.golems)
+                say(ev.note)
+                task.wait(0.2)
+            end
+        end
+
+        -- THE EVENT, one step. true = it is handling the island (nothing else
+        -- runs); false = no island here, or the switch is off.
+        function S.volcanoStep()
+            if not CFG.Volcano then
+                letGolemsGo()
+                return false
+            end
+            local isle, mk = island(), marker()
+            if not (isle or mk) or (mySea() and mySea() ~= 3) then
+                letGolemsGo()
+                S.ev = nil
+                return false
+            end
+            local myEpoch = epoch
+            if S.driving then stopDrive() end
+            if not isle then
+                -- Only the marker: far away. Fly there; the island streams in.
+                local _, r = parts()
+                if r and (r.Position - mk).Magnitude > 300 then
+                    setState("FLY")
+                    S.note = "to the Prehistoric Island"
+                    say(S.note)
+                    flyTo(mk + UP * 80)
+                else
+                    task.wait(0.3)
+                end
+                return true
+            end
+            local ev = S.ev
+            if not ev or ev.isle ~= isle then
+                ev = { isle = isle, vents = 0, golems = 0, bones = 0, eggs = 0, starts = 0, note = "island up" }
+                S.ev = ev
+                S.seen = setmetatable({}, { __mode = "k" })
+                S.boneSkip, S.boneTries = setmetatable({}, { __mode = "k" }), setmetatable({}, { __mode = "k" })
+                S.eggSkip, S.eggTries = setmetatable({}, { __mode = "k" }), setmetatable({}, { __mode = "k" })
+            end
+            if not ev.cage then
+                local rel, centre = relicPos(isle), volcanoCentre(isle)
+                if rel and centre then
+                    ev.relic, ev.centre = rel, centre
+                    ev.cage = cageSpot(rel, centre, CFG.GolemCage or 60)
+                end
+            end
+            countGolems(ev)
+            local active = eventOn(isle)
+            local pp = promptOf(isle)
+            local lootLeft = CFG.VolcanoLoot and not active
+                and (#bonesLying(isle) > 0 or eggPrompt(isle) ~= nil)
+            local ph = phase(active, pp ~= nil and pp.Enabled, lootLeft)
+            ev.phase = ph
+            ev.counted = player:GetAttribute("PrehistoricIslandParticipant")
+            setState("VOLCANO")
+            activeName = "Prehistoric Island"
+            if ph ~= "defend" then letGolemsGo() end
+            if ph == "defend" then
+                defend(isle, ev, myEpoch)
+            elseif ph == "loot" then
+                lootStep(isle, ev, myEpoch)
+            elseif ph == "start" then
+                startEvent(isle, ev, myEpoch)
+            else
+                local at = ev.relic or relicPos(isle) or posOf(isle)
+                if at then flyTo(at + UP * 30) end
+                ev.note = "island up - the event is over or not ready; holding at the relic"
+                say(ev.note)
+                task.wait(0.5)
+            end
+            S.note = ev.note
+            return true
+        end
+
+        -- For the tests.
+        S._t = {
+            metersFrom = metersFrom, headingFor = headingFor, yawOf = yawOf, turnStep = turnStep,
+            cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
+            ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
+        }
+    end
+    build()
+end
+
+-- =========================================================
 -- MAIN LOOP
 -- =========================================================
 local function step()
@@ -4699,12 +5622,15 @@ local function step()
         task.wait(0.5)
         return
     end
-    if healthPct() < (CFG.EscapeBelow or 0.35) then
+    -- At the wheel the boat outruns what hurts you; flying up would leave it.
+    if healthPct() < (CFG.EscapeBelow or 0.35) and not (P.sea and P.sea.driving) then
         escape()
         return
     end
     pcall(keepHaki)
 
+    -- The volcano event goes before every mode while its island is up.
+    if P.sea and P.sea.volcanoStep() then return end
     if CFG.Hunt then huntStep() return end
     if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
@@ -5797,6 +6723,7 @@ local function buildUI()
         { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
+        { "prehistoric", "Prehistoric hunt", "Boat to Sea Danger 6, sail till the island comes, else next server" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -6092,11 +7019,25 @@ local function buildUI()
                 say(x and "random mode on" or "random mode off - back to the circuit")
             end)
         huntSwitches(v)
+        switchRow(v, "Volcano event",
+            "Prehistoric Island up: start it, vents + Lava Golems, bones + egg",
+            function() return CFG.Volcano end,
+            function(x)
+                CFG.Volcano = x
+                say(x and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
+            end)
         readout(v, function()
+            if CFG.Volcano and P.sea.ev then
+                local ev = P.sea.ev
+                return string.format("VOLCANO  %s\n%d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                    tostring(ev.note), ev.vents, ev.golems, ev.bones, ev.eggs)
+            end
             if CFG.Hunt then
                 local t = P.elite.tally
                 local k = CFG.HuntKind
-                local count = (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
+                local count = (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
+                        P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
+                    or (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
                     or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
                         tostring(P.elite.offer or "not asked yet"))
@@ -6153,6 +7094,13 @@ local function buildUI()
             if not CFG.Hunt then return "Off" end
             return tostring(CFG.HuntKind) .. (CFG.HuntHop and ", hopping" or ", this server")
         end, "elite")
+        hairline(v)
+        navRow(v, "Sea", function()
+            local s = P.sea
+            if s.driving and s.meters then return string.format("sailing  ·  %d m", math.floor(s.meters)) end
+            return math.floor(CFG.SeaSpeed) .. " studs/s  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m"
+                .. (CFG.Volcano and "  ·  volcano on" or "")
+        end, "sea")
         hairline(v)
         navRow(v, "Stats", function()
             local m = meas
@@ -6946,6 +7894,103 @@ local function buildUI()
     end
 
     -- =====================================================
+    -- SEA: THE PREHISTORIC HUNT AND THE VOLCANO EVENT
+    -- =====================================================
+    do
+        local v = makeView("sea")
+        gap(v, 6)
+        heading2(v, "prehistoric hunt  (Third Sea)")
+        readout(v, function()
+            local s = P.sea
+            local t = s.tally
+            return table.concat({
+                "now       " .. tostring(s.note),
+                "boat      " .. tostring(s.boatNote)
+                    .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
+                string.format("where     %s  ·  danger %s",
+                    s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
+                        math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
+                    tostring(s.danger or "-")),
+                string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
+            }, "\n")
+        end)
+        sliderRow(v, "Boat speed", 250, 350, 5,
+            function() return CFG.SeaSpeed end,
+            function(x) CFG.SeaSpeed = x end, " studs/s")
+        sliderRow(v, "No island by: next server", 3000, 15000, 500,
+            function() return CFG.SeaSearchTo end,
+            function(x) CFG.SeaSearchTo = x end, " m")
+        sliderRow(v, "One compass meter", 5, 15, 0.5,
+            function() return CFG.SeaStudsPerM end,
+            function(x) CFG.SeaStudsPerM = x end, " studs")
+        caption(v, "Meters are counted from the Tiki back boat dealer. Danger 6 "
+            .. "starts about 2,600 m out. Check the \"where\" line against your "
+            .. "compass once; if it drifts, move \"One compass meter\".")
+        sliderRow(v, "Heading wanders", 0, 30, 1,
+            function() return CFG.SeaWobble end,
+            function(x) CFG.SeaWobble = x end, " deg")
+        caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
+            .. "dealer, puts you at the wheel and drives west through the sea "
+            .. "events. Island up: off the boat, onto the island, and it never "
+            .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
+            .. "or nothing by the far edge: the next server.")
+
+        heading2(v, "volcano event")
+        switchRow(v, "Volcano event",
+            "Whenever a Prehistoric Island is up in this server",
+            function() return CFG.Volcano end,
+            function(x) CFG.Volcano = x end)
+        readout(v, function()
+            local ev = P.sea.ev
+            local t = P.sea.tally
+            local lines = {}
+            if ev then
+                table.insert(lines, "now       " .. tostring(ev.note))
+                table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
+                    tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
+                    ev.counted and "COUNTED" or "not counted (not there at the start)"))
+                table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                    ev.vents, ev.golems, ev.bones, ev.eggs))
+                table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
+            else
+                table.insert(lines, "no Prehistoric Island in this server")
+            end
+            table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
+                t.events, t.vents, t.golems, t.bones, t.eggs))
+            return table.concat(lines, "\n")
+        end)
+        heading2(v, "keys fired at a vent")
+        for _, k in ipairs({ "Z", "X", "C", "V" }) do
+            switchRow(v, k, nil,
+                function() return (CFG.VentKeys or {})[k] end,
+                function(x)
+                    CFG.VentKeys = CFG.VentKeys or {}
+                    CFG.VentKeys[k] = x
+                end)
+        end
+        caption(v, "Every weapon you carry fires these, fruit first, aimed AT "
+            .. "the vent. Only moves that break things close one; a key whose "
+            .. "skill does not fire is left out for 30 s. Nothing ready: an "
+            .. "aimed M1 (Skull Guitar, Bazooka, Cannon, Gravity close vents with M1).")
+        sliderRow(v, "Stand off a vent", 4, 30, 1,
+            function() return CFG.VentDistance end,
+            function(x) CFG.VentDistance = x end, " studs")
+        heading2(v, "lava golems")
+        sliderRow(v, "Held off the relic", 30, 150, 5,
+            function() return CFG.GolemCage end,
+            function(x) CFG.GolemCage = x end, " studs")
+        caption(v, "Magnet on: every golem is held there, on the side away from "
+            .. "the volcano, the whole event - held, it cannot hit the relic - and "
+            .. "killed with your Attack page weapons when no vent is open. Magnet "
+            .. "off: golems first, where they stand.")
+        switchRow(v, "Bones and the egg after a win", nil,
+            function() return CFG.VolcanoLoot end,
+            function(x) CFG.VolcanoLoot = x end)
+        caption(v, "The egg needs the Dragon Tether, a hit on a golem or vent, and "
+            .. "the relic over 90% at the end.")
+    end
+
+    -- =====================================================
     -- STATS
     -- =====================================================
     do
@@ -7064,8 +8109,13 @@ function P.start()
     track(RunService.Heartbeat:Connect(function(dt)
         pcall(bodyHeartbeat)
         pcall(magnetTick)
-        if P.running and CFG.AimSkills and CFG.AimHidden and pileCentre and os.clock() < aimUntil then
-            pcall(aimSwapIn, aimPoint(), pileCentre)
+        if P.running and os.clock() < aimUntil then
+            -- A point of its own (a volcano vent): always aimed at, hidden.
+            if P.aimAt then
+                pcall(aimSwapIn, P.aimAt, P.aimAt)
+            elseif CFG.AimSkills and CFG.AimHidden and pileCentre then
+                pcall(aimSwapIn, aimPoint(), pileCentre)
+            end
         end
         if attacking and meas then meas.fight += dt end
     end))
@@ -7110,6 +8160,8 @@ function P.stop(why)
     lockCF, lastWritten = nil, nil
     pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
     aimUntil = 0
+    P.aimAt = nil
+    if P.sea then P.sea.driving = false end    -- the boat stops; you stay in your seat
     pcall(hiddenAim, false)
     pcall(releaseCamera)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
