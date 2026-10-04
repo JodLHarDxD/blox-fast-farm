@@ -860,4 +860,114 @@ end)()
     P.rotate = nil
 end)()
 
+-- ---------------------------------------------------------------- VENTS: THE SKULL GUITAR M1
+;(function()
+    local ENERGY = { Value = 100 }
+    local energyOn = true
+    player.Character = { FindFirstChild = function(_, n) return (n == "Energy" and energyOn) and ENERGY or nil end }
+    local TAPS = {}
+    local spends = true
+    local RE = { FireServer = function(_, what, pos)
+        table.insert(TAPS, { what, pos })
+        if spends then ENERGY.Value -= 20 end
+    end }
+    local guitar = { Name = "Skull Guitar", ToolTip = "Gun",
+        FindFirstChild = function(_, n) return n == "RemoteEvent" and RE or nil end }
+    local part = inst("Rock", "Part", { Position = vec(20, 20, 20) })
+    local hitsToClose = 2
+    local function target()
+        local t = { pos = part.Position, part = part, model = part }
+        t.alive = function() return #TAPS + M1S < hitsToClose end
+        return t
+    end
+    CFG.VentGuitar, CFG.VentM1Every, CFG.VentM1Time = true, 0.3, 3
+    TOOLS = { { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" }, guitar }
+    READY = { ["Dragon-Dragon Z"] = true }
+    S.learn, S.gunWay, S.gunProbe, S.lowEnergyAt = {}, {}, {}, nil
+
+    -- 1. Its remote spends energy: fired by the remote at the vent, no clicks.
+    reset()
+    M1S = 0
+    check("vents: the Skull Guitar is the vent gun", T.gunForVents() == "Skull Guitar")
+    local key, closed = T.gunM1(target(), "Skull Guitar")
+    check("guitar: in hand, TAP at the vent itself, closed it", HELD == "Skull Guitar" and closed == true
+        and TAPS[1][1] == "TAP" and vnear(TAPS[1][2], part.Position), key)
+    check("guitar: the remote proven by its energy - no clicks", S.gunWay["Skull Guitar"] == "remote" and M1S == 0)
+    check("guitar: credited as \"Skull Guitar M1\"", S.learn["Skull Guitar M1"] and S.learn["Skull Guitar M1"].closed == 1)
+    check("guitar: aimed at the vent while it shoots, the aim cleared after", P.aimAt == nil and aimUntil == 0)
+
+    -- 2. A remote that spends nothing: 3 shots, then the aimed click.
+    S.gunWay, S.gunProbe = {}, {}
+    TAPS, spends, ENERGY.Value, hitsToClose = {}, false, 100, 99
+    M1S = 0
+    T.gunM1(target(), "Skull Guitar")
+    check("guitar: remote spent no energy in 3 shots - the aimed click from then on",
+        S.gunWay["Skull Guitar"] == "click" and #TAPS == 3 and M1S > 0, #TAPS .. " taps, " .. M1S .. " clicks")
+    check("guitar: the click is aimed at the vent (silent aim)", vnear(M1_AIM, part.Position), vs(M1_AIM))
+
+    -- 3. Energy not readable: both, every shot.
+    S.gunWay, S.gunProbe = {}, {}
+    energyOn, TAPS, M1S = false, {}, 0
+    T.gunM1(target(), "Skull Guitar")
+    check("guitar: energy not readable - remote AND click", S.gunWay["Skull Guitar"] == "both" and #TAPS > 1 and M1S >= #TAPS - 1,
+        #TAPS .. " / " .. M1S)
+    energyOn = true
+
+    -- 4. Energy under 20: stops at once, the skills for 5 s.
+    S.gunWay = { ["Skull Guitar"] = "remote" }
+    ENERGY.Value, TAPS = 10, {}
+    T.gunM1(target(), "Skull Guitar")
+    check("guitar: energy under 20 - no shot, the skills next", #TAPS == 0 and T.gunForVents() == nil)
+    CLOCK += 6
+    check("...5 s later the guitar again", T.gunForVents() == "Skull Guitar")
+
+    -- 5. Learned useless: 6 tries, nothing closed - the skills.
+    S.learn["Skull Guitar M1"] = { casts = 6, closed = 0 }
+    check("guitar: 6 tries closed nothing - the skills instead", T.gunForVents() == nil)
+    S.learn["Skull Guitar M1"] = { casts = 6, closed = 1 }
+    check("...one closed = still the guitar", T.gunForVents() == "Skull Guitar")
+
+    -- 6. Not carried / switch off.
+    TOOLS = { { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" } }
+    check("no vent gun carried: the skills", T.gunForVents() == nil)
+    TOOLS = { { Name = "Bazooka", ToolTip = "Gun" } }
+    check("Bazooka carried: it is the vent gun (its M1 breaks things too)", T.gunForVents() == "Bazooka")
+    TOOLS = { { Name = "Bazooka", ToolTip = "Gun" }, guitar }
+    check("both carried: the Skull Guitar first", T.gunForVents() == "Skull Guitar")
+    CFG.VentGuitar = false
+    check("switch off: the skills", T.gunForVents() == nil)
+    -- 7. The whole event: the guitar in your inventory is loaded, kept, and
+    --    its TAPs close the vent - no skill key at all.
+    CFG.VentGuitar = true
+    S.learn, S.gunWay, S.gunProbe, S.lowEnergyAt = {}, {}, {}, nil
+    ENERGY.Value, spends, TAPS, M1S = 100, true, {}, 0
+    MAP.kids.PrehistoricIsland = nil
+    local isleG, _, ventA = makeIsland(true, false)
+    ventA.kids.VFXLayer.kids.Specs.Enabled = true
+    RE.FireServer = function(_, what, pos)
+        table.insert(TAPS, { what, pos })
+        ENERGY.Value -= 20
+        ventA.kids.VFXLayer.kids.Specs.Enabled = false
+    end
+    ENEMIES = {}
+    TOOLS = { { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" } }
+    READY = { ["Dragon-Dragon Z"] = true }
+    local loaded = {}
+    P.invHas = function(n) return n == "Skull Guitar" end
+    P.loadItem = function(n) table.insert(loaded, n) table.insert(TOOLS, guitar) return true end
+    S.ev = nil
+    reset()
+    S.volcanoStep()
+    check("event: the Skull Guitar loaded from your inventory", loaded[1] == "Skull Guitar" and #loaded == 1)
+    check("event: kept - no gun swapped in over it", P.keepGun == "Skull Guitar")
+    check("event: the vent closed by the guitar's TAPs, no skill key", #TAPS >= 1 and #KEYS_SENT == 0
+        and S.ev.vents == 1, #TAPS .. " taps, " .. #KEYS_SENT .. " keys, vents " .. tostring(S.ev.vents))
+    P.invHas, P.loadItem = nil, nil
+    MAP.kids.PrehistoricIsland = nil
+    S.ev = nil
+    CFG.VentGuitar = nil
+    S.learn = {}
+    player.Character = nil
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

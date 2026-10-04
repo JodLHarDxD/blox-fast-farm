@@ -67,6 +67,28 @@ T += 2
 check("rotate: inventory switch off = never", P.rotate(true) == false)
 CFG.InvSwap = true
 
+-- ---------------------------------------------------------------- THE VENT GUN
+R.original, R.lastLoad = nil, -100
+INV = { { Name = "Bazooka", Type = "Gun" }, { Name = "Skull Guitar", Type = "Gun" }, { Name = "Yama", Type = "Sword" },
+    { Name = "Hallow Scythe", Type = "Sword" }, { Name = "Kabucha", Type = "Gun" } }
+R.inv = nil
+CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
+check("invHas: the Skull Guitar is in your inventory", P.invHas("Skull Guitar") and not P.invHas("Soul Cane"))
+check("loadItem: it comes into your hands (the gun slot)", P.loadItem("Skull Guitar") and CARRY["Skull Guitar"] == "Gun"
+    and CARRY.Kabucha == nil)
+check("loadItem: what you carried is remembered for the stop", R.original and R.original.Gun == "Kabucha")
+P.keepGun = "Skull Guitar"
+R.loadedAt, R.failUntil = {}, {}
+T += 5
+P.rotate(true)
+check("keepGun: the rotation loads a SWORD, never a gun over the vent gun", CARRY["Skull Guitar"] == "Gun"
+    and LOADS[#LOADS] == "Yama", LOADS[#LOADS])
+P.keepGun = nil
+R.original = nil
+CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
+R.original = { Sword = "Hallow Scythe", Gun = "Kabucha" }
+R.originalText = "Hallow Scythe, Kabucha"
+
 -- ---------------------------------------------------------------- RESTORE
 -- Swapped away from both by now (a sword and a gun from the inventory in hand).
 CARRY = { ["Dragon Talon"] = "Melee", ["Yama"] = "Sword", ["Bazooka"] = "Gun" }

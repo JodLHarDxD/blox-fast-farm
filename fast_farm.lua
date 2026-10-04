@@ -268,7 +268,16 @@ local CFG = {
     -- The keys fired at a vent, every carried weapon's (fruit, melee, sword,
     -- gun). Only moves that break things close one.
     VentKeys           = { Z = true, X = true, C = true, V = false },
-    VentDistance       = 12,         -- stand this far out from a vent (and 8 up), aiming at it
+    VentDistance       = 12,
+    -- THE GUN M1 AT THE VENTS (user, 2026-10-04; the wiki: Skull Guitar's M1
+    -- has Destructible Physics and a short cooldown, "can be used on the
+    -- pressure points"; Bazooka and Cannon too). Carried or in your inventory
+    -- = loaded and fired at the vent, stood still, before any skill. Skull
+    -- Guitar: its own remote ("TAP", the vent) - no mouse. Its M1 costs 20
+    -- energy: under that, the skills until it is back.
+    VentGuitar         = true,
+    VentM1Every        = 0.3,        -- seconds between shots
+    VentM1Time         = 3,          -- seconds of shots at one vent per turn         -- stand this far out from a vent (and 8 up), aiming at it
     -- Magnet on: every golem is held this far from the relic (away from the
     -- volcano) while the vents are closed - a held golem cannot hit the relic.
     -- Magnet off: golems before vents, fought where they stand.
@@ -2371,8 +2380,47 @@ do
         R.pickNext = pickNext
         R.rested = rested
 
+        -- What you carried, once, to put back at the stop.
+        local function remember(tools)
+            if R.original then return end
+            R.original = {}
+            local names = {}
+            for _, t in ipairs(tools) do
+                local ty = toolType(t)
+                if ty == "Sword" or ty == "Gun" then
+                    R.original[ty] = t.Name
+                    table.insert(names, t.Name)
+                end
+            end
+            R.originalText = (#names > 0) and table.concat(names, ", ") or "nothing"
+        end
+
+        function P.invHas(name)
+            for _, it in ipairs(inventory()) do
+                if it.name == name then return true end
+            end
+            return false
+        end
+
+        -- One by name into your hands (the volcano's Skull Guitar). true = in hand.
+        function P.loadItem(name)
+            if findTool(name) then return true end
+            remember(toolNames())
+            local cf = commF()
+            pcall(function() cf:InvokeServer("LoadItem", name) end)
+            local t0 = os.clock()
+            while not findTool(name) and os.clock() - t0 < 1.5 do task.wait(0.05) end
+            if findTool(name) then
+                R.loads += 1
+                R.note = "loaded " .. name .. " (for the vents)"
+                return true
+            end
+            return false
+        end
+
         -- vents = true: the volcano asks (any attack mode). true = a new one
-        -- is in your hands.
+        -- is in your hands. P.keepGun (the volcano's vent gun) = no gun is
+        -- swapped in over it.
         function P.rotate(vents)
             if not CFG.InvSwap then return false end
             if not vents and not CFG.AutoAttack then return false end
@@ -2381,24 +2429,20 @@ do
             local carried = {}
             local tools = toolNames()
             for _, t in ipairs(tools) do carried[t.Name] = true end
-            local pick = pickNext(inventory(), carried, CFG.InvSkip or {}, R.failUntil, R.loadedAt, now, rested)
+            local list = inventory()
+            if P.keepGun and carried[P.keepGun] then
+                local only = {}
+                for _, it in ipairs(list) do
+                    if it.type ~= "Gun" then table.insert(only, it) end
+                end
+                list = only
+            end
+            local pick = pickNext(list, carried, CFG.InvSkip or {}, R.failUntil, R.loadedAt, now, rested)
             if not pick then
                 R.note = "nothing rested in your inventory"
                 return false
             end
-            if not R.original then
-                -- What you carried, to put back at the stop.
-                R.original = {}
-                local names = {}
-                for _, t in ipairs(tools) do
-                    local ty = toolType(t)
-                    if ty == "Sword" or ty == "Gun" then
-                        R.original[ty] = t.Name
-                        table.insert(names, t.Name)
-                    end
-                end
-                R.originalText = (#names > 0) and table.concat(names, ", ") or "nothing"
-            end
+            remember(tools)
             R.lastLoad = now
             local cf = commF()
             pcall(function() cf:InvokeServer("LoadItem", pick.name) end)
@@ -6329,6 +6373,127 @@ do
             return key, closed
         end
 
+        -- ---------- the gun M1 at the vents ----------
+        -- Skull Guitar first (its M1 has Destructible Physics - the wiki;
+        -- user: "the skull guitar M1 ... really useful"), then Bazooka, Cannon.
+        local VENT_M1_GUNS = { "Skull Guitar", "Bazooka", "Cannon" }
+        S.gunWay = {}        -- [gun] = "remote" | "click" | "both" (Skull Guitar: proven by its energy)
+        S.gunProbe = {}
+        local function carriedTool(name)
+            for _, t in ipairs(toolNames()) do
+                if t.Name == name then return t end
+            end
+            return nil
+        end
+        local function ventGun()
+            for _, n in ipairs(VENT_M1_GUNS) do
+                if carriedTool(n) then return n end
+            end
+            return nil
+        end
+        S.ventGun = ventGun
+        -- Not carried: the first of them in your inventory, into your hands.
+        local function loadVentGun()
+            if ventGun() then return end
+            local has, load = (P :: any).invHas, (P :: any).loadItem
+            if not (has and load) then return end
+            for _, n in ipairs(VENT_M1_GUNS) do
+                if has(n) then
+                    if load(n) then print("[BFF] volcano: " .. n .. " loaded from your inventory for the vents") end
+                    return
+                end
+            end
+        end
+        local function energy()
+            local ok, e = pcall(function()
+                local ch = player.Character
+                local v = ch and ch:FindFirstChild("Energy")
+                return v and tonumber(v.Value)
+            end)
+            return ok and e or nil
+        end
+        -- The gun to use on this vent, or nil = the skills: switch off, none
+        -- carried, energy low in the last 5 s, or 6 tries of it closed nothing.
+        local function gunForVents()
+            if not CFG.VentGuitar then return nil end
+            local g = ventGun()
+            if not g then return nil end
+            if os.clock() - (S.lowEnergyAt or -100) < 5 then return nil end
+            local L = S.learn[g .. " M1"]
+            if L and L.casts >= 6 and L.closed == 0 then return nil end
+            return g
+        end
+
+        -- Shots at the vent, stood still, for VentM1Time or until it goes.
+        -- Skull Guitar: its tool's RemoteEvent ("TAP", the vent) - the public
+        -- hubs' gun fast attack; the first shots are checked against its
+        -- energy (20 a shot): spent = the remote fires; not = the aimed click
+        -- from then on; energy not readable = both. Other guns: the aimed click
+        -- (silent aim + the camera on the vent). true closed.
+        local function gunM1(v, name)
+            if not equip(name) then return name .. " M1", false end
+            local tool = carriedTool(name)
+            local re = nil
+            if name == "Skull Guitar" and tool then
+                local okR, r = pcall(function() return tool:FindFirstChild("RemoteEvent") end)
+                re = okR and r or nil
+            end
+            local key = name .. " M1"
+            local function aimIt()
+                RunService.Heartbeat:Wait()
+                pcall(aimSwapIn, v.pos, v.pos)
+            end
+            local t0, closed, low = os.clock(), false, false
+            aimOn(v, (CFG.VentM1Time or 3) + 1)
+            while os.clock() - t0 < (CFG.VentM1Time or 3) do
+                local e0 = energy()
+                if e0 and e0 < 20 then
+                    S.lowEnergyAt = os.clock()
+                    low = true
+                    break
+                end
+                local way = S.gunWay[name] or (re and "probe" or "click")
+                if re and way ~= "click" then
+                    pcall(function() re:FireServer("TAP", v.pos) end)
+                end
+                if not re or way == "click" or way == "both" then
+                    local cam = workspace.CurrentCamera
+                    if cam then
+                        aimPixel = cam.ViewportSize * 0.5
+                        aimIt()
+                        pressM1()
+                        aimPixel = nil
+                    end
+                end
+                stats.casts += 1
+                task.wait(CFG.VentM1Every or 0.3)
+                if re and way == "probe" then
+                    local e1 = energy()
+                    if not (e0 and e1) then
+                        S.gunWay[name] = "both"
+                    elseif e1 < e0 - 5 then
+                        S.gunWay[name] = "remote"
+                        print("[BFF] volcano: " .. name .. " M1 by its remote - it fires")
+                    else
+                        S.gunProbe[name] = (S.gunProbe[name] or 0) + 1
+                        if S.gunProbe[name] >= 3 then
+                            S.gunWay[name] = "click"
+                            print("[BFF] volcano: " .. name .. "'s remote spent no energy in 3 shots - the aimed click")
+                        end
+                    end
+                end
+                if not (v.alive and v.alive() or (not v.alive and ventLive(v.model))) then
+                    closed = true
+                    break
+                end
+            end
+            aimOff()
+            credit(key, closed, v.learn)
+            S.lastVent = low and (key .. " - energy low, the skills for a moment")
+                or (key .. " (" .. tostring(S.gunWay[name] or "probing") .. ")")
+            return key, closed
+        end
+
         local function patchVent(ev, v, myEpoch)
             local stand = standFor(v.pos, ev.centre or v.pos, CFG.VentDistance or 12)
             ev.note = string.format("closing a vent  ·  %d closed  ·  %d golems down", ev.vents, ev.golems)
@@ -6340,7 +6505,10 @@ do
                 if stale(myEpoch) then return end
             end
             lockAt(stand, v.pos)
-            local key, closed = ventCast(v)
+            local key, closed
+            local gun = gunForVents()
+            if gun then key, closed = gunM1(v, gun) end
+            if not closed and not gun then key, closed = ventCast(v) end
             if closed then
                 ev.vents += 1
                 S.tally.vents += 1
@@ -6515,6 +6683,7 @@ do
             if not (isle or mk) or (mySea() and mySea() ~= 3) then
                 letGolemsGo()
                 S.ev = nil
+                P.keepGun = nil
                 return false
             end
             local myEpoch = epoch
@@ -6548,6 +6717,11 @@ do
                 end
             end
             countGolems(ev)
+            if CFG.VentGuitar and not ev.gunTried then
+                ev.gunTried = true
+                pcall(loadVentGun)
+            end
+            P.keepGun = CFG.VentGuitar and ventGun() or nil
             local active = eventOn(isle)
             ev.active = active
             if active and not ev.startedAt then ev.startedAt = os.clock() end
@@ -6585,6 +6759,7 @@ do
             mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
+            gunM1 = gunM1, gunForVents = gunForVents,
         }
         -- Any thing to break, aimed: v = { pos, part, model, alive = fn, learn = table }.
         S.castAt = ventCast
@@ -9620,6 +9795,27 @@ local function buildUI()
             function() return CFG.SilentAim end,
             function(x) CFG.SilentAim = x end)
         readout(v, function() return "silent aim  " .. tostring(P.silentNote or "-") end)
+        heading2(v, "the gun M1 at a vent")
+        switchRow(v, "Skull Guitar M1 on the vents",
+            "Loaded if in your inventory, fired at the vent stood still - before any skill",
+            function() return CFG.VentGuitar end,
+            function(x) CFG.VentGuitar = x end)
+        readout(v, function()
+            local S = P.sea
+            local g = S.ventGun and S.ventGun()
+            if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
+            local L = S.learn[g .. " M1"]
+            return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
+                tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
+        end)
+        sliderRow(v, "Seconds between shots", 0.1, 1, 0.05,
+            function() return CFG.VentM1Every end,
+            function(x) CFG.VentM1Every = x end, " s")
+        caption(v, "The wiki: Skull Guitar's M1 breaks things (Destructible Physics) "
+            .. "and cools fast - made for the vents; Bazooka and Cannon too. Its M1 "
+            .. "costs 20 energy: under that, the skills below until it is back. Six "
+            .. "turns closing nothing = the skills instead.")
+
         heading2(v, "keys fired at a vent")
         for _, k in ipairs({ "Z", "X", "C", "V" }) do
             switchRow(v, k, nil,
@@ -9629,10 +9825,10 @@ local function buildUI()
                     CFG.VentKeys[k] = x
                 end)
         end
-        caption(v, "Every weapon you carry fires these, fruit first, aimed AT "
-            .. "the vent. Only moves that break things close one; a key whose "
-            .. "skill does not fire is left out for 30 s. Nothing ready: an "
-            .. "aimed M1 (Skull Guitar, Bazooka, Cannon, Gravity close vents with M1).")
+        caption(v, "No vent gun (or its energy low): every weapon you carry fires "
+            .. "these, guns first, aimed AT the vent. Only moves that break things "
+            .. "close one; a key whose skill does not fire is left out for 30 s. "
+            .. "Everything cooling: a sword / gun from your inventory, then an aimed M1.")
         sliderRow(v, "Stand off a vent", 4, 30, 1,
             function() return CFG.VentDistance end,
             function(x) CFG.VentDistance = x end, " studs")
