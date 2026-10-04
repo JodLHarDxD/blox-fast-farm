@@ -6337,7 +6337,7 @@ do
             return 0
         end
         S.keyScore = keyScore
-        -- (S.castAt = ventCast, below: the ember hunt breaks trees with it.)
+        -- (S.castAt, below: the ember hunt breaks trees with it.)
 
         -- A skill whose bar did not start after the key is not one this weapon
         -- has (or not unlocked): left out for 30 s.
@@ -6413,6 +6413,12 @@ do
             -- Nothing ready: a rested sword / gun from your inventory, once.
             local rot = (P :: any).rotate
             if not rotated and rot and rot(true) then return ventCast(v, true) end
+            -- A thing only blasts break (v.noM1, the ember hunt's trees): no
+            -- plain M1 - wait for a key. nil key = nothing was fired.
+            if v.noM1 then
+                task.wait(0.3)
+                return nil, false
+            end
             -- Still nothing: an aimed M1 with what is in hand (Skull Guitar,
             -- Bazooka, Cannon and Gravity close vents with M1 - the wiki).
             local held = heldTool()
@@ -6474,12 +6480,13 @@ do
         end
         -- The gun to use on this vent, or nil = the skills: switch off, none
         -- carried, energy low in the last 5 s, or 6 tries of it closed nothing.
-        local function gunForVents()
+        -- learn = whose table judges it (the trees keep their own).
+        local function gunForVents(learn)
             if not CFG.VentGuitar then return nil end
             local g = ventGun()
             if not g then return nil end
             if os.clock() - (S.lowEnergyAt or -100) < 5 then return nil end
-            local L = S.learn[g .. " M1"]
+            local L = (learn or S.learn)[g .. " M1"]
             if L and L.casts >= 6 and L.closed == 0 then return nil end
             return g
         end
@@ -6863,8 +6870,18 @@ do
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
             gunM1 = gunM1, gunForVents = gunForVents,
         }
-        -- Any thing to break, aimed: v = { pos, part, model, alive = fn, learn = table }.
-        S.castAt = ventCast
+        -- ANY THING TO BREAK (the ember hunt's trees), aimed: v = { pos, part,
+        -- model, alive = fn, learn = table }. The gun M1 first (the wiki,
+        -- Dragon Hunter: "Skull Guitar or Bazooka ... the m1 can break them"),
+        -- else the skills of every weapon you carry; never a plain M1 (user,
+        -- 2026-10-05: a fighting style's M1 does nothing to a tree). nil key =
+        -- nothing fired (every key cooling).
+        function S.castAt(v)
+            local g = gunForVents(v.learn)
+            if g then return gunM1(v, g) end
+            v.noM1 = true
+            return ventCast(v)
+        end
     end
     build()
 end
@@ -7168,7 +7185,11 @@ do
                         and p.Transparency < 1 and (p.Position - pos0).Magnitude < 3
                 end,
             }
-            local _, broke = (P :: any).sea.castAt(v)
+            local fired, broke = (P :: any).sea.castAt(v)
+            if not fired then
+                M.note = "every key cooling - waiting (no plain M1 on a tree)"
+                return false
+            end
             local k = M.kinds[t.kind] or { tries = 0, broke = 0 }
             M.kinds[t.kind] = k
             if broke then
@@ -9710,9 +9731,10 @@ local function buildUI()
             function(x) CFG.EmberTreeMax = x end, " studs")
         caption(v, "Needs Dragon Talon at 500 mastery and the Dojo's Yellow Belt. "
             .. "The quest is asked for from where you are; if that does not take, "
-            .. "at the Dragon Hunter. Enforcers / Assailants are pulled and killed; "
-            .. "trees are broken with your Z/X/C aimed at them (the medium ground "
-            .. "trees first, bamboo last, the giants never). Each quest drops 3 "
+            .. "at the Dragon Hunter. Enforcers / Assailants are pulled and killed "
+            .. "(M1 as the Attack page picks). Trees: blasts only - the Skull Guitar / "
+            .. "Bazooka M1 first, else Z/X/C of every weapon, aimed; never a plain M1 "
+            .. "(the medium ground trees first, bamboo last, the giants never). Each quest drops 3 "
             .. "embers - run through. The tree list goes to "
             .. "workspace/bff_ember_trees.txt.")
 

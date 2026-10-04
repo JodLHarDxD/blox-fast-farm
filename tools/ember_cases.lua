@@ -117,6 +117,19 @@ check("trees: one that never breaks gets 8 casts, then left", seen.Stone == 8, s
 check("trees: bamboo only after the medium ones", seen["Meshes/bambootree"] ~= nil and CASTS[1] ~= "Meshes/bambootree", CASTS[1])
 check("trees: aimed with their OWN learned keys, not the vents'", M.learn ~= nil)
 
+-- 6b. Every key cooling: nothing fired - waiting is not a try on the tree.
+local realCast = P.sea.castAt
+P.sea.castAt = function() return nil, false end
+local function triesNow() local c = 0 for _, n in pairs(M.treeTries) do c += n end return c end
+local tries0 = triesNow()
+SERVER.text = "Destroy 10 trees on Hydra Island"
+M.quest, M.back, M.checkAt, M.kind, M.need = "Destroy 10 trees on Hydra Island", false, T, "trees", 10
+medium.Anchored = true
+for _ = 1, 3 do M.step(1) end
+check("trees: every key cooling - waits, no try counted", triesNow() == tries0
+    and string.find(M.note, "cooling", 1, true) ~= nil, triesNow() .. " vs " .. tries0 .. " " .. M.note)
+P.sea.castAt = realCast
+
 -- 7. He gives nothing at all (no Dragon Talon 500 / Yellow Belt): stopped, says why.
 SERVER.text, SERVER.eligible = nil, false
 M.quest, M.back, M.visits = nil, false, 0

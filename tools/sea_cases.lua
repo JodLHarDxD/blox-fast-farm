@@ -1031,4 +1031,52 @@ end)()
     CFG.Hunt, CFG.HuntKind, CFG.Volcano, CFG.VolcanoAfter = false, nil, false, nil
 end)()
 
+-- ---------------------------------------------------------------- TREES (S.castAt): BLASTS ONLY
+;(function()
+    local TAPS = {}
+    local RE = { FireServer = function(_, what, pos) table.insert(TAPS, { what, pos }) end }
+    local guitar = { Name = "Skull Guitar", ToolTip = "Gun",
+        FindFirstChild = function(_, n) return n == "RemoteEvent" and RE or nil end }
+    local trunk = inst("Trunk", "Part", { Position = vec(30, 5, 30) })
+    local standing = true
+    local learn = {}
+    local function tree() return { pos = trunk.Position, part = trunk, model = trunk, learn = learn,
+        alive = function() return standing end } end
+    CFG.VentGuitar, CFG.VentM1Every, CFG.VentM1Time = true, 0.3, 1
+    S.learn, S.gunWay, S.lowEnergyAt = {}, { ["Skull Guitar"] = "remote" }, nil
+    player.Character = nil
+    -- 1. The guitar carried: its M1 first, credited to the TREES' table.
+    TOOLS = { { Name = "Dragon Talon", ToolTip = "Melee" }, guitar }
+    READY = { ["Dragon Talon Z"] = true }
+    reset()
+    M1S = 0
+    local key = S.castAt(tree())
+    check("trees: the Skull Guitar M1 first (the wiki: its M1 breaks trees)", key == "Skull Guitar M1" and #TAPS > 0
+        and #KEYS_SENT == 0, tostring(key))
+    check("trees: learned in the trees' own table, not the vents'", learn["Skull Guitar M1"] ~= nil and S.learn["Skull Guitar M1"] == nil)
+    -- 2. No gun: the skills of every weapon - never a plain M1.
+    TOOLS = { { Name = "Dragon Talon", ToolTip = "Melee" }, { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" } }
+    READY = { ["Dragon-Dragon Z"] = true }
+    reset()
+    M1S = 0
+    key = S.castAt(tree())
+    check("trees, no gun: a skill fired at the tree", key == "Dragon-Dragon Z" and KEYS_SENT[1] == "Z", tostring(key))
+    -- 3. Every key cooling: no M1 at all, nothing fired.
+    READY = {}
+    reset()
+    M1S = 0
+    key = S.castAt(tree())
+    check("trees, every key cooling: NO plain M1 (a fighting style's does nothing), nothing fired", key == nil and M1S == 0,
+        tostring(key) .. " " .. M1S)
+    -- 4. The guitar useless on trees (6 tries, none broke): the skills.
+    TOOLS = { { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" }, guitar }
+    READY = { ["Dragon-Dragon Z"] = true }
+    learn["Skull Guitar M1"] = { casts = 6, closed = 0 }
+    reset()
+    key = S.castAt(tree())
+    check("trees: the guitar learned useless on trees - the skills", key == "Dragon-Dragon Z", tostring(key))
+    CFG.VentGuitar = nil
+    S.learn, S.gunWay = {}, {}
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")
