@@ -33,6 +33,7 @@ local function enemy(pos)
 end
 
 local P = { running = true }
+P.heldAt = {}
 local CFG = { Magnet = true, PileSpread = 3 }
 local player = {}
 local sethiddenproperty = nil

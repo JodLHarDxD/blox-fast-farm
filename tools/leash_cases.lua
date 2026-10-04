@@ -131,4 +131,15 @@ check("in place: 'in place, from high', no NOT OURS from an old pull",
     P.noDamage[1])
 P.pileInPlace, P.forceClose = false, false
 
+-- 11. a pile that must stay held (the Lava Golems): never put back, noted once
+reset()
+table.clear(P.noDamage)
+pileCur = { keepHeld = true }
+local lg = enemy("Lava Golem", v3(0, 0, 0))
+pile = { lg }
+run(10, {})
+check("a keep-held pile: no damage for 10 s, never put back, noted once",
+    putBack[lg.model] == nil and #P.noDamage == 1 and P.noDamage[1]:find("kept held", 1, true) ~= nil, P.noDamage[1])
+pileCur = nil
+
 print(all and "ALL PASS" or "SOME FAILED")

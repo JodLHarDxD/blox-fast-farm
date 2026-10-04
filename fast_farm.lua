@@ -143,6 +143,12 @@ local CFG = {
     -- key is read, and your view is back before the frame is drawn.
     -- Off: the view itself turns so the pile is under your cursor.
     AimHidden          = true,
+    -- SILENT AIM (user, 2026-10-04: "my mouse should be totally ignored"):
+    -- while a skill or an aimed M1 is fired by this script, the game is told
+    -- the mouse points AT the target - Mouse.Hit / Target / X / Y / UnitRay,
+    -- UserInputService:GetMouseLocation, and any value a remote is sent that
+    -- equals where your real mouse points. Your own clicks are never touched.
+    SilentAim          = true,
     CamDistance        = 30,     -- the camera this far from the pile
     CamPitch           = 55,     -- looking down at most this steeply (degrees)
 
@@ -245,6 +251,13 @@ local CFG = {
     -- volcano) while the vents are closed - a held golem cannot hit the relic.
     -- Magnet off: golems before vents, fought where they stand.
     GolemCage          = 60,
+    GolemLift          = 60,         -- ...and held this high over the relic (up in the air)
+    -- THE PRIORITY (user, 2026-10-04: lost on the relic's health). A golem
+    -- that is NOT held goes first - it is the one hurting the relic - unless
+    -- the pressure is over PressureMax while the relic is still over
+    -- RelicMin. Held golems are killed whenever no vent is open.
+    RelicMin           = 90,         -- percent
+    PressureMax        = 70,         -- percent
     VolcanoLoot        = true,       -- after a win: the bones, then the egg
     -- ELITE PIRATE HUNT (Third Sea). Diablo, Deandre, Urban (and Tyrant of
     -- the Skies while he is up): one per server, back 8 min 45 s after the
@@ -1241,6 +1254,9 @@ local probing    = false     -- an M1 way is being tried; no put-backs meanwhile
 local actions    = 0         -- every M1 and every cast, for the put-back clock
 local simAt      = 0
 P.pileHeld, P.pileOwned = 0, 0
+-- model -> when the magnet's last write on it was still where it was put (it
+-- is ours, held) - the volcano event reads which golems are really held.
+P.heldAt = setmetatable({}, { __mode = "k" })
 P.simNote = sethiddenproperty and "SimulationRadius: settable" or "SimulationRadius: this executor cannot set it"
 
 local homeOf, campFor, middleOf, pullLimit
@@ -1795,7 +1811,10 @@ do
         for _, e in ipairs(live) do
             -- Owned = where we wrote it last frame is where it still is.
             local prev = lastDest[e.model]
-            if prev and (e.root.Position - prev).Magnitude < 4 then owned += 1 end
+            if prev and (e.root.Position - prev).Magnitude < 4 then
+                owned += 1
+                P.heldAt[e.model] = now
+            end
             local s = slotOf[e.model]
             if not s then
                 s = 1
@@ -1920,6 +1939,14 @@ local function checkPutBack()
                 P.leash[e.name] = l
                 if not l.ok or d > l.ok then l.ok = d end
             end
+        elseif now - j.at > (CFG.PutBackAfter or 3) and actions - j.act >= 6
+            and pileCur and pileCur.keepHeld then
+            -- A pile that must stay held (the Lava Golems: put back = back on
+            -- the relic). Written down once, never let go.
+            if not j.noted then
+                j.noted = true
+                P.noteNoDamage(e, "held, kept held")
+            end
         elseif now - j.at > (CFG.PutBackAfter or 3) and actions - j.act >= 6 then
             -- Written down first: whether it was really ours decides below.
             local ours = P.noteNoDamage(e, "pulled")
@@ -1959,6 +1986,16 @@ local function aimPoint()
         if e.model.Parent and e.hum.Health > 0 then return e.root.Position end
     end
     return pileCentre
+end
+
+-- WHERE THE SILENT AIM POINTS: only while this script is firing (aimUntil) -
+-- its own point (a vent) first, else the pile. nil = your mouse, untouched.
+function P.aimTarget()
+    if os.clock() >= aimUntil then return nil end
+    local own = (P :: any).aimAt
+    if own then return own end
+    if CFG.AimSkills and pileCentre then return aimPoint() end
+    return nil
 end
 
 -- =========================================================
@@ -4781,13 +4818,26 @@ end
 --   "Lava Golem"                  workspace.Enemies; one per vent closed, and
 --                                 only their M1s hurt the relic
 --   workspace.DinoBone, Core.SpawnedDragonEggs   the win's loot
--- Vents are closed by moves that break things: every ready Z/X/C/V of every
--- weapon you carry, aimed AT the vent (the hidden camera swap, P.aimAt),
--- from VentDistance out and 8 up. Golems, magnet on: held in one pile
--- GolemCage studs off the relic, away from the volcano, the whole time --
--- held, they cannot reach the relic -- and killed when no vent is live (the
--- Attack page's weapons, your M1). Magnet off: golems first. Lava parts are
--- taken off your client (the hubs do), the vents' own excepted.
+-- THE RELIC FIRST (user's first run, 2026-10-04: lost on the relic's
+-- health while vents were being closed and the golems stood on the relic).
+--   GOLEMS   every one is held up in the air - GolemCage off the relic, away
+--            from the volcano, GolemLift up - by its own frame holder, the
+--            whole event, never put back. Held = cannot touch the relic.
+--            One NOT held (just landed, or not ours to move) is the threat:
+--            it goes first, fought where it stands. Held ones are killed
+--            whenever no vent is open (the Attack page's weapons).
+--   VENTS    closed by moves that break things (the wiki: destructible
+--            physics; M1 only of Skull Guitar / Bazooka / Cannon / Gravity),
+--            fired AT the vent through the silent aim - your mouse is not
+--            read. Which key closes vents is LEARNED: one that closed one is
+--            fired first, one that never did after 4 tries goes last.
+--   METERS   the relic's health and the pressure, read where they can be
+--            (a Humanoid or attributes on the relic / island, values, the
+--            relic's own billboard, the screen's text) - the event's first
+--            seconds write every candidate to workspace/bff_volcano_probe.txt.
+--            Pressure over PressureMax with the relic over RelicMin = vents
+--            before even a free golem.
+-- Lava parts are taken off your client (the hubs do), the vents' own excepted.
 -- Only P.sea leaves the block (the main chunk is at Luau's register limit).
 do
     local function build()
@@ -4851,17 +4901,38 @@ do
             return "idle"
         end
 
-        -- While it is on. Held golems cannot reach the relic, so the vents go
-        -- first; free ones can, so then they go first.
-        local function defendPick(hasVent, hasGolem, magnet)
-            if magnet then
-                if hasVent then return "vent" end
-                if hasGolem then return "golem" end
-            else
-                if hasGolem then return "golem" end
-                if hasVent then return "vent" end
-            end
+        -- While it is on. o = { vent, free (a golem NOT held: it can reach the
+        -- relic), held, relic %, pressure %, relicMin, pressureMax }.
+        --   a free golem first - unless the pressure is over its limit while
+        --   the relic is still healthy (or unread): then the vent
+        --   a vent next; held golems when nothing else
+        local function defendPick(o)
+            local pressing = o.vent and o.pressure ~= nil and o.pressure >= (o.pressureMax or 70)
+                and (o.relic == nil or o.relic >= (o.relicMin or 90))
+            if o.free and not pressing then return "golem" end
+            if o.vent then return "vent" end
+            if o.free or o.held then return "golem" end
             return "wait"
+        end
+
+        -- A meter's percent from a value (0-1 = a fraction, 0-100 = percent,
+        -- or out of `max`), or from text ("73%", "1460/2000").
+        local function pctFrom(v, max)
+            v = tonumber(v)
+            if not v then return nil end
+            local m = tonumber(max)
+            if m and m > 0 then return v / m * 100 end
+            if v >= 0 and v <= 1 then return v * 100 end
+            if v >= 0 and v <= 100 then return v end
+            return nil
+        end
+        local function pctText(t)
+            if type(t) ~= "string" then return nil end
+            local a, b = string.match(t, "([%d%.]+)%s*/%s*([%d%.]+)")
+            local na, nb = tonumber(a), tonumber(b)
+            if na and nb and nb > 0 then return na / nb * 100 end
+            local p = string.match(t, "([%d%.]+)%s*%%")
+            return p and tonumber(p) or nil
         end
 
         local function enabled(x)
@@ -4982,7 +5053,8 @@ do
             for _, c in ipairs(rocks(isle)) do
                 if ventLive(c) then
                     local p = ventPos(c)
-                    if p then table.insert(out, { model = c, pos = p }) end
+                    local part = c:FindFirstChild("VFXLayer") or c:FindFirstChild("volcanorock", true)
+                    if p then table.insert(out, { model = c, pos = p, part = part }) end
                 end
             end
             return out
@@ -5495,65 +5567,307 @@ do
             return true
         end
 
+        -- ---------- the meters: the relic's health, the pressure ----------
+        local WORDS = { relic = { "relic" }, pressure = { "pressure", "heat", "erupt" } }
+        -- A numeric attribute whose name has one of `words` (not a max), out
+        -- of a "max" attribute with the same word when there is one.
+        local function attrPct(inst, words)
+            if not inst then return nil end
+            local ok, a = pcall(function() return inst:GetAttributes() end)
+            if not ok or type(a) ~= "table" then return nil end
+            for k, v in pairs(a) do
+                local lk = string.lower(tostring(k))
+                if type(v) == "number" and not string.find(lk, "max", 1, true) then
+                    for _, w in ipairs(words) do
+                        if string.find(lk, w, 1, true) then
+                            local max = nil
+                            for k2, v2 in pairs(a) do
+                                local l2 = string.lower(tostring(k2))
+                                if type(v2) == "number" and string.find(l2, "max", 1, true) then max = v2 end
+                            end
+                            local pc = pctFrom(v, max)
+                            if pc then return pc, inst.Name .. " attribute " .. tostring(k) end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+        -- Text on screen (or on the relic's billboard) naming the meter.
+        local guiHit = {}
+        local function guiPct(root, words, kind, skipGui)
+            local hit = guiHit[kind]
+            if hit and hit.Parent then
+                local pc = pctText(hit.Text)
+                if pc then return pc, "text " .. hit:GetFullName() end
+            end
+            if not root then return nil end
+            for _, d in ipairs(root:GetDescendants()) do
+                if (d:IsA("TextLabel") or d:IsA("TextButton")) and not (skipGui and d:IsDescendantOf(skipGui)) then
+                    local lt = string.lower(tostring(d.Text) .. " " .. tostring(d.Name) .. " "
+                        .. tostring(d.Parent and d.Parent.Name or ""))
+                    for _, w in ipairs(words) do
+                        if string.find(lt, w, 1, true) then
+                            local pc = pctText(d.Text)
+                            if pc then
+                                guiHit[kind] = d
+                                return pc, "text " .. d:GetFullName()
+                            end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+        local function relicMeter(isle)
+            local c = core(isle)
+            local rel = c and c:FindFirstChild("PrehistoricRelic")
+            if rel then
+                local h = rel:FindFirstChildWhichIsA("Humanoid", true)
+                if h and tonumber(h.MaxHealth) and h.MaxHealth > 0 then
+                    return h.Health / h.MaxHealth * 100, "the relic's Humanoid"
+                end
+            end
+            for _, x in ipairs({ rel, c, isle }) do
+                local pc, src = attrPct(x, WORDS.relic)
+                if pc then return pc, src end
+            end
+            local pc, src = attrPct(rel, { "health", "hp" })
+            if pc then return pc, src end
+            for _, d in ipairs(rel and rel:GetDescendants() or {}) do
+                if (d:IsA("NumberValue") or d:IsA("IntValue")) then
+                    local ln = string.lower(d.Name)
+                    if string.find(ln, "health", 1, true) or ln == "hp" then
+                        local max = d.Parent and (d.Parent:FindFirstChild("MaxHealth") or d.Parent:FindFirstChild("Max"))
+                        local p2 = pctFrom(d.Value, max and max.Value)
+                        if p2 then return p2, "value " .. d:GetFullName() end
+                    end
+                end
+            end
+            pc, src = guiPct(rel, { "" }, "relicBoard")
+            if pc then return pc, src end
+            local okG, pg = pcall(function() return player.PlayerGui end)
+            local mine = okG and pg and pg:FindFirstChild("BFFHUD") or nil
+            return guiPct(okG and pg or nil, WORDS.relic, "relic", mine)
+        end
+        local function pressureMeter(isle)
+            local c = core(isle)
+            for _, x in ipairs({ isle, c }) do
+                local pc, src = attrPct(x, WORDS.pressure)
+                if pc then return pc, src end
+            end
+            for _, d in ipairs(c and c:GetChildren() or {}) do
+                if (d:IsA("NumberValue") or d:IsA("IntValue")) and string.find(string.lower(d.Name), "pressure", 1, true) then
+                    local pc = pctFrom(d.Value)
+                    if pc then return pc, "value " .. d:GetFullName() end
+                end
+            end
+            local okG, pg = pcall(function() return player.PlayerGui end)
+            local mine = okG and pg and pg:FindFirstChild("BFFHUD") or nil
+            return guiPct(okG and pg or nil, WORDS.pressure, "pressure", mine)
+        end
+        -- Read at most twice a second into ev (relicPct / pressurePct + where).
+        local function readMeters(isle, ev)
+            if os.clock() - (ev.metersAt or -1) < 0.5 then return end
+            ev.metersAt = os.clock()
+            local okR, r, rs = pcall(relicMeter, isle)
+            local okP, pr, ps = pcall(pressureMeter, isle)
+            ev.relicPct, ev.relicSrc = okR and r or nil, okR and rs or nil
+            ev.pressurePct, ev.pressureSrc = okP and pr or nil, okP and ps or nil
+            if ev.relicPct and ev.relicPct < (ev.relicLow or 101) then ev.relicLow = ev.relicPct end
+        end
+
+        -- Everything that could be the meters, to a file - once when the event
+        -- starts and once 20 s in (the screen's bars may come late).
+        local function dumpMeters(isle, ev, tag)
+            local out = { "[volcano probe] " .. tag .. "  " .. os.date("!%Y-%m-%d %H:%M:%S") .. "Z" }
+            local function attrs(x)
+                local ok, a = pcall(function() return x:GetAttributes() end)
+                local t = {}
+                if ok and type(a) == "table" then
+                    for k, v in pairs(a) do table.insert(t, tostring(k) .. "=" .. tostring(v)) end
+                end
+                return table.concat(t, ", ")
+            end
+            local c = core(isle)
+            local rel = c and c:FindFirstChild("PrehistoricRelic")
+            table.insert(out, "island attributes: " .. attrs(isle))
+            if c then table.insert(out, "Core attributes: " .. attrs(c)) end
+            if rel then
+                table.insert(out, "relic attributes: " .. attrs(rel))
+                for _, d in ipairs(rel:GetDescendants()) do
+                    local v = ""
+                    pcall(function()
+                        if d:IsA("ValueBase") then v = " = " .. tostring(d.Value)
+                        elseif d:IsA("Humanoid") then v = string.format(" = %s / %s", tostring(d.Health), tostring(d.MaxHealth))
+                        elseif d:IsA("TextLabel") then v = " text '" .. tostring(d.Text) .. "'" end
+                    end)
+                    if not d:IsA("BasePart") then table.insert(out, "  relic " .. d:GetFullName() .. " (" .. d.ClassName .. ")" .. v) end
+                end
+            end
+            for _, d in ipairs(c and c:GetChildren() or {}) do
+                if d:IsA("ValueBase") then table.insert(out, "  core value " .. d.Name .. " = " .. tostring(d.Value)) end
+            end
+            local okG, pg = pcall(function() return player.PlayerGui end)
+            if okG and pg then
+                local mine = pg:FindFirstChild("BFFHUD")
+                for _, d in ipairs(pg:GetDescendants()) do
+                    if d:IsA("GuiObject") and not (mine and d:IsDescendantOf(mine)) then
+                        local txt = (d:IsA("TextLabel") or d:IsA("TextButton")) and tostring(d.Text) or ""
+                        local l = string.lower(d.Name .. " " .. txt)
+                        for _, w in ipairs({ "relic", "pressure", "volcano", "heat", "erupt", "prehistoric", "timer" }) do
+                            if string.find(l, w, 1, true) then
+                                table.insert(out, string.format("  gui %s (%s) visible=%s text='%s' size=%s",
+                                    d:GetFullName(), d.ClassName, tostring(d.Visible), txt, tostring(d.Size)))
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+            readMeters(isle, ev)
+            table.insert(out, string.format("read: relic %s (%s)  ·  pressure %s (%s)",
+                tostring(ev.relicPct), tostring(ev.relicSrc), tostring(ev.pressurePct), tostring(ev.pressureSrc)))
+            local text = table.concat(out, "\n")
+            S.probeText = (S.probeText and (S.probeText .. "\n\n") or "") .. text
+            if writefile then pcall(writefile, "bff_volcano_probe.txt", S.probeText) end
+            print("[BFF] volcano: meters " .. tag .. " - relic " .. tostring(ev.relicSrc or "NOT FOUND")
+                .. " · pressure " .. tostring(ev.pressureSrc or "NOT FOUND") .. "  (all candidates: workspace/bff_volcano_probe.txt)")
+        end
+
         -- ---------- the golems ----------
+        S.tried = setmetatable({}, { __mode = "k" })     -- model -> when holding it was first tried
+        S.cageDest = setmetatable({}, { __mode = "k" })  -- model -> where the holder last put it
+
+        -- Held = a write on it (the magnet's or the holder's) stuck, just now.
+        local function golemHeld(e)
+            local t = P.heldAt[e.model]
+            return t ~= nil and os.clock() - t < 0.6
+        end
+        -- Not ours to move: tried for 1.5 s, never stuck.
+        local function golemWild(e)
+            local t = S.tried[e.model]
+            return t ~= nil and os.clock() - t > 1.5 and not golemHeld(e)
+        end
+
+        -- The fight's pile: a golem that cannot be held first, where it stands
+        -- (it is on the relic); else the held ones, at the cage.
         local function golemBuild()
-            local free, put = {}, {}
-            for _, e in ipairs(liveEnemies(GOLEMS)) do
+            local now = os.clock()
+            local all = liveEnemies(GOLEMS)
+            local mine, wild = {}, {}
+            for _, e in ipairs(all) do
                 if S.seen then S.seen[e.model] = e.hum end
-                if isPutBack(e.model) then table.insert(put, e) else table.insert(free, e) end
+                if golemWild(e) then table.insert(wild, e) else table.insert(mine, e) end
             end
             local _, r = parts()
             local from = r and r.Position or Vector3.new(0, 0, 0)
             local cage = S.ev and S.ev.cage
-            if #free > 0 then
-                if not (CFG.Magnet and cage) then
-                    local e = nearestOf(free, from, function(x) return x.root.Position end)
-                    return { e }, e.root.Position, true
-                end
-                table.sort(free, function(a, b)
+            local function at(x) return x.root.Position end
+            if not (CFG.Magnet and cage) then
+                if #all == 0 then return {}, nil, false end
+                local e = nearestOf(all, from, at)
+                return { e }, e.root.Position, true
+            end
+            if #wild > 0 then
+                local e = nearestOf(wild, from, at)
+                return { e }, e.root.Position, true
+            end
+            if #mine > 0 then
+                table.sort(mine, function(a, b)
                     return (a.root.Position - cage).Magnitude < (b.root.Position - cage).Magnitude
                 end)
                 local cap = math.max(1, math.floor(CFG.GrabMax or 30))
-                while #free > cap do table.remove(free) end
-                return free, cage, false
-            end
-            -- Put back (no damage when held): fought where it stands.
-            if #put > 0 then
-                local e = nearestOf(put, from, function(x) return x.root.Position end)
-                return { e }, e.root.Position, true
+                while #mine > cap do table.remove(mine) end
+                for _, e in ipairs(mine) do S.tried[e.model] = S.tried[e.model] or now end
+                return mine, cage, false
             end
             return {}, nil, false
         end
 
         local function eventOn(isle) return isle ~= nil and isle:GetAttribute("IsMinigameActive") == true end
 
+        -- What is live now, and what goes first.
+        local function situation(isle, ev)
+            local vents = liveVents(isle)
+            local free, held = {}, {}
+            for _, e in ipairs(liveEnemies(GOLEMS)) do
+                if S.seen then S.seen[e.model] = e.hum end      -- counted when it dies
+                if golemHeld(e) then table.insert(held, e) else table.insert(free, e) end
+            end
+            readMeters(isle, ev)
+            local pick = defendPick({
+                vent = #vents > 0, free = #free > 0, held = #held > 0,
+                relic = ev.relicPct, pressure = ev.pressurePct,
+                relicMin = tonumber(CFG.RelicMin) or 90, pressureMax = tonumber(CFG.PressureMax) or 70,
+            })
+            return pick, vents, free, held
+        end
+
         local GOLEM_CUR = {
             name = "Lava Golem", build = golemBuild,
-            -- The fight ends the moment a vent needs closing (magnet on: the
-            -- golems stay held), or the event or the switch ends.
+            keepHeld = true,             -- never put back: back = on the relic
+            -- The fight ends the moment something else goes first (a vent
+            -- while every golem is held), or the event or the switch ends.
             breakIf = function()
                 if not (CFG.Volcano and P.running) then return true end
                 local isle = island()
-                if not eventOn(isle) then return true end
-                return CFG.Magnet and #liveVents(isle) > 0
+                local ev = S.ev
+                if not (eventOn(isle) and ev) then return true end
+                return (situation(isle, ev)) ~= "golem"
             end,
         }
         S.GOLEM_CUR = GOLEM_CUR
 
-        -- Held from the first one on, between fights too: the pile stays
-        -- active (refreshPile adds each new one) until the event ends.
-        local function holdGolems()
-            if not CFG.Magnet or not (S.ev and S.ev.cage) then return end
-            if pileCur == GOLEM_CUR then
-                pileActive = true
+        -- THE HOLDER: every frame of the event, every golem not in the fight's
+        -- pile is put on its spot in the air over the cage, frozen there.
+        -- A write that stuck since the last frame = held (P.heldAt).
+        local GOLDEN = math.pi * (3 - math.sqrt(5))
+        local function cageTick()
+            local ev = S.ev
+            if not (P.running and not P.handsOff and CFG.Volcano and CFG.Magnet and ev and ev.cage and ev.active) then
                 return
             end
-            if #liveEnemies(GOLEMS) == 0 then return end
-            releasePile()
-            pileCur, pileNames = GOLEM_CUR, GOLEMS
-            pileActive = true
-            refreshPile()
+            local now = os.clock()
+            if now - (S.simAt or 0) > 1 then
+                S.simAt = now
+                if sethiddenproperty then pcall(sethiddenproperty, player, "SimulationRadius", math.huge) end
+            end
+            local inPile = {}
+            if pileActive and pileCur == GOLEM_CUR then
+                for _, e in ipairs(pile) do inPile[e.model] = true end
+            end
+            local i = 0
+            for _, e in ipairs(liveEnemies(GOLEMS)) do
+                if not inPile[e.model] then
+                    i += 1
+                    S.tried[e.model] = S.tried[e.model] or now
+                    local prev = S.cageDest[e.model]
+                    if prev and (e.root.Position - prev).Magnitude < 4 then P.heldAt[e.model] = now end
+                    local a = i * GOLDEN
+                    local dest = ev.cage + Vector3.new(math.cos(a) * 8, 0, math.sin(a) * 8)
+                    pcall(function()
+                        local hum = e.hum
+                        if hum.WalkSpeed ~= 0 or not hum.PlatformStand then
+                            hum.WalkSpeed, hum.JumpPower, hum.PlatformStand = 0, 0, true
+                        end
+                        e.root.CFrame = CFrame.new(dest)
+                        e.root.AssemblyLinearVelocity = Vector3.zero
+                        e.root.AssemblyAngularVelocity = Vector3.zero
+                    end)
+                    S.cageDest[e.model] = dest
+                end
+            end
+            ev.caged = i
         end
+        do
+            local conn
+            conn = RunService.Heartbeat:Connect(function()
+                if _G.BFF ~= P then conn:Disconnect() return end
+                pcall(cageTick)
+            end)
+        end
+
         local function letGolemsGo()
             if pileCur == GOLEM_CUR then releasePile() end
         end
@@ -5582,48 +5896,104 @@ do
             return list
         end
 
+        -- WHICH KEY CLOSES VENTS, learned: key -> { casts, closed }. A cast
+        -- whose vent goes out within 1.2 s closed it. Order: keys that closed
+        -- one (best rate first), then untried, then tried < 4 times, then the
+        -- ones that never did - still fired when nothing else is ready.
+        S.learn = {}
+        local function keyScore(key)
+            local L = S.learn[key]
+            if not L or L.casts == 0 then return 1 end
+            if L.closed > 0 then return 2 + L.closed / L.casts end
+            if L.casts < 4 then return 0.5 end
+            return 0
+        end
+        S.keyScore = keyScore
+
         -- A skill whose bar did not start after the key is not one this weapon
         -- has (or not unlocked): left out for 30 s.
         local ventSkip = {}
-        local function ventCast(pos)
+        local function aimOn(v, secs)
+            P.aimAt = v.pos
+            P.aimPart = v.part
+            aimUntil = os.clock() + secs
+        end
+        local function aimOff()
+            aimUntil = 0
+            P.aimAt, P.aimPart = nil, nil
+        end
+        -- Did the vent go out within `secs`?
+        local function watchClosed(v, secs)
+            local t0 = os.clock()
+            repeat
+                if not ventLive(v.model) then return true end
+                task.wait(0.1)
+            until os.clock() - t0 >= secs
+            return not ventLive(v.model)
+        end
+        local function credit(key, closed)
+            local L = S.learn[key] or { casts = 0, closed = 0 }
+            S.learn[key] = L
+            L.casts += 1
+            if closed then L.closed += 1 end
+        end
+        local function ventCast(v)
+            local pos = v.pos
             local now = os.clock()
             local function aimIt()
                 RunService.Heartbeat:Wait()
                 pcall(aimSwapIn, pos, pos)
             end
-            for _, t in ipairs(ventTools()) do
-                for _, k in ipairs(VENT_KEYS) do
-                    local key = t.Name .. " " .. k
-                    if (CFG.VentKeys or {})[k] and now >= (ventSkip[key] or 0) and skillReady(t.Name, k)
-                        and equip(t.Name) and barReady(t.Name, k) ~= false then
-                        local w = CFG.Weapons[t.Name]
-                        local hold = (w and w.hold and w.hold[k]) or 0.05
-                        P.aimAt = pos
-                        aimUntil = os.clock() + hold + (CFG.CastWait or 0.45) + 0.5
-                        holdKey(KEYCODE[k], hold, aimIt)
-                        cdOf(t.Name, k).lastCast = os.clock()
-                        stats.casts += 1
-                        task.wait(CFG.CastWait or 0.45)
-                        aimUntil = 0
-                        P.aimAt = nil
-                        if barReady(t.Name, k) == true then ventSkip[key] = os.clock() + 30 end
-                        S.lastVent = key
-                        return key
+            local cands = {}
+            for ti, t in ipairs(ventTools()) do
+                for ki, k in ipairs(VENT_KEYS) do
+                    if (CFG.VentKeys or {})[k] then
+                        local key = t.Name .. " " .. k
+                        table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key), order = ti * 10 + ki })
                     end
+                end
+            end
+            table.sort(cands, function(a, b)
+                if a.score ~= b.score then return a.score > b.score end
+                return a.order < b.order
+            end)
+            for _, c in ipairs(cands) do
+                if now >= (ventSkip[c.key] or 0) and skillReady(c.tool.Name, c.k)
+                    and equip(c.tool.Name) and barReady(c.tool.Name, c.k) ~= false then
+                    local w = CFG.Weapons[c.tool.Name]
+                    local hold = (w and w.hold and w.hold[c.k]) or 0.05
+                    aimOn(v, hold + (CFG.CastWait or 0.45) + 1.5)
+                    holdKey(KEYCODE[c.k], hold, aimIt)
+                    cdOf(c.tool.Name, c.k).lastCast = os.clock()
+                    stats.casts += 1
+                    task.wait(CFG.CastWait or 0.45)
+                    local fired = barReady(c.tool.Name, c.k) ~= true
+                    local closed = watchClosed(v, 0.75)
+                    aimOff()
+                    if not fired then ventSkip[c.key] = os.clock() + 30 end
+                    credit(c.key, closed)
+                    S.lastVent = c.key
+                    return c.key, closed
                 end
             end
             -- Nothing ready: an aimed M1 with what is in hand (Skull Guitar,
             -- Bazooka, Cannon and Gravity close vents with M1 - the wiki).
+            local held = heldTool()
+            local key = "M1 " .. (held and held.Name or "(empty hand)")
             local cam = workspace.CurrentCamera
             if cam then
+                aimOn(v, 1.2)
                 aimPixel = cam.ViewportSize * 0.5
                 aimIt()
                 pressM1()
                 aimPixel = nil
             end
-            S.lastVent = "M1 (every key cooling)"
-            task.wait(0.15)
-            return nil
+            local closed = watchClosed(v, 0.3)
+            aimOff()
+            credit(key, closed)
+            S.lastVent = key .. " (every key cooling)"
+            task.wait(0.05)
+            return key, closed
         end
 
         local function patchVent(ev, v, myEpoch)
@@ -5637,11 +6007,11 @@ do
                 if stale(myEpoch) then return end
             end
             lockAt(stand, v.pos)
-            ventCast(v.pos)
-            if not ventLive(v.model) then
+            local key, closed = ventCast(v)
+            if closed then
                 ev.vents += 1
                 S.tally.vents += 1
-                print(string.format("[BFF] volcano: vent closed (%s)  ·  %d this event", tostring(S.lastVent), ev.vents))
+                print(string.format("[BFF] volcano: vent closed by %s  ·  %d this event", tostring(key), ev.vents))
             end
         end
 
@@ -5768,24 +6138,34 @@ do
                 S.lavaAt = os.clock()
                 pcall(clearLava, isle)
             end
-            holdGolems()
-            local vents = liveVents(isle)
-            local golems = liveEnemies(GOLEMS)
-            ev.liveVents, ev.liveGolems = #vents, #golems
-            local pick = defendPick(#vents > 0, #golems > 0, CFG.Magnet)
+            if not ev.dumped then
+                ev.dumped = true
+                pcall(dumpMeters, isle, ev, "event start")
+            elseif not ev.dumped2 and ev.startedAt and os.clock() - ev.startedAt > 20 then
+                ev.dumped2 = true
+                pcall(dumpMeters, isle, ev, "20 s in")
+            end
+            local pick, vents, free, held = situation(isle, ev)
+            ev.liveVents, ev.liveGolems, ev.freeGolems = #vents, #free + #held, #free
+            local meters = string.format("relic %s  ·  pressure %s",
+                ev.relicPct and string.format("%.0f%%", ev.relicPct) or "?",
+                ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "?")
             if pick == "vent" then
                 local _, r = parts()
                 local from = r and r.Position or ev.centre or vents[1].pos
                 patchVent(ev, nearestOf(vents, from, function(x) return x.pos end), myEpoch)
+                ev.note = string.format("vents  ·  %s  ·  %d closed  ·  %d held golems", meters, ev.vents, #held)
             elseif pick == "golem" then
                 activeName = "Lava Golem"
-                ev.note = string.format("Lava Golems: %d  ·  %d down  ·  %d vents closed", #golems, ev.golems, ev.vents)
+                ev.note = string.format("%s  ·  %s  ·  %d down",
+                    (#free > 0) and (#free .. " golem(s) NOT held - on them first") or (#held .. " held golem(s)"),
+                    meters, ev.golems)
                 say(ev.note)
                 fight(GOLEM_CUR, GOLEMS)
             else
                 local at = ev.relic or relicPos(isle)
                 if at then flyTo(at + UP * 25) end
-                ev.note = string.format("event on - waiting for a vent or a golem  ·  %d closed  ·  %d down", ev.vents, ev.golems)
+                ev.note = string.format("event on - waiting  ·  %s  ·  %d closed  ·  %d down", meters, ev.vents, ev.golems)
                 say(ev.note)
                 task.wait(0.2)
             end
@@ -5831,11 +6211,13 @@ do
                 local rel, centre = relicPos(isle), volcanoCentre(isle)
                 if rel and centre then
                     ev.relic, ev.centre = rel, centre
-                    ev.cage = cageSpot(rel, centre, CFG.GolemCage or 60)
+                    ev.cage = cageSpot(rel, centre, CFG.GolemCage or 60) + UP * (tonumber(CFG.GolemLift) or 60)
                 end
             end
             countGolems(ev)
             local active = eventOn(isle)
+            ev.active = active
+            if active and not ev.startedAt then ev.startedAt = os.clock() end
             local pp = promptOf(isle)
             local lootLeft = CFG.VolcanoLoot and not active
                 and (#bonesLying(isle) > 0 or eggPrompt(isle) ~= nil)
@@ -5868,6 +6250,8 @@ do
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
             mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
+            pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
+            situation = situation, golemHeld = golemHeld, ventCast = ventCast,
         }
     end
     build()
@@ -8252,6 +8636,13 @@ local function buildUI()
                     ev.counted and "COUNTED" or "not counted (not there at the start)"))
                 table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
                     ev.vents, ev.golems, ev.bones, ev.eggs))
+                table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
+                    ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
+                    ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
+                    ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
+                table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
+                table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
+                    tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
                 table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
             else
                 table.insert(lines, "no Prehistoric Island in this server")
@@ -8260,6 +8651,28 @@ local function buildUI()
                 t.events, t.vents, t.golems, t.bones, t.eggs))
             return table.concat(lines, "\n")
         end)
+        heading2(v, "which keys close vents (learned)")
+        readout(v, function()
+            local rows = {}
+            for key, L in pairs(P.sea.learn or {}) do table.insert(rows, { key = key, L = L }) end
+            table.sort(rows, function(a, b)
+                local sa, sb = P.sea.keyScore(a.key), P.sea.keyScore(b.key)
+                if sa ~= sb then return sa > sb end
+                return a.key < b.key
+            end)
+            if #rows == 0 then return "nothing fired at a vent yet" end
+            local out = {}
+            for i, r in ipairs(rows) do
+                if i > 10 then break end
+                table.insert(out, string.format("%-24s closed %d of %d%s", r.key, r.L.closed, r.L.casts,
+                    (r.L.closed == 0 and r.L.casts >= 4) and "  - does not close them" or ""))
+            end
+            return table.concat(out, "\n")
+        end)
+        switchRow(v, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
+            function() return CFG.SilentAim end,
+            function(x) CFG.SilentAim = x end)
+        readout(v, function() return "silent aim  " .. tostring(P.silentNote or "-") end)
         heading2(v, "keys fired at a vent")
         for _, k in ipairs({ "Z", "X", "C", "V" }) do
             switchRow(v, k, nil,
@@ -8280,10 +8693,25 @@ local function buildUI()
         sliderRow(v, "Held off the relic", 30, 150, 5,
             function() return CFG.GolemCage end,
             function(x) CFG.GolemCage = x end, " studs")
-        caption(v, "Magnet on: every golem is held there, on the side away from "
-            .. "the volcano, the whole event - held, it cannot hit the relic - and "
-            .. "killed with your Attack page weapons when no vent is open. Magnet "
-            .. "off: golems first, where they stand.")
+        sliderRow(v, "Held up in the air", 0, 150, 5,
+            function() return CFG.GolemLift end,
+            function(x) CFG.GolemLift = x end, " studs")
+        caption(v, "Magnet on: every golem is lifted there the moment it lands and "
+            .. "held the whole event - held, it cannot touch the relic - and "
+            .. "never put back. One that cannot be held (not ours to move) is "
+            .. "fought first where it stands. Held ones die when no vent is open "
+            .. "(your Attack page weapons). Magnet off: golems first, always.")
+        heading2(v, "priority")
+        sliderRow(v, "Keep the relic over", 50, 100, 1,
+            function() return CFG.RelicMin end,
+            function(x) CFG.RelicMin = x end, " %")
+        sliderRow(v, "Pressure that comes first", 20, 100, 5,
+            function() return CFG.PressureMax end,
+            function(x) CFG.PressureMax = x end, " %")
+        caption(v, "A golem not held goes first. Only when the pressure is over "
+            .. "its limit AND the relic is still over yours does a vent go first "
+            .. "instead. The meters are read off the game; the first seconds of "
+            .. "each event write what was found to workspace/bff_volcano_probe.txt.")
         switchRow(v, "Bones and the egg after a win", nil,
             function() return CFG.VolcanoLoot end,
             function(x) CFG.VolcanoLoot = x end)
@@ -8512,6 +8940,123 @@ function P.pickTeam()
         end)
     end
 end
+
+-- =========================================================
+-- SILENT AIM
+-- =========================================================
+-- The camera swap points the line through your cursor at the target, but a
+-- skill that reads the mouse itself still went where the cursor was (user,
+-- the volcano, 2026-10-04). So, while P.aimTarget() names a point (only while
+-- this script fires): Mouse.Hit / Target / X / Y / UnitRay and
+-- UserInputService:GetMouseLocation answer for the target, and a remote call
+-- the game sends with a value that IS your real mouse's (its hit point
+-- within 3 studs, or its ray's direction) gets the target's instead. The
+-- script's own calls (checkcaller) and everything outside a cast are left
+-- alone. Hooked once per game session; the hook reads the live copy (_G.BFF).
+do
+    local function build()
+        -- Pure: swap the values that are your mouse's for the target's.
+        -- Returns whether anything changed.
+        local function swapArgs(args, n, hitPos, rayDir, target, from)
+            local changed = false
+            for i = 1, n do
+                local v = args[i]
+                local t = typeof(v)
+                if t == "Vector3" then
+                    if hitPos and (v - hitPos).Magnitude < 3 then
+                        args[i] = target
+                        changed = true
+                    elseif rayDir and math.abs(v.Magnitude - 1) < 0.01 and v:Dot(rayDir) > 0.995 then
+                        local d = target - from
+                        if d.Magnitude > 0.01 then
+                            args[i] = d.Unit
+                            changed = true
+                        end
+                    end
+                elseif t == "CFrame" then
+                    if hitPos and (v.Position - hitPos).Magnitude < 3 then
+                        local d = target - from
+                        args[i] = (d.Magnitude > 0.01) and CFrame.lookAt(target, target + d.Unit) or CFrame.new(target)
+                        changed = true
+                    end
+                end
+            end
+            return changed
+        end
+        P.swapArgs = swapArgs
+
+        if not (hookmetamethod and getnamecallmethod) then
+            P.silentNote = "this executor cannot hook calls - the camera aim only"
+            return
+        end
+        P.silentNote = "on"
+        if _G.BFF_SILENT_HOOKED then return end
+        _G.BFF_SILENT_HOOKED = true
+        local cc = checkcaller or function() return false end
+        local wrap = newcclosure or function(f) return f end
+        local mouse = player:GetMouse()
+        local UIS = game:GetService("UserInputService")
+        local function aimNow()
+            local p = _G.BFF
+            if not (p and p.running and p.config and p.config.SilentAim and p.aimTarget) then return nil end
+            local ok, t = pcall(p.aimTarget)
+            return ok and t or nil
+        end
+        local oldIndex
+        oldIndex = hookmetamethod(game, "__index", wrap(function(self, key)
+            if (key == "Hit" or key == "Target" or key == "UnitRay" or key == "X" or key == "Y")
+                and rawequal(self, mouse) and not cc() then
+                local t = aimNow()
+                if t then
+                    local cam = workspace.CurrentCamera
+                    local o = cam and cam.CFrame.Position or t
+                    local d = t - o
+                    if key == "Hit" then
+                        return (d.Magnitude > 0.01) and CFrame.lookAt(t, t + d.Unit) or CFrame.new(t)
+                    elseif key == "UnitRay" then
+                        return Ray.new(o, (d.Magnitude > 0.01) and d.Unit or Vector3.new(0, -1, 0))
+                    elseif key == "Target" then
+                        local part = _G.BFF.aimPart
+                        if part and part.Parent then return part end
+                    elseif cam then
+                        local sp = cam:WorldToScreenPoint(t)
+                        return (key == "X") and sp.X or sp.Y
+                    end
+                end
+            end
+            return oldIndex(self, key)
+        end))
+        local oldNc
+        oldNc = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+            local m = getnamecallmethod()
+            if (m == "GetMouseLocation" or m == "FireServer" or m == "InvokeServer") and not cc() then
+                local t = aimNow()
+                if t then
+                    if m == "GetMouseLocation" then
+                        if rawequal(self, UIS) then
+                            local cam = workspace.CurrentCamera
+                            local vp = cam and cam:WorldToViewportPoint(t)
+                            if vp and vp.Z > 0 then return Vector2.new(vp.X, vp.Y) end
+                        end
+                    else
+                        local args = table.pack(...)
+                        local okH, hit = pcall(oldIndex, mouse, "Hit")
+                        local okR, ray = pcall(oldIndex, mouse, "UnitRay")
+                        local char = player.Character
+                        local root = char and char:FindFirstChild("HumanoidRootPart")
+                        if swapArgs(args, args.n, okH and hit and hit.Position or nil,
+                            okR and ray and ray.Direction or nil, t, root and root.Position or t) then
+                            return oldNc(self, table.unpack(args, 1, args.n))
+                        end
+                    end
+                end
+            end
+            return oldNc(self, ...)
+        end))
+    end
+    build()
+end
+-- (end of silent aim)
 
 -- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
 do

@@ -38,11 +38,26 @@ check("phase: on = defend", T.phase(true, true, true) == "defend")
 check("phase: loot before a new start", T.phase(false, true, true) == "loot")
 check("phase: prompt on = start", T.phase(false, true, false) == "start")
 check("phase: nothing = idle", T.phase(false, false, false) == "idle")
-check("magnet on: a vent before a golem (held golems cannot reach the relic)",
-    T.defendPick(true, true, true) == "vent" and T.defendPick(false, true, true) == "golem")
-check("magnet off: a golem before a vent", T.defendPick(true, true, false) == "golem"
-    and T.defendPick(true, false, false) == "vent")
-check("nothing live: wait", T.defendPick(false, false, true) == "wait" and T.defendPick(false, false, false) == "wait")
+local function pick(o) o.relicMin, o.pressureMax = 90, 70 return T.defendPick(o) end
+check("a golem NOT held goes before a vent (it is on the relic)", pick({ vent = true, free = true }) == "golem")
+check("every golem held: the vent first", pick({ vent = true, held = true }) == "vent")
+check("held golems are killed when no vent is open", pick({ held = true }) == "golem")
+check("nothing live: wait", pick({}) == "wait")
+check("pressure over its limit, relic healthy: the vent before even a free golem",
+    pick({ vent = true, free = true, pressure = 80, relic = 97 }) == "vent")
+check("pressure over its limit but the relic under 90%: the golem", pick({ vent = true, free = true, pressure = 80, relic = 85 }) == "golem")
+check("pressure over its limit, relic unread: the vent", pick({ vent = true, free = true, pressure = 80 }) == "vent")
+check("pressure under its limit: the free golem", pick({ vent = true, free = true, pressure = 50, relic = 99 }) == "golem")
+check("a free golem and no vent: the golem", pick({ free = true, pressure = 95, relic = 100 }) == "golem")
+
+-- ---------------------------------------------------------------- METERS
+check("pct: a fraction", near(T.pctFrom(0.5), 50))
+check("pct: a percent", near(T.pctFrom(73), 73))
+check("pct: out of a max", near(T.pctFrom(1460, 2000), 73))
+check("pct: a raw number with no max is not a percent", T.pctFrom(5000) == nil)
+check("pct text: 73%", near(T.pctText("Relic 73%") or -1, 73))
+check("pct text: 1460/2000", near(T.pctText("1460 / 2000") or -1, 73))
+check("pct text: no number", T.pctText("Relic") == nil)
 
 -- ---------------------------------------------------------------- VENTS
 local function rock(name, pos)
@@ -75,7 +90,11 @@ check("vent: another colour = not live", not T.ventLive(r1))
 -- ---------------------------------------------------------------- GOLEMS
 local function golem(pos, hp)
     local m = inst("Lava Golem", "Model")
-    local e = { model = m, hum = { Health = hp or 50000 }, root = { Position = pos }, name = "Lava Golem" }
+    -- A root that moves when its CFrame is written (as a part we own does).
+    local root = setmetatable({ Position = pos }, { __newindex = function(t, k, v)
+        if k == "CFrame" then rawset(t, "Position", v.Position) else rawset(t, k, v) end
+    end })
+    local e = { model = m, hum = { Health = hp or 50000, WalkSpeed = 16 }, root = root, name = "Lava Golem" }
     m.Parent = WS
     return e
 end
@@ -94,10 +113,14 @@ CFG.Magnet = false
 list, centre, inPlace = T.golemBuild()
 check("golems, magnet off: the nearest, where it stands", #list == 1 and list[1] == g2 and inPlace)
 CFG.Magnet = true
-PUTBACK[g1.model], PUTBACK[g2.model] = true, true
+S.tried[g1.model] = CLOCK - 2                 -- tried 2 s ago, never stuck: not ours
 list, centre, inPlace = T.golemBuild()
-check("golems put back (no damage held): fought where they stand", #list == 1 and inPlace == true)
-PUTBACK = {}
+check("a golem that cannot be held: fought first, where it stands", #list == 1 and list[1] == g1 and inPlace == true)
+P.heldAt[g1.model] = CLOCK
+list, centre, inPlace = T.golemBuild()
+check("...held after all: back in the pile at the cage", #list == 2 and inPlace == false)
+P.heldAt[g1.model] = nil
+S.tried[g1.model] = nil
 ENEMIES = {}
 list = T.golemBuild()
 check("no golems: an empty pile", #list == 0)
@@ -302,9 +325,9 @@ check("island up while sailing: the wheel stopped", S.driving == false)
 check("prompt on: flown to the relic's prompt and held, the event on",
     vnear(FLIGHTS[1], vec(-69800, 23, 6890)) and pp.held == 1 and S.tally.events == 1
     and S.ev.note == "THE VOLCANO EVENT IS ON", tostring(S.ev.note))
-check("the cage: 60 off the relic, away from the volcano", vnear(S.ev.cage, vec(-69800, 20, 6960)), vs(S.ev.cage))
+check("the cage: 60 off the relic, away from the volcano, 60 up in the air", vnear(S.ev.cage, vec(-69800, 80, 6960)), vs(S.ev.cage))
 
--- On: a live vent and a golem, magnet on.
+-- On: a live vent and a golem that just landed on the relic, magnet on.
 rA.kids.VFXLayer.kids.Specs.Enabled = true
 local g = golem(vec(-69800, 20, 6895))
 ENEMIES = { g }
@@ -314,15 +337,32 @@ BARS = { ["Dragon-Dragon Z"] = true }      -- still "ready" after the key: it di
 reset()
 ROOT.Position = vec(-69800, 40, 6900)
 S.volcanoStep()
-check("event on, magnet: the golems held first (the pile is theirs, active)",
-    pileCur == GOLEM_CUR and pileActive == true and REFRESHED >= 1)
-check("the vent before the golem: stood 12 out, 8 up", vnear(FLIGHTS[1], vec(-69738, 208, 6800)), vs(FLIGHTS[1]))
-check("fruit first: Dragon-Dragon Z, aimed AT the vent", HELD == "Dragon-Dragon" and KEYS_SENT[1] == "Z"
-    and vnear(AIMED[1], vec(-69750, 200, 6800)), tostring(HELD) .. " " .. tostring(KEYS_SENT[1]) .. " " .. vs(AIMED[1]))
-check("the aim point is cleared after the cast", P.aimAt == nil and aimUntil == 0)
+check("a golem not held yet: it goes first, before the vent (relic first)", FIGHTS[1] == "Lava Golem" and #KEYS_SENT == 0,
+    tostring(FIGHTS[1]) .. " " .. tostring(S.ev.note))
 check("lava off your client: InteriorLava and the lava pool, not the vents",
     isle.kids.Core.kids.InteriorLava.destroyed and isle.kids.LavaPool.destroyed and not rA.destroyed)
+check("the fight on a free golem does not break for a vent", GOLEM_CUR.breakIf() == false)
+-- The holder lifts it.
+pileCur, pileActive = nil, false
+T.cageTick()
+local cage = S.ev.cage
+check("the holder: the golem lifted to its spot in the air over the cage, frozen",
+    near(g.root.Position.Y, cage.Y) and (g.root.Position - cage).Magnitude < 9 and g.hum.PlatformStand == true
+    and g.hum.WalkSpeed == 0, vs(g.root.Position))
+check("...not held until a write is seen to stick", not T.golemHeld(g))
+T.cageTick()
+check("the write stuck: held", T.golemHeld(g))
+check("...and the fight breaks: every golem held, a vent open", GOLEM_CUR.breakIf() == true)
 reset()
+T.cageTick()
+S.volcanoStep()
+check("every golem held: the vent, stood 12 out, 8 up", vnear(FLIGHTS[1], vec(-69738, 208, 6800)), vs(FLIGHTS[1]))
+check("fruit first: Dragon-Dragon Z, aimed AT the vent", HELD == "Dragon-Dragon" and KEYS_SENT[1] == "Z"
+    and vnear(AIMED[1], vec(-69750, 200, 6800)), tostring(HELD) .. " " .. tostring(KEYS_SENT[1]) .. " " .. vs(AIMED[1]))
+check("the aim point and part are cleared after the cast", P.aimAt == nil and P.aimPart == nil and aimUntil == 0)
+check("it did not fire: learned as tried, not closed", S.learn["Dragon-Dragon Z"].casts == 1 and S.learn["Dragon-Dragon Z"].closed == 0)
+reset()
+T.cageTick()
 S.volcanoStep()
 check("a key that did not fire is left out: X next", KEYS_SENT[1] == "X", tostring(KEYS_SENT[1]))
 -- The cast closes it.
@@ -332,33 +372,73 @@ READY = { ["Hallow Scythe Z"] = true }
 rA.kids.VFXLayer.kids.Specs.Enabled = false
 rA.kids.Inner.kids.At1Beam.Enabled = true
 reset()
--- the next key lands: the beam goes out
 ON_KEY = function() rA.kids.Inner.kids.At1Beam.Enabled = false end
+T.cageTick()
 S.volcanoStep()
 ON_KEY = nil
-check("the vent goes out after the hit: counted", S.ev.vents == closed0 + 1 and S.tally.vents >= 1,
-    S.ev.vents .. " " .. closed0)
-check("Hallow Scythe Z when it is the only one ready", HELD == "Hallow Scythe")
--- Nothing ready: an aimed M1.
-READY = {}
+check("the vent goes out after the hit: counted, the key credited", S.ev.vents == closed0 + 1
+    and S.learn["Hallow Scythe Z"].closed == 1, S.ev.vents .. " " .. closed0)
+-- Learned: the key that closed one goes first, even before the fruit.
 rB.kids.VFXLayer.kids.Specs.Enabled = true
+READY = { ["Hallow Scythe Z"] = true, ["Dragon-Dragon C"] = true }
+reset()
+T.cageTick()
+S.volcanoStep()
+check("learned: the key that closed a vent is fired first", HELD == "Hallow Scythe" and KEYS_SENT[1] == "Z", tostring(HELD))
+-- A key that never closes one goes last.
+S.learn["Dragon-Dragon C"] = { casts = 4, closed = 0 }
+S.learn["Hallow Scythe Z"] = nil
+READY = { ["Hallow Scythe X"] = true, ["Dragon-Dragon C"] = true }
+reset()
+T.cageTick()
+S.volcanoStep()
+check("a key that never closed one in 4 goes after an untried one", HELD == "Hallow Scythe" and KEYS_SENT[1] == "X", tostring(HELD))
+-- Nothing ready: an aimed M1, at the vent.
+READY = {}
 reset()
 local m0 = M1S
+M1_AIM = nil
+T.cageTick()
 S.volcanoStep()
-check("every key cooling: an aimed M1 instead", M1S == m0 + 1 and S.lastVent == "M1 (every key cooling)")
--- No vent: the golem.
-rB.kids.VFXLayer.kids.Specs.Enabled = false
-reset()
-S.volcanoStep()
-check("no vent live: the golems are fought", FIGHTS[1] == "Lava Golem", tostring(FIGHTS[1]))
-check("the fight breaks when a vent opens (magnet on)", GOLEM_CUR.breakIf() == false)
+check("every key cooling: an aimed M1, the silent aim on the vent", M1S == m0 + 1 and vnear(M1_AIM, vec(-69850, 200, 6800))
+    and string.find(S.lastVent, "every key cooling", 1, true) ~= nil, vs(M1_AIM))
+-- Meters drive the order.
+local relHum = inst("Humanoid", "Humanoid", { Health = 950, MaxHealth = 1000 })
+isle.kids.Core.kids.PrehistoricRelic:add(relHum)
+isle.attrs.Pressure = 0.8
+P.heldAt[g.model] = nil
+S.ev.metersAt = nil
+local s1 = T.situation(isle, S.ev)
+check("meters: the relic's Humanoid 95%, the island's Pressure 80%", near(S.ev.relicPct, 95) and near(S.ev.pressurePct, 80),
+    tostring(S.ev.relicPct) .. " " .. tostring(S.ev.pressurePct))
+check("pressure over 70 with the relic over 90: the vent before a free golem", s1 == "vent", s1)
+relHum.Health = 800
+S.ev.metersAt = nil
+check("the relic at 80%: the free golem first again", (T.situation(isle, S.ev)) == "golem")
+check("the relic's lowest is kept", near(S.ev.relicLow, 80), S.ev.relicLow)
+isle.kids.Core.kids.PrehistoricRelic.kids.Humanoid = nil
+isle.attrs.Pressure = nil
+-- On screen only: read off the text, never off this panel.
+local hud = PG:add(inst("BFFHUD", "ScreenGui"))
+hud:add(inst("Mine", "TextLabel", { Text = "relic 12%" }))
+local eg = PG:add(inst("EventGui", "ScreenGui"))
+local bar = eg:add(inst("RelicBar", "Frame"))
+bar:add(inst("Label", "TextLabel", { Text = "1840/2000" }))
+eg:add(inst("PressureText", "TextLabel", { Text = "Pressure: 35%" }))
+S.ev.metersAt = nil
+T.readMeters(isle, S.ev)
+check("meters on screen: 92% relic, 35% pressure (the panel's own text ignored)",
+    near(S.ev.relicPct or -1, 92) and near(S.ev.pressurePct or -1, 35), tostring(S.ev.relicPct) .. " " .. tostring(S.ev.pressurePct))
+PG.kids.EventGui, PG.kids.BFFHUD = nil, nil
+-- Magnet off: golems first, always.
 rB.kids.VFXLayer.kids.Specs.Enabled = true
-check("...and it does", GOLEM_CUR.breakIf() == true)
 CFG.Magnet = false
-check("magnet off: a vent does not break the golem fight", GOLEM_CUR.breakIf() == false)
 reset()
 S.volcanoStep()
 check("magnet off: the golem before the vent", FIGHTS[1] == "Lava Golem" and #KEYS_SENT == 0)
+local before = g.root.Position
+T.cageTick()
+check("magnet off: the holder leaves them alone", g.root.Position == before)
 CFG.Magnet = true
 CFG.Volcano = false
 check("switch off: breaks the golem fight", GOLEM_CUR.breakIf() == true)

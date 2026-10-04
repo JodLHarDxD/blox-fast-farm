@@ -24,3 +24,4 @@ end
 local lastDest = {}
 local ME = { Position = v3(0, 20, 0) }
 local function parts() return nil, ME end
+local pileCur = nil

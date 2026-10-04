@@ -3,7 +3,7 @@
 -- DinoBone), the player and the compass, the farm's own helpers (flyTo,
 -- fight, the pile, the weapons) as recorders. CLOCK is the clock.
 local CLOCK = 100
-local os = { clock = function() return CLOCK end, time = function() return 0 end }
+local os = { clock = function() return CLOCK end, time = function() return 0 end, date = function() return "now" end }
 local task = {
     wait = function(s) CLOCK += (s or 0.03) end,
     spawn = function(f, ...) f(...) end,
@@ -65,6 +65,8 @@ local function inst(name, class, opts)
     function o:IsA(c)
         if c == self.ClassName then return true end
         if c == "BasePart" then return self.ClassName == "Part" or self.ClassName == "MeshPart" or self.ClassName == "VehicleSeat" end
+        if c == "GuiObject" then return self.ClassName == "TextLabel" or self.ClassName == "Frame" or self.ClassName == "TextButton" end
+        if c == "ValueBase" then return self.ClassName == "NumberValue" or self.ClassName == "IntValue" end
         return false
     end
     function o:add(kid) self.kids[kid.Name] = kid kid.Parent = self return kid end
@@ -99,6 +101,11 @@ local function inst(name, class, opts)
         return nil
     end
     function o:GetAttribute(n) return self.attrs[n] end
+    function o:GetAttributes() return self.attrs end
+    function o:GetFullName()
+        local p = self.Parent
+        return ((type(p) == "table" and p.GetFullName) and (p:GetFullName() .. ".") or "") .. self.Name
+    end
     function o:GetPivot() return self.pivot or cf(self.Position or vec(0, 0, 0)) end
     function o:PivotTo(c) self.pivot = c self.moved = (self.moved or 0) + 1 end
     function o:IsDescendantOf(a)
@@ -122,13 +129,15 @@ local HUM = { Health = 100, SeatPart = nil, Sit = false }
 local ROOT = { Position = vec(0, 10, 0) }
 ROOT.CFrame = cf(ROOT.Position)
 local DANGER_TEXT = nil
-local player = {
-    Name = "Me", attrs = {},
-    PlayerGui = setmetatable({}, { __index = function()
+local PG = inst("PlayerGui", "PlayerGui")
+setmetatable(PG, { __index = function(_, k)
+    if k == "Main" then
         if DANGER_TEXT == nil then error("no compass") end
         return { Compass = { Frame = { DangerLevel = { TextLabel = { Text = DANGER_TEXT } } } } }
-    end }),
-}
+    end
+    return nil
+end })
+local player = { Name = "Me", attrs = {}, PlayerGui = PG }
 function player:GetAttribute(n) return self.attrs[n] end
 local function parts() return {}, ROOT, HUM end
 
@@ -141,7 +150,7 @@ local CFG = {
     VentDistance = 12, GolemCage = 60, VolcanoLoot = true,
 }
 local SET_HUNT = {}
-local P = { running = true, elite = { note = "", why = nil } }
+local P = { running = true, elite = { note = "", why = nil }, heldAt = {} }
 function P.setHunt(x) table.insert(SET_HUNT, x) P.handsOff = false end
 local STOPPED = 0
 function P.stop() STOPPED += 1 end
@@ -184,7 +193,12 @@ local function liveEnemies(names)
 end
 local PUTBACK = {}
 local function isPutBack(m) return PUTBACK[m] == true end
-local function fight(cur, names) table.insert(FIGHTS, cur.name) return "break" end
+local pile = {}
+local function fight(cur, names)
+    table.insert(FIGHTS, cur.name)
+    pileCur, pileNames, pileActive = cur, names, true
+    return "break"
+end
 local stats = { casts = 0 }
 local TOOLS = {}
 local function toolNames() return TOOLS end
@@ -192,6 +206,7 @@ local function toolType(t) return t.ToolTip end
 local READY = {}
 local function skillReady(w, k) return READY[w .. " " .. k] == true end
 local HELD = nil
+local function heldTool() return HELD and { Name = HELD } or nil end
 local function equip(n) HELD = n return true end
 local BARS = {}
 local function barReady(w, k) return BARS[w .. " " .. k] end
@@ -207,7 +222,8 @@ local KEYCODE = { Z = "Z", X = "X", C = "C", V = "V", F = "F" }
 local AIMED = {}
 local function aimSwapIn(at) table.insert(AIMED, at) end
 local M1S = 0
-local function pressM1() M1S += 1 end
+local M1_AIM = nil
+local function pressM1() M1S += 1 M1_AIM = P.aimAt end
 local BUY_CALLS = {}
 local CF_REMOTE = { InvokeServer = function(_, ...) table.insert(BUY_CALLS, { ... }) return 1 end }
 local function commF() return CF_REMOTE end
