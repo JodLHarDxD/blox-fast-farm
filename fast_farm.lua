@@ -145,9 +145,8 @@ local CFG = {
     AimHidden          = true,
     -- SILENT AIM (user, 2026-10-04: "my mouse should be totally ignored"):
     -- while a skill or an aimed M1 is fired by this script, the game is told
-    -- the mouse points AT the target - Mouse.Hit / Target / X / Y / UnitRay,
-    -- UserInputService:GetMouseLocation, and any value a remote is sent that
-    -- equals where your real mouse points. Your own clicks are never touched.
+    -- the mouse points AT the target - Mouse.Hit / Target / X / Y / UnitRay.
+    -- Hooked only while casting, let go 3 s after; your own clicks never.
     SilentAim          = true,
     CamDistance        = 30,     -- the camera this far from the pile
     CamPitch           = 55,     -- looking down at most this steeply (degrees)
@@ -8848,6 +8847,7 @@ function P.start()
             end
         end
         if attacking and meas then meas.fight += dt end
+        pcall((P :: any).silentTick, P.aimTarget() ~= nil)
     end))
     -- The aim lock: after the camera scripts, every frame the pile is hit.
     pcall(hiddenAim, true)
@@ -8891,6 +8891,7 @@ function P.stop(why)
     pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
     aimUntil = 0
     P.aimAt = nil
+    pcall((P :: any).silentOff)
     if P.sea then P.sea.driving = false end    -- the boat stops; you stay in your seat
     P.handsOff = false
     pcall(hiddenAim, false)
@@ -8947,112 +8948,107 @@ end
 -- The camera swap points the line through your cursor at the target, but a
 -- skill that reads the mouse itself still went where the cursor was (user,
 -- the volcano, 2026-10-04). So, while P.aimTarget() names a point (only while
--- this script fires): Mouse.Hit / Target / X / Y / UnitRay and
--- UserInputService:GetMouseLocation answer for the target, and a remote call
--- the game sends with a value that IS your real mouse's (its hit point
--- within 3 studs, or its ray's direction) gets the target's instead. The
--- script's own calls (checkcaller) and everything outside a cast are left
--- alone. Hooked once per game session; the hook reads the live copy (_G.BFF).
+-- this script fires), Mouse.Hit / Target / X / Y / UnitRay answer for the
+-- target. The script's own reads (checkcaller) are left alone.
+--
+-- ONLY __index, and ONLY while casting (user, the same day: NPCs invisible,
+-- the sea's darkness gone). The first version also hooked __namecall, for
+-- the whole session: every WaitForChild / InvokeServer of every game script
+-- went through it, and where the executor's newcclosure cannot yield those
+-- scripts died - the NPC loader and the sea's lighting among them. Now the
+-- hook goes in when a cast starts and the original goes back 3 s after the
+-- last one (and on stop) - nothing of the game's runs through it otherwise.
 do
     local function build()
-        -- Pure: swap the values that are your mouse's for the target's.
-        -- Returns whether anything changed.
-        local function swapArgs(args, n, hitPos, rayDir, target, from)
-            local changed = false
-            for i = 1, n do
-                local v = args[i]
-                local t = typeof(v)
-                if t == "Vector3" then
-                    if hitPos and (v - hitPos).Magnitude < 3 then
-                        args[i] = target
-                        changed = true
-                    elseif rayDir and math.abs(v.Magnitude - 1) < 0.01 and v:Dot(rayDir) > 0.995 then
-                        local d = target - from
-                        if d.Magnitude > 0.01 then
-                            args[i] = d.Unit
-                            changed = true
-                        end
-                    end
-                elseif t == "CFrame" then
-                    if hitPos and (v.Position - hitPos).Magnitude < 3 then
-                        local d = target - from
-                        args[i] = (d.Magnitude > 0.01) and CFrame.lookAt(target, target + d.Unit) or CFrame.new(target)
-                        changed = true
-                    end
-                end
-            end
-            return changed
-        end
-        P.swapArgs = swapArgs
+        local IDLE_OFF = 3
+        local oldIndex = nil      -- the game's own __index while ours is in
+        local lastWant = 0
 
-        if not (hookmetamethod and getnamecallmethod) then
+        local function canHook() return hookmetamethod ~= nil end
+        P.silentHooked = function() return oldIndex ~= nil end
+
+        if _G.BFF_SILENT_HOOKED and not _G.BFF_SILENT_V2 then
+            -- An older copy's whole-session hook is still in this game, and
+            -- it cannot be taken out from here.
+            P.silentNote = "an old copy's hook is still in this game - REJOIN (it hides NPCs and the sea's darkness)"
+            print("[BFF] " .. P.silentNote)
+        elseif not canHook() then
             P.silentNote = "this executor cannot hook calls - the camera aim only"
-            return
+        else
+            P.silentNote = "ready (hooks only while casting)"
         end
-        P.silentNote = "on"
-        if _G.BFF_SILENT_HOOKED then return end
-        _G.BFF_SILENT_HOOKED = true
-        local cc = checkcaller or function() return false end
-        local wrap = newcclosure or function(f) return f end
-        local mouse = player:GetMouse()
-        local UIS = game:GetService("UserInputService")
+        _G.BFF_SILENT_V2 = true
+
         local function aimNow()
-            local p = _G.BFF
-            if not (p and p.running and p.config and p.config.SilentAim and p.aimTarget) then return nil end
-            local ok, t = pcall(p.aimTarget)
+            if not (P.running and CFG.SilentAim) then return nil end
+            local ok, t = pcall(P.aimTarget)
             return ok and t or nil
         end
-        local oldIndex
-        oldIndex = hookmetamethod(game, "__index", wrap(function(self, key)
-            if (key == "Hit" or key == "Target" or key == "UnitRay" or key == "X" or key == "Y")
-                and rawequal(self, mouse) and not cc() then
-                local t = aimNow()
-                if t then
-                    local cam = workspace.CurrentCamera
-                    local o = cam and cam.CFrame.Position or t
-                    local d = t - o
-                    if key == "Hit" then
-                        return (d.Magnitude > 0.01) and CFrame.lookAt(t, t + d.Unit) or CFrame.new(t)
-                    elseif key == "UnitRay" then
-                        return Ray.new(o, (d.Magnitude > 0.01) and d.Unit or Vector3.new(0, -1, 0))
-                    elseif key == "Target" then
-                        local part = _G.BFF.aimPart
-                        if part and part.Parent then return part end
-                    elseif cam then
-                        local sp = cam:WorldToScreenPoint(t)
-                        return (key == "X") and sp.X or sp.Y
-                    end
-                end
+
+        function P.silentOff()
+            if not oldIndex then return end
+            local o = oldIndex
+            oldIndex = nil
+            pcall(hookmetamethod, game, "__index", o)
+            _G.BFF_SILENT_OFF = nil
+            if not (_G.BFF_SILENT_HOOKED and P.silentNote and string.find(P.silentNote, "REJOIN", 1, true)) then
+                P.silentNote = "ready (hooks only while casting)"
             end
-            return oldIndex(self, key)
-        end))
-        local oldNc
-        oldNc = hookmetamethod(game, "__namecall", wrap(function(self, ...)
-            local m = getnamecallmethod()
-            if (m == "GetMouseLocation" or m == "FireServer" or m == "InvokeServer") and not cc() then
-                local t = aimNow()
-                if t then
-                    if m == "GetMouseLocation" then
-                        if rawequal(self, UIS) then
-                            local cam = workspace.CurrentCamera
-                            local vp = cam and cam:WorldToViewportPoint(t)
-                            if vp and vp.Z > 0 then return Vector2.new(vp.X, vp.Y) end
-                        end
-                    else
-                        local args = table.pack(...)
-                        local okH, hit = pcall(oldIndex, mouse, "Hit")
-                        local okR, ray = pcall(oldIndex, mouse, "UnitRay")
-                        local char = player.Character
-                        local root = char and char:FindFirstChild("HumanoidRootPart")
-                        if swapArgs(args, args.n, okH and hit and hit.Position or nil,
-                            okR and ray and ray.Direction or nil, t, root and root.Position or t) then
-                            return oldNc(self, table.unpack(args, 1, args.n))
+        end
+
+        local function silentOn()
+            if oldIndex or not canHook() then return end
+            -- A copy that was replaced without its stop: its hook out first.
+            if _G.BFF_SILENT_OFF then pcall(_G.BFF_SILENT_OFF) end
+            local cc = checkcaller or function() return false end
+            local wrap = newcclosure or function(f) return f end
+            local mouse = player:GetMouse()
+            local mine
+            mine = wrap(function(self, key)
+                if (key == "Hit" or key == "Target" or key == "UnitRay" or key == "X" or key == "Y")
+                    and rawequal(self, mouse) and not cc() then
+                    local t = aimNow()
+                    if t then
+                        local cam = workspace.CurrentCamera
+                        local o = cam and cam.CFrame.Position or t
+                        local d = t - o
+                        if key == "Hit" then
+                            return (d.Magnitude > 0.01) and CFrame.lookAt(t, t + d.Unit) or CFrame.new(t)
+                        elseif key == "UnitRay" then
+                            return Ray.new(o, (d.Magnitude > 0.01) and d.Unit or Vector3.new(0, -1, 0))
+                        elseif key == "Target" then
+                            local part = P.aimPart
+                            if part and part.Parent then return part end
+                        elseif cam then
+                            local sp = cam:WorldToScreenPoint(t)
+                            return (key == "X") and sp.X or sp.Y
                         end
                     end
                 end
+                return oldIndex(self, key)
+            end)
+            local ok, old = pcall(hookmetamethod, game, "__index", mine)
+            if ok and old then
+                oldIndex = old
+                _G.BFF_SILENT_OFF = P.silentOff
+                if not string.find(tostring(P.silentNote), "REJOIN", 1, true) then
+                    P.silentNote = "in (casting)"
+                end
+            else
+                P.silentNote = "the hook failed - the camera aim only"
             end
-            return oldNc(self, ...)
-        end))
+        end
+
+        -- Every frame: want = the script is firing at a point right now.
+        function P.silentTick(want, now)
+            now = now or os.clock()
+            if want and CFG.SilentAim and P.running then
+                lastWant = now
+                silentOn()
+            elseif oldIndex and (now - lastWant > IDLE_OFF or not CFG.SilentAim or not P.running) then
+                P.silentOff()
+            end
+        end
     end
     build()
 end
