@@ -825,4 +825,39 @@ RS.kids.NPCs = nil
 S.mirage = nil
 end)()
 
+-- ---------------------------------------------------------------- VENTS: GUNS FIRST, THE INVENTORY
+;(function()
+    local part = inst("Rock", "Part", { Position = vec(10, 10, 10) })
+    local function target() return { pos = part.Position, part = part, model = part, learn = {}, alive = function() return true end } end
+    TOOLS = { { Name = "Hallow Scythe", ToolTip = "Sword" }, { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" },
+        { Name = "Kabucha", ToolTip = "Gun" }, { Name = "Dragon Talon", ToolTip = "Melee" } }
+    READY = { ["Hallow Scythe Z"] = true, ["Dragon-Dragon Z"] = true, ["Kabucha Z"] = true, ["Dragon Talon Z"] = true }
+    BARS = {}
+    reset()
+    T.ventCast(target())
+    check("vents: a shooting move first - the gun, before fruit / sword / melee", HELD == "Kabucha" and KEYS_SENT[1] == "Z",
+        tostring(HELD))
+    -- Every key cooling: a sword / gun from your inventory, then fired.
+    READY = {}
+    local asked = 0
+    P.rotate = function(vents)
+        asked += 1
+        if not vents then return false end
+        table.insert(TOOLS, { Name = "Bazooka", ToolTip = "Gun" })
+        READY["Bazooka Z"] = true
+        return true
+    end
+    reset()
+    T.ventCast(target())
+    check("vents: every key cooling - the inventory asked once, its gun fired", asked == 1 and HELD == "Bazooka"
+        and KEYS_SENT[1] == "Z", asked .. " " .. tostring(HELD))
+    READY = {}
+    P.rotate = function() asked += 1 return false end
+    asked = 0
+    reset()
+    T.ventCast(target())
+    check("vents: nothing rested in the inventory either - the aimed M1, asked only once", asked == 1)
+    P.rotate = nil
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

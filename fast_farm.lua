@@ -157,6 +157,18 @@ local CFG = {
     -- load, M1 of whatever is in your hand.
     Weapons            = {},
     WeaponOrder        = {},
+    -- EVERY WEAPON YOU CARRY (user, 2026-10-04: whatever you hold should just
+    -- work, no Attack-page setup). On: M1 with a fighting style (else sword,
+    -- fruit, gun - a fighting style's M1 hits the whole pile), and the
+    -- AutoKeys of every weapon you carry. Off: the Attack page's own choices.
+    AutoAttack         = true,
+    AutoKeys           = { Z = true, X = true, C = true, V = false },
+    -- FROM YOUR INVENTORY: every carried skill cooling = the next sword or gun
+    -- in your inventory is put in your hands (CommF_ "LoadItem" - no menu)
+    -- and its skills fired. What you carried goes back when the farm stops.
+    InvSwap            = true,
+    InvSwapGap         = 1.5,        -- seconds between two loads, at least
+    InvSkip            = {},         -- [name] = true: never loaded
 
     -- ---------- TRAVEL ----------
     TravelSpeed        = 330,    -- studs/s. The public hubs all settled on 330.
@@ -610,7 +622,10 @@ end
 
 local function toolNames()
     local out, seen = {}, {}
-    for _, src in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
+    -- Not ipairs: it stops at the first nil (no Backpack for a moment).
+    local srcs = { player:FindFirstChild("Backpack"), player.Character }
+    for i = 1, 2 do
+        local src = srcs[i]
         if src then
             for _, t in ipairs(src:GetChildren()) do
                 if t:IsA("Tool") and not seen[t.Name] and not P.isPhysicalFruit(t) then
@@ -2149,8 +2164,10 @@ function P.moveWeaponUp(name)
     return false
 end
 
--- The weapons that are on AND in your backpack, in your order.
+-- The weapons that are on AND in your backpack, in your order. AutoAttack:
+-- every one you carry (P.autoWeapons, WEAPON ROTATION).
 local function usedWeapons()
+    if CFG.AutoAttack and (P :: any).autoWeapons then return (P :: any).autoWeapons() end
     local out = {}
     for _, name in ipairs(CFG.WeaponOrder) do
         local w = CFG.Weapons[name]
@@ -2222,7 +2239,7 @@ local function cdTick()
     local now = os.clock()
     for name, w in pairs(CFG.Weapons) do
         for _, k in ipairs(KEYS) do
-            if w[k] then
+            if w[k] or CFG.AutoAttack then
                 local b = barReady(name, k)
                 if b ~= nil then
                     local c = cdOf(name, k)
@@ -2239,6 +2256,9 @@ local function cdTick()
 end
 
 local function skillReady(w, k)
+    -- Sent, and its bar never moved: not this weapon's (or not unlocked yet).
+    local dead = cd[w] and cd[w][k] and cd[w][k].deadUntil
+    if dead and os.clock() < dead then return false end
     local b = barReady(w, k)
     local held = heldTool()
     -- The bar of the weapon in hand is the truth. Others: trust a bar that
@@ -2266,6 +2286,152 @@ function P.skillState(w)
         end
     end
     return table.concat(out, "   ")
+end
+
+-- =========================================================
+-- WEAPON ROTATION
+-- =========================================================
+-- EVERY WEAPON YOU CARRY (CFG.AutoAttack): the attack list is simply what
+-- you carry - M1 with a fighting style (else a sword, the fruit, a gun) and
+-- CFG.AutoKeys of all of them, each fired when its bar says ready.
+-- FROM YOUR INVENTORY (CFG.InvSwap): a sword or gun's skills cool per
+-- weapon, so when every carried skill is cooling the next sword / gun in
+-- your inventory is put in your hands - CommF_("LoadItem", name), the game's
+-- own call (the public hubs use it), no menu - and fired. The one loaded
+-- longest ago and rested (none of its keys cast within their cooldown) goes
+-- first. What you carried when it started goes back when the farm stops.
+-- Only P.autoWeapons / P.rotate / P.rotRestore / P.rot leave the block.
+do
+    local function build()
+        local R: { [string]: any } = {
+            inv = nil, invAt = 0, lastLoad = 0, loads = 0, note = "-",
+            loadedAt = {}, failUntil = {}, original = nil, originalText = nil,
+        }
+        P.rot = R
+        local M1_RANK = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
+
+        function P.autoWeapons()
+            local tools = toolNames()
+            table.sort(tools, function(a, b)
+                local ra, rb = M1_RANK[toolType(a)] or 9, M1_RANK[toolType(b)] or 9
+                if ra ~= rb then return ra < rb end
+                return a.Name < b.Name
+            end)
+            local keys = CFG.AutoKeys or {}
+            local out = {}
+            for i, t in ipairs(tools) do
+                local w = wcfg(t.Name)
+                local cfg = { use = true, M1 = (i == 1), hold = w.hold,
+                    Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true, F = false }
+                table.insert(out, { name = t.Name, cfg = cfg, tool = t })
+            end
+            return out
+        end
+
+        -- Your inventory's swords and guns: { name, type, mastery }. 30 s cache.
+        local function inventory()
+            if R.inv and os.clock() - R.invAt < 30 then return R.inv end
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if ok and type(inv) == "table" then
+                local out = {}
+                for _, it in pairs(inv) do
+                    if type(it) == "table" and (it.Type == "Sword" or it.Type == "Gun") and type(it.Name) == "string" then
+                        table.insert(out, { name = it.Name, type = it.Type, mastery = tonumber(it.Mastery) or 0 })
+                    end
+                end
+                R.inv, R.invAt = out, os.clock()
+            end
+            return R.inv or {}
+        end
+
+        -- Every key of it we cast has cooled (by its learned time, 8 s unknown).
+        local function rested(name, now)
+            for _, k in ipairs(KEYS) do
+                local c = cd[name] and cd[name][k]
+                if c and c.lastCast and now - c.lastCast < (c.learned or 8) then return false end
+            end
+            return true
+        end
+
+        -- Pure (tools/rotate_test.py): the next one to load, or nil. Not one
+        -- you carry, not one switched off, not one that failed to load lately,
+        -- rested; the one loaded longest ago (never = first).
+        local function pickNext(list, carried, skip, failUntil, loadedAt, now, restedFn)
+            local best, bestAt = nil, math.huge
+            for _, it in ipairs(list) do
+                if not carried[it.name] and not skip[it.name] and now >= (failUntil[it.name] or 0)
+                    and restedFn(it.name, now) then
+                    local at = loadedAt[it.name] or -math.huge
+                    if at < bestAt then best, bestAt = it, at end
+                end
+            end
+            return best
+        end
+        R.pickNext = pickNext
+        R.rested = rested
+
+        -- vents = true: the volcano asks (any attack mode). true = a new one
+        -- is in your hands.
+        function P.rotate(vents)
+            if not CFG.InvSwap then return false end
+            if not vents and not CFG.AutoAttack then return false end
+            local now = os.clock()
+            if now - R.lastLoad < (CFG.InvSwapGap or 1.5) then return false end
+            local carried = {}
+            local tools = toolNames()
+            for _, t in ipairs(tools) do carried[t.Name] = true end
+            local pick = pickNext(inventory(), carried, CFG.InvSkip or {}, R.failUntil, R.loadedAt, now, rested)
+            if not pick then
+                R.note = "nothing rested in your inventory"
+                return false
+            end
+            if not R.original then
+                -- What you carried, to put back at the stop.
+                R.original = {}
+                local names = {}
+                for _, t in ipairs(tools) do
+                    local ty = toolType(t)
+                    if ty == "Sword" or ty == "Gun" then
+                        R.original[ty] = t.Name
+                        table.insert(names, t.Name)
+                    end
+                end
+                R.originalText = (#names > 0) and table.concat(names, ", ") or "nothing"
+            end
+            R.lastLoad = now
+            local cf = commF()
+            pcall(function() cf:InvokeServer("LoadItem", pick.name) end)
+            local t0 = os.clock()
+            while not findTool(pick.name) and os.clock() - t0 < 1.5 do task.wait(0.05) end
+            if findTool(pick.name) then
+                R.loads += 1
+                R.loadedAt[pick.name] = now
+                R.note = "loaded " .. pick.name .. " (" .. pick.type .. ")"
+                stats.swaps += 1
+                return true
+            end
+            R.failUntil[pick.name] = now + 120
+            R.note = pick.name .. " did not come - left 2 min"
+            return false
+        end
+
+        -- The farm stopped: what you carried back in your hands.
+        function P.rotRestore()
+            local o = R.original
+            R.original = nil
+            if not o then return end
+            local cf = commF()
+            for _, name in pairs(o) do
+                if not findTool(name) then
+                    pcall(function() cf:InvokeServer("LoadItem", name) end)
+                    task.wait(0.3)
+                end
+            end
+            R.note = "put back: " .. tostring(R.originalText)
+        end
+    end
+    build()
 end
 
 -- =========================================================
@@ -2631,7 +2797,8 @@ local function castSkill(u, k)
         P.lastCast = key .. ": fired" .. tail
     elseif b == true then
         stats.castsMissed += 1
-        P.lastCast = key .. ": key sent, the skill did NOT fire"
+        c.deadUntil = os.clock() + 60
+        P.lastCast = key .. ": key sent, the skill did NOT fire - left 1 min"
     else
         P.lastCast = key .. ": key sent (no bar to check)" .. tail
     end
@@ -2663,6 +2830,9 @@ local function attackTick()
                 end
             end
         end
+        -- Every carried skill cooling: a rested sword / gun from your inventory.
+        local rot = (P :: any).rotate
+        if rot and rot(false) then return end
         if not m1u then
             P.nextNote = "every skill cooling"
             task.wait(0.1)
@@ -4867,6 +5037,9 @@ do
         local GOLEMS      = { ["Lava Golem"] = true }
         local VENT_KEYS   = { "Z", "X", "C", "V" }
         local TYPE_RANK   = { ["Blox Fruit"] = 1, Melee = 2, Sword = 3, Gun = 4 }
+        -- Vents: shooting moves first (user: "a powerful shooting attack ...
+        -- gun is better"); what really closes them is learned on top.
+        local VENT_RANK   = { Gun = 1, ["Blox Fruit"] = 2, Sword = 3, Melee = 4 }
         local UP          = Vector3.new(0, 1, 0)
 
         -- ---------- the arithmetic (pure: tools/sea_test.py) ----------
@@ -6040,7 +6213,7 @@ do
         local function ventTools()
             local list = toolNames()
             table.sort(list, function(a, b)
-                local ra, rb = TYPE_RANK[toolType(a)] or 9, TYPE_RANK[toolType(b)] or 9
+                local ra, rb = VENT_RANK[toolType(a)] or 9, VENT_RANK[toolType(b)] or 9
                 if ra ~= rb then return ra < rb end
                 return a.Name < b.Name
             end)
@@ -6094,7 +6267,7 @@ do
             L.casts += 1
             if closed then L.closed += 1 end
         end
-        local function ventCast(v)
+        local function ventCast(v, rotated)
             local pos = v.pos
             local now = os.clock()
             local function aimIt()
@@ -6133,7 +6306,10 @@ do
                     return c.key, closed
                 end
             end
-            -- Nothing ready: an aimed M1 with what is in hand (Skull Guitar,
+            -- Nothing ready: a rested sword / gun from your inventory, once.
+            local rot = (P :: any).rotate
+            if not rotated and rot and rot(true) then return ventCast(v, true) end
+            -- Still nothing: an aimed M1 with what is in hand (Skull Guitar,
             -- Bazooka, Cannon and Gravity close vents with M1 - the wiki).
             local held = heldTool()
             local key = "M1 " .. (held and held.Name or "(empty hand)")
@@ -6885,6 +7061,69 @@ do
         end
 
         M._t = { parseQuest = parseQuest, remoteFailed = remoteFailed, treeOrder = treeOrder }
+    end
+    build()
+end
+
+-- =========================================================
+-- LEARNED KEYS, KEPT
+-- =========================================================
+-- Which key closes vents (P.sea.learn) and which breaks trees (P.ember.learn)
+-- are kept in workspace/bff_learn.json across sessions: "Dragon Talon C
+-- never closed one" is learned once, not every event. Read at load, written
+-- every 15 s when a cast was added.
+do
+    local function build()
+        local FILE = "bff_learn.json"
+        local HS = game:GetService("HttpService")
+        local function total(t)
+            local n = 0
+            for _, L in pairs(t or {}) do n += (tonumber(L.casts) or 0) end
+            return n
+        end
+        -- Pure: a saved table back into { key = { casts, closed } }, bad rows dropped.
+        local function clean(t)
+            local out = {}
+            if type(t) ~= "table" then return out end
+            for k, L in pairs(t) do
+                if type(k) == "string" and type(L) == "table" then
+                    local c, d = tonumber(L.casts), tonumber(L.closed)
+                    if c and d and c >= 0 and d >= 0 and d <= c then out[k] = { casts = c, closed = d } end
+                end
+            end
+            return out
+        end
+        P.learnClean = clean
+        if readfile and isfile then
+            local ok, data = pcall(function()
+                if not isfile(FILE) then return nil end
+                return HS:JSONDecode(readfile(FILE))
+            end)
+            if ok and type(data) == "table" then
+                local S, M = (P :: any).sea, (P :: any).ember
+                if S then
+                    for k, L in pairs(clean(data.vents)) do S.learn[k] = S.learn[k] or L end
+                end
+                if M then
+                    for k, L in pairs(clean(data.trees)) do M.learn[k] = M.learn[k] or L end
+                end
+            end
+        end
+        if not writefile then return end
+        local saved = -1
+        task.spawn(function()
+            while _G.BFF == nil or _G.BFF == P do
+                task.wait(15)
+                local S, M = (P :: any).sea, (P :: any).ember
+                local n = total(S and S.learn) + total(M and M.learn)
+                if n ~= saved then
+                    saved = n
+                    pcall(function()
+                        writefile(FILE, HS:JSONEncode({ vents = S and S.learn or {}, trees = M and M.learn or {} }))
+                    end)
+                end
+            end
+        end)
     end
     build()
 end
@@ -8559,9 +8798,33 @@ local function buildUI()
     do
         local v = makeView("attack")
         gap(v, 6)
+        heading2(v, "every weapon you carry")
+        switchRow(v, "Every weapon you carry", "No setup: M1 with a fighting style, the keys below of all",
+            function() return CFG.AutoAttack end,
+            function(x) CFG.AutoAttack = x end)
+        for _, k in ipairs({ "Z", "X", "C", "V" }) do
+            switchRow(v, "    " .. k, (k == "V") and "Often a transformation or a long hold - off by default" or "",
+                function() return CFG.AutoKeys[k] == true end,
+                function(x) CFG.AutoKeys[k] = x end)
+        end
+        switchRow(v, "Swords and guns from your inventory",
+            "Every skill cooling: the next one is put in your hands, no menu",
+            function() return CFG.InvSwap end,
+            function(x) CFG.InvSwap = x end)
+        readout(v, function()
+            local R = (P :: any).rot
+            if not R then return "-" end
+            local inv = R.inv and #R.inv or 0
+            return string.format("inventory  %s\nloaded     %d   ·   %s\nback at stop  %s",
+                R.inv and (inv .. " swords / guns") or "not read yet",
+                R.loads, tostring(R.note), R.original and tostring(R.originalText) or "-")
+        end)
+        caption(v, "A key whose skill never fires (not this weapon's, not unlocked) "
+            .. "is left alone for a minute. Off: only what you switch on below.")
+
         heading2(v, "weapons")
-        caption(v, "Tap a weapon to choose what it fires. Nothing is on unless "
-            .. "you switch it on; the lit ones fire.")
+        caption(v, "Tap a weapon to choose what it fires (used when \"Every weapon "
+            .. "you carry\" is off). The lit ones fire.")
 
         local box = chooser(v, 170)
         local signature = nil
@@ -9577,6 +9840,7 @@ function P.stop(why)
     aimUntil = 0
     P.aimAt = nil
     pcall((P :: any).silentOff)
+    task.spawn(function() pcall((P :: any).rotRestore) end)
     if P.sea then P.sea.driving = false end    -- the boat stops; you stay in your seat
     P.handsOff = false
     pcall(hiddenAim, false)
