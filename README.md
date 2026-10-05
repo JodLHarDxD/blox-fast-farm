@@ -59,6 +59,29 @@ you are on a team, then hides the team screen; the console says
 `[BFF] autoexec team: on Pirates`. It never loads the farm, does nothing in
 other games, and never switches a team you are on.
 
+## Android: does it run? (`android_probe.lua`)
+
+Nothing in the farm is Windows-only: every executor function it uses is
+checked before use and has a fallback. The farm itself (remote hits, magnet,
+noclip, flight, hunts, hops) does not depend on the device. The Android
+executor with full sUNC is Delta (free, key system, flagged as detected by
+WEAO, so use an account you can afford to lose). Known gaps on a phone:
+
+- the panel is 342 x 570; a landscape phone is ~360-430 tall, so its bottom
+  is off screen (**Hide** folds it, or drag it up);
+- manual boat steering reads W/A/S/D (auto-cruise is unaffected);
+- skills Z/X/C/V/F, Ken (E) and Buso (J) are sent as keys through
+  VirtualInputManager. Whether the game's mobile client fires a skill from
+  a sent key cannot be read from the code. The M1 remote hits do not
+  depend on this.
+
+`android_probe.lua` settles it on the phone: hold a weapon whose Z is ready,
+run the probe, read `workspace/bff_android_probe.txt`. It lists the executor
+functions, the screen, the game UI the farm reads, and presses Z once:
+`RESULT: the game FIRED the skill` = the script runs as is. `did NOT fire` =
+skills need a mobile path (the game's own buttons), and only that part
+needs rewriting, not the farm.
+
 ## What each part does
 
 | part | how |
