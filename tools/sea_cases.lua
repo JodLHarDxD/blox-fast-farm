@@ -284,19 +284,19 @@ CLOCK += 20 * 60
 reset()
 ok = S.huntStep(epoch)
 check("clock: 20 min at sea - still sailing, the note shows the clock", ok == true
-    and string.find(S.note, "20:00 of 21:00 at sea", 1, true) ~= nil, S.note)
+    and string.find(S.note, "20:00 of 21:00 in this server", 1, true) ~= nil, S.note)
 CLOCK += 61
 reset()
 ok = S.huntStep(epoch)
 check("clock: 21 min at sea, no island - the next server, and why", ok == false
-    and P.elite.why == "no Prehistoric Island in 21 min at sea" and S.driving == false, tostring(P.elite.why))
+    and P.elite.why == "no Prehistoric Island in 21 min in this server" and S.driving == false, tostring(P.elite.why))
 -- Manual steering too.
 CFG.SeaSteer = "manual"
 reset()
 HUM.SeatPart = nil
 ok = S.huntStep(epoch)
 check("clock: you steering - 21 min still means the next server", ok == false
-    and P.elite.why == "no Prehistoric Island in 21 min at sea")
+    and P.elite.why == "no Prehistoric Island in 21 min in this server")
 CFG.SeaSteer = "auto"
 -- 0 = off.
 CFG.SeaSearchMinutes = 0
@@ -313,6 +313,16 @@ ok = S.huntStep(epoch)
 check("clock: the island came - it stays, the clock no longer counts", ok == true and P.elite.why == nil
     and string.find(S.note, "PREHISTORIC ISLAND UP", 1, true) ~= nil, tostring(P.elite.why) .. " / " .. S.note)
 LOCS.kids["Prehistoric Island"] = nil
+-- Stuck before sailing (no boat, the buy never comes): the server's clock still ends it.
+BOATS.kids[NEW_BOAT.Name] = nil
+S.foundAt, S.driving = nil, false
+S.sailStart = CLOCK - 22 * 60
+reset()
+ok = S.huntStep(epoch)
+check("clock: stuck before sailing (no boat) - 21 min in the server still = the next server, no buy tried",
+    ok == false and P.elite.why == "no Prehistoric Island in 21 min in this server" and #BUY_CALLS == 0,
+    tostring(P.elite.why) .. " buys " .. #BUY_CALLS)
+BOATS:add(NEW_BOAT)
 CFG.SeaSearchMinutes = 0
 S.sailStart, S.foundAt, S.tally.found = nil, nil, found0
 -- Sunk far out: the next server.
