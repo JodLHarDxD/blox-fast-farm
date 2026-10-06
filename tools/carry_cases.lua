@@ -7,13 +7,27 @@ local function check(name, cond, detail)
 end
 local function state(over)
     local t = {
-        resume = true, freshUntil = NOW + 100, hopAt = NOW - 12, fromJob = "old",
+        resume = true, build = "B2", freshUntil = NOW + 100, hopAt = NOW - 12, fromJob = "old",
         visited = { x = NOW - 5 }, tally = { joins = 4, found = 2, kills = 1, chalices = 0, joinSecs = 40, fails = 1, since = 1 },
         cfg = { TravelSpeed = 500, Hunt = true, NotAField = 1, QuestName = "Q" },
     }
     for k, v in pairs(over or {}) do t[k] = v end
     return t
 end
+
+-- 0. A copy of ANOTHER build hopped here: resumed, but its settings are not
+--    taken (its old defaults would ride through every hop after it).
+reset()
+DB.f1 = state({ build = "B1", cfg = { TravelSpeed = 500, Hunt = true } })
+FILE = "f1"
+check("another build: still resumed", takeCarry() == true and CFG.Hunt == true)
+check("another build: its settings NOT taken - this build's defaults", CFG.TravelSpeed == 330, CFG.TravelSpeed)
+reset()
+DB.f1 = state({ cfg = { TravelSpeed = 500, Hunt = true } })
+DB.f1.build = nil
+FILE = "f1"
+takeCarry()
+check("no build at all (older than the stamp): its settings not taken", CFG.TravelSpeed == 330, CFG.TravelSpeed)
 
 -- 1. nothing carried
 reset()

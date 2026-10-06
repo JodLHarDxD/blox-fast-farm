@@ -366,7 +366,9 @@ local CFG = {
     Debug              = false,
 }
 
-local P = { running = false, config = CFG, handsOff = false }
+-- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
+-- on the panel's title, and in the hop carry - bumped with every change.
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -3956,7 +3958,7 @@ do
             local cfg = {}
             for k, v in pairs(CFG) do cfg[k] = v end
             local t = {
-                v = 1, userId = player.UserId, resume = resume and true or false,
+                v = 1, build = P.build, userId = player.UserId, resume = resume and true or false,
                 freshUntil = os.time() + 300, hopAt = os.time(), fromJob = game.JobId,
                 visited = E.visited, tally = E.tally, cfg = cfg,
             }
@@ -4010,10 +4012,16 @@ do
             local fresh = tonumber(t.freshUntil) and os.time() <= t.freshUntil
             -- Written in THIS server: nothing hopped (a copy run again by hand).
             if not fresh or t.fromJob == game.JobId then return false end
-            if type(t.cfg) == "table" then
+            -- Settings only from a copy of THIS build: an older copy's would
+            -- carry its old defaults through every hop after it (the far edge
+            -- 8,000, M1 0.12...) and the update would look like it never came.
+            if type(t.cfg) == "table" and t.build == P.build then
                 for k, v in pairs(t.cfg) do
                     if CFG[k] ~= nil then CFG[k] = v end
                 end
+            elseif type(t.cfg) == "table" then
+                print("[BFF] hop: settings from build " .. tostring(t.build or "old")
+                    .. " not taken - this build's (" .. tostring(P.build) .. ") defaults")
             end
             if not t.resume then return false end
             -- Two loaders in one server (autoexec AND the queue): count the join once.
@@ -6032,7 +6040,11 @@ do
                 local _, rr = parts()
                 local spot = (isle and frontOf(isle)) or (mk and rr and edgeOf(mk, rr.Position,
                     tonumber(CFG.VolcanoKeepOut) or 220)) or nil
-                if spot and rr and (rr.Position - spot).Magnitude > 10 then safeFly(spot, isle, mk, myEpoch) end
+                if spot and rr and (rr.Position - spot).Magnitude > 10 then
+                    print(isle and "[BFF] sea: island up - to the front of the T-Rex skull (round the volcano)"
+                        or "[BFF] sea: island up - to its edge on your side (never the volcano)")
+                    safeFly(spot, isle, mk, myEpoch)
+                end
                 S.note = "PREHISTORIC ISLAND UP - holding on it"
                 E.note = S.note
                 say(S.note)
@@ -6048,8 +6060,13 @@ do
                 if g and g.step(myEpoch) then
                     S.note = "before the sail: " .. tostring(g.note)
                     E.note = S.note
+                    if g.note ~= S.magnetSaid then
+                        S.magnetSaid = g.note
+                        print("[BFF] magnet: " .. tostring(g.note))
+                    end
                     return true
                 end
+                if g then print("[BFF] magnet: " .. tostring(g.note) .. " - sailing") end
             end
             -- THE SERVER'S CLOCK: the Prehistoric hunt only (user, 2026-10-06 -
             -- not the Mirage hunt, not the farm), from its first step past the
@@ -8565,7 +8582,7 @@ local function buildUI()
         Size = UDim2.new(1, -104, 0, 22), Position = UDim2.fromOffset(20, 18),
         BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
         TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
-        TextColor3 = C.text, Text = "Fast Farm", Parent = panel,
+        TextColor3 = C.text, Text = "Fast Farm  ·  " .. tostring(P.build), Parent = panel,
     })
     local dot = mk("Frame", {
         Size = UDim2.fromOffset(7, 7), Position = UDim2.new(1, -62, 0, 26),
@@ -8726,7 +8743,7 @@ local function buildUI()
     end
 
     local TITLES = {
-        home = "Fast Farm", target = "Targets", attack = "Attack", weapon = "Weapon",
+        home = "Fast Farm  ·  " .. tostring(P.build), target = "Targets", attack = "Attack", weapon = "Weapon",
         magnet = "Magnet", position = "Position", travel = "Travel",
         safety = "Safety", stats = "Stats",
         elite = "Hunt",
@@ -10641,7 +10658,7 @@ function P.start()
 
     task.spawn(mainLoop)
     task.spawn(sideLoop)
-    print("[BFF] running. _G.BFF.stop() to halt.")
+    print("[BFF] running - build " .. tostring(P.build) .. ". _G.BFF.stop() to halt.")
 end
 
 -- why = "reload": a new copy of the script is replacing this one (the top of

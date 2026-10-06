@@ -19,6 +19,8 @@ Paste `fast_farm.lua` into the executor, or once this repo is on GitHub:
 loadstring(game:HttpGet("https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/fast_farm.lua?cb=" .. tick()))()
 ```
 
+**Which build is running:** the panel's title and the console's `[BFF] running - build ...` line (e.g. `2026-10-07.1`). A hop carries your settings only between copies of the **same** build - an older copy's would bring its old defaults with it.
+
 Then: **Targets** → tap the species for the circuit → **Attack** → tap each
 weapon and switch on what it fires → **Start**.
 

@@ -29,3 +29,5 @@ end
 reset()
 -- this account
 local player = { UserId = 111 }
+-- this copy's build (a carry from another build brings no settings)
+local P = { build = "B2" }
