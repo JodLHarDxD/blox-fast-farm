@@ -1274,4 +1274,31 @@ end)()
     S.driving = false
 end)()
 
+-- ---------------------------------------------------------------- THE VOLCANIC MAGNET BEFORE THE SAIL
+;(function()
+    MAP.kids.PrehistoricIsland = nil
+    LOCS.kids["Prehistoric Island"] = nil
+    S.ev, S.foundAt, S.sailStart, S.driving = nil, nil, nil, false
+    CFG.SeaSearchMinutes = 21
+    local busy = true
+    P.magnet = { note = "Scrap Metal for the magnet: 2 / 10", step = function() return busy end }
+    reset()
+    local ok = S.huntStep(epoch, "prehistoric")
+    check("magnet: getting it - busy, no sail, the 21 min NOT started", ok == true and S.sailStart == nil
+        and string.find(S.note, "before the sail", 1, true) ~= nil and #BUY_CALLS == 0, S.note)
+    busy = false
+    reset()
+    S.huntStep(epoch, "prehistoric")
+    check("magnet held: the 21 min start now, at the sail", S.sailStart == CLOCK)
+    -- The Mirage hunt: no magnet step.
+    busy = true
+    S.sailStart = nil
+    reset()
+    S.huntStep(epoch, "mirage")
+    check("the Mirage hunt: no magnet step", string.find(tostring(S.note), "before the sail", 1, true) == nil)
+    P.magnet = nil
+    CFG.SeaSearchMinutes = 0
+    S.sailStart, S.driving = nil, false
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

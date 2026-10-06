@@ -251,6 +251,10 @@ local CFG = {
     -- started in this server = the next server. The island up = the clock no
     -- longer counts (the event, the loot, then the hop). 0 = off.
     SeaSearchMinutes   = 21,
+    -- THE VOLCANIC MAGNET first (user, 2026-10-06): in your inventory = sail;
+    -- not = crafted (15 Blaze Ember + 10 Scrap Metal at the Dragon Hunter),
+    -- the materials farmed first when short. The 21 min start at the sail.
+    SeaMagnet          = true,
     -- The compass meter in studs, counted from the Tiki boat dealer (user's
     -- compass, 2026-10-04: Danger 6 ~2,600 m = 26.3k studs; the Prehistoric
     -- came ~5,000 m = 50k studs). The panel shows both.
@@ -5925,9 +5929,6 @@ do
                 say(S.note)
                 return true
             end
-            -- THE SERVER'S CLOCK: the Prehistoric hunt only (user, 2026-10-06 -
-            -- not the Mirage hunt, not the farm), from its first step here.
-            if kind == "prehistoric" then S.sailStart = S.sailStart or os.clock() end
             if kind == "mirage" then
                 local mi, mmk = mirageIsle(), mirageMarker()
                 if mi or mmk then
@@ -5967,8 +5968,20 @@ do
                 return true
             end
             S.foundAt = nil
-            -- THE SERVER'S CLOCK, before any boat step: a stuck buy, seat or
-            -- loop is caught too.
+            -- THE VOLCANIC MAGNET before the boat (P.magnet). Getting it is not
+            -- counted in the 21 min: the clock starts at the sail.
+            if kind == "prehistoric" and not S.sailStart then
+                local g = (P :: any).magnet
+                if g and g.step(myEpoch) then
+                    S.note = "before the sail: " .. tostring(g.note)
+                    E.note = S.note
+                    return true
+                end
+            end
+            -- THE SERVER'S CLOCK: the Prehistoric hunt only (user, 2026-10-06 -
+            -- not the Mirage hunt, not the farm), from its first step past the
+            -- magnet; checked before any boat step - a stuck buy, seat or loop.
+            if kind == "prehistoric" then S.sailStart = S.sailStart or os.clock() end
             local capS = (tonumber(CFG.SeaSearchMinutes) or 21) * 60
             if kind == "prehistoric" and capS > 0 and S.sailStart and os.clock() - S.sailStart >= capS then
                 if S.driving then stopDrive() end
@@ -7388,22 +7401,29 @@ do
         end
 
         local function fightBreak()
-            return not (CFG.Hunt and CFG.HuntKind == "ember") or #embersLying() > 0 or headBack()
+            -- Borrowed (the Volcanic Magnet's embers): while the Prehistoric hunt is on.
+            local mine = (CFG.Hunt and CFG.HuntKind == "ember")
+                or (M.borrowed and CFG.Hunt and CFG.HuntKind == "prehistoric")
+            return not mine or #embersLying() > 0 or headBack()
         end
 
         -- true = busy here (the director's contract; this hunt never hops).
-        function M.step(myEpoch)
+        -- borrowed = run for another job (the Volcanic Magnet): what would stop
+        -- the hunt is written to M.blocked instead, and no stop-at count.
+        function M.step(myEpoch, borrowed)
+            M.borrowed, M.blocked = borrowed and true or false, nil
             local sea = mySea()
             if sea and sea ~= 3 then
                 M.note = "Blaze Embers come only from the Third Sea - hunt stopped"
                 say(M.note)
+                if borrowed then M.blocked = "not the Third Sea" return false end
                 P.stop("Blaze Embers: not the Third Sea")
                 return true
             end
             local now = os.clock()
             if now - (M.haveAt or 0) > 20 then pcall(emberCount) end
             local stopAt = CFG.EmberStopAt or 99
-            if M.have and M.have >= stopAt then
+            if not borrowed and M.have and M.have >= stopAt then
                 M.note = string.format("you have %d Blaze Embers (stop at %d) - hunt done", M.have, stopAt)
                 say(M.note)
                 notify("Blaze Embers: " .. M.have)
@@ -7435,6 +7455,10 @@ do
                     M.note = "the Dragon Hunter gives no quest - he needs Dragon Talon at 500 mastery "
                         .. "and the Dojo Trainer's Yellow Belt - hunt stopped"
                     say(M.note)
+                    if borrowed then
+                        M.blocked = "the Dragon Hunter gives no quest (Dragon Talon 500 + Yellow Belt?)"
+                        return false
+                    end
                     notify("Blaze Embers: no quest (Dragon Talon 500 + Yellow Belt?)")
                     P.stop("Blaze Embers: no quest")
                 end
@@ -7475,7 +7499,176 @@ do
             return true
         end
 
+        M.hunterAt = hunterAt
         M._t = { parseQuest = parseQuest, remoteFailed = remoteFailed, treeOrder = treeOrder }
+    end
+    build()
+end
+
+-- =========================================================
+-- VOLCANIC MAGNET
+-- =========================================================
+-- Before the Prehistoric hunt sails (user, 2026-10-06: with the magnet the
+-- island comes far more often - the wiki: "drastically increases the spawn
+-- chances"; it is CONSUMED when the island spawns, so every trip wants a new
+-- one; you hold at most 1). In your inventory = sail. Not: craft it - 15
+-- Blaze Ember + 10 Scrap Metal at the Dragon Hunter,
+-- CommF_("CraftItem", "Craft", "Volcanic Magnet") (two hubs; one calls it
+-- from anywhere, one at the NPC: from here first, then at him). Short of
+-- either: Scrap Metal from Forest Pirates (else Pirate Millionaires - the
+-- wiki's Third Sea droppers, the hubs' picks), Blaze Embers by the Ember
+-- hunt's own quests. Anything that cannot be done (no Ember quests, the
+-- craft refused 3 times, the inventory unreadable) = sail without it, said.
+do
+    local function build()
+        local G: { [string]: any } = { note = "-", crafts = 0, tries = 0, gaveUp = nil, inv = nil, invAt = 0 }
+        P.magnet = G
+        local SCRAP_MOBS = { "Forest Pirate", "Pirate Millionaire" }
+        local SCRAP_AT = {
+            ["Forest Pirate"]      = Vector3.new(-13206, 425, -7964),
+            ["Pirate Millionaire"] = Vector3.new(81, 43, 5724),
+        }
+        local NEED_EMBER, NEED_SCRAP = 15, 10
+
+        -- Pure (tools/vmagnet_test.py): what to do with these counts.
+        -- "sail" (have one) | "craft" | "scrap" | "embers".
+        local function plan(c)
+            if (c.magnet or 0) >= 1 then return "sail" end
+            if (c.ember or 0) >= NEED_EMBER and (c.scrap or 0) >= NEED_SCRAP then return "craft" end
+            if (c.scrap or 0) < NEED_SCRAP then return "scrap" end
+            return "embers"
+        end
+
+        -- { magnet, ember, scrap } off the game's inventory, 3 s cache; nil = unreadable.
+        local function counts(fresh)
+            if not fresh and G.inv and os.clock() - G.invAt < 3 then return G.inv end
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if not (ok and type(inv) == "table") then return nil end
+            local c = { magnet = 0, ember = 0, scrap = 0 }
+            for _, it in pairs(inv) do
+                if type(it) == "table" then
+                    local n = tonumber(it.Count) or 1
+                    if it.Name == "Volcanic Magnet" then c.magnet = n
+                    elseif it.Name == "Blaze Ember" then c.ember = n
+                    elseif it.Name == "Scrap Metal" then c.scrap = n end
+                end
+            end
+            G.inv, G.invAt = c, os.clock()
+            return c
+        end
+
+        local function huntOn() return CFG.Hunt and CFG.HuntKind == "prehistoric" end
+
+        local function craft(myEpoch)
+            local cf = commF()
+            local function try()
+                pcall(function() return cf and cf:InvokeServer("CraftItem", "Craft", "Volcanic Magnet") end)
+                task.wait(1)
+                local c = counts(true)
+                return c and c.magnet >= 1
+            end
+            G.note = "crafting the Volcanic Magnet"
+            say(G.note)
+            if try() then
+                G.crafts += 1
+                G.tries = 0
+                print("[BFF] magnet: Volcanic Magnet crafted (from here)")
+                return
+            end
+            -- At the Dragon Hunter.
+            local at = ((P :: any).ember and (P :: any).ember.hunterAt and (P :: any).ember.hunterAt())
+                or Vector3.new(5864, 1209, 810)
+            releasePile()
+            setState("FLY")
+            G.note = "to the Dragon Hunter to craft the Volcanic Magnet"
+            say(G.note)
+            flyTo(at + Vector3.new(0, 3, 0))
+            if stale(myEpoch) then return end
+            lockAt(at + Vector3.new(0, 3, 0))
+            if try() then
+                G.crafts += 1
+                G.tries = 0
+                print("[BFF] magnet: Volcanic Magnet crafted (at the Dragon Hunter)")
+                return
+            end
+            G.tries += 1
+            G.note = "the craft did not take (" .. G.tries .. ")"
+            if G.tries >= 3 then
+                G.gaveUp = "the craft was refused 3 times"
+                print("[BFF] magnet: " .. G.gaveUp .. " - sailing without it")
+            end
+        end
+
+        local function farmScrap(c, myEpoch)
+            local mob = nil
+            for _, n in ipairs(SCRAP_MOBS) do
+                if nearestLoaded(n) then mob = n break end
+            end
+            G.note = string.format("Scrap Metal for the magnet: %d / %d", c.scrap, NEED_SCRAP)
+            if not mob then
+                mob = SCRAP_MOBS[1]
+                local dest = campOf(mob, SCRAP_AT[mob])
+                releasePile()
+                setState("FLY")
+                say(G.note .. "  ·  to the " .. mob .. "s")
+                if dest then flyTo(dest + Vector3.new(0, CFG.HeightSafe or 20, 0), { stream = mob }) end
+                task.wait(0.3)
+                return
+            end
+            say(G.note)
+            activeName = "Scrap Metal"
+            local t0 = os.clock()
+            fight({ name = mob, breakIf = function()
+                -- Every 10 s back here to count again.
+                return not huntOn() or os.clock() - t0 > 10
+            end }, { [mob] = true })
+        end
+
+        -- true = busy getting the magnet; false = sail (have it, or cannot).
+        function G.step(myEpoch)
+            if not CFG.SeaMagnet then return false end
+            if G.gaveUp then
+                G.note = "sailing without the Volcanic Magnet - " .. G.gaveUp
+                return false
+            end
+            local c = counts(false)
+            if not c then
+                G.note = "inventory not readable - sailing without the Volcanic Magnet"
+                return false
+            end
+            local what = plan(c)
+            if what == "sail" then
+                G.note = "Volcanic Magnet in your inventory"
+                return false
+            end
+            setState("MAGNET")
+            if what == "craft" then
+                craft(myEpoch)
+                return not G.gaveUp
+            end
+            if what == "scrap" then
+                farmScrap(c, myEpoch)
+                return true
+            end
+            local M = (P :: any).ember
+            if not (M and M.step) then
+                G.gaveUp = "no Blaze Ember hunt"
+                return false
+            end
+            G.note = string.format("Blaze Embers for the magnet: %d / %d  ·  %s", c.ember, NEED_EMBER, tostring(M.note))
+            say(G.note)
+            M.step(myEpoch, true)
+            if M.blocked then
+                G.gaveUp = "Blaze Embers: " .. tostring(M.blocked)
+                print("[BFF] magnet: " .. G.gaveUp .. " - sailing without it")
+                return false
+            end
+            G.inv = nil            -- an ember may have come: count again
+            return true
+        end
+
+        G._t = { plan = plan }
     end
     build()
 end
@@ -9966,6 +10159,18 @@ local function buildUI()
         sliderRow(v, "Auto: and sail on (0 = next server)", 0, 20000, 500,
             function() return CFG.SeaLeg2 end,
             function(x) CFG.SeaLeg2 = x end, " m")
+        switchRow(v, "Volcanic Magnet first",
+            "Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
+            function() return CFG.SeaMagnet end,
+            function(x) CFG.SeaMagnet = x end)
+        readout(v, function()
+            local g = P.magnet
+            if not g then return "-" end
+            local c = g.inv
+            return string.format("magnet     %s\nhave       %s", tostring(g.note),
+                c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
+                    or "not read yet")
+        end)
         sliderRow(v, "Safety cap: no island this long in a server (0 = off)", 0, 60, 1,
             function() return CFG.SeaSearchMinutes end,
             function(x) CFG.SeaSearchMinutes = x end, " min")

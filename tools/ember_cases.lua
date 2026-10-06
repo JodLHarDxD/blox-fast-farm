@@ -137,6 +137,16 @@ for _ = 1, 4 do M.step(1) end
 check("no quest 3 visits running: hunt stopped, says why", STOPPED == "Blaze Embers: no quest"
     and string.find(M.note, "Dragon Talon", 1, true) ~= nil, tostring(STOPPED) .. " / " .. tostring(M.note))
 
+-- 7b. Borrowed (the Volcanic Magnet): no quest = M.blocked, the farm NOT stopped.
+STOPPED = nil
+M.quest, M.back, M.visits = nil, false, 0
+for _ = 1, 4 do M.step(1, true) end
+check("borrowed: no quest - blocked, the farm not stopped", STOPPED == nil
+    and string.find(tostring(M.blocked), "no quest", 1, true) ~= nil, tostring(STOPPED) .. " / " .. tostring(M.blocked))
+M.have, M.haveAt, CFG.EmberStopAt = 99, T, 99
+M.step(1, true)
+check("borrowed: no stop-at count (99 held does not stop the farm)", STOPPED == nil)
+
 -- 8. Enough embers.
 STOPPED = nil
 M.have, M.haveAt, CFG.EmberStopAt = 99, T, 99

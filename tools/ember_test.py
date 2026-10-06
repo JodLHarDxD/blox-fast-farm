@@ -2,7 +2,7 @@
 never, bamboo last, a kind that broke first), the quest asked for from afar
 then at the Dragon Hunter when afar does not take, the "Head back" notice,
 embers taken first, the stop when he gives nothing / you have enough. The
-REAL section is cut out of fast_farm.lua (-- EMBER HUNT .. -- LEARNED KEYS, KEPT).
+REAL section is cut out of fast_farm.lua (-- EMBER HUNT .. -- VOLCANIC MAGNET).
 
 usage: python tools/ember_test.py [path-to-luau.exe]
 """
@@ -16,7 +16,7 @@ LUAU = sys.argv[1] if len(sys.argv) > 1 else \
     r"C:\Users\sarka\Downloads\scripts\tools\luau-0.735\luau.exe"
 src = open(os.path.join(HERE, "..", "fast_farm.lua"), encoding="utf-8").read()
 a = src.index("-- EMBER HUNT\n")
-sec = src[a:src.index("-- =========================================================\n-- LEARNED KEYS, KEPT", a)]
+sec = src[a:src.index("-- =========================================================\n-- VOLCANIC MAGNET", a)]
 stubs = open(os.path.join(HERE, "ember_stubs.lua"), encoding="utf-8").read()
 cases = open(os.path.join(HERE, "ember_cases.lua"), encoding="utf-8").read()
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
