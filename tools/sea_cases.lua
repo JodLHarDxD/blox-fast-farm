@@ -1079,4 +1079,47 @@ end)()
     S.learn, S.gunWay = {}, {}
 end)()
 
+-- ---------------------------------------------------------------- THE GOLEM WEAPON
+;(function()
+    check("golems: the fight names CFG.GolemWeapon", (function()
+        CFG.GolemWeapon = "Cursed Dual Katana"
+        return S.GOLEM_CUR.m1Weapon() == "Cursed Dual Katana"
+    end)())
+    local function event()
+        MAP.kids.PrehistoricIsland = nil
+        S.ev = nil
+        makeIsland(true, false)
+        ENEMIES, READY = {}, {}
+        CFG.Volcano = true
+        reset()
+        S.volcanoStep()
+    end
+    -- In the inventory: loaded at the event.
+    local loaded = {}
+    TOOLS = { { Name = "Hallow Scythe", ToolTip = "Sword" } }
+    P.invHas = function(n) return n == "Cursed Dual Katana" end
+    P.loadItem = function(n) table.insert(loaded, n) table.insert(TOOLS, { Name = n, ToolTip = "Sword" }) return true end
+    event()
+    check("golem weapon: loaded from your inventory at the event", loaded[1] == "Cursed Dual Katana"
+        and string.find(tostring(S.golemNote), "loaded", 1, true) ~= nil, tostring(S.golemNote))
+    -- Carried: nothing loaded.
+    loaded = {}
+    event()
+    check("golem weapon: carried - nothing loaded", #loaded == 0 and string.find(tostring(S.golemNote), "carried", 1, true) ~= nil)
+    -- Nowhere: says so, the Attack page pick.
+    TOOLS = { { Name = "Hallow Scythe", ToolTip = "Sword" } }
+    P.invHas = function() return false end
+    event()
+    check("golem weapon: not found - said, the Attack page pick", #loaded == 0
+        and string.find(tostring(S.golemNote), "not found", 1, true) ~= nil, tostring(S.golemNote))
+    -- "" = no golem weapon: nothing tried.
+    CFG.GolemWeapon = ""
+    S.golemNote = nil
+    event()
+    check("golem weapon off: nothing loaded, nothing said", S.golemNote == nil and #loaded == 0)
+    P.invHas, P.loadItem = nil, nil
+    MAP.kids.PrehistoricIsland = nil
+    S.ev, CFG.Volcano, CFG.GolemWeapon = nil, false, nil
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

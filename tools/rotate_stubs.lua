@@ -8,6 +8,7 @@ local P = {}
 local stats = { swaps = 0 }
 local KEYS = { "Z", "X", "C", "V", "F" }
 local cd = {}
+local pileCur = nil         -- the fight the M1 is for (the golems name their own weapon)
 
 -- What you carry: name -> type. The inventory: what getInventory answers.
 local CARRY = {}

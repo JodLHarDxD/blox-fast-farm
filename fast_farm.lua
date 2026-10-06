@@ -273,6 +273,11 @@ local CFG = {
     -- gun). Only moves that break things close one.
     VentKeys           = { Z = true, X = true, C = true, V = false },
     VentDistance       = 12,
+    -- THE GOLEM WEAPON (user, 2026-10-06: Cursed Dual Katana hits 4100+ a
+    -- swing, Hallow Scythe 3755): its M1 on the Lava Golems. Carried or in
+    -- your inventory = loaded at the event and kept. "" = the Attack page's
+    -- "M1 with" pick.
+    GolemWeapon        = "Cursed Dual Katana",
     -- THE GUN M1 AT THE VENTS (user, 2026-10-04; the wiki: Skull Guitar's M1
     -- has Destructible Physics and a short cooldown, "can be used on the
     -- pressure points"; Bazooka and Cannon too). Carried or in your inventory
@@ -2337,10 +2342,14 @@ do
         -- before swords, and switched on for you on the first run) ahead of
         -- the sword you picked.
         function P.m1Of(used)
-            local want = CFG.M1Weapon
-            if type(want) == "string" and want ~= "" then
-                local t = findTool(want)
-                if t then return { name = want, cfg = wcfg(want), tool = t } end
+            -- The fight's own weapon (the volcano's golems: CFG.GolemWeapon),
+            -- then your pick; whichever you carry first.
+            local own = pileCur and pileCur.m1Weapon and pileCur.m1Weapon() or nil
+            for _, want in ipairs({ own or "", CFG.M1Weapon or "" }) do
+                if type(want) == "string" and want ~= "" then
+                    local t = findTool(want)
+                    if t then return { name = want, cfg = wcfg(want), tool = t } end
+                end
             end
             local best, br = nil, math.huge
             for _, u in ipairs(used) do
@@ -6235,6 +6244,7 @@ do
         local GOLEM_CUR = {
             name = "Lava Golem", build = golemBuild,
             keepHeld = true,             -- never put back: back = on the relic
+            m1Weapon = function() return CFG.GolemWeapon end,   -- P.m1Of
             -- The fight ends the moment something else goes first (a vent
             -- while every golem is held), or the event or the switch ends.
             breakIf = function()
@@ -6802,6 +6812,26 @@ do
             if CFG.VentGuitar and not ev.gunTried then
                 ev.gunTried = true
                 pcall(loadVentGun)
+            end
+            -- The golem weapon, from your inventory if not carried.
+            local gw = CFG.GolemWeapon
+            if type(gw) == "string" and gw ~= "" and not ev.swordTried then
+                ev.swordTried = true
+                local has, load = (P :: any).invHas, (P :: any).loadItem
+                local carried = false
+                for _, t in ipairs(toolNames()) do
+                    if t.Name == gw then carried = true end
+                end
+                if carried then
+                    S.golemNote = gw .. " - carried"
+                elseif has and load and has(gw) then
+                    local ok = load(gw)
+                    S.golemNote = gw .. (ok and " - loaded from your inventory" or " - in your inventory, would not load")
+                    print("[BFF] volcano: " .. S.golemNote)
+                else
+                    S.golemNote = gw .. " - not found (carried or inventory): the Attack page's M1 pick"
+                    print("[BFF] volcano: " .. S.golemNote)
+                end
             end
             P.keepGun = CFG.VentGuitar and ventGun() or nil
             local active = eventOn(isle)
@@ -9979,6 +10009,45 @@ local function buildUI()
             .. "and cools fast - made for the vents; Bazooka and Cannon too. Its M1 "
             .. "costs 20 energy: under that, the skills below until it is back. Six "
             .. "turns closing nothing = the skills instead.")
+
+        heading2(v, "golem weapon")
+        local gbox = chooser(v, 130)
+        local gsig = nil
+        local function grefresh()
+            local names = {}
+            for _, t in ipairs(toolNames()) do
+                local ty = toolType(t)
+                if ty == "Sword" or ty == "Melee" then table.insert(names, t.Name) end
+            end
+            table.sort(names)
+            local cur = CFG.GolemWeapon or ""
+            if cur ~= "" and not table.find(names, cur) then table.insert(names, 1, cur) end
+            local sig = cur .. "|" .. table.concat(names, ",")
+            if sig == gsig then return end
+            gsig = sig
+            for _, c in ipairs(gbox:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            chooserRow(gbox, 1, "The Attack page's M1 pick", "", cur == "", function()
+                CFG.GolemWeapon = ""
+                gsig = nil
+                grefresh()
+            end)
+            for i, n in ipairs(names) do
+                local t = findTool(n)
+                chooserRow(gbox, i + 1, n, t and toolType(t) or "inventory", cur == n, function()
+                    CFG.GolemWeapon = n
+                    gsig = nil
+                    grefresh()
+                end)
+            end
+        end
+        grefresh()
+        addLive(grefresh)
+        readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
+        caption(v, "Its M1 swings on the Lava Golems (the strongest swing: Cursed Dual "
+            .. "Katana 4100+, Hallow Scythe 3755). Not carried: loaded from your "
+            .. "inventory when the event starts, and kept. Not found: the Attack page's pick.")
 
         heading2(v, "keys fired at a vent")
         for _, k in ipairs({ "Z", "X", "C", "V" }) do

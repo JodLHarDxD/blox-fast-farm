@@ -30,6 +30,18 @@ check("manual: the sword's M1 off - the fighting style", P.m1Of(manual).name == 
 CFG.M1Weapon = "Hallow Scythe"
 check("manual: picked even with its own M1 switch off", P.m1Of(manual).name == "Hallow Scythe")
 CFG.M1Weapon = ""
+-- THE GOLEM FIGHT names its own weapon (CFG.GolemWeapon -> pileCur.m1Weapon).
+CARRY = { ["Dragon Talon"] = "Melee", ["Cursed Dual Katana"] = "Sword", ["Kabucha"] = "Gun" }
+CFG.M1Weapon = "Dragon Talon"
+pileCur = { m1Weapon = function() return "Cursed Dual Katana" end }
+check("golems: their weapon (Cursed Dual Katana) beats your M1 pick", P.m1Of(P.autoWeapons()).name == "Cursed Dual Katana")
+CARRY["Cursed Dual Katana"] = nil
+check("golems: their weapon not carried - your M1 pick", P.m1Of(P.autoWeapons()).name == "Dragon Talon")
+pileCur = nil
+CARRY["Cursed Dual Katana"] = "Sword"
+check("not a golem fight: your M1 pick, the katana carried or not", P.m1Of(P.autoWeapons()).name == "Dragon Talon")
+CFG.M1Weapon = ""
+CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
 list = P.autoWeapons()
 check("auto: the M1 sword is kept (never swapped by the rotation)", P.keepSword == "Hallow Scythe", P.keepSword)
 check("auto: Z X C on, V off, F (flight) never", list[2].cfg.Z and list[2].cfg.X and list[2].cfg.C
