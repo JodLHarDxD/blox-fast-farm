@@ -252,6 +252,26 @@ local sat0 = NEW_SEAT.sat
 ok = S.huntStep(epoch)
 check("a failed hop: back in the seat, the edge seen again, the next server again",
     ok == false and NEW_SEAT.sat == sat0 + 1 and P.elite.why == "no Prehistoric Island by 8000 m")
+-- THE TWO LEGS (user, 2026-10-06): out to the edge, 120 left, 10k m more, then the next server.
+CFG.SeaLeg2 = 10000
+reset()
+HUM.SeatPart = nil
+ok = S.huntStep(epoch)
+local turnedSaid = false
+for _, l in ipairs(PRINTED) do if string.find(l, "120 deg left, 10000 m more", 1, true) then turnedSaid = true end end
+check("two legs: at the edge NOT the next server - turned 120 left, said", ok == true and T.drive.leg == 2
+    and T.drive.base == 120 and turnedSaid and P.elite.why == nil, tostring(ok) .. " leg " .. tostring(T.drive.leg))
+T.drive.odo = (T.drive.odo or 0) + 5000 * 10
+ok = S.huntStep(epoch)
+check("two legs: 5,000 m after the turn - still sailing, the note says how far", ok == true
+    and string.find(S.note, "turned back: 5000 of 10000 m", 1, true) ~= nil, S.note)
+T.drive.odo = T.drive.odo + 5000 * 10
+reset()
+ok = S.huntStep(epoch)
+check("two legs: 10,000 m after the turn - the next server, and why", ok == false
+    and P.elite.why == "no Prehistoric Island by 8000 m, nor 10000 m after the turn" and T.drive.leg == 1,
+    tostring(P.elite.why))
+CFG.SeaLeg2 = 0
 -- Sunk far out: the next server.
 BOATS.kids[NEW_BOAT.Name] = nil
 NEW_BOAT.Parent = nil
@@ -1169,6 +1189,30 @@ end)()
     check("the drive: a turn due - a new heading 10..20 off, the next turn 1..2 min on", turned)
     S.driving = false
     CFG.SeaSteer = "auto"
+end)()
+
+-- ---------------------------------------------------------------- THE SEARCH'S LEGS (pure) + THE TURNED HEADING
+;(function()
+    local st = { leg = 1 }
+    check("legs: short of 23k - out", T.searchLeg(st, 10000, 10000, 23000, 120, 10000) == "out" and st.leg == 1)
+    check("legs: at 23k - turn, once: 120 left", T.searchLeg(st, 23000, 23500, 23000, 120, 10000) == "turn"
+        and st.leg == 2 and st.base == 120 and st.odo0 == 23500)
+    check("legs: after the turn, closer to Tiki - still sailing back (by the odometer, not the distance)",
+        T.searchLeg(st, 20000, 30000, 23000, 120, 10000) == "back")
+    check("legs: 10k sailed after the turn - the next server", T.searchLeg(st, 19000, 33500, 23000, 120, 10000) == "hop")
+    check("legs: 0 m after the turn = the next server at the edge", T.searchLeg({ leg = 1 }, 23000, 0, 23000, 120, 0) == "hop")
+    -- The drive follows the turned heading: 120 left of west = east-north-east-ish, +Z.
+    local bt, st2 = makeBoat(vec(-30000, 5, 400), math.pi / 2)
+    S.boat, S.seat, S.driving, P.running = bt, st2, true, true
+    HUM.SeatPart = st2
+    CFG.SeaSteer = "auto"
+    T.drive.waterY, T.drive.wobbleAt, T.drive.want, T.drive.base, T.drive.odo = 5, 1e9, 0, 120, 0
+    T.driveTick(0.1)
+    local p = bt.pivot.Position
+    check("the drive: sails the turned heading (120 left of west: +X and +Z)", p.X > -30000 and p.Z > 400
+        and near(T.drive.odo, 30, 1e-6), vs(p) .. " odo " .. T.drive.odo)
+    T.drive.base, T.drive.leg = 0, 1
+    S.driving = false
 end)()
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

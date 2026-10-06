@@ -239,8 +239,12 @@ local CFG = {
     -- the Volcano event switch (below) does the event.
     SeaBoat            = "Beast Hunter",
     SeaSpeed           = 300,        -- studs/s, 250-350 (the boat sails ~140 by itself)
-    SeaSearchTo        = 20000,      -- meters from Tiki: nothing by here = the next server (user, 2026-10-06: the island
-                                     -- mostly came late, ~20k m - it is time on the sea that counts)
+    -- THE SEARCH, auto (user, 2026-10-06): out to SeaSearchTo m from Tiki; no
+    -- island = a SeaTurnBack-degree turn to the LEFT and SeaLeg2 m more (as
+    -- sailed); still none = the next server. The island mostly came late.
+    SeaSearchTo        = 23000,      -- meters from Tiki: the first leg ends here
+    SeaTurnBack        = 120,        -- degrees left at the end of it
+    SeaLeg2            = 10000,      -- meters sailed after the turn (0 = the next server at once)
     -- The compass meter in studs, counted from the Tiki boat dealer (user's
     -- compass, 2026-10-04: Danger 6 ~2,600 m = 26.3k studs; the Prehistoric
     -- came ~5,000 m = 50k studs). The panel shows both.
@@ -5189,6 +5193,23 @@ do
             return new, every * (1 + rnd())
         end
 
+        -- THE SEARCH'S LEGS, pure (tools/sea_test.py). st = the drive (leg,
+        -- odo0, base). Out to `to` m from Tiki ("out"); there: turn `back`
+        -- degrees left ("turn" once, base += back) and sail `leg2` m more by
+        -- the odometer ("back"); done = "hop". leg2 0 = "hop" at `to`.
+        local function searchLeg(st, meters, odoM, to, back, leg2)
+            if st.leg ~= 2 then
+                if meters >= to then
+                    if (leg2 or 0) <= 0 then return "hop" end
+                    st.leg, st.odo0, st.base = 2, odoM, (st.base or 0) + back
+                    return "turn"
+                end
+                return "out"
+            end
+            if odoM - (st.odo0 or odoM) >= leg2 then return "hop" end
+            return "back"
+        end
+
         -- Where the golems are held: `dist` off the relic, on the far side from
         -- the volcano (the beach side).
         local function cageSpot(relic, volcano, dist)
@@ -5466,7 +5487,8 @@ do
             return tonumber(v), tonumber(b:GetAttribute("MaxHealth"))
         end
 
-        local drive = { want = 0, wobbleAt = 0, waterY = nil, boat = nil, sitAt = 0, cruise = true }
+        local drive = { want = 0, wobbleAt = 0, waterY = nil, boat = nil, sitAt = 0, cruise = true,
+            base = 0, leg = 1, odo = 0, odo0 = nil }      -- base: the leg's heading (deg off west); odo: studs sailed
 
         -- Your keys at the wheel (none while you type in chat): steer +1 =
         -- left (A / Left), -1 = right (D / Right); go = W / Up; stop = S / Down.
@@ -5530,7 +5552,8 @@ do
                         tonumber(CFG.SeaTurnEvery) or 60, tonumber(CFG.SeaTurnMax) or 20, 45)
                     drive.wobbleAt = now + wait
                 end
-                dir = headingFor(drive.want)
+                dir = headingFor((drive.base or 0) + drive.want)
+                drive.odo = (drive.odo or 0) + speed * step
                 if look.Magnitude > 0.1 then
                     turn = turnStep(yawOf(look), yawOf(dir), math.rad(45) * step)
                 end
@@ -6005,19 +6028,33 @@ do
             S.meters = metersFrom(pos, CFG.SeaStudsPerM)
             S.danger = dangerNow()
             S.hp, S.maxHp = boatHP(b)
-            local to = tonumber(CFG.SeaSearchTo) or 8000
+            local to = tonumber(CFG.SeaSearchTo) or 23000
+            local back, leg2 = tonumber(CFG.SeaTurnBack) or 120, tonumber(CFG.SeaLeg2) or 10000
+            local spm = math.max(tonumber(CFG.SeaStudsPerM) or 10, 1)
             setState("SAIL")
             local manual = CFG.SeaSteer == "manual"
+            -- Near Tiki again (a new boat): a fresh search.
+            if S.meters < 2000 then drive.leg, drive.base, drive.odo0 = 1, 0, nil end
+            local leg = manual and "manual" or searchLeg(drive, S.meters, (drive.odo or 0) / spm, to, back, leg2)
+            if leg == "turn" then
+                drive.want, drive.wobbleAt = 0, os.clock() + 20
+                print(string.format("[BFF] sea: no island by %d m - %d deg left, %d m more", to, back, leg2))
+            end
+            local where = manual and "" or ((drive.leg == 2)
+                and string.format("  ·  turned back: %d of %d m", math.floor((drive.odo or 0) / spm - (drive.odo0 or 0)), leg2)
+                or string.format(" (of %d)", to))
             S.note = string.format("%s  ·  %d m from Tiki%s  ·  danger %s%s",
-                manual and ("YOU STEER: A/D turn, W go, S stop" .. (drive.cruise and "" or "  (stopped)")) or "sailing west",
-                math.floor(S.meters), manual and "" or string.format(" (of %d)", to), tostring(S.danger or "?"),
+                manual and ("YOU STEER: A/D turn, W go, S stop" .. (drive.cruise and "" or "  (stopped)")) or "sailing",
+                math.floor(S.meters), where, tostring(S.danger or "?"),
                 S.hp and string.format("  ·  boat %d/%s HP", S.hp, tostring(S.maxHp or "?")) or "")
             E.note = S.note
             say(S.note)
-            if not manual and S.meters >= to then
+            if leg == "hop" then
                 stopDrive()
                 S.everDriven = false
-                E.why = string.format("no Prehistoric Island by %d m", to)
+                drive.leg, drive.base, drive.odo0 = 1, 0, nil
+                E.why = (leg2 > 0) and string.format("no Prehistoric Island by %d m, nor %d m after the turn", to, leg2)
+                    or string.format("no Prehistoric Island by %d m", to)
                 return false
             end
             task.wait(0.25)
@@ -6922,7 +6959,7 @@ do
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
             mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
-            nextHeading = nextHeading,
+            nextHeading = nextHeading, searchLeg = searchLeg,
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
             gunM1 = gunM1, gunForVents = gunForVents,
@@ -9897,9 +9934,15 @@ local function buildUI()
         sliderRow(v, "Boat speed", 250, 350, 5,
             function() return CFG.SeaSpeed end,
             function(x) CFG.SeaSpeed = x end, " studs/s")
-        sliderRow(v, "Auto: no island by, next server", 3000, 30000, 500,
+        sliderRow(v, "Auto: out to", 3000, 30000, 500,
             function() return CFG.SeaSearchTo end,
             function(x) CFG.SeaSearchTo = x end, " m")
+        sliderRow(v, "Auto: then turn left", 0, 180, 5,
+            function() return CFG.SeaTurnBack end,
+            function(x) CFG.SeaTurnBack = x end, " deg")
+        sliderRow(v, "Auto: and sail on (0 = next server)", 0, 20000, 500,
+            function() return CFG.SeaLeg2 end,
+            function(x) CFG.SeaLeg2 = x end, " m")
         sliderRow(v, "One compass meter", 5, 15, 0.5,
             function() return CFG.SeaStudsPerM end,
             function(x) CFG.SeaStudsPerM = x end, " studs")

@@ -144,7 +144,7 @@ local function parts() return {}, ROOT, HUM end
 -- ---------------------------------------------------------------- the farm
 local CFG = {
     Magnet = true, GrabMax = 30, CastWait = 0.45, Weapons = {},
-    SeaBoat = "Beast Hunter", SeaSpeed = 300, SeaSearchTo = 8000, SeaStudsPerM = 10,
+    SeaBoat = "Beast Hunter", SeaSpeed = 300, SeaSearchTo = 8000, SeaStudsPerM = 10, SeaLeg2 = 0, SeaTurnBack = 120,
     SeaSteer = "auto", SeaTurnRate = 60, MirageGear = true, MirageNeed = "night",
     Volcano = false, VentKeys = { Z = true, X = true, C = true, V = false },
     VentDistance = 12, GolemCage = 60, VolcanoLoot = true,
