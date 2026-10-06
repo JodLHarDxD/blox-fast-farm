@@ -5066,6 +5066,8 @@ do
             if kind then CFG.HuntKind = kind end
             P.handsOff = false           -- a hunt changed: the farm drives again
             CFG.Hunt = x and true or false
+            -- The Prehistoric hunt's 21-min clock starts again with the switch.
+            if x and (P :: any).sea then (P :: any).sea.sailStart = nil end
             releasePile()
             if x then
                 CFG.RaidMode, CFG.RandomMode = false, false
@@ -5923,7 +5925,9 @@ do
                 say(S.note)
                 return true
             end
-            S.sailStart = S.sailStart or os.clock()     -- THE SERVER'S CLOCK: from the hunt's first step here
+            -- THE SERVER'S CLOCK: the Prehistoric hunt only (user, 2026-10-06 -
+            -- not the Mirage hunt, not the farm), from its first step here.
+            if kind == "prehistoric" then S.sailStart = S.sailStart or os.clock() end
             if kind == "mirage" then
                 local mi, mmk = mirageIsle(), mirageMarker()
                 if mi or mmk then
@@ -5966,7 +5970,7 @@ do
             -- THE SERVER'S CLOCK, before any boat step: a stuck buy, seat or
             -- loop is caught too.
             local capS = (tonumber(CFG.SeaSearchMinutes) or 21) * 60
-            if capS > 0 and os.clock() - S.sailStart >= capS then
+            if kind == "prehistoric" and capS > 0 and S.sailStart and os.clock() - S.sailStart >= capS then
                 if S.driving then stopDrive() end
                 S.everDriven = false
                 E.why = string.format("no Prehistoric Island in %d min in this server", math.floor(capS / 60 + 0.5))
@@ -6056,7 +6060,7 @@ do
                 drive.want, drive.wobbleAt = 0, os.clock() + 20
                 print(string.format("[BFF] sea: no island by %d m - %d deg left, %d m more", to, back, leg2))
             end
-            local limitS = (tonumber(CFG.SeaSearchMinutes) or 21) * 60
+            local limitS = (kind == "prehistoric") and (tonumber(CFG.SeaSearchMinutes) or 21) * 60 or 0
             local atSea = os.clock() - (S.sailStart or os.clock())
             local clock = (limitS > 0) and string.format("  ·  %s of %s in this server", mmss(atSea), mmss(limitS)) or ""
             local where = manual and "" or ((drive.leg == 2)

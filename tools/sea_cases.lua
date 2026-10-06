@@ -298,6 +298,12 @@ ok = S.huntStep(epoch)
 check("clock: you steering - 21 min still means the next server", ok == false
     and P.elite.why == "no Prehistoric Island in 21 min in this server")
 CFG.SeaSteer = "auto"
+-- The Mirage hunt: no clock (the Prehistoric hunt's only).
+reset()
+HUM.SeatPart = nil
+ok = S.huntStep(epoch, "mirage")
+check("clock: the Mirage hunt has none - sailing on past 21 min, no clock shown", ok == true and P.elite.why == nil
+    and string.find(S.note, "in this server", 1, true) == nil, tostring(P.elite.why) .. " / " .. S.note)
 -- 0 = off.
 CFG.SeaSearchMinutes = 0
 reset()
