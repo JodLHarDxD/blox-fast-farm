@@ -293,6 +293,11 @@ local CFG = {
     -- gun). Only moves that break things close one.
     VentKeys           = { Z = true, X = true, C = true, V = false },
     VentDistance       = 12,
+    -- THE CRATER (user, 2026-10-06: arriving, the character went to the
+    -- island's middle - the volcano - touched the lava and died). Flights on
+    -- the island go ROUND this disc (studs from the volcano's middle), never
+    -- across it; with only the far marker, the island's edge on your side.
+    VolcanoKeepOut     = 220,
     -- THE GOLEM WEAPON (user, 2026-10-06: Cursed Dual Katana hits 4100+ a
     -- swing, Hallow Scythe 3755): its M1 on the Lava Golems. Carried or in
     -- your inventory = loaded at the event and kept. "" = the Attack page's
@@ -5205,6 +5210,46 @@ do
             return new, every * (1 + rnd())
         end
 
+        -- THE WAY ROUND THE VOLCANO, pure (tools/sea_test.py): waypoints from
+        -- `from` to `to` that never cross the disc of `radius` round `centre`
+        -- (the crater's lava). The line keeps out of it: straight. Else round
+        -- it at 1.25x the radius, the short way, a waypoint every 45 deg, at
+        -- the higher of the two heights, then in to `to` along its own bearing
+        -- (from outside, on its side - never over the middle). A short hop
+        -- (under 30 studs) is straight.
+        local function arcPath(from, to, centre, radius)
+            if (to - from).Magnitude < 30 then return { to } end
+            local a, b = flat(from - centre), flat(to - centre)
+            local seg = flat(to - from)
+            local t = 0
+            if seg.Magnitude > 0.01 then
+                t = math.clamp(-a:Dot(seg) / seg:Dot(seg), 0, 1)
+            end
+            if (a + seg * t).Magnitude >= radius then return { to } end
+            local r = radius * 1.25
+            local angA = math.atan2(a.Z, a.X)
+            local angB = math.atan2(b.Z, b.X)
+            if a.Magnitude < 1 then angA = angB end
+            local d = (angB - angA + math.pi) % (2 * math.pi) - math.pi
+            local steps = math.max(1, math.ceil(math.abs(d) / math.rad(45)))
+            local y = math.max(from.Y, to.Y)
+            local out = {}
+            for i = 0, steps do
+                local ang = angA + d * i / steps
+                table.insert(out, Vector3.new(centre.X + math.cos(ang) * r, y, centre.Z + math.sin(ang) * r))
+            end
+            table.insert(out, to)
+            return out
+        end
+
+        -- The island's edge on your side (only the far marker known): 1.6x
+        -- the keep-out from its middle, toward you, 30 up.
+        local function edgeOf(mk, from, radius)
+            local dir = flat(from - mk)
+            if dir.Magnitude < 1 then dir = Vector3.new(1, 0, 0) end
+            return mk + dir.Unit * radius * 1.6 + UP * 30
+        end
+
         -- THE SEARCH'S LEGS, pure (tools/sea_test.py). st = the drive (leg,
         -- odo0, base). Out to `to` m from Tiki ("out"); there: turn `back`
         -- degrees left ("turn" once, base += back) and sail `leg2` m more by
@@ -5412,6 +5457,28 @@ do
             end
             if n > 0 then return sum / n end
             return posOf(core(isle)) or posOf(isle)
+        end
+
+        -- A flight on / to the island that never crosses the crater.
+        local function safeFly(to, isle, mk, myEpoch, opts)
+            local _, r = parts()
+            if not r then return false end
+            local centre = (isle and volcanoCentre(isle)) or mk
+            local wps = centre and arcPath(r.Position, to, centre, tonumber(CFG.VolcanoKeepOut) or 220) or { to }
+            for i, wp in ipairs(wps) do
+                flyTo(wp, (i == #wps) and opts or nil)
+                if stale(myEpoch) then return false end
+            end
+            return true
+        end
+        S.safeFly = safeFly
+        -- Where to wait on the island: 40 studs in front of the T-Rex skull,
+        -- on the side away from the volcano, 15 up.
+        local function frontOf(isle)
+            local rel, c = relicPos(isle), volcanoCentre(isle)
+            if not rel then return nil end
+            if not c then return rel + UP * 15 end
+            return cageSpot(rel, c, 40) + UP * 15
         end
 
         -- The compass's danger level 0-6 (its own label; the 0-600 attribute
@@ -5958,8 +6025,14 @@ do
                     print(string.format("[BFF] sea: PREHISTORIC ISLAND at %d m from Tiki", math.floor(S.meters or 0)))
                     notify("Prehistoric Island is up!")
                 end
-                local at = relicPos(isle) or mk
-                if at then flyTo(at + UP * 40) end
+                -- Never the island's middle (the volcano): in front of the skull,
+                -- or, not streamed yet, the island's edge on your side. Its
+                -- lava off your client first (the hubs do).
+                if isle and S.lavaOff then S.lavaOff(isle) end
+                local _, rr = parts()
+                local spot = (isle and frontOf(isle)) or (mk and rr and edgeOf(mk, rr.Position,
+                    tonumber(CFG.VolcanoKeepOut) or 220)) or nil
+                if spot and rr and (rr.Position - spot).Magnitude > 10 then safeFly(spot, isle, mk, myEpoch) end
                 S.note = "PREHISTORIC ISLAND UP - holding on it"
                 E.note = S.note
                 say(S.note)
@@ -6677,7 +6750,7 @@ do
             local _, r = parts()
             if not r then return end
             if (r.Position - stand).Magnitude > 4 then
-                flyTo(stand, { face = v.pos })
+                safeFly(stand, ev.isle, nil, myEpoch, { face = v.pos })
                 if stale(myEpoch) then return end
             end
             lockAt(stand, v.pos)
@@ -6713,6 +6786,15 @@ do
                     end
                     if not kept then pcall(function() d:Destroy() end) end
                 end
+            end
+        end
+
+        -- The island's lava off your client, at most every 2 s - from the
+        -- moment it streams in, not only once the event runs.
+        function S.lavaOff(isle)
+            if os.clock() - (S.lavaAt or 0) > 2 then
+                S.lavaAt = os.clock()
+                pcall(clearLava, isle)
             end
         end
 
@@ -6791,7 +6873,7 @@ do
             if not (pp and at) then return end
             ev.note = "starting the event at the relic"
             say(ev.note)
-            flyTo(at + UP * 3)
+            safeFly(at + UP * 3, isle, nil, myEpoch)
             if stale(myEpoch) then return end
             local function cameOn(secs)
                 local t0 = os.clock()
@@ -6856,7 +6938,7 @@ do
                 fight(GOLEM_CUR, GOLEMS)
             else
                 local at = ev.relic or relicPos(isle)
-                if at then flyTo(at + UP * 25) end
+                if at then safeFly(at + UP * 25, isle, nil, myEpoch) end
                 ev.note = string.format("event on - waiting  ·  %s  ·  %d closed  ·  %d down", meters, ev.vents, ev.golems)
                 say(ev.note)
                 task.wait(0.2)
@@ -6879,14 +6961,16 @@ do
             end
             local myEpoch = epoch
             if S.driving then stopDrive() end
+            if isle then S.lavaOff(isle) end
             if not isle then
                 -- Only the marker: far away. Fly there; the island streams in.
                 local _, r = parts()
-                if r and (r.Position - mk).Magnitude > 300 then
+                local keep = tonumber(CFG.VolcanoKeepOut) or 220
+                if r and (r.Position - mk).Magnitude > keep * 1.6 + 60 then
                     setState("FLY")
-                    S.note = "to the Prehistoric Island"
+                    S.note = "to the Prehistoric Island (its edge - never the volcano)"
                     say(S.note)
-                    flyTo(mk + UP * 80)
+                    safeFly(edgeOf(mk, r.Position, keep), nil, mk, epoch)
                 else
                     task.wait(0.3)
                 end
@@ -6979,8 +7063,8 @@ do
             elseif ph == "start" then
                 startEvent(isle, ev, myEpoch)
             else
-                local at = ev.relic or relicPos(isle) or posOf(isle)
-                if at then flyTo(at + UP * 30) end
+                local at = frontOf(isle)
+                if at then safeFly(at, isle, nil, myEpoch) end
                 ev.note = "island up - the event is over or not ready; holding at the relic"
                 say(ev.note)
                 task.wait(0.5)
@@ -6995,7 +7079,7 @@ do
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
             mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
-            nextHeading = nextHeading, searchLeg = searchLeg,
+            nextHeading = nextHeading, searchLeg = searchLeg, arcPath = arcPath, edgeOf = edgeOf,
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
             gunM1 = gunM1, gunForVents = gunForVents,

@@ -26,6 +26,7 @@ V.__index = function(v, k)
         local m = math.sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z)
         return vec(v.X / m, v.Y / m, v.Z / m)
     end
+    if k == "Dot" then return function(a, b) return a.X * b.X + a.Y * b.Y + a.Z * b.Z end end
     return nil
 end
 V.__add = function(a, b) return vec(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end

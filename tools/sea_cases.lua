@@ -13,6 +13,16 @@ local function vs(v) return v and string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, 
 SECTION()
 local S = P.sea
 local T = S._t
+-- Flights: was one to `p`; every corner of the way (all but the last) clear
+-- of the crater's disc.
+function T.hasFlight(p) for _, f in ipairs(FLIGHTS) do if vnear(f, p) then return true end end return false end
+function T.cornersClear(centre, r)
+    for i = 1, #FLIGHTS - 1 do
+        if vec(FLIGHTS[i].X - centre.X, 0, FLIGHTS[i].Z - centre.Z).Magnitude < r - 1e-6 then return false end
+    end
+    return true
+end
+function T.horiz(a, b) return vec(a.X - b.X, 0, a.Z - b.Z).Magnitude end
 local TIKI = vec(-16928.9, 7.8, 434.6)
 
 -- ---------------------------------------------------------------- ARITHMETIC
@@ -353,8 +363,10 @@ local mk = LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 
 S.driving = true
 reset()
 ok = S.huntStep(epoch)
-check("the island up: off the boat, over it, never the next server", ok == true and S.driving == false
-    and vnear(FLIGHTS[#FLIGHTS], vec(-69800, 95, 6800)) and S.tally.found == 1, vs(FLIGHTS[#FLIGHTS]))
+check("the island up (marker only): off the boat, to its EDGE - never the middle (the volcano), never the next server",
+    ok == true and S.driving == false and #FLIGHTS >= 1
+    and near(T.horiz(FLIGHTS[#FLIGHTS], vec(-69800, 55, 6800)), 352, 1) and near(FLIGHTS[#FLIGHTS].Y, 85, 1e-6)
+    and T.cornersClear(vec(-69800, 55, 6800), 220) and S.tally.found == 1, vs(FLIGHTS[#FLIGHTS]))
 S.huntStep(epoch)
 check("found counted once", S.tally.found == 1)
 LOCS.kids["Prehistoric Island"] = nil
@@ -392,8 +404,9 @@ check("switch on, no island: not the event's step", S.volcanoStep() == false and
 mk = LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 55, 6800) }))
 ROOT.Position = vec(0, 10, 0)
 reset()
-check("only the far marker: flown to, over it", S.volcanoStep() == true and vnear(FLIGHTS[1], vec(-69800, 135, 6800)),
-    vs(FLIGHTS[1]))
+check("only the far marker: flown to the island's EDGE on your side, never over the volcano", S.volcanoStep() == true
+    and near(T.horiz(FLIGHTS[#FLIGHTS], vec(-69800, 55, 6800)), 352, 1) and FLIGHTS[#FLIGHTS].X > -69800
+    and T.cornersClear(vec(-69800, 55, 6800), 220), vs(FLIGHTS[#FLIGHTS]))
 
 local isle, pp, rA, rB = makeIsland(false, true)
 pp.onHold = function() isle.attrs.IsMinigameActive = true end
@@ -401,8 +414,8 @@ reset()
 S.driving = true
 S.volcanoStep()
 check("island up while sailing: the wheel stopped", S.driving == false)
-check("prompt on: flown to the relic's prompt and held, the event on",
-    vnear(FLIGHTS[1], vec(-69800, 23, 6890)) and pp.held == 1 and S.tally.events == 1
+check("prompt on: flown to the relic's prompt ROUND the crater, held, the event on",
+    T.hasFlight(vec(-69800, 23, 6890)) and pp.held == 1 and S.tally.events == 1
     and S.ev.note == "THE VOLCANO EVENT IS ON", tostring(S.ev.note))
 check("the cage: 60 off the relic, away from the volcano, 60 up in the air", vnear(S.ev.cage, vec(-69800, 80, 6960)), vs(S.ev.cage))
 
@@ -435,7 +448,7 @@ check("...and the fight breaks: every golem held, a vent open", GOLEM_CUR.breakI
 reset()
 T.cageTick()
 S.volcanoStep()
-check("every golem held: the vent, stood 12 out, 8 up", vnear(FLIGHTS[1], vec(-69738, 208, 6800)), vs(FLIGHTS[1]))
+check("every golem held: the vent, stood 12 out, 8 up", T.hasFlight(vec(-69738, 208, 6800)), vs(FLIGHTS[#FLIGHTS]))
 check("fruit first: Dragon-Dragon Z, aimed AT the vent", HELD == "Dragon-Dragon" and KEYS_SENT[1] == "Z"
     and vnear(AIMED[1], vec(-69750, 200, 6800)), tostring(HELD) .. " " .. tostring(KEYS_SENT[1]) .. " " .. vs(AIMED[1]))
 check("the aim point and part are cleared after the cast", P.aimAt == nil and P.aimPart == nil and aimUntil == 0)
@@ -566,7 +579,8 @@ S.volcanoStep()
 check("an egg that stays: given up after two, says why", string.find(S.ev.note, "Dragon Tether", 1, true) ~= nil, S.ev.note)
 reset()
 S.volcanoStep()
-check("nothing left: held at the relic", S.ev.phase == "idle" and vnear(FLIGHTS[1], vec(-69800, 50, 6900)), vs(FLIGHTS[1]))
+check("nothing left: held in front of the skull (away from the volcano), not on it", S.ev.phase == "idle"
+    and vnear(FLIGHTS[#FLIGHTS], vec(-69800, 35, 6940)), vs(FLIGHTS[#FLIGHTS]))
 
 -- A new island: a new count.
 MAP.kids.PrehistoricIsland = nil
@@ -1299,6 +1313,65 @@ end)()
     P.magnet = nil
     CFG.SeaSearchMinutes = 0
     S.sailStart, S.driving = nil, false
+end)()
+
+-- ---------------------------------------------------------------- THE CRATER: NEVER ACROSS IT
+;(function()
+    local c = vec(0, 200, 0)
+    local function minDist(path, from)
+        -- closest any straight leg of the path comes to the middle
+        local best, prev = math.huge, from
+        for _, p in ipairs(path) do
+            local a, b = vec(prev.X, 0, prev.Z), vec(p.X, 0, p.Z)
+            local seg = b - a
+            local t = 0
+            if seg.Magnitude > 0.01 then t = math.clamp(-(a.X * seg.X + a.Z * seg.Z) / (seg.X ^ 2 + seg.Z ^ 2), 0, 1) end
+            local q = a + seg * t
+            best = math.min(best, vec(q.X, 0, q.Z).Magnitude)
+            prev = p
+        end
+        return best
+    end
+    -- The skull's prompt on the far side (90 from the middle), you on this side.
+    local from, to = vec(-800, 5, 0), vec(90, 23, 0)
+    local path = T.arcPath(from, to, c, 220)
+    check("crater: the prompt behind the volcano - the way goes ROUND (corners on the 275 circle)", #path >= 3
+        and near(T.horiz(path[1], c), 275, 1e-6) and vnear(path[#path], to), #path)
+    -- Every leg but the last stays out of the disc; the last comes in on the prompt's own bearing.
+    local outside = minDist({ table.unpack(path, 1, #path - 1) }, from)
+    check("crater: no leg before the last crosses the disc", outside >= 220 - 1e-6, outside)
+    local last0 = path[#path - 1]
+    check("crater: the last leg comes in from the prompt's side (same bearing, from outside)",
+        near(math.atan2(last0.Z - c.Z, last0.X - c.X), math.atan2(to.Z - c.Z, to.X - c.X), 1e-6))
+    -- The straight line keeps out: straight.
+    path = T.arcPath(vec(-800, 5, 400), vec(800, 5, 400), c, 220)
+    check("crater: a line that keeps out of it - straight, one leg", #path == 1)
+    -- A short hop: straight.
+    check("crater: a short hop - straight", #T.arcPath(vec(90, 23, 0), vec(100, 23, 10), c, 220) == 1)
+    -- The edge (only the marker): toward you, 1.6x out, 30 up.
+    local e = T.edgeOf(vec(0, 55, 0), vec(5000, 5, 0), 220)
+    check("crater: the island's edge toward you", vnear(e, vec(352, 85, 0)), vs(e))
+    -- The lava goes the moment the island streams in (before any event).
+    MAP.kids.PrehistoricIsland = nil
+    S.ev, S.lavaAt = nil, nil
+    local isleL = makeIsland(false, false)
+    CFG.Volcano = true
+    reset()
+    S.volcanoStep()
+    check("crater: the island streamed in, no event yet - its lava already off", isleL.kids.Core.kids.InteriorLava.destroyed == true
+        and isleL.kids.LavaPool.destroyed == true)
+    -- Starting the event from BEHIND the volcano: round it to the skull's prompt.
+    MAP.kids.PrehistoricIsland = nil
+    S.ev = nil
+    local isleS, ppS = makeIsland(false, true)
+    ppS.onHold = function() isleS.attrs.IsMinigameActive = true end
+    ROOT.Position = vec(-69800, 40, 6500)          -- 300 behind the middle; the prompt is in front (z 6890)
+    reset()
+    S.volcanoStep()
+    check("crater: the event started from behind the volcano - flown ROUND it to the prompt",
+        T.hasFlight(vec(-69800, 23, 6890)) and T.cornersClear(vec(-69800, 200, 6800), 220) and #FLIGHTS >= 3, #FLIGHTS)
+    MAP.kids.PrehistoricIsland = nil
+    S.ev, CFG.Volcano = nil, false
 end)()
 
 realPrint(all and "ALL PASS" or "SOME FAILED")
