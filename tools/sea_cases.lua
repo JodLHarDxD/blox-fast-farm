@@ -272,6 +272,49 @@ check("two legs: 10,000 m after the turn - the next server, and why", ok == fals
     and P.elite.why == "no Prehistoric Island by 8000 m, nor 10000 m after the turn" and T.drive.leg == 1,
     tostring(P.elite.why))
 CFG.SeaLeg2 = 0
+-- THE CLOCK (user, 2026-10-06): 21 min at sea, no island = the next server.
+CFG.SeaSearchMinutes = 21
+NEW_BOAT.pivot = cf(TIKI + vec(-50000, 0, 0), 0)        -- 5,000 m out: no leg ends here
+T.drive.leg, T.drive.base, T.drive.odo0 = 1, 0, nil
+reset()
+HUM.SeatPart = nil
+S.huntStep(epoch)
+S.sailStart = CLOCK
+CLOCK += 20 * 60
+reset()
+ok = S.huntStep(epoch)
+check("clock: 20 min at sea - still sailing, the note shows the clock", ok == true
+    and string.find(S.note, "20:00 of 21:00 at sea", 1, true) ~= nil, S.note)
+CLOCK += 61
+reset()
+ok = S.huntStep(epoch)
+check("clock: 21 min at sea, no island - the next server, and why", ok == false
+    and P.elite.why == "no Prehistoric Island in 21 min at sea" and S.driving == false, tostring(P.elite.why))
+-- Manual steering too.
+CFG.SeaSteer = "manual"
+reset()
+HUM.SeatPart = nil
+ok = S.huntStep(epoch)
+check("clock: you steering - 21 min still means the next server", ok == false
+    and P.elite.why == "no Prehistoric Island in 21 min at sea")
+CFG.SeaSteer = "auto"
+-- 0 = off.
+CFG.SeaSearchMinutes = 0
+reset()
+HUM.SeatPart = nil
+ok = S.huntStep(epoch)
+check("clock off (0): sailing on past 21 min", ok == true and string.find(S.note, "at sea", 1, true) == nil, S.note)
+-- The island up after the clock ran out: it stays (the event, the loot).
+CFG.SeaSearchMinutes = 21
+local found0 = S.tally.found
+local mkLate = LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 55, 6800) }))
+reset()
+ok = S.huntStep(epoch)
+check("clock: the island came - it stays, the clock no longer counts", ok == true and P.elite.why == nil
+    and string.find(S.note, "PREHISTORIC ISLAND UP", 1, true) ~= nil, tostring(P.elite.why) .. " / " .. S.note)
+LOCS.kids["Prehistoric Island"] = nil
+CFG.SeaSearchMinutes = 0
+S.sailStart, S.foundAt, S.tally.found = nil, nil, found0
 -- Sunk far out: the next server.
 BOATS.kids[NEW_BOAT.Name] = nil
 NEW_BOAT.Parent = nil

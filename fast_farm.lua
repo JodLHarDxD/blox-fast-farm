@@ -245,6 +245,11 @@ local CFG = {
     SeaSearchTo        = 23000,      -- meters from Tiki: the first leg ends here
     SeaTurnBack        = 120,        -- degrees left at the end of it
     SeaLeg2            = 10000,      -- meters sailed after the turn (0 = the next server at once)
+    -- THE CLOCK (user, 2026-10-06): no island this many minutes after the
+    -- boat first set sail in this server = the next server, auto or manual,
+    -- whichever comes first with the legs. The island up = the clock no
+    -- longer counts (the event, the loot, then the hop). 0 = off.
+    SeaSearchMinutes   = 21,
     -- The compass meter in studs, counted from the Tiki boat dealer (user's
     -- compass, 2026-10-04: Danger 6 ~2,600 m = 26.3k studs; the Prehistoric
     -- came ~5,000 m = 50k studs). The panel shows both.
@@ -6017,6 +6022,7 @@ do
                 S.boatNote = "at the wheel of " .. b.Name
             end
             if not S.driving then
+                S.sailStart = S.sailStart or os.clock()     -- THE CLOCK: from the first sail in this server
                 drive.waterY = drive.waterY or b:GetPivot().Position.Y
                 drive.wobbleAt = 0
                 drive.cruise = true
@@ -6040,15 +6046,24 @@ do
                 drive.want, drive.wobbleAt = 0, os.clock() + 20
                 print(string.format("[BFF] sea: no island by %d m - %d deg left, %d m more", to, back, leg2))
             end
+            local limitS = (tonumber(CFG.SeaSearchMinutes) or 21) * 60
+            local atSea = os.clock() - (S.sailStart or os.clock())
+            local clock = (limitS > 0) and string.format("  ·  %s of %s at sea", mmss(atSea), mmss(limitS)) or ""
             local where = manual and "" or ((drive.leg == 2)
                 and string.format("  ·  turned back: %d of %d m", math.floor((drive.odo or 0) / spm - (drive.odo0 or 0)), leg2)
                 or string.format(" (of %d)", to))
-            S.note = string.format("%s  ·  %d m from Tiki%s  ·  danger %s%s",
+            S.note = string.format("%s  ·  %d m from Tiki%s%s  ·  danger %s%s",
                 manual and ("YOU STEER: A/D turn, W go, S stop" .. (drive.cruise and "" or "  (stopped)")) or "sailing",
-                math.floor(S.meters), where, tostring(S.danger or "?"),
+                math.floor(S.meters), where, clock, tostring(S.danger or "?"),
                 S.hp and string.format("  ·  boat %d/%s HP", S.hp, tostring(S.maxHp or "?")) or "")
             E.note = S.note
             say(S.note)
+            if limitS > 0 and atSea >= limitS and leg ~= "hop" then
+                stopDrive()
+                S.everDriven = false
+                E.why = string.format("no Prehistoric Island in %d min at sea", math.floor(limitS / 60 + 0.5))
+                return false
+            end
             if leg == "hop" then
                 stopDrive()
                 S.everDriven = false
@@ -9943,6 +9958,9 @@ local function buildUI()
         sliderRow(v, "Auto: and sail on (0 = next server)", 0, 20000, 500,
             function() return CFG.SeaLeg2 end,
             function(x) CFG.SeaLeg2 = x end, " m")
+        sliderRow(v, "No island this long at sea: next server (0 = off)", 0, 60, 1,
+            function() return CFG.SeaSearchMinutes end,
+            function(x) CFG.SeaSearchMinutes = x end, " min")
         sliderRow(v, "One compass meter", 5, 15, 0.5,
             function() return CFG.SeaStudsPerM end,
             function(x) CFG.SeaStudsPerM = x end, " studs")
