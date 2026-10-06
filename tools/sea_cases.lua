@@ -1122,4 +1122,53 @@ end)()
     S.ev, CFG.Volcano, CFG.GolemWeapon = nil, false, nil
 end)()
 
+-- ---------------------------------------------------------------- AUTO STEERING: LEFT, RIGHT, STRAIGHT
+;(function()
+    local function seq(list)
+        local i = 0
+        return function() i += 1 return list[(i - 1) % #list + 1] end
+    end
+    local h, wait = T.nextHeading(0, seq({ 0.1, 0.0, 0.5 }), 60, 20, 45)
+    check("steer: a third of the time LEFT (+), 10 deg at the least", near(h, 10) and near(wait, 90), h .. " " .. wait)
+    h = T.nextHeading(10, seq({ 0.5, 1 - 1e-9, 0 }), 60, 20, 45)
+    check("steer: a third RIGHT (-), from where it heads now, up to 20", near(h, -10, 1e-6), h)
+    h = T.nextHeading(-10, seq({ 0.9, 0.5, 0 }), 60, 20, 45)
+    check("steer: a third STRAIGHT ON", near(h, -10))
+    h = T.nextHeading(40, seq({ 0.1, 1 - 1e-9, 0 }), 60, 20, 45)
+    check("steer: never past 45 off west - a turn past it goes the other way", near(h, 20, 1e-6), h)
+    -- 300 turns at random: all three kinds, sizes 10..20, waits 60..120, inside +-45.
+    math.randomseed(7)
+    local cur, l, r, st, okSize, okWait, okLim = 0, 0, 0, 0, true, true, true
+    for _ = 1, 300 do
+        local nh, w = T.nextHeading(cur, math.random, 60, 20, 45)
+        local d = nh - cur
+        if d > 0 then l += 1 elseif d < 0 then r += 1 else st += 1 end
+        if d ~= 0 and (math.abs(d) < 10 - 1e-9 or math.abs(d) > 20 + 1e-9) then okSize = false end
+        if w < 60 or w > 120 then okWait = false end
+        if math.abs(nh) > 45 then okLim = false end
+        cur = nh
+    end
+    check("steer: left, right and straight all happen", l > 50 and r > 50 and st > 50, l .. "/" .. r .. "/" .. st)
+    check("steer: every turn 10..20 deg, every 1..2 min, always within 45 of west", okSize and okWait and okLim)
+    -- The drive itself turns: a turn due, auto steering, at the wheel.
+    local bt, st2 = makeBoat(vec(-30000, 5, 400), math.pi / 2)
+    S.boat, S.seat, S.driving, P.running = bt, st2, true, true
+    HUM.SeatPart = st2
+    CFG.SeaSteer, CFG.SeaTurnEvery, CFG.SeaTurnMax = "auto", 60, 20
+    local turned = false
+    for i = 1, 40 do
+        T.drive.waterY, T.drive.wobbleAt, T.drive.want = 5, 0, 0
+        T.driveTick(0.1)
+        local wnt, at = T.drive.want, T.drive.wobbleAt
+        if wnt ~= 0 then
+            turned = math.abs(wnt) >= 10 - 1e-9 and math.abs(wnt) <= 20 + 1e-9
+                and at - CLOCK >= 60 - 1e-6 and at - CLOCK <= 120 + 1e-6
+            break
+        end
+    end
+    check("the drive: a turn due - a new heading 10..20 off, the next turn 1..2 min on", turned)
+    S.driving = false
+    CFG.SeaSteer = "auto"
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

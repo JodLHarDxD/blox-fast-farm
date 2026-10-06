@@ -239,12 +239,18 @@ local CFG = {
     -- the Volcano event switch (below) does the event.
     SeaBoat            = "Beast Hunter",
     SeaSpeed           = 300,        -- studs/s, 250-350 (the boat sails ~140 by itself)
-    SeaSearchTo        = 8000,       -- meters from Tiki: nothing by here = the next server
+    SeaSearchTo        = 20000,      -- meters from Tiki: nothing by here = the next server (user, 2026-10-06: the island
+                                     -- mostly came late, ~20k m - it is time on the sea that counts)
     -- The compass meter in studs, counted from the Tiki boat dealer (user's
     -- compass, 2026-10-04: Danger 6 ~2,600 m = 26.3k studs; the Prehistoric
     -- came ~5,000 m = 50k studs). The panel shows both.
     SeaStudsPerM       = 10,
-    SeaWobble          = 10,         -- degrees the heading wanders, now and then
+    -- AUTO STEERING (user, 2026-10-06: not a straight line - "left a little,
+    -- then right, then straight"). Every SeaTurnEvery..2x seconds, at random:
+    -- left, right or straight on; a turn is SeaTurnMax/2..SeaTurnMax degrees
+    -- from where it heads now, never more than 45 off west.
+    SeaTurnEvery       = 60,         -- seconds (random up to twice this)
+    SeaTurnMax         = 20,         -- degrees a turn, at most (half of it at least)
     -- WHO STEERS. "manual" (user, 2026-10-04: the spawn wants time on the sea,
     -- so you keep the boat where you want): your keys at the wheel - A / D
     -- (or the arrows) turn, W goes (and keeps going), S stops - at SeaSpeed;
@@ -5164,6 +5170,25 @@ do
             return math.clamp(d, -maxStep, maxStep)
         end
 
+        -- AUTO STEERING, pure (tools/sea_test.py): the next heading (degrees
+        -- off west) and how long until the turn after it. rnd() in [0,1).
+        -- A third each: left, right, straight on; a turn of turnMax/2 ..
+        -- turnMax; kept within +-limit (a turn past it goes the other way).
+        local function nextHeading(cur, rnd, every, turnMax, limit)
+            local pick = rnd()
+            local amount = turnMax * (0.5 + 0.5 * rnd())
+            local new = cur
+            if pick < 1 / 3 then
+                new = cur + amount
+            elseif pick < 2 / 3 then
+                new = cur - amount
+            end
+            if new > limit then new = cur - amount end
+            if new < -limit then new = cur + amount end
+            new = math.clamp(new, -limit, limit)
+            return new, every * (1 + rnd())
+        end
+
         -- Where the golems are held: `dist` off the relic, on the far side from
         -- the volcano (the beach side).
         local function cageSpot(relic, volcano, dist)
@@ -5500,9 +5525,10 @@ do
             else
                 local now = os.clock()
                 if now >= drive.wobbleAt then
-                    drive.wobbleAt = now + 15 + math.random() * 15
-                    local w = CFG.SeaWobble or 10
-                    drive.want = (math.random() * 2 - 1) * w
+                    local wait
+                    drive.want, wait = nextHeading(drive.want or 0, math.random,
+                        tonumber(CFG.SeaTurnEvery) or 60, tonumber(CFG.SeaTurnMax) or 20, 45)
+                    drive.wobbleAt = now + wait
                 end
                 dir = headingFor(drive.want)
                 if look.Magnitude > 0.1 then
@@ -6896,6 +6922,7 @@ do
             cageSpot = cageSpot, standFor = standFor, phase = phase, defendPick = defendPick,
             ventLive = ventLive, golemBuild = golemBuild, driveTick = driveTick, drive = drive,
             mirageFits = mirageFits, blueGear = blueGear, keysDown = keysDown, seatOf = seatOf,
+            nextHeading = nextHeading,
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
             gunM1 = gunM1, gunForVents = gunForVents,
@@ -9870,7 +9897,7 @@ local function buildUI()
         sliderRow(v, "Boat speed", 250, 350, 5,
             function() return CFG.SeaSpeed end,
             function(x) CFG.SeaSpeed = x end, " studs/s")
-        sliderRow(v, "Auto: no island by, next server", 3000, 15000, 500,
+        sliderRow(v, "Auto: no island by, next server", 3000, 30000, 500,
             function() return CFG.SeaSearchTo end,
             function(x) CFG.SeaSearchTo = x end, " m")
         sliderRow(v, "One compass meter", 5, 15, 0.5,
@@ -9879,9 +9906,14 @@ local function buildUI()
         caption(v, "Meters are counted from the Tiki back boat dealer. Danger 6 "
             .. "starts about 2,600 m out. Check the \"where\" line against your "
             .. "compass once; if it drifts, move \"One compass meter\".")
-        sliderRow(v, "Heading wanders", 0, 30, 1,
-            function() return CFG.SeaWobble end,
-            function(x) CFG.SeaWobble = x end, " deg")
+        sliderRow(v, "Auto: a turn every", 20, 180, 5,
+            function() return CFG.SeaTurnEvery end,
+            function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
+        sliderRow(v, "Auto: a turn up to", 0, 45, 1,
+            function() return CFG.SeaTurnMax end,
+            function(x) CFG.SeaTurnMax = x end, " deg")
+        caption(v, "Auto steering: at each turn, at random, left, right or straight "
+            .. "on - never more than 45 deg off west, so it still goes out to sea.")
         caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
             .. "dealer, puts you at the wheel and drives west through the sea "
             .. "events. Island up: off the boat, onto the island, and it never "
