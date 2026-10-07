@@ -198,7 +198,8 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric" | "mirage"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric"
+                                     -- | "mirage" | "dealer" | "mchest" | "gear" (the four Mirage hunts)
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -272,17 +273,19 @@ local CFG = {
     -- the next server at SeaSearchTo.
     SeaSteer           = "manual",
     SeaTurnRate        = 60,         -- degrees a second while A / D is held
-    -- MIRAGE HUNT: the same boat and search. The Mirage up = off the boat, onto
-    -- it, and the character is YOURS (no lock, no noclip): you climb, face the
-    -- moon, press T. The Blue Gear is picked the moment it shows. Which Mirage
-    -- is worth stopping for (it lives 15 min; the gear needs night):
+    -- THE MIRAGE: FOUR HUNTS, each its own switch on the Hunt page (user,
+    -- 2026-10-07: "the hunts separated"). A Mirage already up = straight to
+    -- the job; none = the same boat and search first.
+    --   "mirage"  onto the Mirage - nothing else
+    --   "dealer"  in front of the Advanced Fruit Dealer, his shop open
+    --   "mchest"  every chest on it, nearest first
+    --   "gear"    the Blue Gear: your turn at the moon (a high point, face it,
+    --             T - never the script's), the gear picked the moment it shows
+    -- Each done = the character is yours and the farm stops, on the Mirage.
+    -- Which Mirage the GEAR hunt stops for (it lives 15 min; the gear needs
+    -- night; the other three take every one):
     --   "any" every one  ·  "night" one that sees night  ·  "full" a full-moon night
     MirageNeed         = "night",
-    -- ON THE MIRAGE (user, 2026-10-04): three jobs, each its own switch. The
-    -- moon is yours (a high point, face it, T) - never the script's.
-    MirageChests       = true,       -- every chest on the island, nearest first
-    MirageDealer       = true,       -- to the Advanced Fruit Dealer, his shop opened
-    MirageGear         = true,       -- the Blue Gear: taken if it shows (MirageNeed judges only for it)
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -368,7 +371,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -5047,7 +5050,8 @@ do
             elseif kind == "ember" then
                 -- BLAZE EMBERS: always busy (never hops) - EMBER HUNT.
                 if (P :: any).ember.step(myEpoch) then return end
-            elseif kind == "prehistoric" or kind == "mirage" then
+            elseif kind == "prehistoric" or kind == "mirage" or kind == "dealer"
+                or kind == "mchest" or kind == "gear" then
                 -- SEA HUNT: true while it sails (or holds the island); false
                 -- = nothing came by the far edge, E.why says so.
                 if (P :: any).sea.huntStep(myEpoch, kind) then return end
@@ -5085,6 +5089,9 @@ do
             CFG.Hunt = x and true or false
             -- The Prehistoric hunt's 21-min clock starts again with the switch.
             if x and (P :: any).sea then (P :: any).sea.sailStart = nil end
+            -- A Mirage hunt switched on: its job from the start, on the same
+            -- Mirage too (one done before would otherwise sit there, done).
+            if x and (P :: any).sea and (P :: any).sea.mirage then (P :: any).sea.mirage.kind = nil end
             releasePile()
             if x then
                 CFG.RaidMode, CFG.RandomMode = false, false
@@ -5116,15 +5123,25 @@ end
 -- boat is left and you go onto the island: it despawns with nobody on it.
 -- Nothing by SeaSearchTo = the next server.
 --
--- THE MIRAGE HUNT (HuntKind "mirage"): the same boat and search. The Mirage
--- up (Map.MysticIsland / Locations "Mirage Island") and one worth it
--- (MirageNeed: it lives 15 min, the gear needs night - judged off the server
--- news' sky) = off the boat, onto it, and the character is handed back to you
--- (P.handsOff: no lock, no noclip, no keys): you climb, face the moon, T.
--- The Blue Gear -- the island's MeshPart 10153114969 (every hub 2024-26),
--- hidden until the moon resonates -- is run over the moment it shows ("run
--- over it", the wiki), then the farm stops and leaves you there. Not worth
--- it: sailed past.
+-- THE MIRAGE HUNTS (HuntKind "mirage" / "dealer" / "mchest" / "gear"; user,
+-- 2026-10-07: each its own hunt). The same boat and search until a Mirage is
+-- up (Map.MysticIsland / Locations "Mirage Island"); one up already = no
+-- boat. Then ONLY the hunt's job, and when it is done the character is
+-- handed back to you (P.handsOff: no lock, no noclip, no keys), the farm
+-- stops, you are left on the Mirage:
+--   mirage   onto it
+--   dealer   the Advanced Fruit Dealer, found wherever the client holds him
+--            (workspace.NPCs, ReplicatedStorage.NPCs, the nil instances, the
+--            island) - he stands at a random spot on it (the wiki) - else the
+--            island searched until he streams in; you stand in front of his
+--            face, his shop opened
+--   mchest   every chest, nearest first
+--   gear     MirageNeed judges the Mirage (it lives 15 min, the gear needs
+--            night - off the server news' sky); your turn at the moon (climb,
+--            face it, T). The Blue Gear -- the island's MeshPart 10153114969
+--            (every hub 2024-26), hidden until the moon resonates -- is run
+--            over the moment it shows ("run over it", the wiki). Not worth it:
+--            sailed past.
 --
 -- THE VOLCANO EVENT (CFG.Volcano, its own switch, any mode). The public
 -- hubs (2026-03 .. 2026-09) and the wiki agree on the island's insides:
@@ -5859,58 +5876,164 @@ do
         end
 
         -- ---------- the Advanced Fruit Dealer ----------
-        -- NPCs["Advanced Fruit Dealer"], in workspace or parked in
-        -- ReplicatedStorage (the hubs look in both); his shop opens through
-        -- the game's own FruitShop controller (one hub, 2026).
-        local function dealerAt()
-            -- Not ipairs: it stops at the first nil (no workspace.NPCs).
-            local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
-            for i = 1, 2 do
-                local f = folders[i]
-                local d = f and f:FindFirstChild("Advanced Fruit Dealer")
-                if d then
-                    local ok, p = pcall(function() return d:GetPivot().Position end)
-                    if ok and p then return p end
+        -- He stands at a random spot on the Mirage (the wiki, 2026), so never a
+        -- fixed point: his own root, read wherever the client holds him. The
+        -- hubs (2024-26) look in workspace.NPCs (near you), ReplicatedStorage.
+        -- NPCs (parked - its CFrame is still where he stands) and the nil
+        -- instances; the island's own model last. A copy far off this Mirage is
+        -- a stale one, not him. In front = along his own LookVector: his face.
+        local DEALER, DEALER_RANGE, DEALER_FRONT = "Advanced Fruit Dealer", 2500, 5
+        local function dealerCF(x)
+            local root = x:FindFirstChild("HumanoidRootPart") or x:FindFirstChild("Head")
+            if root and root:IsA("BasePart") then return root.CFrame end
+            return x:GetPivot()
+        end
+        -- Where he is: { model, cf, from, off (studs from the Mirage's middle) };
+        -- else nil, and the nearest copy found off this Mirage. deep = the nil
+        -- instances and the island's model too (the hunt; the news reads only
+        -- the two folders, once a second).
+        local function findDealer(isle, mk, deep)
+            local centre = (isle and posOf(isle)) or mk
+            local found = {}
+            local function add(x, from)
+                if not x then return end
+                local ok, cf = pcall(dealerCF, x)
+                if ok and cf then table.insert(found, { model = x, cf = cf, from = from }) end
+            end
+            local wsN, rsN = workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs")
+            add(wsN and wsN:FindFirstChild(DEALER), "workspace.NPCs")
+            add(rsN and rsN:FindFirstChild(DEALER), "ReplicatedStorage.NPCs")
+            if deep then
+                if getnilinstances then
+                    local ok, list = pcall(getnilinstances)
+                    for _, x in ipairs((ok and type(list) == "table") and list or {}) do
+                        local okN, n = pcall(function() return x.Name end)
+                        if okN and n == DEALER then add(x, "the nil instances") end
+                    end
+                end
+                add(isle and isle:FindFirstChild(DEALER, true), "the Mirage's model")
+            end
+            local far = nil
+            for _, d in ipairs(found) do
+                d.off = centre and flat(d.cf.Position - centre).Magnitude or 0
+                if d.off <= DEALER_RANGE then return d, nil end
+                if not far or d.off < far.off then far = d end
+            end
+            return nil, far
+        end
+        S.findDealer = findDealer
+
+        -- Nowhere to be read: the island searched - two rings round its middle,
+        -- at a third and two thirds of its half-width, 30 up (noclip: hills are
+        -- nothing), so whatever brings him in by distance does.
+        local function sweepPoints(isle, mk)
+            local centre = (isle and posOf(isle)) or mk
+            if not centre then return {} end
+            local half = 300
+            if isle then
+                local ok, _, size = pcall(function() return isle:GetBoundingBox() end)
+                if ok and size then half = math.clamp(math.max(size.X, size.Z) / 2, 150, 1200) end
+            end
+            local out = {}
+            for _, f in ipairs({ 1 / 3, 2 / 3 }) do
+                for i = 0, 7 do
+                    local a = i * math.pi / 4
+                    table.insert(out, centre + Vector3.new(math.cos(a) * half * f, 30, math.sin(a) * half * f))
                 end
             end
-            return nil
+            return out
         end
-        S.dealerAt = dealerAt
-        local function dealerStep(m, myEpoch)
-            m.dealerDone = true
-            local at = dealerAt()
-            if not at then
-                m.dealerNote = "no Advanced Fruit Dealer found on this Mirage"
-                print("[BFF] mirage: " .. m.dealerNote)
-                return
-            end
+
+        -- In front of his face: `dist` out along his LookVector, at his root's
+        -- height (your feet on his ground).
+        local function frontOfDealer(cf, dist)
+            local look = flat(cf.LookVector)
+            if look.Magnitude < 0.1 then look = Vector3.new(0, 0, -1) end
+            return cf.Position + look.Unit * dist
+        end
+
+        -- Your view on him: from behind you, a little above, his head in the middle.
+        local function viewDealer(stand, d)
+            pcall(function()
+                local cam = workspace.CurrentCamera
+                local head = d.model:FindFirstChild("Head")
+                local hp = (head and head:IsA("BasePart")) and head.Position or (d.cf.Position + UP * 1.5)
+                local back = flat(stand - d.cf.Position)
+                back = (back.Magnitude > 0.1) and back.Unit or Vector3.new(0, 0, 1)
+                cam.CFrame = CFrame.lookAt(stand + back * 10 + UP * 4, hp)
+            end)
+        end
+
+        -- One step. true = still at it (call again); false = done
+        -- (m.dealerNote says how). Never a single look (2026-10-07: one miss
+        -- made it "not found" for the whole Mirage): not read = the island
+        -- searched, ring after ring, until he is.
+        local function dealerStep(isle, mk, m, myEpoch)
             if P.handsOff then handsOn() end
-            m.note = "to the Advanced Fruit Dealer"
-            say(m.note)
             setState("DEALER")
-            local stand = at + Vector3.new(0, 2, 6)
-            flyTo(stand)
-            if stale(myEpoch) then return end
-            lockAt(stand)
-            local opened = pcall(function()
+            local d, far = findDealer(isle, mk, true)
+            if not d then
+                m.sweep = m.sweep or sweepPoints(isle, mk)
+                m.looked = (m.looked or 0) + 1
+                if m.looked == 1 then
+                    print("[BFF] mirage: no Advanced Fruit Dealer in workspace.NPCs, ReplicatedStorage.NPCs, "
+                        .. "the nil instances or the island" .. (far and string.format(
+                            " (one in %s, %d studs off this Mirage - not him)", far.from, math.floor(far.off)) or "")
+                        .. " - searching the island")
+                end
+                local n = #m.sweep
+                m.note = string.format("looking for the Advanced Fruit Dealer - he stands at a random spot (%d/%d)",
+                    ((m.looked - 1) % math.max(n, 1)) + 1, n)
+                say(m.note)
+                if n > 0 then flyTo(m.sweep[((m.looked - 1) % n) + 1]) else task.wait(0.5) end
+                return true
+            end
+            local _, r = parts()
+            local stand = frontOfDealer(d.cf, DEALER_FRONT)
+            if not m.dealerFrom then
+                m.dealerFrom = d.from
+                print(string.format("[BFF] mirage: the Advanced Fruit Dealer is in %s - %d studs from you, %d from the Mirage's middle",
+                    d.from, r and math.floor((r.Position - d.cf.Position).Magnitude) or -1, math.floor(d.off)))
+            end
+            m.note = "to the Advanced Fruit Dealer"
+                .. (r and string.format(" - %d studs", math.floor((r.Position - stand).Magnitude)) or "")
+            say(m.note)
+            flyTo(stand, { face = d.cf.Position })
+            if stale(myEpoch) then return true end
+            -- Read again from beside him: a parked copy's spot against the live one.
+            local d2 = findDealer(isle, mk, false) or d
+            local stand2 = frontOfDealer(d2.cf, DEALER_FRONT)
+            local _, r2 = parts()
+            local moved = (stand2 - stand).Magnitude > 4
+            local short = r2 ~= nil and (r2.Position - stand2).Magnitude > 8
+            if moved or short then
+                m.goes = (m.goes or 0) + 1
+                if m.goes < 4 then return true end          -- not in front of him yet: again
+                if short then
+                    m.dealerNote = string.format("could not reach the Advanced Fruit Dealer - %d studs off (%s)",
+                        math.floor((r2.Position - stand2).Magnitude), tostring(P.lastFlight or "no flight"))
+                    print("[BFF] mirage: " .. m.dealerNote)
+                    return false
+                end
+            end
+            lockAt(stand2, d2.cf.Position)
+            viewDealer(stand2, d2)
+            local opened, err = pcall(function()
                 require(player.PlayerGui.Main.UIController.FruitShop):Open("AdvancedFruitDealer")
             end)
             m.dealerSeen = true
             S.tally.dealers += 1
-            m.dealerNote = "by the Advanced Fruit Dealer" .. (opened and " - his shop is open" or " - talk to him")
+            m.dealerNote = "in front of the Advanced Fruit Dealer" .. (opened and " - his shop is open"
+                or (" - talk to him (the shop did not open: " .. tostring(err) .. ")"))
             print("[BFF] mirage: " .. m.dealerNote)
-            notify("Advanced Fruit Dealer" .. (opened and " - shop open" or " - here"))
+            notify("Advanced Fruit Dealer" .. (opened and " - shop open" or " - in front of you"))
+            return false
         end
 
-        -- Every job you switched on is done: the character is yours, the farm stops.
-        local function mirageDone(m)
+        -- The hunt's job is done: the character is yours, the farm stops.
+        local function mirageDone(m, what)
             m.done = true
-            local bits = {}
-            if CFG.MirageChests then table.insert(bits, m.chests .. " chests") end
-            if CFG.MirageDealer then table.insert(bits, tostring(m.dealerNote or "no dealer")) end
-            if CFG.MirageGear then table.insert(bits, "Blue Gear collected") end
-            m.note = "MIRAGE DONE - " .. ((#bits > 0) and table.concat(bits, "  ·  ") or "you are on it")
-                .. " - the farm stopped, you are on the Mirage"
+            m.note = "MIRAGE DONE - " .. tostring(what) .. " - the farm stopped, you are on the Mirage"
             print("[BFF] mirage: " .. m.note)
             handsOff()
             P.setHunt(false)
@@ -5918,23 +6041,33 @@ do
         end
 
         -- One step with a Mirage up. true = handled; false = not worth it
-        -- (sailed past). On it: the gear first if it already shows (it does not
-        -- wait), then the chests, the dealer, then your turn at the moon while
-        -- the gear is watched. Each job only when its switch is on.
-        local function mirageStep(isle, mk, myEpoch)
+        -- (sailed past: the gear hunt's sky judge only). ONLY the hunt's job:
+        --   mirage   onto it
+        --   dealer   in front of him, his shop open (straight to him when he
+        --            can be read already)
+        --   mchest   the chests, nearest first
+        --   gear     the gear if it already shows (it does not wait), else your
+        --            turn at the moon while it is watched
+        -- Another hunt on the same Mirage starts its own job (its age kept).
+        local MIRAGE_HUNT = { mirage = true, dealer = true, mchest = true, gear = true }
+        S.MIRAGE_HUNT = MIRAGE_HUNT
+        local function mirageStep(isle, mk, myEpoch, kind)
             local m = S.mirage
-            if not m then
-                m = { seenAt = os.clock(), tries = 0, chests = 0 }
+            if not m or m.kind ~= kind then
+                local seen = m and m.seenAt
+                m = { seenAt = seen or os.clock(), tries = 0, chests = 0, kind = kind }
                 S.mirage = m
-                S.tally.mirages += 1
+                if not seen then S.tally.mirages += 1 end
                 local news = (P :: any).news
-                -- Only the gear needs night: without it, every Mirage is worth it.
-                local need = CFG.MirageGear and CFG.MirageNeed or "any"
+                -- Only the gear needs night: every other hunt takes every Mirage.
+                local need = (kind == "gear") and CFG.MirageNeed or "any"
                 m.fits, m.why = mirageFits(need, news and news.sky, MIRAGE_LIFE, GEAR_MARGIN)
-                print(string.format("[BFF] mirage: MIRAGE ISLAND at %d m from Tiki - %s%s",
-                    math.floor(S.meters or 0), m.why, m.fits and "" or " - sailing on"))
-                notify(m.fits and "Mirage Island is up!"
-                    or ("Mirage Island - " .. m.why .. ": sailing on"))
+                print(string.format("[BFF] mirage: MIRAGE ISLAND (%s hunt) at %d m from Tiki - %s%s",
+                    kind, math.floor(S.meters or 0), m.why, m.fits and "" or " - sailing on"))
+                if not seen then
+                    notify(m.fits and "Mirage Island is up!"
+                        or ("Mirage Island - " .. m.why .. ": sailing on"))
+                end
             end
             if not m.fits then return false end
             if m.done then
@@ -5943,9 +6076,9 @@ do
                 return true
             end
             if not m.landed then
+                stopDrive()
                 local at = mk or posOf(isle)
-                if at then
-                    stopDrive()
+                if at and not (kind == "dealer" and findDealer(isle, mk, false)) then
                     setState("FLY")
                     say("onto the Mirage")
                     flyTo(at + UP * 20)
@@ -5953,8 +6086,32 @@ do
                 end
                 m.landed = true
             end
+            if kind == "mirage" then
+                mirageDone(m, "you are on it")
+                return true
+            end
+            if kind == "dealer" then
+                if dealerStep(isle, mk, m, myEpoch) then return true end
+                mirageDone(m, m.dealerNote)
+                return true
+            end
+            if not isle then
+                -- Only its marker so far: the island's model is still coming.
+                m.waitIsle = m.waitIsle or os.clock()
+                if os.clock() - m.waitIsle < 15 then
+                    say("on the Mirage - its island still loading")
+                    task.wait(0.5)
+                    return true
+                end
+            end
+            if kind == "mchest" then
+                if not m.chestsDone and chestStep(isle, m, myEpoch) then return true end
+                mirageDone(m, m.chests .. " chests taken")
+                return true
+            end
+            -- THE BLUE GEAR.
             local g, byMesh = blueGear(isle)
-            if CFG.MirageGear and not m.got and g then
+            if not m.got and g then
                 local hidden = (tonumber(g.Transparency) or 1) >= 1
                 if hidden then m.sawHidden = true end
                 if not hidden and (byMesh or m.sawHidden) and (m.tries or 0) < 3 then
@@ -5962,15 +6119,8 @@ do
                     if stale(myEpoch) then return true end
                 end
             end
-            if CFG.MirageChests and not m.chestsDone then
-                if chestStep(isle, m, myEpoch) then return true end
-            end
-            if CFG.MirageDealer and not m.dealerDone then
-                dealerStep(m, myEpoch)
-                if stale(myEpoch) then return true end
-            end
-            if not CFG.MirageGear or m.got then
-                mirageDone(m)
+            if m.got then
+                mirageDone(m, "Blue Gear collected")
                 return true
             end
             -- Your turn at the moon; the gear is watched.
@@ -5992,22 +6142,24 @@ do
         end
 
         -- THE HUNT, one step. true = keep going here; false = the next server
-        -- (E.why says why). kind: "prehistoric" (default) or "mirage".
+        -- (E.why says why). kind: "prehistoric" (default), or a Mirage hunt
+        -- ("mirage" / "dealer" / "mchest" / "gear").
         function S.huntStep(myEpoch, kind)
             kind = kind or "prehistoric"
             local E = P.elite
             local sea = mySea()
             if sea and sea ~= 3 then
-                S.note = "the Prehistoric Island is Third Sea only - hunt stopped"
+                S.note = (MIRAGE_HUNT[kind] and "the Mirage" or "the Prehistoric Island")
+                    .. " is Third Sea only - hunt stopped"
                 P.setHunt(false)
                 E.note = S.note
                 say(S.note)
                 return true
             end
-            if kind == "mirage" then
+            if MIRAGE_HUNT[kind] then
                 local mi, mmk = mirageIsle(), mirageMarker()
                 if mi or mmk then
-                    if mirageStep(mi, mmk, myEpoch) then return true end
+                    if mirageStep(mi, mmk, myEpoch, kind) then return true end
                 elseif S.mirage then
                     -- Gone (15 min, or its spawner left): back to the boat.
                     if S.mirage.fits and not S.mirage.done then print("[BFF] mirage: the Mirage went") end
@@ -6179,8 +6331,9 @@ do
                 stopDrive()
                 S.everDriven = false
                 drive.leg, drive.base, drive.odo0 = 1, 0, nil
-                E.why = (leg2 > 0) and string.format("no Prehistoric Island by %d m, nor %d m after the turn", to, leg2)
-                    or string.format("no Prehistoric Island by %d m", to)
+                local what = MIRAGE_HUNT[kind] and "Mirage" or "Prehistoric Island"
+                E.why = (leg2 > 0) and string.format("no %s by %d m, nor %d m after the turn", what, to, leg2)
+                    or string.format("no %s by %d m", what, to)
                 return false
             end
             task.wait(0.25)
@@ -8425,9 +8578,19 @@ do
                         end
                         local pos = st.inst and posOf(st.inst)
                         if pos and here then
-                            table.insert(bits, string.format("%d studs away", math.floor((pos - here).Magnitude + 0.5)))
+                            -- The island's MIDDLE (user, 2026-10-07, read it as
+                            -- the dealer's distance): said so.
+                            table.insert(bits, string.format("its middle %d studs away", math.floor((pos - here).Magnitude + 0.5)))
                         end
-                        table.insert(bits, d.why)
+                        -- The dealer's own distance, when the client holds him.
+                        local sea = (P :: any).sea
+                        local dl = (d.key == "mirage" and here and sea and sea.findDealer)
+                            and sea.findDealer(st.inst, nil, false) or nil
+                        if dl then
+                            table.insert(bits, string.format("Advanced Fruit Dealer %d studs away (his hunt takes you to him)",
+                                math.floor((dl.cf.Position - here).Magnitude + 0.5)))
+                        end
+                        table.insert(bits, dl and "Blue Gear at night" or d.why)
                         add(d.key, "up", d.title .. " UP", table.concat(bits, " · "))
                     elseif st.goneAt and now - st.goneAt < 300 then
                         add(d.key, "dim", d.title .. " GONE", "left " .. mins(now - st.goneAt) .. " ago"
@@ -8953,7 +9116,12 @@ local function buildUI()
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
         { "prehistoric", "Prehistoric hunt", "Sail to the island, run the volcano event, loot, next server - the loop" },
-        { "mirage", "Mirage hunt", "Same boat - on the Mirage: chests, Advanced Fruit Dealer, Blue Gear (Sea page)" },
+        -- The Mirage (user, 2026-10-07): four hunts, each only its job. One
+        -- up already = straight to the job; none = the boat sails for one.
+        { "mirage", "Mirage hunt", "Sail till a Mirage comes, onto it - nothing else" },
+        { "dealer", "Advanced Fruit Dealer hunt", "On the Mirage: in front of him, his shop open - you buy" },
+        { "mchest", "Mirage chest hunt", "On the Mirage: every chest, nearest first" },
+        { "gear", "Blue Gear hunt", "On the Mirage: your turn at the moon, the gear picked when it shows" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -9265,8 +9433,10 @@ local function buildUI()
             if CFG.Hunt then
                 local t = P.elite.tally
                 local k = CFG.HuntKind
-                local count = (k == "mirage") and string.format("%d Mirages  ·  %d Blue Gears  ·  %d chests  ·  %s", P.sea.tally.mirages,
-                        P.sea.tally.gears, P.sea.tally.chests, P.handsOff and "YOUR TURN - the character is yours"
+                local count = P.sea.MIRAGE_HUNT[k] and string.format("%d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears  ·  %s",
+                        P.sea.tally.mirages, P.sea.tally.dealers, P.sea.tally.chests, P.sea.tally.gears,
+                        P.handsOff and "YOUR TURN - the character is yours"
+                            or (P.sea.mirage and "on the Mirage")
                             or (P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing"))
                     or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
@@ -10295,49 +10465,40 @@ local function buildUI()
             .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
             .. "or nothing by the far edge: the next server.")
 
-        heading2(v, "mirage hunt")
-        switchRow(v, "Chests", "Every chest on the Mirage, nearest first",
-            function() return CFG.MirageChests end,
-            function(x) CFG.MirageChests = x end)
-        switchRow(v, "Advanced Fruit Dealer", "Flown to him, his shop opened - you buy",
-            function() return CFG.MirageDealer end,
-            function(x) CFG.MirageDealer = x end)
-        switchRow(v, "Blue Gear", "Taken if it shows; else your turn at the moon, then taken",
-            function() return CFG.MirageGear end,
-            function(x) CFG.MirageGear = x end)
+        heading2(v, "the mirage hunts")
         readout(v, function()
             local s = P.sea
             local m = s.mirage
             local lines = {
-                string.format("found     %d Mirages  ·  %d Blue Gears  ·  %d chests  ·  %d dealers",
-                    s.tally.mirages, s.tally.gears, s.tally.chests, s.tally.dealers),
+                string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
+                    s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
             }
             if m then
-                table.insert(lines, "this one  " .. tostring(m.why) .. (m.fits and "" or "  - sailed past"))
-                if m.landed then
-                    table.insert(lines, string.format("jobs      chests %s  ·  dealer %s  ·  gear %s",
-                        not CFG.MirageChests and "off" or (m.chestsDone and (m.chests .. " taken") or (m.chests .. " so far")),
-                        not CFG.MirageDealer and "off" or (m.dealerDone and (m.dealerSeen and "visited" or "not found") or "next"),
-                        not CFG.MirageGear and "off" or (m.got and "TAKEN" or "watching")))
-                end
+                table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
+                    m.fits and "" or "  - sailed past"))
+                if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
                 if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
             end
-            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours; the gear is watched") end
+            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours") end
             return table.concat(lines, "\n")
         end)
+        caption(v, "Four hunts on the Hunt page, each only its job: the Mirage "
+            .. "hunt puts you on it; the Advanced Fruit Dealer hunt puts you in "
+            .. "front of him with his shop open (he stands at a random spot - "
+            .. "not read = the island searched until he is); the chest hunt takes "
+            .. "every chest; the Blue Gear hunt gives you the moon (a high point, "
+            .. "face it, T) and runs over the gear the moment it shows. A Mirage "
+            .. "already up = straight to the job, else the boat sails for one. "
+            .. "Done = the farm stops and leaves you on it. A Mirage lives 15 min; "
+            .. "dying or leaving makes it go.")
+        heading2(v, "blue gear hunt: which mirage")
         radio(v, 122, {
             { "night", "One that sees night", "the gear needs it" },
             { "full",  "A full-moon night only", "" },
             { "any",   "Every Mirage", "" },
         }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
-        caption(v, "On the Mirage: the gear first if it already shows, then the "
-            .. "chests, then the dealer, then - Blue Gear on - the character is "
-            .. "yours for the moon (a high point, face it, T) and the gear is run "
-            .. "over the moment it shows. Every job you switched on done = the "
-            .. "farm stops and leaves you there. The sky choice above judges a "
-            .. "Mirage only for the gear (it needs night, 2 min to climb); with "
-            .. "Blue Gear off every Mirage is taken. A Mirage lives 15 min; dying "
-            .. "or leaving makes it go.")
+        caption(v, "Only the Blue Gear hunt asks this (the gear needs night, 2 min "
+            .. "to climb); the other Mirage hunts take every one.")
 
         heading2(v, "volcano event")
         switchRow(v, "Volcano event",

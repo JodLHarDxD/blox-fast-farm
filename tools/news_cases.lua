@@ -253,6 +253,15 @@ N.tick()
 it = item("mirage")
 check("2 min later: came 2 min ago · gone within 13 min · 100 studs away", has(it.body, "came 2 min ago")
     and has(it.body, "gone within 13 min") and has(it.body, "100 studs away"), it.body)
+check("the distance is said to be the island's MIDDLE (user read it as the dealer's)",
+    has(it.body, "its middle 100 studs away") and not has(it.body, "Advanced Fruit Dealer 1"), it.body)
+-- The dealer read by the sea hunt's finder: his own distance in the strip.
+P.sea = { findDealer = function() return { cf = { Position = Vector3.new(0, 0, 400) } } end }
+N.tick()
+it = item("mirage")
+check("dealer held by the client: 'Advanced Fruit Dealer 400 studs away' of his own",
+    has(it.body, "Advanced Fruit Dealer 400 studs away"), it.body)
+P.sea = nil
 pass(14 * 60)
 N.tick()
 it = item("mirage")
