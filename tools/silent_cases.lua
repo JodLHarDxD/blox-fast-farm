@@ -26,6 +26,16 @@ check("casting: everything else answers as the game's", META.__index(game, "Name
 P.silentTick(true, 2.5)
 check("casting again: hooked once, not stacked", HOOKS.index == 1, HOOKS.index)
 
+CALLER = true
+check("the script's own read: your real mouse (never fooled by its own hook)", hit() == REAL_HIT)
+P.inGameShot = true
+local hs = hit()
+check("...except while it runs the game's own gun shot: the target (THE GUN)",
+    hs ~= REAL_HIT and hs.Position.Y == 50, hs.Position and hs.Position.Y)
+P.inGameShot = false
+check("...and the real mouse again right after", hit() == REAL_HIT)
+CALLER = false
+
 AIM = nil
 check("between casts: Mouse.Hit is your real mouse", hit() == REAL_HIT)
 P.silentTick(false, 4)

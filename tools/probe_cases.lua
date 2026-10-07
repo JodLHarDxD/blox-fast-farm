@@ -38,4 +38,52 @@ check("reprobe: due at once", m1Due("Bisento") == true)
 reset() P.reprobe()
 check("new weapon: due", m1Due("Other") == true)
 
+-- 6. A GUN (user, 2026-10-07: Dragonstorm "should hold down"; the aim missed)
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = true }, { hold = true }
+way = probeM1("Dragonstorm", {})
+check("gatling gun: held like a player first, kept", way and way.path == "hold" and TRIED[1] == "hold",
+    table.concat(TRIED, ","))
+check("held from above: range 400, never down close", way and way.pose == "safe")
+check("a hold that landed is kept held (not let go)", RELEASED == 0, RELEASED)
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = true }, { keys = true }
+way = probeM1("Dragonstorm", {})
+check("hold landed nothing: let go, THEN the click", way and way.path == "keys" and TRIED[1] == "hold"
+    and TRIED[2] == "keys" and RELEASED == 1, table.concat(TRIED, ",") .. "  released " .. RELEASED)
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = true }, { keys = true, hold = true }
+CFG.GunHold = false
+way = probeM1("Dragonstorm", {})
+check("hold switched off: the click only", way and way.path == "keys" and TRIED[1] == "keys",
+    table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = true }, { gunshot = true, hold = true }
+CFG.GunFast, SHOTFN = true, true
+way = probeM1("Dragonstorm", {})
+check("past the heat on + the game's shot found: tried first", way and way.path == "gunshot"
+    and TRIED[1] == "gunshot", table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = true }, { hold = true }
+CFG.GunFast = true
+way = probeM1("Dragonstorm", {})
+check("past the heat on, the shot NOT found: held", way and way.path == "hold" and TRIED[1] == "hold",
+    table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = false }, { keys = true }
+way = probeM1("Flintlock", {})
+check("a gun that does not fire while held: the click", way and way.path == "keys" and #TRIED == 1,
+    table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GUN, LANDS = "Gun", { gatling = false, custom = true }, { keys = true }
+CFG.GunFast, SHOTFN = true, true
+way = probeM1("Skull Guitar", {})
+check("a gun with its own way (Skull Guitar): never the game's shot", way and TRIED[1] == "keys",
+    table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GUN = "Sword", { gatling = true }
+LANDS = { new = true }
+way = probeM1("Bisento", {})
+check("a sword is never held or shot as a gun", way and way.variant == "new" and TRIED[1] == "new",
+    table.concat(TRIED, ","))
+
 print(all and "ALL PASS" or "SOME FAILED")

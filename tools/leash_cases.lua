@@ -142,4 +142,40 @@ check("a keep-held pile: no damage for 10 s, never put back, noted once",
     putBack[lg.model] == nil and #P.noDamage == 1 and P.noDamage[1]:find("kept held", 1, true) ~= nil, P.noDamage[1])
 pileCur = nil
 
+-- 12. A GUN SHOOTS ONE ENEMY (THE GUN, user 2026-10-07: Dragonstorm). The
+-- rest of the pile waits its turn: never put back for it. The one being shot
+-- with no HP change is still judged (not ours / out of its area).
+reset()
+table.clear(P.noDamage)
+local g1 = enemy("Reef Bandit", v3(20, 0, 0))
+local g2 = enemy("Reef Bandit", v3(40, 0, 0))
+local g3 = enemy("Reef Bandit", v3(60, 0, 0))
+pile = { g1, g2, g3 }
+P.gunFocus = g1.root
+run(10, { g1 })
+check("gun on one: the two waiting their turn are never put back (10 s)",
+    putBack[g2.model] == nil and putBack[g3.model] == nil and putBack[g1.model] == nil)
+check("...and nothing learned as a pull limit from them", (P.leash["Reef Bandit"] or {}).bad == nil,
+    tostring((P.leash["Reef Bandit"] or {}).bad))
+P.gunFocus = g2.root
+run(1, { g2 })
+P.gunFocus = g3.root
+run(4, {})
+check("the one being shot, no HP change for 3 s: put back as always", putBack[g3.model] ~= nil)
+P.gunFocus = nil
+run(4, {})
+check("no gun firing: the others judged again as always", putBack[g2.model] ~= nil)
+
+reset()
+table.clear(P.noDamage)
+P.pileInPlace, P.forceClose = true, false
+local g4 = enemy("Raid Brute", v3(0, 0, 0))
+pile = { g4 }
+P.gunFocus = { Position = v3(0, 0, 0) }
+run(20, {})
+check("in place, the gun on another: never sent close or skipped for it",
+    P.forceClose == false and P.randomSkip[g4.model] == nil and #P.noDamage == 0, P.noDamage[1])
+P.gunFocus = nil
+P.pileInPlace, P.forceClose = false, false
+
 print(all and "ALL PASS" or "SOME FAILED")

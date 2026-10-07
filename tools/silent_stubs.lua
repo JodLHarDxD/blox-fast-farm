@@ -32,7 +32,8 @@ local hookmetamethod = function(obj, name, f)
     if name == "__index" then HOOKS.index += 1 else HOOKS.namecall += 1 end
     return old
 end
-local checkcaller = function() return false end
+local CALLER = false                       -- true = the script's own thread is reading
+local checkcaller = function() return CALLER end
 local newcclosure = function(f) return f end
 local workspace = { CurrentCamera = { CFrame = { Position = vec(0, 0, 0) } } }
 local player = { GetMouse = function() return MOUSE end }

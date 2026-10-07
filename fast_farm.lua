@@ -173,6 +173,27 @@ local CFG = {
     InvSwap            = true,
     InvSwapGap         = 1.5,        -- seconds between two loads, at least
     InvSkip            = {},         -- [name] = true: never loaded
+    -- THE MASTERY FARM (user, 2026-10-07: Dragonstorm to 500 for Draco v4,
+    -- Dragonheart already done). A weapon named here is the ONLY one that
+    -- hurts anything, in every fight: its M1 and its AutoKeys (a key not
+    -- unlocked yet never fires and is left alone). Nothing else swings,
+    -- nothing is loaded from the inventory - a kill another weapon helps
+    -- with shares the mastery. Not carried = loaded from your inventory.
+    -- The farm stops when it reaches MasteryStop (0 = never). "" = off.
+    MasteryWeapon      = "",
+    MasteryStop        = 500,
+    -- A GUN'S M1 (user, 2026-10-07: "for the gun to work best it should hold
+    -- down"). On: a gun that fires while held (Dragonstorm) gets the button
+    -- HELD like a player - the game's own fire loop, every shot silently aimed
+    -- at one enemy until it dies. The game caps it: 12.5 shots/s, 3 s of heat,
+    -- then 1 s locked. Off: a click per M1 (3 shots).
+    GunHold            = true,
+    -- PAST THE HEAT: the game's own shot (its validator kept in step), called
+    -- every GunFastEvery seconds - no heat, no lockout. What the public hubs
+    -- do; the wiki says long gun M1 streams get kills marked suspicious.
+    -- OFF by default.
+    GunFast            = false,
+    GunFastEvery       = 0.08,       -- seconds a shot (0.08 = the gun's own speed)
 
     -- ---------- TRAVEL ----------
     TravelSpeed        = 330,    -- studs/s. The public hubs all settled on 330.
@@ -377,7 +398,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.4" }
 _G.BFF = P
 
 -- =========================================================
@@ -1986,7 +2007,11 @@ local function checkPutBack()
         local e = pile[1]
         if not e then return end
         local j = pileJoin[e.model]
-        if not j then
+        local focus = (P :: any).gunFocus
+        if j and focus and e.root ~= focus and not (e.hum.Health < j.hp - 0.5) then
+            -- A gun's shots are going at another one (THE GUN): not its turn.
+            j.at, j.act = now, actions
+        elseif not j then
             pileJoin[e.model] = { at = now, hp = e.hum.Health, act = actions }
         elseif e.hum.Health < j.hp - 0.5 then
             j.at, j.hp, j.act, j.hit = now, e.hum.Health, actions, true
@@ -2009,9 +2034,16 @@ local function checkPutBack()
         return
     end
     if not CFG.Magnet then return end
+    -- A GUN SHOOTS ONE ENEMY (THE GUN, P.gunFocus): the rest of the pile is
+    -- waiting its turn, not failing to take damage. Their clock is held at
+    -- now until it is their turn (or a skill hurts them); judging them put
+    -- the whole pile back to its spawns, one by one, while the gun fired.
+    local focus = (P :: any).gunFocus
     for _, e in ipairs(pile) do
         local j = pileJoin[e.model]
-        if not j then
+        if j and focus and e.root ~= focus and not (e.hum.Health < j.hp - 0.5) then
+            j.at, j.act = now, actions
+        elseif not j then
             pileJoin[e.model] = { at = now, hp = e.hum.Health, act = actions }
         elseif e.hum.Health < j.hp - 0.5 then
             j.at, j.hp, j.act, j.hit = now, e.hum.Health, actions, true
@@ -2066,6 +2098,9 @@ end
 -- the middle empty, and a line through empty air lands on whatever is behind
 -- the pile instead -- the ground, or the sky over a floating camp.
 local function aimPoint()
+    -- A gun's one enemy (THE GUN) while it is being shot: its skills too.
+    local g = (P :: any).gunFocus
+    if g and g.Parent then return g.Position end
     for _, e in ipairs(pile) do
         if e.model.Parent and e.hum.Health > 0 then return e.root.Position end
     end
@@ -2078,6 +2113,10 @@ function P.aimTarget()
     if os.clock() >= aimUntil then return nil end
     local own = (P :: any).aimAt
     if own then return own end
+    -- A gun reads the mouse on EVERY shot: its one enemy, whatever the
+    -- skill aim switch says.
+    local g = (P :: any).gunFocus
+    if g and g.Parent then return g.Position end
     if CFG.AimSkills and pileCentre then return aimPoint() end
     return nil
 end
@@ -2226,6 +2265,10 @@ end
 -- The weapons that are on AND in your backpack, in your order. AutoAttack:
 -- every one you carry (P.autoWeapons, WEAPON ROTATION).
 local function usedWeapons()
+    -- The mastery farm (THE GUN): that weapon alone, whatever else is set.
+    local mu = (P :: any).masteryUsed
+    local only = mu and mu()
+    if only then return only end
     if CFG.AutoAttack and (P :: any).autoWeapons then return (P :: any).autoWeapons() end
     local out = {}
     for _, name in ipairs(CFG.WeaponOrder) do
@@ -2381,7 +2424,9 @@ do
             -- The fight's own weapon (the volcano's golems: CFG.GolemWeapon),
             -- then your pick; whichever you carry first.
             local own = pileCur and pileCur.m1Weapon and pileCur.m1Weapon() or nil
-            for _, want in ipairs({ own or "", CFG.M1Weapon or "" }) do
+            -- The mastery weapon before your pick: another weapon's swing
+            -- would share its kills.
+            for _, want in ipairs({ own or "", CFG.MasteryWeapon or "", CFG.M1Weapon or "" }) do
                 if type(want) == "string" and want ~= "" then
                     local t = findTool(want)
                     if t then return { name = want, cfg = wcfg(want), tool = t } end
@@ -2505,6 +2550,8 @@ do
         function P.rotate(vents)
             if not CFG.InvSwap then return false end
             if not vents and not CFG.AutoAttack then return false end
+            -- The mastery farm: nothing else is put in your hands.
+            if not vents and (CFG.MasteryWeapon or "") ~= "" then return false end
             local now = os.clock()
             if now - R.lastLoad < (CFG.InvSwapGap or 1.5) then return false end
             local carried = {}
@@ -2727,7 +2774,16 @@ do
             m1Remote(way.variant, list)
         elseif way.path == "click" then
             m1Click(tool, list)
+        elseif way.path == "hold" then
+            (P :: any).gunHoldTick(tool)
+        elseif way.path == "gunshot" then
+            (P :: any).gunShotTick(tool)
         else
+            -- A gun's click fires a burst (Dragonstorm: 3 shots, 0.08 s
+            -- apart) and the game reads the mouse for EACH shot: the aim is
+            -- kept on one enemy for the whole burst, not only the click.
+            local ga = (P :: any).gunAimFor
+            if ga and toolType(tool) == "Gun" then ga(0.5) end
             -- The click is sent at the middle of the screen, so for this click the
             -- line through the middle has to be the one that lands on the pile.
             local cam = workspace.CurrentCamera
@@ -2753,6 +2809,8 @@ local function describeWay(way)
     local where = (way.pose == "melee") and "close" or "from above"
     if way.path == "remote" then return "remote hit (" .. way.variant .. "), " .. where end
     if way.path == "click" then return "fruit click, " .. where end
+    if way.path == "hold" then return "held like a player (the game's own fire), " .. where end
+    if way.path == "gunshot" then return "the game's own shot, past the heat, " .. where end
     return "key press, " .. where
 end
 P.describeWay = describeWay
@@ -2777,6 +2835,16 @@ do
             table.insert(all, { path = "remote", variant = "new", pose = "safe" })
             table.insert(all, { path = "keys", pose = "melee" })
         else
+            -- A gun (THE GUN): the game's own shot past the heat when that is
+            -- switched on, held like a player when it fires while held
+            -- (Dragonstorm), a click per M1 last. Range 400: from above.
+            local gi = (P :: any).gunInfo and (P :: any).gunInfo(tool)
+            if gi and not gi.custom and CFG.GunFast and (P :: any).gunShotFn() then
+                table.insert(all, { path = "gunshot", pose = "safe" })
+            end
+            if gi and gi.gatling and CFG.GunHold then
+                table.insert(all, { path = "hold", pose = "safe" })
+            end
             table.insert(all, { path = "keys", pose = "melee" })
         end
         if CFG.StayHigh then
@@ -2830,6 +2898,9 @@ do
             end
             task.wait(0.2)
             local landed = (hp0 - sumHP()) > 0.5
+            -- A held button that landed nothing is let go before the next way.
+            local gr = (P :: any).gunRelease
+            if not landed and way.path == "hold" and gr then gr() end
             table.insert(tried, describeWay(way) .. (landed and ": landed" or ": nothing"))
             if landed then
                 probing = false
@@ -2873,6 +2944,9 @@ P.lastCast = "none yet"
 P.skillTally = {}            -- ["weapon key"] = { cast, fired, hit }
 
 local function castSkill(u, k)
+    -- A gun's held M1 (THE GUN) is let go: the key is pressed alone.
+    local gr = (P :: any).gunRelease
+    if gr then gr() end
     if not equip(u.name) then return false end
     -- In hand now, so its bar is the truth: if the guess was wrong, no key.
     if barReady(u.name, k) == false then return false end
@@ -2954,7 +3028,15 @@ local function attackTick()
     P.m1Now = m1u and m1u.name or nil
     if m1u and m1u.tool and toolType(m1u.tool) == "Sword" then P.keepSword = m1u.name end
 
-    if anySkill and (not m1u or m1Count >= (CFG.M1Between or 0)) then
+    -- A held gun (THE GUN) heats while it fires and cools while it does
+    -- not, at the same rate - so the time a skill takes costs it no shots
+    -- at all. Skills whenever ready, the gun held in between. Past the heat
+    -- the same: nothing to wait for.
+    local between = CFG.M1Between or 0
+    local gi = m1u and m1u.tool and (P :: any).gunInfo and (P :: any).gunInfo(m1u.tool)
+    if gi and ((gi.gatling and CFG.GunHold) or CFG.GunFast) then between = 0 end
+
+    if anySkill and (not m1u or m1Count >= between) then
         for _, u in ipairs(used) do
             for _, k in ipairs(KEYS) do
                 if u.cfg[k] and skillReady(u.name, k) then
@@ -3013,7 +3095,7 @@ local tried = {}
 P.tried = tried
 
 local function setupKey()
-    local bits, anyM1, anyKey = {}, false, false
+    local bits, anyM1, anyKey, anyGun = {}, false, false, false
     for _, name in ipairs(CFG.WeaponOrder) do
         local w = CFG.Weapons[name]
         if w and w.use then
@@ -3021,15 +3103,24 @@ local function setupKey()
             if s ~= "off" then table.insert(bits, name .. " " .. s) end
             if w.M1 then anyM1 = true end
             for _, k in ipairs(KEYS) do if w[k] then anyKey = true end end
+            if w.M1 and toolType(findTool(name)) == "Gun" then anyGun = true end
         end
     end
+    -- The mastery farm is its own setup, and a gun's way of firing is part
+    -- of one (held vs past the heat: kills per minute side by side).
+    local mw = CFG.MasteryWeapon or ""
+    if mw ~= "" then anyGun = toolType(findTool(mw)) == "Gun" end
+    local gun = not anyGun and ""
+        or CFG.GunFast and string.format(",  gun past the heat %.2f s", CFG.GunFastEvery or 0.08)
+        or (CFG.GunHold and ",  gun held" or ",  gun clicked")
+    if mw ~= "" then return "mastery: " .. mw .. gun end
     if #bits == 0 then return "nothing on" end
     local key = table.concat(bits, "  +  ")
     if anyM1 and anyKey then
         key = key .. string.format(",  %d M1 between, %s first", CFG.M1Between or 0,
             CFG.StartWith == "M1" and "M1" or "skills")
     end
-    return key
+    return key .. gun
 end
 P.setupKey = setupKey
 
@@ -3058,6 +3149,346 @@ local function recordPile(secs)
         meas.piles += 1
         meas.pileSecs += secs
     end
+end
+
+-- =========================================================
+-- THE GUN: HELD LIKE A PLAYER
+-- =========================================================
+-- How a gun fires, read in the game's own client (decompiled v4623:
+-- CombatController, WeaponToolClient, HitscanSingleShot; 2026-10-07):
+--   * A click is UserInputService.InputBegan MouseButton1 -> Attack(tool,
+--     input). A Gatling gun (Dragonstorm) then fires every 0.08 s for as
+--     long as THAT input has not ended - the button held.
+--   * Heat: +1 a second while it fires, -1 a second while it does not; at
+--     3 it locks for 1 s. Held for good = 3 s of fire, then ~1 s on, 1 s
+--     off. A skill cast in the off half costs the gun nothing.
+--   * EVERY shot reads the mouse (Mouse.Hit) and casts ONE ray: one enemy a
+--     shot, never the whole pile. The old way - a 0.04 s tap, the camera
+--     aimed only at the instant of the click - sent the first shot of each
+--     3-shot burst at the pile and the other two where your cursor was.
+-- So: the button held while the gun can fire and let go when its loop
+-- ends, and the silent aim on ONE enemy for every shot - the one being shot
+-- while it lives, then the weakest (a kill sooner, the next one sooner).
+-- PAST THE HEAT (CFG.GunFast): the game's own shot function on this
+-- script's clock - the game's validator advances with it, as it would.
+-- THE MASTERY FARM (CFG.MasteryWeapon): that weapon alone; the farm stops at
+-- CFG.MasteryStop. Only P.gun* / P.mastery* / P.inGameShot leave the block.
+do
+    local function build()
+        local G: { [string]: any } = {
+            down = nil, downAt = 0, holdUntil = 0, focusUntil = 0, bx = 0, by = 0,
+            presses = 0, locks = 0, wasLocked = false, lastShot = 0, fast = 0,
+            shots0 = nil, shotsAt = 0, rate = 0, loadTry = -100,
+        }
+        P.gun = G
+        P.gunFocus = nil
+        P.inGameShot = false
+        P.gunNote = "no gun fired yet"
+        P.masteryNote = "off"
+
+        -- The game's own table of every weapon (ShootStyle, OverheatLimit,
+        -- Cooldown, Range). Read once; false = it cannot be read.
+        local wd = nil
+        local function weaponData(name)
+            if wd == nil then
+                local ok, m = pcall(function() return require(RS.Modules.WeaponData) end)
+                wd = (ok and type(m) == "table") and m or false
+            end
+            if not wd then return nil end
+            local d = wd[name] or wd[(string.gsub(name, "%s", ""))]
+            return type(d) == "table" and d or nil
+        end
+
+        -- nil = not a gun. gatling = fires while held. custom = a way of its
+        -- own (Skull Guitar's TAP): the game's shot function is not its.
+        function P.gunInfo(tool)
+            if not tool or toolType(tool) ~= "Gun" then return nil end
+            local d = weaponData(tool.Name)
+            return {
+                gatling = (d and d.ShootStyle == "Gatling") or tool.Name == "Dragonstorm",
+                limit   = (d and tonumber(d.OverheatLimit)) or 3,
+                range   = (d and tonumber(d.Range)) or 400,
+                custom  = (d and d.ShootType == "Custom") or false,
+            }
+        end
+
+        -- Pure (tools/gun_test.py). The enemy every shot goes at: the one
+        -- being shot while it lives and is in reach, else the weakest in
+        -- reach. Its root part, or nil.
+        local function pickFocus(list, cur, from, range)
+            local keep, best, bestHp = false, nil, math.huge
+            for _, e in ipairs(list) do
+                if e.model.Parent and e.hum.Health > 0 and from
+                    and (e.root.Position - from).Magnitude <= range then
+                    if e.root == cur then keep = true end
+                    if e.hum.Health < bestHp then best, bestHp = e.root, e.hum.Health end
+                end
+            end
+            if keep then return cur end
+            return best
+        end
+        G.pickFocus = pickFocus
+
+        -- Pure (tools/gun_test.py). What the button does now: "press",
+        -- "keep", "release" or "wait". down = held by this script; shooting
+        -- = the game's loop is firing (IsAutoShooting); locked = overheated or
+        -- not enabled; heldFor = seconds since the press.
+        local function holdStep(down, shooting, locked, heat, limit, heldFor)
+            if down then
+                -- Its loop ended (the heat, a skill, a stun): only a NEW press
+                -- starts it again.
+                if not shooting and heldFor > 0.35 then return "release" end
+                return "keep"
+            end
+            if locked or heat >= limit - 0.05 then return "wait" end
+            return "press"
+        end
+        G.holdStep = holdStep
+
+        -- The aim on one enemy for `secs`: the silent aim and the hidden
+        -- camera both read P.gunFocus. false = nobody to shoot.
+        function P.gunAimFor(secs, range)
+            local _, r = parts()
+            local f = pickFocus(pile, P.gunFocus, r and r.Position, range or 400)
+            P.gunFocus = f
+            if not f then return false end
+            local now = os.clock()
+            G.focusUntil = now + secs
+            aimUntil = math.max(aimUntil, now + secs)
+            -- In before the first shot reads the mouse, not a frame later.
+            local st = (P :: any).silentTick
+            if st then pcall(st, true) end
+            return true
+        end
+
+        function P.gunRelease()
+            if not G.down then return end
+            G.down = nil
+            local x, y = G.bx, G.by
+            pcall(function() VIM:SendMouseButtonEvent(x, y, 0, false, game, 0) end)
+        end
+
+        local function press(tool)
+            if heldTool() ~= tool then return end
+            local cam = workspace.CurrentCamera
+            if not cam then return end
+            -- The middle of the screen, as the click: a press on a panel's
+            -- button is the button's, never the gun's.
+            local vs = cam.ViewportSize
+            G.bx, G.by = vs.X * 0.5, vs.Y * 0.5
+            local x, y = G.bx, G.by
+            pcall(function() VIM:SendMouseButtonEvent(x, y, 0, true, game, 0) end)
+            G.down, G.downAt = tool, os.clock()
+            G.presses += 1
+        end
+
+        -- Shots a second, off the game's own count (LocalTotalShots).
+        local function countShots(tool, now)
+            local n = tonumber(tool:GetAttribute("LocalTotalShots"))
+            if not n then return end
+            if G.shots0 == nil or now - G.shotsAt > 3 then
+                G.shots0, G.shotsAt = n, now
+            elseif now - G.shotsAt >= 1 then
+                G.rate = (n - G.shots0) / (now - G.shotsAt)
+                G.shots0, G.shotsAt = n, now
+            end
+        end
+
+        local function focusText()
+            local f = P.gunFocus
+            local m = f and f.Parent
+            local h = m and m:FindFirstChildOfClass("Humanoid")
+            if not h then return "nobody" end
+            return string.format("%s %.0f HP", m.Name, h.Health)
+        end
+
+        -- One M1 tick of a gun that fires while held: the button pressed when
+        -- it can fire, kept while the game's loop fires, let go when it ends.
+        function P.gunHoldTick(tool)
+            local gi = P.gunInfo(tool)
+            if not gi then return false end
+            local now = os.clock()
+            if not P.gunAimFor(0.45, gi.range) then
+                P.gunRelease()
+                P.gunNote = tool.Name .. ": nobody in reach"
+                return false
+            end
+            G.holdUntil = now + 0.45
+            if G.down and G.down ~= tool then P.gunRelease() end
+            local heat = tonumber(tool:GetAttribute("LocalOverheat")) or 0
+            local shooting = tool:GetAttribute("IsAutoShooting") == true
+            local locked = (not tool.Enabled) or tool:GetAttribute("IsReloading_Client") == true
+            if locked and not G.wasLocked then G.locks += 1 end
+            G.wasLocked = locked
+            local act = holdStep(G.down ~= nil, shooting, locked, heat, gi.limit, now - G.downAt)
+            if act == "release" then
+                P.gunRelease()
+            elseif act == "press" then
+                press(tool)
+            end
+            countShots(tool, now)
+            P.gunNote = string.format("%s held  ·  %s  ·  %.1f shots/s  ·  heat %.1f of %g%s\nat %s  ·  pressed %d  ·  overheated %d",
+                tool.Name, act, G.rate, heat, gi.limit, locked and "  LOCKED" or "",
+                focusText(), G.presses, G.locks)
+            return true
+        end
+
+        -- THE GAME'S OWN SHOT: the function CombatController.Attack calls for
+        -- every shot - found among Attack's upvalues as the one whose own
+        -- upvalues hold the mouse and the validator's numbers. Looked for
+        -- again every 10 s while missing.
+        local shotFn, shotAt = nil, -1e9
+        P.gunShotWhy = "not looked for yet"
+        function P.gunShotFn()
+            if shotFn then return shotFn end
+            if os.clock() - shotAt < 10 then return nil end
+            shotAt = os.clock()
+            local gu = (debug and (debug :: any).getupvalues) or getupvalues
+            if type(gu) ~= "function" then
+                P.gunShotWhy = "this executor has no getupvalues"
+                return nil
+            end
+            local okC, cc = pcall(function() return require(RS.Controllers.CombatController) end)
+            if not okC or type(cc) ~= "table" or type(cc.Attack) ~= "function" then
+                P.gunShotWhy = "the game's CombatController cannot be read"
+                return nil
+            end
+            local okU, ups = pcall(gu, cc.Attack)
+            for _, f in pairs((okU and type(ups) == "table") and ups or {}) do
+                if type(f) == "function" then
+                    local okF, inner = pcall(gu, f)
+                    if okF and type(inner) == "table" then
+                        local hasMouse, nums = false, 0
+                        for _, u in pairs(inner) do
+                            if typeof(u) == "Instance" and u:IsA("PlayerMouse") then
+                                hasMouse = true
+                            elseif type(u) == "number" then
+                                nums += 1
+                            end
+                        end
+                        if hasMouse and nums >= 4 then
+                            shotFn = f
+                            break
+                        end
+                    end
+                end
+            end
+            P.gunShotWhy = shotFn and "the game's own shot - found" or "the game's shot function not found"
+            print("[BFF] gun: " .. P.gunShotWhy)
+            return shotFn
+        end
+
+        -- One M1 tick past the heat: as many of the game's own shots as
+        -- GunFastEvery allows since the last (4 at most), each at the enemy.
+        local FAKE_CLICK = { UserInputType = Enum.UserInputType.MouseButton1 }
+        function P.gunShotTick(tool)
+            local f = P.gunShotFn()
+            local gi = P.gunInfo(tool)
+            if not (f and gi) then return false end
+            if not P.gunAimFor(0.45, gi.range) then
+                P.gunNote = tool.Name .. ": nobody in reach"
+                return false
+            end
+            local now = os.clock()
+            local every = math.max(tonumber(CFG.GunFastEvery) or 0.08, 0.01)
+            local n = math.min(math.floor((now - G.lastShot) / every), 4)
+            if n < 1 then return true end
+            G.lastShot = now
+            P.inGameShot = true
+            for _ = 1, n do
+                pcall(f, tool, FAKE_CLICK)
+                G.fast += 1
+            end
+            P.inGameShot = false
+            countShots(tool, now)
+            P.gunNote = string.format("%s past the heat  ·  %.1f shots/s  ·  the server's heat %s\nat %s  ·  %d shots",
+                tool.Name, G.rate, tostring(tool:GetAttribute("Overheat") or "-"), focusText(), G.fast)
+            return true
+        end
+
+        -- Every frame: the button let go and the aim off once the fight stops
+        -- calling (a death, a weapon swap, the pile done, the stop).
+        function P.gunWatch()
+            local now = os.clock()
+            if G.down and (not P.running or not attacking or now > G.holdUntil
+                or heldTool() ~= G.down) then
+                P.gunRelease()
+            end
+            if P.gunFocus and now > G.focusUntil then P.gunFocus = nil end
+        end
+
+        -- ---------- the mastery farm ----------
+        -- A weapon's mastery: its tool's Level, else your inventory's.
+        function P.masteryOf(name)
+            local t = findTool(name)
+            local lv = t and t:FindFirstChild("Level")
+            local v = lv and tonumber(lv.Value)
+            if v then return v end
+            local has = (P :: any).invHas
+            if has then pcall(has, name) end
+            local R = (P :: any).rot
+            for _, it in ipairs(R and R.inv or {}) do
+                if it.name == name then return it.mastery end
+            end
+            return nil
+        end
+
+        -- usedWeapons() asks first: the mastery weapon alone, {} while it is
+        -- being loaded, nil = the farm is off.
+        function P.masteryUsed()
+            local name = CFG.MasteryWeapon
+            if type(name) ~= "string" or name == "" then return nil end
+            local tool = findTool(name)
+            if not tool then return {} end
+            local keys = CFG.AutoKeys or {}
+            local w = wcfg(name)
+            return { { name = name, tool = tool, cfg = {
+                use = true, M1 = true, hold = w.hold, F = false,
+                Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true,
+            } } }
+        end
+
+        -- Once a second (the side loop): not carried = loaded from your
+        -- inventory (every 10 s at most); its mastery read; the stop.
+        function P.masteryTick()
+            local name = CFG.MasteryWeapon
+            if type(name) ~= "string" or name == "" then
+                P.masteryNote = "off"
+                return
+            end
+            local now = os.clock()
+            if not findTool(name) then
+                if now - G.loadTry > 10 then
+                    G.loadTry = now
+                    local has, load = (P :: any).invHas, (P :: any).loadItem
+                    if has and load and has(name) then
+                        P.masteryNote = name .. ": not carried - loading it from your inventory"
+                        task.spawn(function() pcall(load, name) end)
+                    else
+                        P.masteryNote = name .. ": not carried, and not in your inventory"
+                    end
+                end
+                return
+            end
+            local m = P.masteryOf(name)
+            local stopAt = tonumber(CFG.MasteryStop) or 0
+            P.masteryNote = string.format("%s  mastery %s%s", name, m and tostring(m) or "not readable",
+                (stopAt > 0) and ("  ·  stops at " .. stopAt) or "")
+            if stopAt > 0 and m and m >= stopAt and P.running then
+                local text = string.format("%s reached %d mastery - the farm stopped", name, m)
+                P.masteryNote = text
+                print("[BFF] " .. text)
+                say(text)
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                        Title = "Fast Farm", Text = text, Duration = 30,
+                    })
+                end)
+                task.spawn(function() pcall(P.stop) end)
+            end
+        end
+    end
+    build()
 end
 
 -- =========================================================
@@ -8467,6 +8898,7 @@ local function sideLoop()
                 P.reprobe()
             end
             pcall(syncWeapons)
+            pcall((P :: any).masteryTick)
             if math.random() < 0.05 then
                 for m, t in pairs(countedDead) do
                     if now - t > 120 then countedDead[m] = nil end
@@ -10018,6 +10450,69 @@ local function buildUI()
         caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
             .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
 
+        heading2(v, "mastery farm")
+        local mbox = chooser(v, 130)
+        local msig = nil
+        local function mrefresh()
+            local names, seen = {}, {}
+            for _, t in ipairs(toolNames()) do
+                if not seen[t.Name] then seen[t.Name] = true table.insert(names, t.Name) end
+            end
+            local R = (P :: any).rot
+            for _, it in ipairs(R and R.inv or {}) do
+                if not seen[it.name] then seen[it.name] = true table.insert(names, it.name) end
+            end
+            table.sort(names)
+            local cur = CFG.MasteryWeapon or ""
+            local sig = cur .. "|" .. table.concat(names, ",")
+            if sig == msig then return end
+            msig = sig
+            for _, c in ipairs(mbox:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            chooserRow(mbox, 1, "Off - every weapon as set", "", cur == "", function()
+                CFG.MasteryWeapon = ""
+                msig = nil
+                mrefresh()
+            end)
+            for i, n in ipairs(names) do
+                local t = findTool(n)
+                chooserRow(mbox, i + 1, n, t and toolType(t) or "in your inventory", cur == n, function()
+                    CFG.MasteryWeapon = n
+                    msig = nil
+                    mrefresh()
+                end)
+            end
+        end
+        mrefresh()
+        addLive(mrefresh)
+        sliderRow(v, "Stop the farm at", 0, 600, 25,
+            function() return CFG.MasteryStop end,
+            function(x) CFG.MasteryStop = x end, " mastery")
+        readout(v, function() return tostring(P.masteryNote) end)
+        caption(v, "The picked weapon alone hurts anything: its M1 and the keys under "
+            .. "\"Every weapon you carry\" (a key not unlocked yet is left alone). No "
+            .. "other weapon shares its kills. Stop at 0 = never.")
+
+        heading2(v, "a gun's M1")
+        switchRow(v, "Hold the button", "Dragonstorm: the game's own fire loop, every shot at one enemy",
+            function() return CFG.GunHold end,
+            function(x) CFG.GunHold = x P.reprobe() end)
+        switchRow(v, "Past the heat", "The game's own shot on the script's clock - no lockout. Loud",
+            function() return CFG.GunFast end,
+            function(x) CFG.GunFast = x P.reprobe() end)
+        sliderRow(v, "Past the heat: a shot every", 0.02, 0.2, 0.01,
+            function() return CFG.GunFastEvery end,
+            function(x) CFG.GunFastEvery = x end, " s")
+        readout(v, function()
+            return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
+                .. "\nsilent aim  " .. tostring(P.silentNote or "-")
+        end)
+        caption(v, "Held: 12.5 shots/s for 3 s of heat, then 1 s locked - its skills go "
+            .. "in while it cools. Past the heat: no lockout; the wiki says long gun M1 "
+            .. "streams get kills marked suspicious. Stats page, \"which setup is "
+            .. "better\": kills per minute of each.")
+
         heading2(v, "every weapon you carry")
         switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
             function() return CFG.AutoAttack end,
@@ -11115,6 +11610,7 @@ function P.start()
             end
         end
         if attacking and meas then meas.fight += dt end
+        pcall((P :: any).gunWatch)
         pcall((P :: any).silentTick, P.aimTarget() ~= nil)
     end))
     -- The aim lock: after the camera scripts, every frame the pile is hit.
@@ -11159,6 +11655,8 @@ function P.stop(why)
     pcall(function() RunService:UnbindFromRenderStep("BFFAim") end)
     aimUntil = 0
     P.aimAt = nil
+    pcall((P :: any).gunRelease)
+    P.gunFocus = nil
     pcall((P :: any).silentOff)
     task.spawn(function() pcall((P :: any).rotRestore) end)
     if P.sea then P.sea.driving = false end    -- the boat stops; you stay in your seat
@@ -11274,8 +11772,11 @@ do
             local mouse = player:GetMouse()
             local mine
             mine = wrap(function(self, key)
+                -- The script's own reads see your real mouse - except while it
+                -- runs the game's own gun shot (P.inGameShot, THE GUN): that is
+                -- the game reading it, on this script's thread.
                 if (key == "Hit" or key == "Target" or key == "UnitRay" or key == "X" or key == "Y")
-                    and rawequal(self, mouse) and not cc() then
+                    and rawequal(self, mouse) and (P.inGameShot or not cc()) then
                     local t = aimNow()
                     if t then
                         local cam = workspace.CurrentCamera

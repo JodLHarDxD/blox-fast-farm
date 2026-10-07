@@ -21,7 +21,14 @@ local function fireM1(way)
     if LANDS[k] then enemy.hum.Health -= 5 end
 end
 function P.findGameHit() return GAME and function() end or nil end
+-- A gun (THE GUN): GUN = P.gunInfo's answer, SHOTFN = the game's shot found.
+local GUN, SHOTFN, RELEASED = nil, false, 0
+function P.gunInfo() return GUN end
+function P.gunShotFn() return SHOTFN and function() end or nil end
+function P.gunRelease() RELEASED += 1 end
 local function reset()
     CLOCK, LANDS, GAME, TRIED, TYPE = 0, {}, false, {}, "Sword"
+    GUN, SHOTFN, RELEASED = nil, false, 0
+    CFG.GunHold, CFG.GunFast = true, false
     enemy.hum.Health = 1000
 end

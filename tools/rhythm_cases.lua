@@ -69,4 +69,23 @@ local kept = P.keepSword == "Sword"
 print((kept and "PASS " or "FAIL ") .. "...and that sword is kept from the rotation (any attack mode)")
 all = kept and all
 P.m1Of, P.keepSword = nil, nil
+-- A GUN THAT FIRES WHILE HELD (THE GUN, user 2026-10-07: Dragonstorm). Its
+-- heat drains while a skill plays, so the skills go whenever ready - "M1
+-- between" does not hold them back - and the held button is let go first.
+TOOLS.Dragonstorm = { kind = "Gun", gatling = true }
+P.gunInfo = function(t) return (t and t.kind == "Gun") and { gatling = t.gatling == true } or nil end
+P.gunRelease = function() ev("let go") end
+local function gunCfg(hold)
+    local c = cfg({ M1Between = 10, GunHold = hold }, { Kitsune = W{}, ["Sanguine Art"] = W{}, Sword = W{},
+        Dragonstorm = W{ M1 = true, Z = true, X = true } })
+    c.WeaponOrder = { "Dragonstorm" }
+    return c
+end
+all = run("held gun: skills whenever ready (10 between ignored), the button let go before each key", gunCfg(true), 7,
+    "let go | swap Dragonstorm | cast Dragonstorm Z | let go | cast Dragonstorm X | M1 Dragonstorm | M1 Dragonstorm"
+    .. " | M1 Dragonstorm | M1 Dragonstorm | let go | cast Dragonstorm Z") and all
+all = run("hold switched off: the gun keeps \"M1 between\" like any weapon", gunCfg(false), 7,
+    "let go | swap Dragonstorm | cast Dragonstorm Z | M1 Dragonstorm | M1 Dragonstorm | M1 Dragonstorm"
+    .. " | M1 Dragonstorm | M1 Dragonstorm | M1 Dragonstorm") and all
+P.gunInfo, P.gunRelease = nil, nil
 print(all and "ALL PASS" or "SOME FAILED")
