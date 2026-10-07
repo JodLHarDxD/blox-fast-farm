@@ -183,6 +183,42 @@ Third Sea, Dragonstorm carried (or in your inventory), your usual Random mode sp
 6. **Skills:** Z unlocks at 125, X at 250. "last skill  Dragonstorm Z: fired, hit the pile" every ~9 s, X every ~15 s; a locked one says "did NOT fire - left 1 min" (expected below its mastery).
 7. **Past the heat** (off by default): switch on for a few minutes, then Stats page "which setup is better": `mastery: Dragonstorm, gun held` vs `gun past the heat 0.08 s` kills/min. The readout's `the game's shot` line says whether the game's shot function was found (`this executor has no getupvalues` = Velocity lacks it; held is all there is). Watch the mastery bar too - if kills "past the heat" give no mastery (the wiki's "suspicious kills"), switch it back off.
 
+## Draco V4 trial mode (v4_trial.lua, its own script)
+
+The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava
+climbing every eruption. This flies it. A separate script, not a fast_farm page: turning it
+on stops fast_farm (fast_farm's body lock writes the character every frame and would fight
+the flight).
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/v4_trial.lua?cb=" .. tick()))()
+```
+
+Panel "V4 TRIAL" (top right, drag by the title). **TRIAL MODE** on = you fly:
+**WASD** flat where the camera faces, **Space** up, **Ctrl** down, no keys = hang still.
+Noclip, and the lava guard keeps you on top of the lava while it climbs (with room for
+its speed). **Next** flies you to what is next (relic pad / its extractor / the way out):
+up = climb first, then across; down = across first, then down. **Auto** (off) = Next
+until all three are in; a fly key takes over and switches it off.
+
+How the trial works was read from the game's own client, not guessed - see the header of
+`v4_trial.lua`. The relic shield is the game's own: a relic in your hands + still for 1 s.
+Hovering is still, so a held relic shields you while you hover.
+
+### First test (each answer decides the next fix)
+
+1. Load it anywhere first: TRIAL MODE on, fly round with WASD / Space / Ctrl. Anything
+   pulling you back (rubber-banding) = say so, with the speed shown.
+2. In the trial (after the Statue's "Yes"): the panel's `Relics 0/3` line appears. `not in
+   the trial` there = send a screenshot (Map.DracoTrial was not found).
+3. **Next** -> it flies to relic 1 (green). Does hovering over the pad PICK IT UP? (`Hands
+   green (1)`.) If not: press E there yourself, and tell me what the game showed (a prompt?
+   nothing?).
+4. **Next** again -> up to extractor 1. Does hovering there DELIVER it? (`Relics 1/3`.)
+5. During an eruption: does `Lava  HOLDING YOU UP` show, and are you ever sent back to the
+   floor anyway (= the server has its own lava check - tell me)?
+6. Console lines `[BFV4] ...` from the whole run.
+
 ## First in-game test (each answer decides the next fix)
 
 1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
@@ -224,6 +260,7 @@ python tools/vmagnet_test.py                     # the Volcanic Magnet before th
 python tools/fruitguard_test.py                  # the fruit guard, real code: never a weapon, never equipped, no click with one in hand
 python tools/elite_test.py                       # the hunt, real code, 95 checks: Elite Hunter words, server pick, pickFruit (price, drops, traders), berries (names, nearest wanted), the Barista Cousin's recipe (not here / not picked / learned / cannot pay), hop() refusing on the chalice, the join (always the game's; a token refusal remembered; why in words), carry-over, the director (the chalice in every hunt; ONLY the hunt switched on)
 python tools/news_test.py                        # the server news, real code, 96 checks: MoonPhase attribute / decal / blue, day+night number round the clock (the noon turn, midnight), the full moon tonight / now / in N nights in real minutes, the measured speed (jumps, stops, gaps ignored), the turn learned + bff_sky.json, islands (up at the join / spawned / gone / lasted), elites + raid bosses, Cake Prince asked only on screen, fruit, order + BREAKING, the chip
+python tools/trial_test.py                       # v4_trial.lua's pure decisions, real code, 41 checks: relic by its painted metal (not gem / particles), Next's step (carried -> its extractor, empty -> lowest not in, all in -> out), the lava floor (+ the climb's lookahead, none for draining), the route (up: climb first; down: across first), travel never overshoots / hitch-capped, the fly keys (flat W never sinks, diagonal not faster), the game's teleports adopted, drift held
 ```
 
 The main chunk is at Luau's 200-local register limit: a new section goes in
