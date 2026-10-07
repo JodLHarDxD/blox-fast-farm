@@ -318,6 +318,12 @@ local CFG = {
     -- the egg are picked: "hop" = the next server, the hunt goes on there;
     -- "again" = the event again on this island (the wiki: no cooldown).
     VolcanoAfter       = "hop",
+    -- AFTER THE LOOT (user, 2026-10-07: bones + an egg lost - the loop left
+    -- the server ~3 s after the last bone). A pick counts only when the
+    -- game's own count goes up; then the hunt stays this many seconds after
+    -- the last pick before the next server, so the game saves it. The next
+    -- server checks the count the last one said - less = the hunt stops.
+    LootStay           = 60,
     VentM1Every        = 0.3,        -- seconds between shots
     VentM1Time         = 3,          -- seconds of shots at one vent per turn         -- stand this far out from a vent (and 8 up), aiming at it
     -- Magnet on: every golem is held this far from the relic (away from the
@@ -371,7 +377,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.3" }
 _G.BFF = P
 
 -- =========================================================
@@ -6205,6 +6211,13 @@ do
                 return true
             end
             S.foundAt = nil
+            -- What you have before the hunt (user, 2026-10-07: "check the
+            -- inventory before"), once a server - the event says it again.
+            if kind == "prehistoric" and not S.baseSaid and S.have then
+                S.baseSaid = true
+                S.lootBase = S.have(S.LOOT, true)
+                print("[BFF] loot: before the hunt - you have " .. S.lootText(S.lootBase))
+            end
             -- THE VOLCANIC MAGNET before the boat (P.magnet). Getting it is not
             -- counted in the 21 min: the clock starts at the sail.
             if kind == "prehistoric" and not S.sailStart then
@@ -6968,6 +6981,142 @@ do
             end
         end
 
+        -- ---------- WHAT YOU HAVE: the game's own count ----------
+        -- (user, 2026-10-07: bones and an egg "picked" never reached the
+        -- inventory - the pick was judged by the bone VANISHING, the egg's
+        -- prompt going.) A pick counts only when the game's count goes up.
+        -- The game keeps your items in ItemReplicationService (decompile
+        -- v4623, 2026-10-05): Net "RF/GetAllItemValues" answers every
+        -- { Key, ItemId, Value } you own, "RE/OnItemValueChanged" pushes each
+        -- change; a count is Key "Quantity". CommF_("getInventory") is the
+        -- legacy path (on the user's client it answered nothing, even 3 min
+        -- after a join - 2026-10-06 logs) - the fallback. Ids: the game's
+        -- Economy.ItemId.RawSource (the Dragon Egg also as a carried Tool,
+        -- 1276 - counted with it).
+        local ITEM_IDS = {
+            ["Dinosaur Bones"] = { 585 }, ["Dragon Egg"] = { 565, 1276 },
+            ["Volcanic Magnet"] = { 550 }, ["Blaze Ember"] = { 587 }, ["Scrap Metal"] = { 566 },
+        }
+        local LOOT = { "Dinosaur Bones", "Dragon Egg" }
+        local LOOT_FILE = "bff_loot.json"
+        S.LOOT = LOOT
+
+        -- Pure (tools/sea_test.py): { [ItemId] = quantity } off the game's
+        -- item-value list.
+        local function qtyOf(list)
+            local q = {}
+            for _, it in pairs(list) do
+                if type(it) == "table" and it.Key == "Quantity" then
+                    local id = tonumber(it.ItemId)
+                    if id then q[id] = (q[id] or 0) + (tonumber(it.Value) or 0) end
+                end
+            end
+            return q
+        end
+
+        -- The game's push, kept: S.qty stays current between full reads.
+        task.spawn(function()
+            local re = netRemote("RE", "OnItemValueChanged")
+            if not re then return end
+            local conn
+            conn = re.OnClientEvent:Connect(function(items)
+                if _G.BFF ~= P then conn:Disconnect() return end
+                if type(items) ~= "table" or not S.qty then return end
+                for _, it in pairs(items) do
+                    if type(it) == "table" and it.Key == "Quantity" then
+                        local id = tonumber(it.ItemId)
+                        if id then S.qty[id] = tonumber(it.Value) or 0 end
+                    end
+                end
+            end)
+        end)
+
+        -- A full read from the server. false = could not (S.invWhy says why).
+        local function readQty()
+            S.qtyTry = os.clock()
+            local rf = netRemote("RF", "GetAllItemValues")
+            if not rf then
+                S.invWhy = "no GetAllItemValues remote"
+                return false
+            end
+            local ok, list = pcall(function() return rf:InvokeServer() end)
+            if ok and type(list) == "table" then
+                S.qty, S.qtyRead, S.invSrc = qtyOf(list), os.clock(), "the game's item list"
+                return true
+            end
+            S.invWhy = "GetAllItemValues gave " .. (ok and ("a " .. type(list)) or ("an error: " .. tostring(list)))
+            return false
+        end
+        -- The legacy list; nil when its last ask gave nothing.
+        local function readLegacy()
+            S.legacyTry = os.clock()
+            local cf = commF()
+            local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if not (ok and type(inv) == "table") then
+                S.legacyInv = nil
+                S.invWhy = tostring(S.invWhy) .. "  ·  getInventory gave "
+                    .. (ok and ("a " .. type(inv)) or ("an error: " .. tostring(inv)))
+                return
+            end
+            S.legacyInv, S.invSrc = inv, "getInventory (legacy)"
+        end
+        local function legacyCount(inv, names)
+            local out = {}
+            for _, n in ipairs(names) do out[n] = 0 end
+            for _, it in pairs(inv) do
+                if type(it) == "table" and out[it.Name] ~= nil then
+                    out[it.Name] += tonumber(it.Count) or 1
+                end
+            end
+            return out
+        end
+
+        -- { [name] = count } of `names`, or nil (unreadable - S.invWhy). fresh
+        -- = asked of the server now; else the last full read, kept current by
+        -- the game's pushes. Not fresh, the server is asked at most every 2 s
+        -- (either list) - never a remote a frame.
+        function S.have(names, fresh)
+            local now = os.clock()
+            if fresh or ((not S.qtyRead or now - S.qtyRead > 5) and now - (S.qtyTry or -99) >= 2) then
+                readQty()
+            end
+            if S.qtyRead then
+                local out = {}
+                for _, n in ipairs(names) do
+                    local sum = 0
+                    for _, id in ipairs(ITEM_IDS[n] or {}) do sum += (S.qty[id] or 0) end
+                    out[n] = sum
+                end
+                return out
+            end
+            if fresh or now - (S.legacyTry or -99) >= 2 then readLegacy() end
+            return S.legacyInv and legacyCount(S.legacyInv, names) or nil
+        end
+        -- The count as last known - no call to the server (the panel).
+        function S.peek(name)
+            if not S.qtyRead then return nil end
+            local sum = 0
+            for _, id in ipairs(ITEM_IDS[name] or {}) do sum += (S.qty[id] or 0) end
+            return sum
+        end
+
+        -- Waits up to `secs` for the game's count of `name` to go over
+        -- `before` (giveUp() = stop early). -> the count now (nil =
+        -- unreadable), and whether it went up.
+        local function gained(name, before, secs, myEpoch, giveUp)
+            local t0 = os.clock()
+            while os.clock() - t0 < secs and not stale(myEpoch) do
+                local h = S.have({ name }, false)
+                local now = h and h[name]
+                if before and now and now > before then return now, true end
+                if giveUp and giveUp(os.clock() - t0) then break end
+                task.wait(0.15)
+            end
+            local h = S.have({ name }, true)       -- once more, from the server itself
+            local now = h and h[name]
+            return now, (before ~= nil and now ~= nil and now > before)
+        end
+
         -- ---------- the loot ----------
         local function bonesLying(isle)
             local c = posOf(isle)
@@ -6990,25 +7139,51 @@ do
             return nil
         end
 
+        local function counted()
+            return tostring(player:GetAttribute("PrehistoricIslandParticipant") == true)
+        end
+        local function lootText(h)
+            if not h then return "not readable (" .. tostring(S.invWhy) .. ")" end
+            return string.format("%d Dinosaur Bones, %d Dragon Egg", h["Dinosaur Bones"] or 0, h["Dragon Egg"] or 0)
+        end
+        S.lootText = lootText
+
         local function lootStep(isle, ev, myEpoch)
             local _, r = parts()
             if not r then return end
+            ev.base = ev.base or S.have(LOOT, true)            -- what you had before the first pick
             local bones = bonesLying(isle)
             if #bones > 0 then
                 local bn = nearestOf(bones, r.Position, function(x) return x.part.Position end)
                 ev.note = string.format("picking up dinosaur bones  ·  %d lying", #bones)
                 say(ev.note)
+                local h0 = S.have({ "Dinosaur Bones" }, true)
+                local before = h0 and h0["Dinosaur Bones"]
                 flyTo(bn.part.Position)
                 task.wait(0.3)
                 lockAt(bn.part.Position + UP * 2)
-                task.wait(0.4)
-                if bn.inst.Parent then
+                local now, up = gained("Dinosaur Bones", before, 2, myEpoch)
+                if up then
+                    local n = now - before
+                    ev.bones += n
+                    S.tally.bones += n
+                    ev.lastPickAt = os.clock()
+                    S.boneSkip[bn.inst] = true             -- yours: never again, gone or not
+                    print(string.format("[BFF] loot: Dinosaur Bones %d -> %d - in your inventory", before, now))
+                elseif bn.inst.Parent then
                     local n = (S.boneTries[bn.inst] or 0) + 1
                     S.boneTries[bn.inst] = n
                     if n >= 3 then S.boneSkip[bn.inst] = true end
+                elseif before == nil then
+                    ev.bonesUnread = (ev.bonesUnread or 0) + 1
+                    ev.lastPickAt = os.clock()
+                    print("[BFF] loot: a bone went - your inventory is not readable here, NOT confirmed ("
+                        .. tostring(S.invWhy) .. ")")
                 else
-                    ev.bones += 1
-                    S.tally.bones += 1
+                    ev.bonesGone = (ev.bonesGone or 0) + 1
+                    print(string.format("[BFF] loot: a bone went but your Dinosaur Bones stayed %d - NOT given to you"
+                        .. " (counted by the game: %s)%s", before, counted(),
+                        (before >= 99) and " - 99 is the most you can hold" or ""))
                 end
                 return
             end
@@ -7017,11 +7192,24 @@ do
                 local at = posOf(pp.Parent)
                 ev.note = "the Dragon Egg"
                 say(ev.note)
+                local h0 = S.have({ "Dragon Egg" }, true)
+                local before = h0 and h0["Dragon Egg"]
                 if at then flyTo(at + UP * 3) end
                 if stale(myEpoch) then return end
                 holdPrompt(pp, myEpoch)
-                task.wait(0.8)
-                if pp.Parent and pp.Enabled then
+                -- Stay by it while the game hands it over (its pickup plays);
+                -- a prompt still there after 2.5 s = it was not taken.
+                local now, up = gained("Dragon Egg", before, 6, myEpoch, function(t)
+                    return t > 2.5 and pp.Parent ~= nil and pp.Enabled
+                end)
+                if up then
+                    ev.eggs += 1
+                    S.tally.eggs += 1
+                    ev.lastPickAt = os.clock()
+                    S.eggSkip[pp] = true
+                    notify("Dragon Egg - in your inventory!")
+                    print(string.format("[BFF] loot: Dragon Egg %d -> %d - in your inventory", before, now))
+                elseif pp.Parent and pp.Enabled then
                     local n = (S.eggTries[pp] or 0) + 1
                     S.eggTries[pp] = n
                     if n >= 2 then
@@ -7029,12 +7217,82 @@ do
                         ev.note = "the egg will not come - it needs the Dragon Tether, a hit on a golem or vent, and the relic over 90%"
                         print("[BFF] volcano: " .. ev.note)
                     end
+                elseif before == nil then
+                    S.eggSkip[pp] = true
+                    ev.eggUnread = true
+                    ev.lastPickAt = os.clock()
+                    print("[BFF] loot: the egg's prompt went - your inventory is not readable here, NOT confirmed ("
+                        .. tostring(S.invWhy) .. ")")
                 else
-                    ev.eggs += 1
-                    S.tally.eggs += 1
-                    notify("Dragon Egg picked up!")
-                    print("[BFF] volcano: Dragon Egg picked up")
+                    S.eggSkip[pp] = true
+                    ev.eggGone = true
+                    print(string.format("[BFF] loot: the egg's prompt went but your Dragon Egg stayed %d - NOT given to you"
+                        .. " (counted by the game: %s)", before, counted()))
                 end
+            end
+        end
+
+        -- The loot over: the game's count now, said; written for the next
+        -- server to check (S.checkLastLoot there).
+        local function lootDone(ev)
+            local h = S.have(LOOT, true)
+            local b = ev.base or {}
+            local function arrow(n)
+                local x, y = b[n], h and h[n]
+                if not (x and y) then return string.format("%s %s", n, y and tostring(y) or "not readable") end
+                return string.format("%s %d -> %d (%+d)", n, x, y, y - x)
+            end
+            ev.final = h
+            print(string.format("[BFF] volcano: DONE - %d bones, %d egg  ·  %s  ·  %s%s", ev.bones, ev.eggs,
+                arrow("Dinosaur Bones"), arrow("Dragon Egg"),
+                (((ev.bonesGone or 0) > 0) or ev.eggGone) and "  ·  some went WITHOUT reaching your inventory" or ""))
+            if h and writefile then
+                pcall(writefile, LOOT_FILE, string.format("bones=%d;eggs=%d;at=%d;job=%s",
+                    h["Dinosaur Bones"], h["Dragon Egg"], os.time(), tostring(game.JobId)))
+            end
+        end
+
+        -- THE LAST SERVER'S LOOT, checked here (user, 2026-10-07: progress
+        -- lost). Less here than the last server's game said when it was left
+        -- = it was not saved: said, and the Prehistoric hunt stops (the user
+        -- decides - "stay after the loot" on the Sea page is the lever).
+        function S.checkLastLoot()
+            if not readfile then return end
+            local ok, s = pcall(readfile, LOOT_FILE)
+            if not ok or type(s) ~= "string" or s == "" then return end
+            local b, e, at, job = string.match(s, "^bones=(%d+);eggs=(%d+);at=(%d+);job=(.*)$")
+            b, e, at = tonumber(b), tonumber(e), tonumber(at)
+            if not (b and e and at) then return end
+            if job == tostring(game.JobId) then return end          -- a reload in the same server
+            if writefile then pcall(writefile, LOOT_FILE, "") end   -- checked once
+            if os.time() - at > 1800 then return end                -- old: not this hop
+            local h = nil
+            for _ = 1, 40 do
+                if _G.BFF ~= P then return end
+                h = S.have(LOOT, true)
+                if h then break end
+                task.wait(1)
+            end
+            if not h then
+                S.lootCheck = "the last server's loot NOT checked - your inventory is not readable here ("
+                    .. tostring(S.invWhy) .. ")"
+                print("[BFF] loot: " .. S.lootCheck)
+                return
+            end
+            local hb, he = h["Dinosaur Bones"], h["Dragon Egg"]
+            if hb < b or he < e then
+                S.lootCheck = string.format("LOST ON THE HOP - the last server had %d Dinosaur Bones, %d Dragon Egg; "
+                    .. "here %d and %d. The game did not save them. Prehistoric hunt stopped - raise \"stay after "
+                    .. "the loot\" (Sea page)", b, e, hb, he)
+                print("[BFF] loot: " .. S.lootCheck)
+                notify("Loot LOST on the hop - the hunt stopped (Sea page)")
+                if CFG.Hunt and CFG.HuntKind == "prehistoric" then
+                    P.setHunt(false)
+                    task.defer(function() pcall((P :: any).stop) end)
+                end
+            else
+                S.lootCheck = string.format("the last server's loot is here: %d Dinosaur Bones, %d Dragon Egg - saved", hb, he)
+                print("[BFF] loot: " .. S.lootCheck)
             end
         end
 
@@ -7190,6 +7448,22 @@ do
             local active = eventOn(isle)
             ev.active = active
             if active and not ev.startedAt then ev.startedAt = os.clock() end
+            -- Once it is on: whether the game counts you (the wiki: only those
+            -- there when the relic was touched get loot) and what you have
+            -- before; a death during it is said (no loot after one).
+            if active and not ev.saidCounted then
+                ev.saidCounted = true
+                ev.life = player.Character
+                ev.base = ev.base or S.have(LOOT, true)
+                print("[BFF] volcano: event on - " .. ((player:GetAttribute("PrehistoricIslandParticipant") == true)
+                    and "you ARE counted by the game (PrehistoricIslandParticipant) - the bones and the egg can be yours"
+                    or "you are NOT counted by the game (PrehistoricIslandParticipant off) - no bones or egg for you this time")
+                    .. "  ·  you have " .. lootText(ev.base))
+            end
+            if active and ev.life and player.Character ~= ev.life and not ev.died then
+                ev.died = true
+                print("[BFF] volcano: you died during the event - the game gives no bones or egg after a death (wiki)")
+            end
             local pp = promptOf(isle)
             local lootLeft = CFG.VolcanoLoot and not active
                 and (#bonesLying(isle) > 0 or eggPrompt(isle) ~= nil)
@@ -7201,9 +7475,27 @@ do
                 print(string.format("[BFF] volcano: event over - %d vents, %d golems down", ev.vents, ev.golems))
             end
             if ev.overAt and not ev.complete and not lootLeft and os.clock() - ev.overAt > 8 then
+                -- Anything picked and the hunt about to leave the server: stay
+                -- LootStay s after the last pick first, so the game saves it
+                -- (user, 2026-10-07: loot lost - the loop left ~3 s after the
+                -- last bone, ~10 s after the egg).
+                local picked = ev.bones + ev.eggs + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
+                local leaving = CFG.Hunt and CFG.HuntKind == "prehistoric" and (CFG.VolcanoAfter or "hop") == "hop"
+                local stay = (picked > 0 and leaving) and math.max(tonumber(CFG.LootStay) or 60, 0) or 0
+                local since = os.clock() - (ev.lastPickAt or ev.overAt)
+                if since < stay then
+                    letGolemsGo()
+                    ev.note = string.format("loot in - staying %s so the game saves it before the next server",
+                        mmss(stay - since))
+                    S.note = ev.note
+                    say(ev.note)
+                    setState("VOLCANO")
+                    task.wait(0.5)
+                    return true
+                end
                 ev.complete = true
                 S.tally.done = (S.tally.done or 0) + 1
-                print(string.format("[BFF] volcano: DONE - %d bones, %d egg", ev.bones, ev.eggs))
+                lootDone(ev)
             end
             if ev.complete and (ev.stuck or (CFG.VolcanoAfter or "hop") == "hop") then
                 letGolemsGo()
@@ -7252,8 +7544,10 @@ do
             nextHeading = nextHeading, searchLeg = searchLeg, arcPath = arcPath, edgeOf = edgeOf,
             pctFrom = pctFrom, pctText = pctText, readMeters = readMeters, cageTick = cageTick,
             situation = situation, golemHeld = golemHeld, ventCast = ventCast,
-            gunM1 = gunM1, gunForVents = gunForVents,
+            gunM1 = gunM1, gunForVents = gunForVents, qtyOf = qtyOf,
         }
+        -- The last server's loot, checked once this one's inventory reads.
+        task.defer(function() pcall(S.checkLastLoot) end)
         -- ANY THING TO BREAK (the ember hunt's trees), aimed: v = { pos, part,
         -- model, alive = fn, learn = table }. The gun M1 first (the wiki,
         -- Dragon Hunter: "Skull Guitar or Bazooka ... the m1 can break them"),
@@ -7796,6 +8090,16 @@ do
         -- { magnet, ember, scrap } off the game's inventory, 3 s cache; nil = unreadable.
         local function counts(fresh)
             if not fresh and G.inv and os.clock() - G.invAt < 3 then return G.inv end
+            -- The game's item list first (P.sea.have): getInventory answered
+            -- nothing on the user's client before every sail (2026-10-06,
+            -- "inventory not readable"). getInventory below: the fallback.
+            local sea = (P :: any).sea
+            local h = sea and sea.have and sea.have({ "Volcanic Magnet", "Blaze Ember", "Scrap Metal" }, true)
+            if h then
+                local c = { magnet = h["Volcanic Magnet"] or 0, ember = h["Blaze Ember"] or 0, scrap = h["Scrap Metal"] or 0 }
+                G.inv, G.invAt = c, os.clock()
+                return c
+            end
             local cf = commF()
             local ok, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
             if not (ok and type(inv) == "table") then return nil end
@@ -10509,6 +10813,24 @@ local function buildUI()
             { "hop",   "After the loot: the next server", "the hunt goes on there - the loop" },
             { "again", "After the loot: again on this island", "the wiki: the event has no cooldown" },
         }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
+        sliderRow(v, "Stay after the loot (the game saves it) before the next server", 0, 300, 10,
+            function() return CFG.LootStay end,
+            function(x) CFG.LootStay = x end, " s")
+        readout(v, function()
+            local s = P.sea
+            local ev = s.ev
+            local lines = {}
+            local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
+            table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
+                b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
+            if ev and ev.base then
+                table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
+                    ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
+                    ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
+            end
+            if s.lootCheck then table.insert(lines, "last hop  " .. tostring(s.lootCheck)) end
+            return table.concat(lines, "\n")
+        end)
         readout(v, function()
             local ev = P.sea.ev
             local t = P.sea.tally

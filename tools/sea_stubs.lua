@@ -243,7 +243,29 @@ local INPUT = {
 }
 local TAGGED = {}
 INPUT.GetTagged = function(_, tag) return TAGGED[tag] or {} end
-local game = { GetService = function() return INPUT end }
+local game = { GetService = function() return INPUT end, JobId = "job-this" }
+-- The game's Net remotes (Modules.Net "RF/.." / "RE/.."): NET[kind .. "/" .. name].
+local NET = {}
+local function netRemote(kind, name) return NET[kind .. "/" .. name] end
+-- The game's push of a changed item value (RE/OnItemValueChanged): PUSH(items).
+local PUSH = nil
+NET["RE/OnItemValueChanged"] = { OnClientEvent = { Connect = function(_, f)
+    PUSH = f
+    return { Disconnect = function() end }
+end } }
+-- The executor's files - switched on by useFiles() AFTER the section is
+-- built (with files at build time the learned-keys saver starts its
+-- 15 s loop, and the stub task.spawn runs that loop for ever).
+local FILES = {}
+local writefile, readfile = nil, nil
+local function useFiles()
+    writefile = function(n, s) FILES[n] = s end
+    readfile = function(n)
+        local x = FILES[n]
+        if x == nil then error("no such file") end
+        return x
+    end
+end
 local RS = inst("ReplicatedStorage", "Folder")
 local getnilinstances = nil           -- the executor's; a case sets it
 local fireproximityprompt = function(p) p.fired = (p.fired or 0) + 1 end

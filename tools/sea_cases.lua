@@ -11,6 +11,7 @@ end
 local function vs(v) return v and string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z) or "nil" end
 
 SECTION()
+useFiles()
 local S = P.sea
 local T = S._t
 -- Flights: was one to `p`; every corner of the way (all but the last) clear
@@ -543,7 +544,28 @@ check("a dead golem counted once", S.ev.golems == 1, S.ev.golems)
 ENEMIES = {}
 rB.kids.VFXLayer.kids.Specs.Enabled = false
 
--- The win: the bones, then the egg.
+-- The win: the bones, then the egg - each counted ONLY when the game's own
+-- count goes up (user, 2026-10-07: "picked" loot never reached the inventory).
+local ITEMS = { [585] = 14, [565] = 1 }          -- what the server says you have (585 bones, 565 egg)
+NET["RF/GetAllItemValues"] = { InvokeServer = function()
+    local out = { { Key = "Mastery", ItemId = 585, Value = 99 } }      -- not a count: ignored
+    for id, v in pairs(ITEMS) do table.insert(out, { Key = "Quantity", ItemId = id, Value = v }) end
+    return out
+end }
+-- The server gives it: its count, and its push.
+local function grant(id, n)
+    ITEMS[id] = (ITEMS[id] or 0) + n
+    if PUSH then PUSH({ { Key = "Quantity", ItemId = id, Value = ITEMS[id] } }) end
+end
+local function saidP(text)
+    for _, l in ipairs(PRINTED) do if string.find(l, text, 1, true) then return true end end
+    return false
+end
+check("the game's item list: Quantity rows only, by ItemId", (function()
+    local q = T.qtyOf({ { Key = "Quantity", ItemId = 585, Value = 3 }, { Key = "Mastery", ItemId = 585, Value = 50 },
+        { Key = "Quantity", ItemId = "565", Value = 2 } })
+    return q[585] == 3 and q[565] == 2
+end)())
 isle.attrs.IsMinigameActive = false
 pp.Enabled = false
 check("the event over: the golem pile let go", (function() S.volcanoStep() return pileCur == nil end)())
@@ -554,21 +576,48 @@ local de = se:add(inst("DragonEgg", "Model"))
 local molten = de:add(inst("Molten", "Part", { Position = vec(-69800, 22, 6910) }))
 molten:add(egg)
 reset()
--- touching it picks it up
+PRINTED = {}
+-- touching it: the game takes the bone and gives it to you
 ON_FLY = function(pos)
-    if (pos - bone.Position).Magnitude < 1 then
+    if (pos - bone.Position).Magnitude < 1 and bone.Parent then
         WS.kids.DinoBone = nil
         bone.Parent = nil
+        grant(585, 1)
     end
 end
 S.volcanoStep()
 ON_FLY = nil
-check("a bone lying: flown onto it, picked, counted", vnear(FLIGHTS[1], vec(-69790, 20, 6920)) and S.ev.phase == "loot"
-    and S.ev.bones == 1 and S.tally.bones == 1, vs(FLIGHTS[1]) .. " " .. S.ev.bones)
+check("a bone: flown onto it, counted as the game's count went up (14 -> 15)", vnear(FLIGHTS[1], vec(-69790, 20, 6920))
+    and S.ev.phase == "loot" and S.ev.bones == 1 and S.tally.bones == 1 and saidP("Dinosaur Bones 14 -> 15"),
+    vs(FLIGHTS[1]) .. " " .. S.ev.bones)
+-- A bone that goes WITHOUT reaching your inventory: never counted as picked.
+local bone2 = WS:add(inst("DinoBone", "Part", { Position = vec(-69780, 20, 6925) }))
+ON_FLY = function(pos)
+    if (pos - bone2.Position).Magnitude < 1 and bone2.Parent then
+        WS.kids.DinoBone = nil
+        bone2.Parent = nil
+    end
+end
 reset()
-egg.onHold = function(p) p.Enabled = false end
 S.volcanoStep()
-check("no bones left: the egg, held", egg.held == 1 and S.ev.eggs == 1 and S.tally.eggs == 1, tostring(egg.held) .. " " .. S.ev.eggs)
+ON_FLY = nil
+check("a bone gone with the count unchanged: NOT picked, said so", S.ev.bones == 1 and S.ev.bonesGone == 1
+    and saidP("Dinosaur Bones stayed 15"), tostring(S.ev.bonesGone))
+-- The egg: held, then stayed by until the game's count goes up.
+reset()
+egg.onHold = function(p) p.Enabled = false grant(565, 1) end
+S.volcanoStep()
+check("the egg: held, counted as the count went up (1 -> 2)", egg.held == 1 and S.ev.eggs == 1 and S.tally.eggs == 1
+    and saidP("Dragon Egg 1 -> 2"), tostring(egg.held) .. " " .. S.ev.eggs)
+-- An egg whose prompt goes with no egg for you.
+local egg3 = prompt(true)
+egg3.Name = "P3"
+molten:add(egg3)
+egg3.onHold = function(p) p.Enabled = false end
+reset()
+S.volcanoStep()
+check("an egg prompt gone, your Dragon Egg unchanged: NOT counted, said so", S.ev.eggs == 1 and S.ev.eggGone == true
+    and saidP("Dragon Egg stayed 2"), tostring(S.ev.eggGone))
 -- An egg that will not come: given up after two holds.
 local egg2 = prompt(true)
 egg2.Name = "P2"
@@ -578,6 +627,7 @@ S.volcanoStep()
 S.volcanoStep()
 check("an egg that stays: given up after two, says why", string.find(S.ev.note, "Dragon Tether", 1, true) ~= nil, S.ev.note)
 reset()
+S.ev.overAt = CLOCK                    -- the loot just over: the 8 s not run out yet
 S.volcanoStep()
 check("nothing left: held in front of the skull (away from the volcano), not on it", S.ev.phase == "idle"
     and vnear(FLIGHTS[#FLIGHTS], vec(-69800, 35, 6940)), vs(FLIGHTS[#FLIGHTS]))
@@ -1225,6 +1275,79 @@ end)()
     S.volcanoStep()
     CLOCK += 9
     check("switch alone: done - held on the island (no hunt, no hop)", S.volcanoStep() == true and S.ev.complete)
+    -- 6. Loot picked: the hunt STAYS LootStay seconds after the last pick
+    --    before the next server (the game saves it), then the game's count is
+    --    written for the next server to check. Diagnostics on the way.
+    CFG.Hunt, CFG.HuntKind, CFG.Volcano, CFG.VolcanoAfter, CFG.LootStay = true, "prehistoric", false, "hop", 60
+    local isleS = fresh(true, false)
+    player.attrs.PrehistoricIslandParticipant = true
+    player.Character = { name = "life 1" }
+    PRINTED = {}
+    S.volcanoStep()
+    check("event on: whether the game counts you is said", saidP("you ARE counted"))
+    player.Character = { name = "life 2" }
+    S.volcanoStep()
+    check("a death during the event: said (the game gives no loot after one)", saidP("you died during the event"))
+    ITEMS[585], ITEMS[565] = 20, 3
+    isleS.attrs.IsMinigameActive = false
+    S.volcanoStep()
+    S.ev.bones, S.ev.lastPickAt = 5, CLOCK
+    CLOCK += 9
+    reset()
+    check("loot in: not done yet - staying so the game saves it", S.volcanoStep() == true and not S.ev.complete
+        and string.find(tostring(S.ev.note), "staying", 1, true) ~= nil, tostring(S.ev.note))
+    reset()
+    check("...the hunt does not go to the next server meanwhile", S.huntStep(epoch, "prehistoric") == true)
+    CLOCK += 61
+    FILES["bff_loot.json"] = nil
+    check("60 s after the last pick: DONE, the event step lets go", S.volcanoStep() == false and S.ev.complete == true)
+    check("...the game's count written for the next server", string.find(tostring(FILES["bff_loot.json"]),
+        "bones=20;eggs=3", 1, true) ~= nil, tostring(FILES["bff_loot.json"]))
+    check("...DONE says the count before -> after", saidP("Dinosaur Bones"))
+    player.Character = nil
+    player.attrs.PrehistoricIslandParticipant = nil
+    -- Nothing picked: no stay.
+    local isleN = fresh(true, false)
+    S.volcanoStep()
+    isleN.attrs.IsMinigameActive = false
+    S.volcanoStep()
+    CLOCK += 9
+    check("nothing picked: no stay - DONE at once", S.volcanoStep() == false and S.ev.complete == true)
+    -- 7. The next server: the last one's count against this one's.
+    FILES["bff_loot.json"] = "bones=20;eggs=3;at=0;job=job-other"
+    ITEMS[585], ITEMS[565] = 20, 3
+    reset()
+    STOPPED = 0
+    S.lootCheck = nil
+    S.checkLastLoot()
+    check("next server, the loot is here: said, the hunt goes on", SET_HUNT[1] == nil and STOPPED == 0
+        and string.find(tostring(S.lootCheck), "saved", 1, true) ~= nil, tostring(S.lootCheck))
+    FILES["bff_loot.json"] = "bones=20;eggs=3;at=0;job=job-other"
+    ITEMS[585], ITEMS[565] = 14, 1
+    reset()
+    S.checkLastLoot()
+    check("next server, LESS here: LOST ON THE HOP said, the hunt stopped", string.find(tostring(S.lootCheck),
+        "LOST ON THE HOP", 1, true) ~= nil and SET_HUNT[1] == false and STOPPED == 1, tostring(S.lootCheck))
+    check("...checked once (the file emptied)", FILES["bff_loot.json"] == "")
+    FILES["bff_loot.json"] = "bones=99;eggs=9;at=0;job=job-this"
+    S.lootCheck = nil
+    S.checkLastLoot()
+    check("a reload in the same server: not checked", S.lootCheck == nil)
+    -- 8. Neither list readable: the server is asked at most every 2 s, never a frame.
+    local keepRF, keepInvoke = NET["RF/GetAllItemValues"], CF_REMOTE.InvokeServer
+    NET["RF/GetAllItemValues"] = nil
+    S.qtyRead, S.qtyTry, S.legacyTry = nil, nil, nil
+    local asks = 0
+    CF_REMOTE.InvokeServer = function(_, what) if what == "getInventory" then asks += 1 end return nil end
+    local got = "x"
+    for _ = 1, 20 do
+        got = S.have({ "Dinosaur Bones" }, false)
+        task.wait(0.15)
+    end
+    check("unreadable: nil, and getInventory asked at most every 2 s (2 in 3 s)", got == nil and asks <= 2, asks)
+    NET["RF/GetAllItemValues"], CF_REMOTE.InvokeServer = keepRF, keepInvoke
+    FILES["bff_loot.json"] = nil
+    CFG.LootStay = nil
     MAP.kids.PrehistoricIsland = nil
     S.ev = nil
     CFG.Hunt, CFG.HuntKind, CFG.Volcano, CFG.VolcanoAfter = false, nil, false, nil
