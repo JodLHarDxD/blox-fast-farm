@@ -6991,10 +6991,11 @@ do
         -- change; a count is Key "Quantity". CommF_("getInventory") is the
         -- legacy path (on the user's client it answered nothing, even 3 min
         -- after a join - 2026-10-06 logs) - the fallback. Ids: the game's
-        -- Economy.ItemId.RawSource (the Dragon Egg also as a carried Tool,
-        -- 1276 - counted with it).
+        -- Economy.ItemId.RawSource. Bones and the egg are stored materials,
+        -- straight into the inventory, never held (user, 2026-10-07: "same
+        -- as Mirror Fractal") - the material ids only.
         local ITEM_IDS = {
-            ["Dinosaur Bones"] = { 585 }, ["Dragon Egg"] = { 565, 1276 },
+            ["Dinosaur Bones"] = { 585 }, ["Dragon Egg"] = { 565 },
             ["Volcanic Magnet"] = { 550 }, ["Blaze Ember"] = { 587 }, ["Scrap Metal"] = { 566 },
         }
         local LOOT = { "Dinosaur Bones", "Dragon Egg" }
