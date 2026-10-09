@@ -451,7 +451,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.8" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.9" }
 _G.BFF = P
 
 -- =========================================================
@@ -10880,19 +10880,22 @@ do
                 end)
             end
         end
+        local function leviWatchOff()
+            local c = LV.watchConn
+            LV.watchConn = nil
+            if c then pcall(function() c:Disconnect() end) end
+            LV.dangers, LV.now = {}, {}
+        end
         local function leviWatchOn()
             if LV.watchConn then return end
             local wo = workspace:FindFirstChild("_WorldOrigin")
             if not wo then return end
             LV.dangers = {}
             for _, c in ipairs(wo:GetChildren()) do pcall(dangerSeen, c) end
-            LV.watchConn = wo.ChildAdded:Connect(function(i) pcall(dangerSeen, i) end)
-        end
-        local function leviWatchOff()
-            local c = LV.watchConn
-            LV.watchConn = nil
-            if c then pcall(function() c:Disconnect() end) end
-            LV.dangers, LV.now = {}, {}
+            LV.watchConn = wo.ChildAdded:Connect(function(i)
+                if _G.BFF ~= P then leviWatchOff() return end     -- a new copy loaded / unloaded
+                pcall(dangerSeen, i)
+            end)
         end
 
         -- The character to you (its heart; nothing of it up) / back to the fight.

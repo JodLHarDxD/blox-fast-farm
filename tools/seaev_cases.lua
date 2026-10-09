@@ -1346,6 +1346,13 @@ check("a segment back mid-fight: its attacks watched too (the target kept)", SE.
 for _ = 1, 8 do SE.leviStep() end
 check("nothing landed for 6 s: the Leviathan's circle down to 25 over the part", SE.ev ~= nil and SE.ev.h == 25,
     SE.ev and SE.ev.h)
+-- A new copy of the script loaded (_G.BFF is not this one): the watch lets go by itself.
+_G.BFF = {}
+spawnFx(inst("Bubble", "Part", { Position = segPos, Size = vec(50, 50, 50) }))
+check("a new copy loaded: the effects watch lets go by itself", WO_ADDED == nil)
+_G.BFF = P
+SE.leviStep()
+check("...this copy again: watched again", WO_ADDED ~= nil)
 -- The switch off: the watch let go.
 CFG.LeviFight = false
 SE.leviStep()
