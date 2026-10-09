@@ -1661,6 +1661,14 @@ end)()
     check("sea beast: every key cooling - the M1 of the weapon that hurts it, in hand first, credited",
         HELD == "Kitsune-Kitsune" and M1S == m1s0 + 1 and key == "M1 Kitsune-Kitsune" and landed == true
         and learn["M1 Kitsune-Kitsune"].closed == 1, tostring(key) .. " " .. tostring(HELD))
+    -- A transformed fruit (v.toolOk): only its moves are fired.
+    READY = { ["Kitsune-Kitsune Z"] = true, ["Skull Guitar Z"] = true }
+    HELD = nil
+    reset()
+    T.ventCast({ pos = part.Position, part = part, model = part, learn = {}, alive = function() return true end,
+        keys = { "Z" }, keyOn = { Z = true }, toolOk = function(n) return n == "Kitsune-Kitsune" end })
+    check("sea beast, Kitsune form: the gun's Z (refused by the game) is never fired - Kitsune's is",
+        HELD == "Kitsune-Kitsune" and KEYS_SENT[1] == "Z", tostring(HELD))
     -- A vent never fires F (no keys of its own): unchanged.
     READY = { ["Kitsune-Kitsune F"] = true }
     HELD = nil

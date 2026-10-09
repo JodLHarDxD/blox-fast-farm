@@ -108,7 +108,7 @@ local function commas(n)
 end
 local function beast(name, pos, hp, max, how)
     local m = inst(name, "Model")
-    m:add(inst("HumanoidRootPart", "Part", { Position = pos }))
+    m:add(inst("HumanoidRootPart", "Part", { Position = pos, Size = vec(10, 10, 10), CanCollide = true, Transparency = 0 }))
     if how == "bbg" then
         local g = m:add(inst("HealthBBG", "BillboardGui"))
         local fr = g:add(inst("Frame", "Frame"))
@@ -477,5 +477,61 @@ CFG.Hunt = false
 T.fightBeast(xs[1], epoch)
 check("the hunt off mid-fight: no move fired", #CASTS == 0, #CASTS)
 CFG.Hunt = true
+
+-- ---------------------------------------------------------------- LANDING THE HITS (2026-10-09)
+reset()
+clearWorld()
+CFG.Hunt, P.running = true, true
+BOAT = makeBoat(Z5 + vec(0, 5, 0))
+S.drive.waterY = 5
+S.driving, HUM.SeatPart = true, BOAT.seat
+local hb = beast("SeaBeast1", Z5 + vec(300, 0, 0), 100000, 100000)
+local hroot = hb.kids.HumanoidRootPart
+DAMAGE = 1000
+SE.step(epoch)
+check("the hitbox: the beast's root 60 a side on your client, see-through, no collisions (what the hubs do)",
+    vnear(hroot.Size, vec(60, 60, 60)) and hroot.Transparency == 1 and hroot.CanCollide == false, vs(hroot.Size))
+check("the camera 90 from it while it is fought (outside the grown box)", P.camDistance == 90)
+hb.kids.Health.Value = 0
+SE.step(epoch)
+CLOCK += 6
+SE.step(epoch)
+check("the fight over: the root as it was, the camera back to yours",
+    vnear(hroot.Size, vec(10, 10, 10)) and hroot.Transparency == 0 and hroot.CanCollide == true and P.camDistance == nil,
+    vs(hroot.Size) .. " " .. tostring(P.camDistance))
+-- The hunt switched off mid-fight: nothing of it stays.
+reset()
+clearWorld()
+local hb2 = beast("SeaBeast2", Z5 + vec(300, 0, 0), 100000, 100000)
+SE.step(epoch)
+CFG.Hunt = false
+beat()
+check("the hunt off mid-fight: the box shrunk, the camera yours, no lock",
+    vnear(hb2.kids.HumanoidRootPart.Size, vec(10, 10, 10)) and P.camDistance == nil and SE.lockPart == nil)
+CFG.Hunt = true
+-- Only a part named HumanoidRootPart is ever grown (another may be the body you see).
+local body = inst("Body", "Part", { Size = vec(80, 20, 80) })
+T.grow(body)
+check("a part not named HumanoidRootPart: never grown", vnear(body.Size, vec(80, 20, 80)) and SE.grown == nil)
+T.shrink()
+-- TRANSFORMED: the game refuses every other weapon's key.
+check("not transformed: every weapon's moves", T.toolOk("Skull Guitar") and T.toolOk("Kitsune-Kitsune"))
+player.Character:add(inst("Kitsune", "Model"))
+check("Kitsune form: only Kitsune's moves (the game refuses the rest)", T.toolOk("Kitsune-Kitsune")
+    and not T.toolOk("Skull Guitar") and not T.toolOk("Sanguine Art"))
+TOOLS = { { Name = "Skull Guitar", ToolTip = "Gun" }, { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" } }
+SE.learn = { ["M1 Skull Guitar"] = { casts = 5, closed = 5 }, ["M1 Kitsune-Kitsune"] = { casts = 5, closed = 0 } }
+check("Kitsune form: the M1 is Kitsune's, whatever was learned in base", T.bestM1() == "Kitsune-Kitsune", T.bestM1())
+player.Character.kids.Kitsune = nil
+check("...back in base: the learned best again", T.bestM1() == "Skull Guitar")
+player.Character:add(inst("Dragon", "Model"))
+check("Dragon form: Dragon-Dragon's moves, never Dragon Talon's (a different weapon)", T.toolOk("Dragon-Dragon")
+    and not T.toolOk("Dragon Talon"))
+player.Character.kids.Dragon = nil
+reset()
+clearWorld()
+local hb3 = beast("SeaBeast3", Z5 + vec(300, 0, 0), 100000, 100000)
+SE.step(epoch)
+check("the beast's caster is given the transform rule", CASTS[1] and CASTS[1].toolOk ~= nil and CASTS[1].toolOk("Kitsune-Kitsune"))
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

@@ -42,3 +42,15 @@ local AIM = nil
 local P = { running = true }
 function P.aimTarget() return AIM end
 local _G = {}
+-- ReplicatedStorage.Mouse, as in the decompiled client (v4623): a plain table
+-- the game aims again every frame (its updateMouse writes Hit), its metatable's
+-- __index falling back to the PlayerMouse for what it has not got (Move ...).
+-- Skills and a fruit's M1 send ITS Hit.
+local GAME_HIT1 = cfr(vec(111, 0, 0), nil)
+local GM = { X = 960, Y = 465, Hit = GAME_HIT1, Target = "gamePart" }
+setmetatable(GM, { __index = function(_, k) if k == "Move" then return "move-signal" end return nil end })
+local GM_INDEX = getmetatable(GM).__index
+local function gameWrites(h) GM.Hit = h end      -- the game's updateMouse, a frame
+local MOUSE_MODULE = { Name = "Mouse" }
+local RS = { FindFirstChild = function(_, n) return n == "Mouse" and MOUSE_MODULE or nil end }
+local require = function(m) if m == MOUSE_MODULE then return GM end error("no such module") end

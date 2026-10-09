@@ -140,7 +140,7 @@ local ENEMIES = WS:add(inst("Enemies", "Folder"))
 -- ---------------------------------------------------------------- the player
 local HUM = { Health = 100, SeatPart = nil, Sit = false }
 local ROOT = { Position = vec(0, 10, 0) }
-local player = { Name = "Me" }
+local player = { Name = "Me", Character = inst("Me", "Model") }
 local function parts() return {}, ROOT, HUM end
 
 -- ---------------------------------------------------------------- the farm

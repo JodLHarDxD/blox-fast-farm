@@ -51,5 +51,6 @@ function CFrame.lookAt(at, target)
 end
 local function rot(c, v) return mvec(c.m, v) end
 
+local P = {}              -- P.camDistance: a fight's own (SEA EVENTS)
 local CFG = { CamDistance = 30, CamPitch = 55 }
 

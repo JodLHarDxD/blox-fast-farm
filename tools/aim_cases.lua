@@ -65,4 +65,14 @@ local e1 = math.deg(math.acos(math.clamp(dot(got, steep), -1, 1)))
 check(string.format("pile straight below, cursor in the corner: no error thrown, off by %.1f deg", e1),
     e1 == e1 and e1 < 60, e1)
 
+-- A fight's own camera distance (SEA EVENTS: a beast is bigger than 30 studs).
+P.camDistance = 90
+local c3 = aimFrame(pile, v3(0, 0, 1), pixelDir(960, 540))
+local far = (c3.p - pile).Magnitude
+local g3 = rot(c3, pixelDir(960, 540))
+check(string.format("a sea fight: the camera 90 from the target (%.1f), still aimed through it", far),
+    math.abs(far - 90) < 0.01 and dot(g3, (pile - c3.p).Unit) > 0.9999, far)
+P.camDistance = nil
+check("...the fight over: 30 again", math.abs((aimFrame(pile, v3(0, 0, 1), pixelDir(960, 540)).p - pile).Magnitude - 30) < 0.01)
+
 print(all and "ALL PASS" or "SOME FAILED")

@@ -419,7 +419,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -977,7 +977,9 @@ do
         local d = dl.Unit
         local amp = math.sqrt(d.Y * d.Y + d.Z * d.Z)
         local e = math.min(math.rad(CFG.CamPitch or 55), math.asin(math.min(amp, 1)) * 0.95)
-        local at = target + (away * math.cos(e) + Vector3.new(0, math.sin(e), 0)) * (CFG.CamDistance or 30)
+        -- P.camDistance: a fight's own (SEA EVENTS: a beast is bigger than 30
+        -- studs - a camera inside it casts its ray from inside, and misses it).
+        local at = target + (away * math.cos(e) + Vector3.new(0, math.sin(e), 0)) * (P.camDistance or CFG.CamDistance or 30)
         return rayAim(at, target, d)
     end
 
@@ -7231,7 +7233,8 @@ do
             local cands = {}
             for ti, t in ipairs(ventTools()) do
                 for ki, k in ipairs(v.keys or VENT_KEYS) do
-                    if (v.keyOn or CFG.VentKeys or {})[k] then
+                    -- v.toolOk: a transformed fruit takes only its own moves (SEA EVENTS).
+                    if (v.keyOn or CFG.VentKeys or {})[k] and (not v.toolOk or v.toolOk(t.Name)) then
                         local key = t.Name .. " " .. k
                         table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key, v.learn), order = ti * 10 + ki })
                     end
@@ -8992,6 +8995,15 @@ end
 --               nothing. Up: hover BeastHeight over the sea, every ready key
 --               of every weapon you carry (SeaEvKeys) and the M1 between,
 --               aimed AT it - the silent aim follows its body every frame.
+--               HOW A MOVE LANDS (the decompiled client v4623, 2026-10-09):
+--               a skill (and a fruit's M1) sends ReplicatedStorage.Mouse's
+--               Hit - the game's own table, answered with the target while
+--               casting (SILENT AIM); a gun reads the PlayerMouse (the hook
+--               there); a move casting its own camera ray finds the root,
+--               made 60 a side on your client (every public sea-event
+--               script does), the camera 90 off so it is never inside it.
+--               Transformed (a fruit's rig on you), the game refuses every
+--               other weapon's key: only that fruit's moves are fired.
 --               Which key and whose M1 hurt it is LEARNED from its HP (the
 --               vent caster, P.sea.ventCast, credited by HP); nothing lands
 --               for 6 s = in close.
@@ -9577,16 +9589,74 @@ do
                 if lp and lp.Parent and P.running and os.clock() < aimUntil then
                     P.aimAt, P.aimPart = lp.Position, lp
                 end
+                -- The hunt off (or the farm stopped) mid-fight: nothing of it stays
+                -- - the grown box, the far camera, the lock.
+                if not (P.running and huntOn()) and (SE.grown or SE.lockPart or SE.camSet) then
+                    if SE.shrink then SE.shrink() end      -- (declared below, with the fights)
+                    SE.lockPart, SE.camSet = nil, nil
+                    P.camDistance = nil
+                end
+                SE.camSet = P.camDistance ~= nil or nil
             end)
         end
 
         -- ---------- the fights ----------
+        -- TRANSFORMED (the game's own rule, MovesetClientRunner v4623): with a
+        -- fruit's rig on the character, every other weapon's key is REFUSED -
+        -- only that fruit's moves fire. Fired anyway, they would be learned as
+        -- "never hurt it". Rig -> the tool names it allows (Lua patterns).
+        local RIGS = {
+            Kitsune = "Kitsune", Dragon = "%-Dragon", GasRig = "Gas%-Gas", HydraRig = "Venom",
+            TigerRig = "Tiger", YetiRig = "Yeti", Mammoth = "Mammoth%-Mammoth", TRex = "T%-Rex", Phoenix = "Phoenix",
+        }
+        local function formOf()
+            local ch = player.Character
+            if not ch then return nil end
+            for rig, pat in pairs(RIGS) do
+                if ch:FindFirstChild(rig) then return pat, rig end
+            end
+            return nil
+        end
+        local function toolOk(name)
+            local pat = formOf()
+            return pat == nil or string.find(name, pat) ~= nil
+        end
+
+        -- THE HITBOX (every public sea-event script, 2024-26): the target's
+        -- HumanoidRootPart made 60 studs a side on YOUR client, see-through,
+        -- no collisions - a ray cast from the camera at it (the game's own
+        -- aim, for moves that cast their own) and the game's local hit checks
+        -- find it; put back when the fight leaves it. Only a part named
+        -- HumanoidRootPart: anything else may be the body you see.
+        local GROW = Vector3.new(60, 60, 60)
+        local function shrink()
+            local g = SE.grown
+            SE.grown = nil
+            if not (g and g.part) then return end
+            pcall(function()
+                g.part.Size, g.part.CanCollide, g.part.Transparency = g.size, g.collide, g.transp
+            end)
+        end
+        local function grow(root)
+            if SE.grown and SE.grown.part == root then return end
+            shrink()
+            if not (root and root.Name == "HumanoidRootPart") then return end
+            local ok = pcall(function()
+                SE.grown = { part = root, size = root.Size, collide = root.CanCollide, transp = root.Transparency }
+                root.Size, root.CanCollide, root.Transparency = GROW, false, 1
+            end)
+            if not ok then SE.grown = nil end
+        end
+        SE.shrink = shrink
+
         -- Whose M1 hurts a beast: learned ("M1 <weapon>"); untried ones fruit
         -- first (Kitsune's M1 hits them - the wiki), then guns (Skull Guitar).
+        -- Transformed: the fruit's own, nothing else swings.
         local M1_RANK = { ["Blox Fruit"] = 1, Gun = 2, Melee = 3, Sword = 4 }
         local function bestM1()
             local best, bs, br = nil, -1, 99
             for _, t in ipairs(toolNames()) do
+                if not toolOk(t.Name) then continue end
                 local s = S.keyScore("M1 " .. t.Name, SE.learn)
                 local rk = M1_RANK[toolType(t)] or 9
                 if s > bs or (s == bs and rk < br) then best, bs, br = t.Name, s, rk end
@@ -9612,6 +9682,8 @@ do
             end
             activeName = x.label
             setState("FIGHT")
+            grow(x.root)
+            P.camDistance = 90           -- the camera outside the beast (and its grown box)
             local ref, sea = seaRef(), surfaceY()
             local rp = x.root.Position
             local _, r = parts()
@@ -9643,7 +9715,7 @@ do
             lockAt(spot, rp)
             SE.lockPart = x.root
             local v = { pos = rp, part = x.root, model = x.model, learn = SE.learn,
-                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, m1Tool = bestM1 }
+                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, m1Tool = bestM1, toolOk = toolOk }
             v.alive = function()
                 local hp = hpOf(x.model)
                 return x.model.Parent ~= nil and not (hp and hp <= 0)
@@ -9667,10 +9739,11 @@ do
                 if mm then mm.hp = hpOf(x.model) or mm.hp end
             end
             local hp = hpOf(x.model)
-            SE.note = string.format("%s  ·  HP %s%s  ·  %s  ·  last: %s", x.label,
+            local _, rig = formOf()
+            SE.note = string.format("%s  ·  HP %s%s  ·  %s  ·  last: %s%s", x.label,
                 hp and tostring(math.floor(hp)) or "?", (x.max and x.max > 0) and (" / " .. math.floor(x.max)) or "",
                 close and "IN CLOSE (nothing landed for 6 s)" or (math.floor(tonumber(CFG.BeastHeight) or 90) .. " up"),
-                tostring(SE.lastKey or "-"))
+                tostring(SE.lastKey or "-"), rig and ("  ·  " .. rig .. " form: only its moves") or "")
             say(SE.note)
         end
 
@@ -9691,7 +9764,10 @@ do
                     local on = (CFG.SeaEvFight or {})[k] == true
                     if on and FISH[k] and near(e.root.Position, h, me, RANGE)
                         and not (P.randomSkip[e.model] and now < P.randomSkip[e.model]) then
-                        if e.model == SE.cur then return { e }, e.root.Position, true end
+                        if e.model == SE.cur then
+                            grow(e.root)
+                            return { e }, e.root.Position, true
+                        end
                         local d = me and (e.root.Position - me).Magnitude or 0
                         if d < bd then best, bd = e, d end
                     end
@@ -9699,6 +9775,7 @@ do
                 if not best then return {}, nil, false end
                 SE.cur = best.model
                 remember({ model = best.model, root = best.root, hum = best.hum, kind = kindOf(best.name) }, now)
+                grow(best.root)
                 return { best }, best.root.Position, true
             end,
             breakIf = function() return not (P.running and huntOn()) end,
@@ -9713,6 +9790,7 @@ do
                 SE.fights += 1
             end
             activeName = x.label
+            P.camDistance = 90
             SE.note = x.label .. "  ·  M1 + every skill, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
             say(SE.note)
             local why = fight(FISH_CUR, FISH)
@@ -9765,7 +9843,8 @@ do
                 return true
             end
             -- Nothing to fight: back at the wheel.
-            SE.cur, SE.lockPart = nil, nil
+            SE.cur, SE.lockPart, P.camDistance = nil, nil, nil
+            shrink()
             if pileCur then releasePile() end
             if not board(myEpoch) then
                 E.note = SE.note
@@ -9845,7 +9924,7 @@ do
             joinGroup = joinGroup, verdict = verdict, groupOver = groupOver, patrolDir = patrolDir,
             fleeDir = fleeDir, wheelMode = wheelMode, nudge = nudge, centreOf = centreOf, spyText = spyText, beastHP = beastHP,
             scan = scan, pick = pick, bestM1 = bestM1, hangSpot = hangSpot, fightBeast = fightBeast,
-            board = board, leaveBoat = leaveBoat, ZONES = ZONES,
+            board = board, leaveBoat = leaveBoat, ZONES = ZONES, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
         }
     end
     build()
@@ -12429,7 +12508,10 @@ local function buildUI()
         switchRow(v, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
             function() return CFG.SilentAim end,
             function(x) CFG.SilentAim = x end)
-        readout(v, function() return "silent aim  " .. tostring(P.silentNote or "-") end)
+        readout(v, function()
+            return "silent aim  " .. tostring(P.silentNote or "-") .. "  (guns)"
+                .. "\nskill aim   " .. tostring(P.gameAimText and P.gameAimText() or "-") .. "  (skills, a fruit's M1)"
+        end)
         heading2(v, "the gun M1 at a vent")
         switchRow(v, "Skull Guitar M1 on the vents",
             "Loaded if in your inventory, fired at the vent stood still - before any skill",
@@ -12807,7 +12889,95 @@ do
             return ok and t or nil
         end
 
+        -- THE GAME'S OWN SKILL AIM (2026-10-09, read in the decompiled client
+        -- v4623). Skills, and a fruit's M1 (sent as the key G), never read
+        -- your PlayerMouse: MovesetClientRunner's sendMouse does
+        -- RemoteEvent:FireServer(Mouse.Hit.Position) with Mouse =
+        -- require(ReplicatedStorage.Mouse) - a plain table the game aims
+        -- again every frame (a ray from the camera through the cursor). The
+        -- hook on the PlayerMouse below reached guns only (CombatController's
+        -- shot reads the PlayerMouse). Here, while this script casts, that
+        -- table's Hit / Target answer the target; the game's own writes go
+        -- to a shadow and are put back the moment the casting is over (the
+        -- same 3 s rule). The table's own metatable, pure Lua: no game call
+        -- goes through it - only reads of that one table's Hit / Target.
+        -- (The public hubs swap the remote's argument with a session-long
+        -- __namecall hook instead - the one that broke this game's scripts.)
+        local modT, modMt, modOld, shadow = nil, nil, nil, nil
+        local function gameMouse()
+            if modT then return modT end
+            local ok, m = pcall(function()
+                local ms = RS:FindFirstChild("Mouse")
+                return ms and require(ms)
+            end)
+            if ok and type(m) == "table" then modT = m end
+            return modT
+        end
+        local function modOn()
+            if modOld then return end
+            local m = gameMouse()
+            if not m then return end
+            local mt = getmetatable(m)
+            if type(mt) ~= "table" then
+                mt = {}
+                if not pcall(setmetatable, m, mt) then return end
+            end
+            modMt, shadow = mt, { Hit = rawget(m, "Hit"), Target = rawget(m, "Target"), writes = 0 }
+            modOld = { index = rawget(mt, "__index"), newindex = rawget(mt, "__newindex") }
+            local oldIdx = modOld.index
+            mt.__newindex = function(t, k, v)
+                if k == "Hit" or k == "Target" then
+                    shadow[k] = v
+                    if k == "Hit" then shadow.writes += 1 end
+                    return
+                end
+                rawset(t, k, v)
+            end
+            mt.__index = function(t, k)
+                if k == "Hit" or k == "Target" then
+                    local tgt = aimNow()
+                    if tgt then
+                        if k == "Target" then
+                            local part = P.aimPart
+                            if part and part.Parent then return part end
+                            return shadow.Target
+                        end
+                        local cam = workspace.CurrentCamera
+                        local o = cam and cam.CFrame.Position or tgt
+                        local d = tgt - o
+                        return (d.Magnitude > 0.01) and CFrame.lookAt(tgt, tgt + d.Unit) or CFrame.new(tgt)
+                    end
+                    return shadow[k]
+                end
+                if type(oldIdx) == "function" then return oldIdx(t, k) end
+                if type(oldIdx) == "table" then return oldIdx[k] end
+                return nil
+            end
+            rawset(m, "Hit", nil)
+            rawset(m, "Target", nil)
+            P.gameAimSeen = P.gameAimSeen or 0
+        end
+        local function modOff()
+            if not modOld then return end
+            modMt.__index, modMt.__newindex = modOld.index, modOld.newindex
+            modOld = nil
+            P.gameAimSeen = (P.gameAimSeen or 0) + shadow.writes
+            rawset(modT, "Hit", shadow.Hit or CFrame.new())
+            rawset(modT, "Target", shadow.Target)
+        end
+        P.gameAimHooked = function() return modOld ~= nil end
+        -- What the panel says: in / ready, and whether the game was seen
+        -- writing to that table (= it IS the game's own, not a copy).
+        function P.gameAimText()
+            if not gameMouse() then return "the game's skill aim (ReplicatedStorage.Mouse) not found" end
+            local seen = (P.gameAimSeen or 0) + (modOld and shadow.writes or 0)
+            return (modOld and "in (casting)" or "ready")
+                .. ((seen > 0) and "  ·  the game's own table (it aims it, seen)"
+                    or (P.gameAimSeen and "  ·  the game never wrote it while hooked - not its table?" or ""))
+        end
+
         function P.silentOff()
+            modOff()
             if not oldIndex then return end
             local o = oldIndex
             oldIndex = nil
@@ -12870,7 +13040,8 @@ do
             if want and CFG.SilentAim and P.running then
                 lastWant = now
                 silentOn()
-            elseif oldIndex and (now - lastWant > IDLE_OFF or not CFG.SilentAim or not P.running) then
+                modOn()
+            elseif (oldIndex or modOld) and (now - lastWant > IDLE_OFF or not CFG.SilentAim or not P.running) then
                 P.silentOff()
             end
         end
