@@ -441,7 +441,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.5" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.6" }
 _G.BFF = P
 
 -- =========================================================
@@ -3082,19 +3082,34 @@ local function castSkill(u, k)
     -- it, the next one the frame this one's bar starts - no fixed wait.
     local fast = pileCur and pileCur.fastCast
     if fast then
+        -- The move before still playing: wait for it (up to 3 s), never press into it.
         local tw = os.clock()
-        while os.clock() - tw < 0.6 and not canCast() do RunService.Heartbeat:Wait() end
+        while os.clock() - tw < 3 and not canCast() do RunService.Heartbeat:Wait() end
+        if not canCast() then return false end
     end
     holdKey(KEYCODE[k], hold, before)
     local c = cdOf(u.name, k)
     c.lastCast = os.clock()
     stats.casts += 1
     actions += 1
+    -- DID IT START (user, 2026-10-09: "Kitsune Z and X missed, only C and F"):
+    -- a long move's bar starts only when it ENDS, so "no bar yet" read as
+    -- refused and the key was put aside. The game marks a move it took at
+    -- once - the tool's Holding / the character's Busy (the decompiled
+    -- casFunc) - so that counts as fired too.
+    local started = false
     if fast then
         local tf = os.clock()
-        repeat RunService.Heartbeat:Wait() until barReady(u.name, k) == false or os.clock() - tf > 0.3
+        repeat
+            RunService.Heartbeat:Wait()
+            if not canCast() then started = true end
+        until started or barReady(u.name, k) == false or os.clock() - tf > 0.4
     else
-        task.wait(CFG.CastWait or 0.45)
+        local tf = os.clock()
+        repeat
+            RunService.Heartbeat:Wait()
+            if not canCast() then started = true end
+        until os.clock() - tf >= (CFG.CastWait or 0.45)
     end
     aimUntil = 0
     -- Did it fire (its bar is cooling now)? Did it hit (the pile lost HP)?
@@ -3111,7 +3126,11 @@ local function castSkill(u, k)
     if hit then stats.castsHit += 1 tally.hit += 1 end
     local b = barReady(u.name, k)
     local tail = hit and string.format(", hit the pile (-%.0f HP)", lost) or ", MISSED the pile"
-    if b == false then
+    if b == true and started then
+        stats.castsTook += 1
+        tally.fired += 1
+        P.lastCast = key .. ": fired (a long move - its bar starts when it ends)" .. tail
+    elseif b == false then
         stats.castsTook += 1
         tally.fired += 1
         P.lastCast = key .. ": fired" .. tail
@@ -9103,7 +9122,8 @@ end
 -- Re-tested every 5th target. The radio: auto / form always / never.
 -- EVERY READY KEY, AT ONCE (user, 2026-10-09): pressed the moment the game
 -- takes it (not Busy / stunned / another move Holding - its own gates), the
--- next one the frame this one's bar starts; a refused press retried in 3 s;
+-- next one the frame this one's bar starts or the game goes busy with it (a
+-- long move - Kitsune Z / X - starts its bar at its END), never into it; a refused press retried in 3 s;
 -- V never on a transformation fruit, on for the rest; mastery-locked keys
 -- skipped. THE WATER AS ROCK: every sea fight sets a floor (the sea's top + 4)
 -- the lock never goes under, swimming off, a knockback / pull not adopted.
@@ -9980,8 +10000,10 @@ do
                     if v.keyOk(t.Name, k) and not (rf and now < rf.untilT) and skillReady(t.Name, k) then
                         if not equip(t.Name) then break end
                         if barReady(t.Name, k) ~= false then
+                            -- The move before still playing: wait for it (up to 3 s).
                             local tw = os.clock()
-                            while os.clock() - tw < 0.6 and not canCast() do RunService.Heartbeat:Wait() end
+                            while os.clock() - tw < 3 and not canCast() do RunService.Heartbeat:Wait() end
+                            if not canCast() then return nil, resolved end
                             local hp0 = v.hp()
                             local w = (CFG.Weapons or {})[t.Name]
                             local hold = (w and w.hold and w.hold[k]) or 0.05
@@ -9989,9 +10011,14 @@ do
                             holdKey(KEYCODE[k], hold, aimed)
                             cdOf(t.Name, k).lastCast = os.clock()
                             stats.casts += 1
-                            local tf = os.clock()
-                            repeat RunService.Heartbeat:Wait() until barReady(t.Name, k) == false or os.clock() - tf > 0.3
-                            if barReady(t.Name, k) ~= true then
+                            -- Started = its bar cooling OR the game went busy with it
+                            -- (a long move - Kitsune Z / X - starts its bar at the END).
+                            local tf, started = os.clock(), false
+                            repeat
+                                RunService.Heartbeat:Wait()
+                                if not canCast() then started = true end
+                            until started or barReady(t.Name, k) == false or os.clock() - tf > 0.4
+                            if started or barReady(t.Name, k) ~= true then
                                 refused[rk] = nil
                                 for _, p in ipairs(v.pend) do
                                     if p.m1 then p.solo = false end

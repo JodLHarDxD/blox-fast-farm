@@ -922,6 +922,43 @@ local m1solo = nil
 for _, rr in ipairs(res3) do if rr.m1 and rr.hit then m1solo = rr.solo end end
 check("an M1 with a key going off beside it: not counted for the form's test (who hit is unclear)", m1solo == false,
     tostring(m1solo))
+-- A LONG MOVE (user, 2026-10-09: "Kitsune Z and X missed, only C and F"): its bar starts at
+-- its END; the game goes busy with it at once (Holding). Counted fired - never put aside.
+FORM_M1 = false
+CLOCK += 5                -- past the earlier cases' 3 s back-offs
+local LONG_BUSY = 1.2
+ON_KEY = function(code)
+    if code == "Z" or code == "X" then
+        CAN = CLOCK + LONG_BUSY                         -- busy with it; its bar stays "ready" for now
+    else
+        BARS[HELD .. " " .. code] = false
+    end
+end
+READY = { ["Kitsune-Kitsune Z"] = true, ["Kitsune-Kitsune X"] = true, ["Kitsune-Kitsune C"] = true }
+BARS = { ["Kitsune-Kitsune Z"] = true, ["Kitsune-Kitsune X"] = true, ["Kitsune-Kitsune C"] = true }
+HELD, CAN = "Kitsune-Kitsune", true
+local vl = cv()
+local kz2 = SEA_CAST(vl)
+check("a long move (Z: its bar still ready, the game busy with it): FIRED, not refused", kz2 == "Kitsune-Kitsune Z",
+    tostring(kz2))
+READY["Kitsune-Kitsune Z"] = false
+local busyTill = CAN
+local kx2 = SEA_CAST(vl)
+check("...X waits for Z to end (never pressed into it), then goes - fired too", kx2 == "Kitsune-Kitsune X"
+    and KEYS_AT[#KEYS_AT] >= busyTill - 1e-9, tostring(kx2) .. " at +" .. tostring(KEYS_AT[#KEYS_AT] - busyTill))
+READY["Kitsune-Kitsune X"] = false
+local kc2 = SEA_CAST(vl)
+check("...then C: Z, X and C all pressed in turn", kc2 == "Kitsune-Kitsune C", tostring(kc2) .. " CAN " .. tostring(CAN) .. " CLOCK " .. CLOCK .. " readyC " .. tostring(READY["Kitsune-Kitsune C"]) .. " barC " .. tostring(BARS["Kitsune-Kitsune C"]) .. " sent " .. table.concat(KEYS_SENT, ",", math.max(1, #KEYS_SENT-3)))
+-- Busy for more than 3 s (stunned): nothing pressed into it.
+READY = { ["Kitsune-Kitsune Z"] = true }
+BARS = {}
+CAN = CLOCK + 10
+local sentL = #KEYS_SENT
+local kb = SEA_CAST(vl)
+check("busy for long (stunned): nothing pressed into it - tried again next turn", kb == nil and #KEYS_SENT == sentL)
+CAN = true
+ON_KEY = function(code) BARS[HELD .. " " .. code] = false end
+
 -- NO M1 OUT OF FORM (user, 2026-10-09: an untransformed M1 does nothing to a sea event).
 FORM_M1 = false
 READY, BARS = {}, {}

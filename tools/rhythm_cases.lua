@@ -117,6 +117,24 @@ print((dead and dead - clock <= 3.01 and dead - clock > 2 and "PASS " or "FAIL "
     .. "sea event: a refused key is tried again in 3 s (it may only have been too early), not a minute")
 all = (dead and dead - clock <= 3.01 and dead - clock > 2) and all
 REFUSE = false
+-- A LONG MOVE (its bar starts at its end; the game busy with it at once): fired, not put aside.
+LONG = 1.5
+LOG, clock, held, CD, m1Count, cdStore = {}, 0, nil, {}, 0, {}
+attackTick()
+local dl = cdStore["KitsuneZ"] and cdStore["KitsuneZ"].deadUntil
+print(((dl == nil) and string.find(tostring(P.lastCast), "long move", 1, true) and "PASS " or "FAIL ")
+    .. "sea event: a long move (bar later, the game busy at once) = fired, never put aside - " .. tostring(P.lastCast))
+all = (dl == nil) and all
+print((clock < 0.1 and "PASS " or "FAIL ") .. "...and on at once the frame the game went busy - no 0.4 s wait (" .. clock .. " s)")
+all = (clock < 0.1) and all
+pileCur = nil
+LOG, clock, held, CD, m1Count, cdStore = {}, 0, nil, {}, 0, {}
+attackTick()
+dl = cdStore["KitsuneZ"] and cdStore["KitsuneZ"].deadUntil
+print(((dl == nil) and "PASS " or "FAIL ") .. "...the normal farm too: not left a minute (" .. tostring(P.lastCast) .. ")")
+all = (dl == nil) and all
+pileCur = { allKeys = function() return {} end, fastCast = true }
+LONG, BUSY_UNTIL = 0, -1
 -- NO M1 at a sea event out of Kitsune form (noM1): skills only, whatever has M1 on.
 pileCur = { allKeys = function() return {} end, fastCast = true, noM1 = function() return true end }
 all = run("sea event out of form: no M1 - the skill, then nothing while it cools (no swing)",
