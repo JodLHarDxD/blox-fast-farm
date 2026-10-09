@@ -1112,23 +1112,33 @@ check("its heart (Map.FrozenHeart): the character is YOURS (hands off), nothing 
     SE.leviStep() == true and P.handsOff == true and #NOTES >= 1 and P.floorY == nil and SE.ev == nil)
 MAP.kids.FrozenHeart = nil
 for _, m in ipairs({ headM, segA, segB, tailM }) do gone(m) end
-check("the heart gone (and the Leviathan): the farm drives again; nothing of it - the other modes run",
-    SE.leviStep() == false and P.handsOff == false)
+check("the heart gone, nothing of it up: the switch on = still yours (hands off), nothing else runs - waiting, said",
+    SE.leviStep() == true and P.handsOff == true and SE.levi.waiting == true and printed("waiting for it"))
 -- A new one later; its head gone at 5% (it sank): down too.
 local h2 = lpart("Leviathan", Z5, 300000, 300000, true)
 SE.leviStep()
+check("it shows: the fight has the character again (hands back, not waiting)", P.handsOff == false
+    and SE.levi.waiting == false and SE.levi.active == true)
 h2.kids.Health.Value = 12000
 SE.leviStep()
 gone(h2)
 SE.leviStep()
 check("a new Leviathan, its head gone at 4%: down (it sinks as it dies) - a second kill", SE.levi.kills == 2, SE.levi.kills)
--- It goes without a heart (despawned / left): nothing of the fight stays.
+-- It goes without a heart (under / despawned / left): held over the water 20 s, then yours.
 local g1 = lpart("Leviathan Segment", Z5 + vec(300, 0, 0), 100000, 100000, true)
 SE.leviStep()
-check("(a fight on)", P.floorY ~= nil)
+check("(a fight on)", P.floorY ~= nil and SE.levi.active == true)
 gone(g1)
-check("it goes without a heart: the other modes run, nothing of the fight stays",
-    SE.leviStep() == false and P.floorY == nil and SE.ev == nil and SE.levi.active == false)
+LOCKS = {}
+ROOT.Position = vec(Z5.X + 300, 0, Z5.Z)       -- low over the water when it went
+check("it goes mid-fight (no heart): HELD over the water - the floor kept, 20+ over the sea, nothing else runs",
+    SE.leviStep() == true and P.floorY ~= nil and SE.ev == nil and SE.levi.active == false and P.handsOff == false
+    and LOCKS[#LOCKS] ~= nil and LOCKS[#LOCKS].Y >= T.seaTop() + 20 - 0.01, vs(LOCKS[#LOCKS]))
+beat()
+check("...the heartbeat leaves the hold's floor alone (the hold is a fight)", P.floorY ~= nil and P.keepLock == true)
+CLOCK += 21
+check("...20 s and nothing: the floor off, the character yours (hands off) - waiting for it",
+    SE.leviStep() == true and P.floorY == nil and P.handsOff == true and SE.levi.waiting == true)
 -- Its attacks: an AnimationController's Animator (no Humanoid) is watched too.
 local lpa = lpart("Leviathan Segment", Z5 + vec(300, 0, 0), 100000, 100000, true)
 local ac = lpa:add(inst("AnimationController", "AnimationController"))
@@ -1158,6 +1168,200 @@ check("the switch off mid-fight: no floor, no circle - nothing of it stays (the 
     P.floorY == nil and SE.ev == nil and P.keepLock == nil and SE.levi.active == false)
 beat()
 gone(n1)
+CAST_KEY, DAMAGE = "Kitsune-Kitsune C", 0
+end)()
+
+-- ---------------------------------------------------------------- THE LEVIATHAN v2 (2026-10-09.8)
+;(function()
+-- Out of an attack's reach, pure: sideways only.
+local Cl = T.clearOf
+local ball = { kind = "ball", c = vec(0, 0, 0), r = 100 }
+local s1 = Cl(vec(30, 80, 40), { ball }, 15)
+check("out of its red area: sideways to its edge + 15, the height kept (up does not leave it)",
+    near(horiz(s1, vec(0, 0, 0)), 115, 0.01) and near(s1.Y, 80, 0.01) and near(s1.X / s1.Z, 30 / 40, 0.01), vs(s1))
+check("...outside it: left alone", vnear(Cl(vec(200, 80, 0), { ball }, 15), vec(200, 80, 0)))
+local line = { kind = "line", o = vec(0, 50, 0), dir = vec(1, 0, 0), w = 20 }
+local s2 = Cl(vec(100, 50, 10), { line }, 15)
+check("off its beam's line: sideways to 35 from it, as far along it (never up / down)",
+    near(s2.X, 100, 0.01) and near(s2.Y, 50, 0.01) and near(s2.Z, 35, 0.01), vs(s2))
+local s3 = Cl(vec(100, 60, 0), { line }, 15)
+check("...right over it (10 up): sideways only, 35 from the line in all",
+    near(s3.Y, 60, 0.01) and near(s3.X, 100, 0.01) and near(math.sqrt(100 + s3.Z * s3.Z), 35, 0.01), vs(s3))
+local s3b = Cl(vec(100, 50, -10), { line }, 15)
+check("...on its other side: out that side (the shorter way)", near(s3b.Z, -35, 0.01), vs(s3b))
+check("...behind its mouth: left alone", vnear(Cl(vec(-50, 50, 5), { line }, 15), vec(-50, 50, 5)))
+local s4 = Cl(vec(10, 50, 0), { ball, line }, 15)
+check("two at once: out of both", horiz(s4, vec(0, 0, 0)) >= 115 - 0.01 and math.abs(s4.Z) >= 35 - 0.01, vs(s4))
+
+-- THE HEAD LAST, whatever the attribute says (none at all = every part takes damage).
+local function px(name, kind, enabled, hp, max, pos)
+    return { model = { Name = name }, kind = kind, enabled = enabled, hp = hp, max = max, pos = pos, label = name }
+end
+local A2 = px("segA", "segment", true, 100000, 100000, vec(100, 0, 0))
+local Hn = px("head", "head", true, 300000, 300000, vec(0, 0, 0))
+check("levi pick: THE HEAD LAST - nearer and taking damage, still never while a segment is alive",
+    T.leviPick({ Hn, A2 }, nil, { [A2.model] = 20000 }, 0.15, vec(0, 0, 0)) == A2)
+check("...a segment back (they respawn) while the head is hit: back to the segment",
+    T.leviPick({ Hn, A2 }, Hn.model, {}, 0.15, vec(0, 0, 0)) == A2)
+local T2 = px("tail", "tail", true, 100000, 100000, vec(900, 0, 0))
+check("...the tail too goes before the head", T.leviPick({ Hn, T2 }, Hn.model, { [T2.model] = 50000 }, 0.15,
+    vec(0, 0, 0)) == T2)
+
+-- Its HP: a Humanoid when nothing else has it (the game's SyncLeviathan gives each part one).
+local hm = inst("Leviathan Segment", "Model")
+hm:add(inst("Humanoid", "Humanoid", { Health = 150000, MaxHealth = 187500 }))
+local hpa, hpm, hsrc = T.beastHP(hm)
+check("its HP from its Humanoid when no value / text / attribute has it", hpa == 150000 and hpm == 187500
+    and hsrc == "its Humanoid", tostring(hsrc))
+local hm2 = inst("SeaBeast1", "Model")
+hm2:add(inst("Health", "NumberValue", { Value = 5 }))
+hm2:add(inst("Humanoid", "Humanoid", { Health = 100, MaxHealth = 100 }))
+check("...a Health value first (the Humanoid only the last resort)", T.beastHP(hm2) == 5)
+
+-- The hitbox never made smaller.
+local big = inst("HumanoidRootPart", "Part", { Size = vec(100, 40, 120), CanCollide = true, Transparency = 0 })
+T.grow(big)
+check("the hitbox: a side already over 60 keeps its length - never made smaller", vnear(big.Size, vec(100, 60, 120)),
+    vs(big.Size))
+T.shrink()
+check("...put back as it was", vnear(big.Size, vec(100, 40, 120)))
+
+-- Its parts' attacks watched, every one: the head roars while you hit a segment.
+local function lpart(name, pos, hp, max, enabled)
+    local m = inst(name, "Model")
+    m:add(inst("HumanoidRootPart", "Part", { Position = pos, Size = vec(10, 10, 10), CanCollide = true, Transparency = 0 }))
+    m:add(inst("Health", "NumberValue", { Value = hp }))
+    if max then m:add(inst("MaxHealth", "NumberValue", { Value = max })) end
+    if enabled ~= nil then m.attrs.HealthEnabled = enabled end
+    SEABEASTS:add(m)
+    return m
+end
+reset()
+clearWorld()
+local wHead = lpart("Leviathan", Z5 + vec(0, 0, 0), 300000, 300000, false)
+local wHum = wHead:add(inst("Humanoid", "Humanoid", { Health = 100, MaxHealth = 100 }))
+local wAn = wHum:add(inst("Animator", "Animator"))
+wAn.tracks = {}
+function wAn:GetPlayingAnimationTracks() return self.tracks end
+local wSeg = lpart("Leviathan Segment", Z5 + vec(150, 0, 0), 100000, 100000, true)
+local ew = { root = wSeg.kids.HumanoidRootPart, model = wSeg, watch = { wSeg, wHead }, name = "Leviathan segment",
+    seen = setmetatable({}, { __mode = "k" }) }
+check("the watch: nothing new on any part - no attack", T.attackWatch(ew, Z5 + vec(150, 75, 30), CLOCK, 5) == nil)
+wAn.tracks = { { Looped = false, Animation = { AnimationId = "rbxassetid://levi-roar" } } }
+check("the watch: its HEAD starts an attack while you hit a segment - dodge",
+    T.attackWatch(ew, Z5 + vec(150, 75, 30), CLOCK, 5) ~= nil)
+
+-- THE FIGHT, its attacks out of reach: workspace._WorldOrigin, as the game fills it.
+local WO = WS:add(inst("_WorldOrigin", "Folder"))
+local WO_ADDED = nil
+WO.ChildAdded = { Connect = function(_, f)
+    WO_ADDED = f
+    return { Disconnect = function() WO_ADDED = nil end }
+end }
+local function spawnFx(i)
+    WO:add(i)
+    if WO_ADDED then WO_ADDED(i) end
+    return i
+end
+CFG.LeviFight, CFG.Hunt = true, false
+CAST_KEY, DAMAGE = "Kitsune-Kitsune C", 3000
+ROOT.Position = Z5 + vec(150, 80, 0)
+SE.leviStep()
+local segPos = wSeg.kids.HumanoidRootPart.Position
+check("the fight on: the game's effects folder watched", WO_ADDED ~= nil and SE.ev ~= nil and SE.ev.dangers ~= nil)
+check("...every part of it watched for an attack (the head too)", SE.ev.watch ~= nil and #SE.ev.watch == 2)
+-- The tail's red area (Bubble), over the segment: out of it sideways, kept 7 s.
+local bubble = spawnFx(inst("Bubble", "Part", { Position = segPos, Size = vec(200, 200, 200) }))
+LOCKS = {}
+beat()
+local lb = LOCKS[#LOCKS]
+check("ITS RED AREA (Bubble, 200 across) over the segment: the circle steps out of it - 115 from its middle",
+    lb ~= nil and horiz(lb, segPos) >= 115 - 0.01 and SE.lastClear ~= nil, vs(lb))
+check("...said, what it is", printed("the tail's red area") and printed("Bubble"))
+runSpawned()
+check("...its real size and place written to the probe file", FILES["bff_beast_probe.txt"] ~= nil
+    and string.find(FILES["bff_beast_probe.txt"], "[leviathan attack] Bubble", 1, true) ~= nil)
+gone(bubble)
+CLOCK += 3
+LOCKS = {}
+beat()
+check("...it goes (the game's Debris, 4 s): still kept out - the swipe comes after",
+    LOCKS[#LOCKS] ~= nil and horiz(LOCKS[#LOCKS], segPos) >= 115 - 0.01)
+CLOCK += 5
+LOCKS = {}
+beat()
+check("...7 s on: back round the segment, 30 off", LOCKS[#LOCKS] ~= nil and near(horiz(LOCKS[#LOCKS], segPos), 30, 0.01),
+    vs(LOCKS[#LOCKS]))
+-- The beam: its charge on the mouth, then the beam - a line along its look.
+local mouth = spawnFx(inst("MouthCharge", "Part", { Position = Z5 + vec(0, 40, 0), CFrame = cf(Z5 + vec(0, 40, 0), -math.pi / 2) }))
+local ds = T.leviDangers()
+local ln = nil
+for _, d in ipairs(ds) do if d.kind == "line" then ln = d end end
+check("ITS BEAM CHARGING (MouthCharge): a line from the mouth along its look",
+    ln ~= nil and vnear(ln.o, Z5 + vec(0, 40, 0)) and vnear(ln.dir, vec(1, 0, 0)), ln and vs(ln.dir))
+gone(mouth)
+check("...the charge gone: no line (the beam has its own object)", #T.leviDangers() == 0)
+local beam = inst("BeamModel", "Model")
+beam:add(inst("BeamRoot", "Part", { Position = Z5 + vec(0, 40, 0) }))
+beam:add(inst("BeamEnd", "Part", { Position = Z5 + vec(300, 40, 0), CFrame = cf(Z5 + vec(300, 40, 0), -math.pi / 2) }))
+spawnFx(beam)
+ds = T.leviDangers()
+check("ITS BEAM (BeamModel): from its root along its end's look", #ds == 1 and ds[1].kind == "line"
+    and vnear(ds[1].o, Z5 + vec(0, 40, 0)) and vnear(ds[1].dir, vec(1, 0, 0)))
+CLOCK += 9
+check("...over after 8 s even if left behind", #T.leviDangers() == 0)
+gone(beam)
+-- Its tornadoes: a column where it is now (it moves).
+local torn = inst("IcyTornado", "Model")
+torn:add(inst("Part", "Part", { Size = vec(10, 300, 10), Position = Z5 + vec(500, 0, 0) }))
+torn.pivot = cf(Z5 + vec(500, 0, 0))
+spawnFx(torn)
+ds = T.leviDangers()
+check("ITS TORNADO (IcyTornado): a column where it is, 15 across at least", #ds == 1 and ds[1].kind == "ball"
+    and vnear(ds[1].c, Z5 + vec(500, 0, 0)) and near(ds[1].r, 15, 0.01))
+torn.pivot = cf(Z5 + vec(520, 0, 0))
+ds = T.leviDangers()
+check("...followed as it moves", vnear(ds[1].c, Z5 + vec(520, 0, 0)))
+gone(torn)
+-- Its roar's ice spears: up, the moment one flies near.
+SE.ev.dodgeUntil = 0
+spawnFx(inst("IceSpear", "Part", { Position = ROOT.Position + vec(120, 0, 0) }))
+check("ITS ICE SPEAR (the roar) near you: up now", SE.ev.dodgeUntil > CLOCK and SE.lastDodge == "its ice spear")
+SE.ev.dodgeUntil = 0
+spawnFx(inst("IceSpear", "Part", { Position = ROOT.Position + vec(900, 0, 0) }))
+check("...one far off (900): not for you", SE.ev.dodgeUntil == 0)
+-- A second red area: kept out of, said only the first time.
+local bubble2 = spawnFx(inst("Bubble", "Part", { Position = segPos + vec(0, 0, 400), Size = vec(100, 100, 100) }))
+local said = 0
+for _, s in ipairs(PRINTED) do if string.find(s, "the tail's red area", 1, true) then said += 1 end end
+check("...a second one: said only once (a kind is named the first time)", said == 1, said)
+gone(bubble2)
+-- A segment back (they respawn) while one is being hit: watched too, the target kept.
+DAMAGE = 0
+local wSeg2 = lpart("Leviathan Segment", Z5 + vec(900, 0, 0), 100000, 100000, true)
+SE.leviStep()
+check("a segment back mid-fight: its attacks watched too (the target kept)", SE.ev ~= nil
+    and SE.ev.root == wSeg.kids.HumanoidRootPart and #SE.ev.watch == 3, SE.ev and #SE.ev.watch)
+-- Nothing lands for 6 s: the circle comes in to 25 over it.
+for _ = 1, 8 do SE.leviStep() end
+check("nothing landed for 6 s: the Leviathan's circle down to 25 over the part", SE.ev ~= nil and SE.ev.h == 25,
+    SE.ev and SE.ev.h)
+-- The switch off: the watch let go.
+CFG.LeviFight = false
+SE.leviStep()
+check("the switch off: the effects folder let go, nothing of the fight stays", WO_ADDED == nil and SE.ev == nil
+    and P.floorY == nil)
+WO.Parent.kids[WO.key] = nil
+gone(wHead)
+gone(wSeg)
+gone(wSeg2)
+-- Waiting for it (nothing up), then the switch off: the character back to the farm.
+CFG.LeviFight = true
+check("the switch on, nothing of it up: waiting, the character yours", SE.leviStep() == true and P.handsOff == true
+    and SE.levi.waiting == true)
+CFG.LeviFight = false
+check("...the switch off while waiting: the farm drives again (hands back), the other modes run",
+    SE.leviStep() == false and P.handsOff == false and SE.levi.waiting == false)
 CAST_KEY, DAMAGE = "Kitsune-Kitsune C", 0
 end)()
 
