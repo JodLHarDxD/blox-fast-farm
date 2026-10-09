@@ -196,6 +196,10 @@ local function lockAt(pos, look) table.insert(LOCKS, pos) ROOT.Position = pos en
 local function say(s) table.insert(SAYS, s) end
 local function setState(s) table.insert(STATES, s) end
 local flying, aimUntil = false, 0
+local lastWritten = nil
+local RESTORED = 0
+local function restoreBody() RESTORED += 1 end
+local function releaseCamera() end
 local pileCur, activeName = nil, nil
 local RELEASED = 0
 local function releasePile() RELEASED += 1 pileCur = nil end

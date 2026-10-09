@@ -994,4 +994,171 @@ ON_KEY, READY, BARS, CAN = nil, {}, {}, true
 TOOLS = {}
 end)()
 
+-- ---------------------------------------------------------------- THE LEVIATHAN (2026-10-09)
+;(function()
+-- The part to hit, pure.
+local function px(name, kind, enabled, hp, max, pos)
+    return { model = { Name = name }, kind = kind, enabled = enabled, hp = hp, max = max, pos = pos, label = name }
+end
+local A = px("segA", "segment", true, 100000, 100000, vec(0, 0, 0))
+local B = px("segB", "segment", true, 100000, 100000, vec(500, 0, 0))
+local H = px("head", "head", false, 300000, 300000, vec(10, 0, 0))
+local share = {}
+check("levi pick: the nearest segment short of your share", T.leviPick({ A, B, H }, nil, share, 0.15, vec(1, 0, 0)) == A)
+share[A.model] = 16000
+check("levi pick: your share of it reached (16% of 15%) - the next one, even far", T.leviPick({ A, B, H }, A.model, share, 0.15,
+    vec(1, 0, 0)) == B)
+share[A.model] = 5000
+check("levi pick: the one being hit, while short - kept (nearer ones wait)", T.leviPick({ A, B, H }, B.model, share, 0.15,
+    vec(1, 0, 0)) == B)
+share[A.model], share[B.model] = 20000, 20000
+check("levi pick: every share reached - the one being hit until it dies", T.leviPick({ A, B, H }, B.model, share, 0.15,
+    vec(1, 0, 0)) == B)
+check("levi pick: ...or the nearest", T.leviPick({ A, B, H }, nil, share, 0.15, vec(1, 0, 0)) == A)
+check("levi pick: a part that takes no damage now (the head, before the segments) - never",
+    T.leviPick({ H }, nil, {}, 0.15, vec(0, 0, 0)) == nil)
+local Hon = px("head", "head", true, 300000, 300000, vec(10, 0, 0))
+local Adead = px("segA", "segment", true, 0, 100000, vec(0, 0, 0))
+check("levi pick: a dead segment skipped; the head, once it takes damage, has no share rule",
+    T.leviPick({ Adead, Hon }, nil, {}, 0.15, vec(0, 0, 0)) == Hon)
+local Ash = px("segA", "segment", true, 100000, 100000, vec(0, 0, 0))
+check("levi pick: the head (no share rule) never pulls you off a segment you finished",
+    T.leviPick({ Hon, Ash }, Ash.model, { [Ash.model] = 20000 }, 0.15, vec(10, 0, 0)) == Ash)
+
+-- Its parts in workspace.SeaBeasts.
+local function lpart(name, pos, hp, max, enabled)
+    local m = inst(name, "Model")
+    m:add(inst("HumanoidRootPart", "Part", { Position = pos, Size = vec(10, 10, 10), CanCollide = true, Transparency = 0 }))
+    m:add(inst("Health", "NumberValue", { Value = hp }))
+    if max then m:add(inst("MaxHealth", "NumberValue", { Value = max })) end
+    if enabled ~= nil then m.attrs.HealthEnabled = enabled end
+    SEABEASTS:add(m)
+    return m
+end
+reset()
+clearWorld()
+TOOLS, READY, BARS = {}, {}, {}
+player.Character.kids = {}
+local headM = lpart("Leviathan", Z5 + vec(0, 0, 0), 300000, 300000, false)
+local segA = lpart("Leviathan Segment", Z5 + vec(200, 0, 0), 100000, 100000, true)
+local segB = lpart("Leviathan Segment", Z5 + vec(800, 0, 0), 100000, 100000, true)
+local tailM = lpart("Leviathan Tail", Z5 + vec(1200, 0, 0), 100000, 100000, true)
+local lp = T.leviParts()
+local kinds = {}
+for _, x in ipairs(lp) do kinds[x.kind] = (kinds[x.kind] or 0) + 1 end
+check("its parts: the head, two segments, the tail - the head not taking damage yet",
+    #lp == 4 and kinds.head == 1 and kinds.segment == 2 and kinds.tail == 1, #lp)
+for _, x in ipairs(lp) do
+    if x.kind == "head" then check("...the head: HealthEnabled off = not now", x.enabled == false) end
+end
+-- No part has the attribute at all (renamed?): every part taken.
+local savedAttrs = {}
+for _, m in ipairs({ headM, segA, segB, tailM }) do savedAttrs[m] = m.attrs.HealthEnabled m.attrs.HealthEnabled = nil end
+local allOn = true
+for _, x in ipairs(T.leviParts()) do if not x.enabled then allOn = false end end
+check("no part has HealthEnabled at all: every part taken", allOn)
+for m, a in pairs(savedAttrs) do m.attrs.HealthEnabled = a end
+
+-- THE FIGHT: switch off = nothing.
+CFG.LeviFight = false
+CFG.Hunt = false
+check("the switch off: the Leviathan left alone (the other modes run)", SE.leviStep() == false)
+CFG.LeviFight = true
+-- On: the nearest segment, no boat touched, the water a floor, round it at 75.
+BOAT = makeBoat(Z5 + vec(0, 5, 0))
+local pivot0 = BOAT.pivot
+S.driving, HUM.SeatPart = true, BOAT.seat
+SE.parkBoat, SE.parkAt = nil, nil
+ROOT.Position = Z5 + vec(150, 40, 0)
+CAST_KEY, DAMAGE = "Kitsune-Kitsune C", 5000
+local stops0 = STOPS
+check("on, the Leviathan up: it has the character (true), said", SE.leviStep() == true and printed("THE LEVIATHAN"))
+check("...off the seat, but NO boat parked or moved (a group may ride it)", STOPS > stops0 and SE.parkAt == nil
+    and BOAT.pivot == pivot0)
+check("...the nearest segment that takes damage - not the head", CASTS[1] and CASTS[1].model == segA, CASTS[1] and CASTS[1].model.Name)
+check("...the water a floor, knockback refused, round it at 75 over it", P.floorY ~= nil and P.keepLock == true
+    and SE.ev and SE.ev.h == 75)
+check("...its parts written to the probe file", FILES["bff_beast_probe.txt"]
+    and string.find(FILES["bff_beast_probe.txt"], "[leviathan]", 1, true) ~= nil)
+-- The sea events hunt is OFF: the fight's frame runs anyway (the circle at 75).
+LOCKS = {}
+beat()
+local ll = LOCKS[#LOCKS]
+check("the sea events hunt off: the circle round the segment still runs, 75 over the water",
+    ll and near(ll.Y, math.max(segA.kids.HumanoidRootPart.Position.Y, T.seaTop()) + 75, 0.01)
+    and near(horiz(ll, segA.kids.HumanoidRootPart.Position), 30, 0.01), vs(ll))
+-- Your share: segment A's HP drop while your keys land; at 15% the next segment.
+for _ = 1, 6 do
+    SE.leviStep()
+    if CASTS[#CASTS].model ~= segA then break end
+end
+check("segment A at your share (15% of it from your keys): on to the next segment",
+    (SE.levi.share[segA] or 0) >= 15000 and CASTS[#CASTS].model ~= segA and printed("on the Leviathan"),
+    tostring(SE.levi.share[segA]))
+-- The head takes damage only now; it dies: the count back to 0, the kill kept.
+SE.count.total, SE.count.kinds = 13, { ["Sea Beast"] = 13 }
+headM.attrs.HealthEnabled = true
+headM.kids.Health.Value = 0
+SE.leviStep()
+check("its head's HP 0: THE LEVIATHAN IS DOWN - the sea event count back to 0, the kill kept, said",
+    SE.count.total == 0 and SE.count.kinds.Leviathan == 1 and SE.levi.kills == 1 and printed("LEVIATHAN IS DOWN")
+    and saved() and saved().total == 0, SE.count.total)
+SE.leviStep()
+check("...counted once", SE.levi.kills == 1)
+-- ITS HEART: the character is yours.
+local heartPart = MAP:add(inst("FrozenHeart", "Model"))
+P.handsOff = false
+check("its heart (Map.FrozenHeart): the character is YOURS (hands off), nothing else runs, said",
+    SE.leviStep() == true and P.handsOff == true and #NOTES >= 1 and P.floorY == nil and SE.ev == nil)
+MAP.kids.FrozenHeart = nil
+for _, m in ipairs({ headM, segA, segB, tailM }) do gone(m) end
+check("the heart gone (and the Leviathan): the farm drives again; nothing of it - the other modes run",
+    SE.leviStep() == false and P.handsOff == false)
+-- A new one later; its head gone at 5% (it sank): down too.
+local h2 = lpart("Leviathan", Z5, 300000, 300000, true)
+SE.leviStep()
+h2.kids.Health.Value = 12000
+SE.leviStep()
+gone(h2)
+SE.leviStep()
+check("a new Leviathan, its head gone at 4%: down (it sinks as it dies) - a second kill", SE.levi.kills == 2, SE.levi.kills)
+-- It goes without a heart (despawned / left): nothing of the fight stays.
+local g1 = lpart("Leviathan Segment", Z5 + vec(300, 0, 0), 100000, 100000, true)
+SE.leviStep()
+check("(a fight on)", P.floorY ~= nil)
+gone(g1)
+check("it goes without a heart: the other modes run, nothing of the fight stays",
+    SE.leviStep() == false and P.floorY == nil and SE.ev == nil and SE.levi.active == false)
+-- Its attacks: an AnimationController's Animator (no Humanoid) is watched too.
+local lpa = lpart("Leviathan Segment", Z5 + vec(300, 0, 0), 100000, 100000, true)
+local ac = lpa:add(inst("AnimationController", "AnimationController"))
+local an = ac:add(inst("Animator", "Animator"))
+an.tracks = {}
+function an:GetPlayingAnimationTracks() return self.tracks end
+local lev = { root = lpa.kids.HumanoidRootPart, model = lpa, name = "Leviathan segment", seen = setmetatable({}, { __mode = "k" }) }
+an.tracks = { { Looped = false, Animation = { AnimationId = "rbxassetid://levi-beam" } } }
+check("its attack seen on an AnimationController (no Humanoid): dodge",
+    T.attackWatch(lev, Z5 + vec(300, 80, 30), CLOCK, 5) ~= nil)
+gone(lpa)
+-- Nothing takes damage (a phase change): over it, waiting, nothing fired.
+reset()
+local n1 = lpart("Leviathan Segment", Z5 + vec(300, -10, 0), 100000, 100000, false)
+CASTS = {}
+LOCKS = {}
+SE.leviStep()
+local lw = LOCKS[#LOCKS]
+check("no part takes damage right now: waiting 75 over it, nothing fired", #CASTS == 0 and lw
+    and near(lw.Y, math.max(-10, T.seaTop()) + 75, 0.01), vs(lw))
+-- The switch off mid-fight: all of it undone.
+n1.attrs.HealthEnabled = true
+SE.leviStep()
+CFG.LeviFight = false
+SE.leviStep()
+check("the switch off mid-fight: no floor, no circle - nothing of it stays (the step itself)",
+    P.floorY == nil and SE.ev == nil and P.keepLock == nil and SE.levi.active == false)
+beat()
+gone(n1)
+CAST_KEY, DAMAGE = "Kitsune-Kitsune C", 0
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

@@ -312,7 +312,7 @@ local CFG = {
     -- slow circle at Sea Danger SeaEvDanger and what comes is FOUGHT or FLED,
     -- each its own switch. Ship raids (the pirate brigades, the Fish Boat and
     -- its crew, the haunted ships) are ALWAYS fled - slow, and they break the
-    -- boat. The Leviathan is never touched. Never the next server.
+    -- boat. The Leviathan: its own switch (LeviFight, below). Never the next server.
     SeaEvDanger        = 5,          -- 1-6: where the boat patrols
     SeaEvFight         = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true,
         Piranha = true, Shark = false },
@@ -350,6 +350,14 @@ local CFG = {
     SeaEvTrial         = 20,         -- seconds in form, at most, for the test
     -- The weapons that fight at sea out of form (your points: fruit + melee).
     SeaEvWeapons       = { ["Blox Fruit"] = true, Melee = true, Sword = false, Gun = false },
+    -- THE LEVIATHAN (user, 2026-10-09): its own switch, any mode - whenever
+    -- it is up in this server, fought like a Sea Beast (every ready key, no
+    -- M1 out of Kitsune form, round it dodging, the water a floor); each
+    -- segment until your share (the reward needs 8% of the damage on each);
+    -- its heart = the character is yours. No boat is touched.
+    LeviFight          = false,
+    LeviHeight         = 75,         -- over the part being hit (the hubs: 75)
+    LeviShare          = 15,         -- % of a segment's HP before the next (others' hits count in it)
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -441,7 +449,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.6" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.7" }
 _G.BFF = P
 
 -- =========================================================
@@ -8917,6 +8925,8 @@ local function step()
     end
     if not off then pcall(keepHaki) end
 
+    -- THE LEVIATHAN: its own switch, any mode; its heart = the character is yours.
+    if P.seaev and P.seaev.leviStep() then return end
     -- The volcano event goes before every mode while its island is up.
     if not off and P.sea and P.sea.volcanoStep() then return end
     if CFG.Hunt then huntStep() return end
@@ -9093,7 +9103,8 @@ end
 --   FLED, always                  ship raids: the pirate brigades, the Fish
 --                                 Boat and its crew, the haunted ships (user:
 --                                 slow, and they break the boat)
---   NEVER TOUCHED                 the Leviathan (user: no Leviathan code)
+--   THE LEVIATHAN                 its own switch, any mode (LeviFight; user,
+--                                 2026-10-09 - THE LEVIATHAN, below)
 -- A fight: off the seat, the boat held BoatLift up (out of the waves), one
 -- target at a time - the nearest, kept until it dies.
 --   SEA BEAST   workspace.SeaBeasts, no Humanoid: its HP is a Health value,
@@ -9287,6 +9298,10 @@ do
         -- ---------- what the game shows ----------
         local function huntOn() return CFG.Hunt and CFG.HuntKind == "seaevents" end
         SE.huntOn = huntOn
+        -- A sea fight may run: the sea events hunt, or the Leviathan switch with one up.
+        local function fightAllowed()
+            return P.running and (huntOn() or (CFG.LeviFight == true and SE.levi ~= nil and SE.levi.active == true))
+        end
 
         -- The sea plane's middle (the surfaced test's reference, the hubs')
         -- and the water's top (a boat's water line; else the plane's top as
@@ -9732,7 +9747,7 @@ do
                 end
                 -- The hunt off (or the farm stopped) mid-fight: nothing of it stays
                 -- - the grown box, the far camera, the lock, the water's floor.
-                if not (P.running and huntOn()) and (SE.grown or SE.lockPart or SE.camSet or SE.ev or P.floorY) then
+                if not fightAllowed() and (SE.grown or SE.lockPart or SE.camSet or SE.ev or P.floorY) then
                     if SE.fightOff then SE.fightOff() end   -- (declared below, with the fights)
                     SE.camSet = nil
                 end
@@ -9836,9 +9851,9 @@ do
         -- (a new animation that does not loop - its wind-up), charges at you
         -- (over 60 studs/s toward you) or leaps (its root over the sea + 10,
         -- rising).
-        local function dodgeOpts()
+        local function dodgeOpts(h)
             return { r = tonumber(CFG.DodgeRadius) or 30, speed = tonumber(CFG.DodgeSpeed) or 50,
-                h = tonumber(CFG.FishHeight) or 30, up = tonumber(CFG.DodgeUp) or 40, top = seaTop() }
+                h = h or tonumber(CFG.FishHeight) or 30, up = tonumber(CFG.DodgeUp) or 40, top = seaTop() }
         end
         -- Pure (tools/seaev_test.py): the spot this frame. e = the circle's state.
         local function evadeSpot(e, tp, now, rnd, o)
@@ -9855,8 +9870,7 @@ do
             return Vector3.new(tp.X + math.cos(e.angle) * r, y, tp.Z + math.sin(e.angle) * r)
         end
         local function tracksOf(model)
-            local hum = model:FindFirstChildOfClass("Humanoid")
-            local anim = hum and hum:FindFirstChildOfClass("Animator")
+            local anim = model:FindFirstChildWhichIsA("Animator", true)
             if not anim then return {} end
             local ok, list = pcall(function() return anim:GetPlayingAnimationTracks() end)
             return (ok and type(list) == "table") and list or {}
@@ -9869,7 +9883,7 @@ do
         local function attackWatch(e, me, now, top)
             local tp = e.root.Position
             local vel = Vector3.zero
-            pcall(function() vel = e.root.AssemblyLinearVelocity end)
+            pcall(function() vel = e.root.AssemblyLinearVelocity or Vector3.zero end)
             local why = nil
             for _, t in ipairs(tracksOf(e.model)) do
                 if not e.seen[t] then
@@ -9909,7 +9923,7 @@ do
         SE.fightOff = fightOff
         -- A sea fight on target x: its hitbox, the camera off it, the water a
         -- floor, knockback refused, no swimming, the aim on it; a fish = the circle.
-        local function fightOn(x, cls)
+        local function fightOn(x, cls, opts)
             grow(x.root)
             P.camDistance = 90
             P.floorY = seaTop() + 4
@@ -9919,10 +9933,11 @@ do
             if h and SE.swimHum ~= h then
                 if pcall(function() h:SetStateEnabled(Enum.HumanoidStateType.Swimming, false) end) then SE.swimHum = h end
             end
-            if cls == "fish" and CFG.SeaDodge then
+            if (cls == "fish" or (opts and opts.dodge)) and CFG.SeaDodge then
                 if not (SE.ev and SE.ev.root == x.root) then
                     SE.ev = { root = x.root, model = x.model, name = x.label or x.kind, angle = math.random() * 2 * math.pi,
-                        dir = 1, flipAt = 0, dodgeUntil = 0, seen = setmetatable({}, { __mode = "k" }) }
+                        dir = 1, flipAt = 0, dodgeUntil = 0, seen = setmetatable({}, { __mode = "k" }),
+                        h = opts and opts.height or nil }
                     markPlaying(SE.ev)       -- what plays already is not an attack starting now
                 end
             else
@@ -9932,7 +9947,7 @@ do
         -- Every frame of a fight (the heartbeat above): the aim held on the
         -- target; round a fish, up when it attacks.
         function SE.fightTick()
-            if not (P.running and huntOn()) or S.driving then return end
+            if not fightAllowed() or S.driving then return end
             local now = os.clock()
             local lp = SE.lockPart
             if lp and lp.Parent then aimUntil = math.max(aimUntil, now + 0.25) end
@@ -9949,7 +9964,7 @@ do
                     SE.lastDodge = why
                 end
             end
-            lockAt(evadeSpot(e, e.root.Position, now, math.random, dodgeOpts()), e.root.Position)
+            lockAt(evadeSpot(e, e.root.Position, now, math.random, dodgeOpts(e.h)), e.root.Position)
         end
 
         -- ---------- THE SEA CASTER ----------
@@ -10183,14 +10198,14 @@ do
         -- Where to hang. A beast: BeastHeight over the water, 50 to your side;
         -- close: 25 over, 20 off. A fish: FishHeight over it, 15 off; close:
         -- 8 over, 8 off. Close = nothing landed for 6 s.
-        local function hangSpot(rp, from, close, sea, cls)
+        local function hangSpot(rp, from, close, sea, cls, hOwn)
             local side = flat(from - rp)
             side = (side.Magnitude > 1) and side.Unit or Vector3.new(1, 0, 0)
             if cls == "fish" then
                 local h = close and 8 or (tonumber(CFG.FishHeight) or 30)
                 return Vector3.new(rp.X, math.max(rp.Y, sea) + h, rp.Z) + side * (close and 8 or 15)
             end
-            local h = close and 25 or (tonumber(CFG.BeastHeight) or 90)
+            local h = close and 25 or (hOwn or tonumber(CFG.BeastHeight) or 90)
             return Vector3.new(rp.X, math.max(sea, rp.Y) + h, rp.Z) + side * (close and 20 or 50)
         end
 
@@ -10198,18 +10213,20 @@ do
         -- move aimed at it, credited by its HP (a fish's Humanoid, a beast's
         -- value), learned per class and per form; the form's M1 counted for
         -- the test.
-        local function fightBeast(x, myEpoch, cls, formNow)
+        -- opts (the Leviathan): noBoat - only off the seat, never a boat parked;
+        -- height - its own; dodge - round it; onCast(key, hp before, hp after).
+        local function fightBeast(x, myEpoch, cls, formNow, opts)
             cls = cls or "beast"
             if formNow == nil then formNow = inForm() end
             if pileCur then releasePile() end
-            leaveBoat()
+            if opts and opts.noBoat then S.stopDrive() else leaveBoat() end
             if SE.cur ~= x.model then
                 SE.cur, SE.fightStart, SE.lastHurt, SE.closeOn = x.model, os.clock(), nil, false
                 SE.fights += 1
             end
             activeName = x.label
             setState("FIGHT")
-            fightOn(x, cls)             -- the hitbox, the camera off it, the water a floor, the aim, the circle
+            fightOn(x, cls, opts)       -- the hitbox, the camera off it, the water a floor, the aim, the circle
             local function hpNow()
                 if x.hum then return x.hum.Health end
                 return hpOf(x.model)
@@ -10236,7 +10253,8 @@ do
                 print("[BFF] seaev: nothing hurt " .. x.label .. " for 6 s - in close")
             end
             local close = SE.closeOn
-            local spot = hangSpot(rp, r.Position, close, sea, cls)
+            local hOwn = opts and opts.height or nil
+            local spot = hangSpot(rp, r.Position, close, sea, cls, hOwn)
             if (r.Position - spot).Magnitude > (CFG.InstantHop or 150) then
                 flyTo(spot, { face = rp })
                 if stale(myEpoch) then return end
@@ -10262,14 +10280,16 @@ do
             local f = SE.form[cls]
             local testing = formNow and (CFG.SeaEvForm or "auto") == "auto" and not f.verdict
             local t0 = os.clock()
-            while os.clock() - t0 < 1.5 and P.running and huntOn() and not stale(myEpoch) and v.alive() do
+            while os.clock() - t0 < 1.5 and fightAllowed() and not stale(myEpoch) and v.alive() do
                 local _, r2 = parts()
                 if not r2 then break end
                 v.pos = x.root.Position
                 -- Round a fish, the heartbeat moves you (dodging); else hang here.
-                if not SE.ev then lockAt(hangSpot(v.pos, r2.Position, close, sea, cls), v.pos) end
+                if not SE.ev then lockAt(hangSpot(v.pos, r2.Position, close, sea, cls, hOwn), v.pos) end
                 local tc = os.clock()
+                local hpb = hpNow()
                 local key, resolved = SE.caster(v)
+                if opts and opts.onCast then opts.onCast(key, hpb, hpNow()) end
                 local landed = false
                 for _, rr in ipairs(resolved or {}) do
                     if rr.hit then landed = true end
@@ -10326,7 +10346,7 @@ do
             pose = function()
                 local e = SE.ev
                 if not (e and CFG.SeaDodge and e.root and e.root.Parent) then return nil end
-                return evadeSpot(e, e.root.Position, os.clock(), math.random, dodgeOpts())
+                return evadeSpot(e, e.root.Position, os.clock(), math.random, dodgeOpts(e.h))
             end,
             -- The M1: your fighting style first, then the fruit, a sword, a gun
             -- - of the weapons the sea fight takes.
@@ -10517,6 +10537,257 @@ do
             end)
         end
 
+        -- ---------- THE LEVIATHAN (user, 2026-10-09; CFG.LeviFight) ----------
+        -- Its own switch, any mode, before every other: whenever its parts
+        -- are in workspace.SeaBeasts - "Leviathan" (the head), "Leviathan
+        -- Segment"s, "Leviathan Tail" (the hubs, 2026) - fought like a Sea
+        -- Beast: every ready key aimed at it, no M1 out of Kitsune form, the
+        -- water a floor, round it dodging, a dive waited out. Only a part whose
+        -- HealthEnabled is true takes damage (the head only after the segments
+        -- - the game); none has the attribute at all = every part taken.
+        -- THE REWARD needs at least 8% of the damage on EACH segment (the
+        -- wiki): yours is its HP drop while your keys land (other players'
+        -- hits in that moment count too - so the goal is LeviShare, 15%), then
+        -- the next segment; every one reached = the nearest until it dies.
+        -- ITS HEART (Map.FrozenHeart): the character is YOURS - the Beast
+        -- Hunter's harpoon, tow it to Tiki (dying loses it); the farm drives
+        -- again when it is gone. KILLED (the head's HP 0, or gone at 10% or
+        -- less): the Spy's cooldown starts (each Frozen Dimension resets his
+        -- count - the wiki) - the sea event count back to 0, the kill kept.
+        -- No boat is ever touched (a group may be riding yours).
+        local LEVI = { ["Leviathan"] = "head", ["Leviathan Segment"] = "segment", ["Leviathan Tail"] = "tail" }
+        local LV: { [string]: any } = { active = false, hands = false, note = "-", kills = 0,
+            share = setmetatable({}, { __mode = "k" }), maxSeen = setmetatable({}, { __mode = "k" }), lastKeyAt = 0 }
+        SE.levi = LV
+
+        local function leviRoot(m)
+            for _, n in ipairs({ "HumanoidRootPart", "Head" }) do
+                local p = m:FindFirstChild(n)
+                if p and p:IsA("BasePart") then return p end
+            end
+            if m:IsA("Model") and m.PrimaryPart then return m.PrimaryPart end
+            return m:FindFirstChildWhichIsA("BasePart", true)
+        end
+
+        local function leviParts()
+            local f = workspace:FindFirstChild("SeaBeasts")
+            local out, anyAttr = {}, false
+            for _, m in ipairs(f and f:GetChildren() or {}) do
+                local kind = LEVI[tostring(m.Name)]
+                local root = kind and leviRoot(m)
+                if root then
+                    local ok, hp, max = pcall(beastHP, m)
+                    local attr = m:GetAttribute("HealthEnabled")
+                    if attr ~= nil then anyAttr = true end
+                    hp, max = ok and hp or nil, ok and max or nil
+                    if hp then LV.maxSeen[m] = math.max(LV.maxSeen[m] or 0, hp) end
+                    table.insert(out, { model = m, root = root, kind = kind, hp = hp, max = max, maxSeen = LV.maxSeen[m],
+                        attr = attr, pos = root.Position, label = "Leviathan " .. kind })
+                end
+            end
+            for _, x in ipairs(out) do x.enabled = (x.attr == true) or not anyAttr end
+            return out
+        end
+
+        -- THE PART TO HIT (pure: tools/seaev_test.py). Alive and taking damage
+        -- only. One still short of your share (a segment / the tail - the head
+        -- has no rule) before the rest: the one being hit while it is short,
+        -- else the nearest short one; every share reached = the one being hit,
+        -- else the nearest.
+        local function leviPick(list, cur, share, goal, from)
+            local ok = {}
+            for _, x in ipairs(list) do
+                if x.enabled and (x.hp == nil or x.hp > 0) then table.insert(ok, x) end
+            end
+            if #ok == 0 then return nil end
+            local function short(x)
+                local m = x.max or x.maxSeen
+                return x.kind ~= "head" and m ~= nil and m > 0 and (share[x.model] or 0) < goal * m
+            end
+            local anyShort = false
+            for _, x in ipairs(ok) do
+                if short(x) then anyShort = true end
+            end
+            for _, x in ipairs(ok) do
+                if x.model == cur and (short(x) or not anyShort) then return x end
+            end
+            local best, bd = nil, math.huge
+            for _, x in ipairs(ok) do
+                if short(x) or not anyShort then
+                    local d = from and (x.pos - from).Magnitude or 0
+                    if d < bd then best, bd = x, d end
+                end
+            end
+            return best
+        end
+
+        local function leviDown()
+            LV.downSaid = true
+            LV.kills += 1
+            local c = SE.count
+            local was = c.total
+            local lev = (c.kinds.Leviathan or 0) + 1
+            SE.count = { total = 0, kinds = { Leviathan = lev }, since = os.time(),
+                log = { string.format("%s Leviathan down - count reset (was %d)", os.date("%H:%M"), was) } }
+            SE.goalHit = false
+            save()
+            SE.last = string.format("THE LEVIATHAN IS DOWN - the Spy's cooldown starts: the count is back to 0 (was %d)", was)
+            print("[BFF] levi: " .. SE.last)
+            S.notify("Leviathan down! Sea event count reset to 0")
+        end
+
+        -- Its head: down when its HP reads 0, or it went at 10% or less (it sinks).
+        local function leviTrack(list)
+            local head = nil
+            for _, x in ipairs(list) do
+                if x.kind == "head" then head = x end
+            end
+            if head then
+                LV.head = head.model
+                LV.headHp = head.hp or LV.headHp
+                LV.headMax = head.max or head.maxSeen or LV.headMax
+                if head.hp ~= nil and head.hp <= 0 and not LV.downSaid then leviDown() end
+            elseif LV.head then
+                local frac = (LV.headHp and LV.headMax and LV.headMax > 0) and (LV.headHp / LV.headMax) or nil
+                if not LV.downSaid and verdict(false, true, frac) == "killed" then leviDown() end
+                LV.head = nil
+            end
+        end
+
+        local function probeLevi(list)
+            if LV.probed then return end
+            LV.probed = true
+            local out = { "[leviathan] " .. os.date("!%Y-%m-%d %H:%M:%S") .. "Z  " .. #list .. " parts" }
+            for _, x in ipairs(list) do
+                local m = x.model
+                local t = {}
+                local ok, a = pcall(function() return m:GetAttributes() end)
+                if ok and type(a) == "table" then
+                    for k, val in pairs(a) do table.insert(t, tostring(k) .. "=" .. tostring(val)) end
+                end
+                local okh, hp, max, src = pcall(beastHP, m)
+                table.insert(out, string.format("%s (%s): HP %s / %s from %s  ·  root %s at Y %.0f  ·  attributes: %s",
+                    tostring(m.Name), tostring(m.ClassName), tostring(okh and hp), tostring(okh and max), tostring(okh and src),
+                    tostring(x.root.Name), x.root.Position.Y, table.concat(t, ", ")))
+                local n = 0
+                for _, d in ipairs(m:GetChildren()) do
+                    if n < 25 then
+                        n += 1
+                        table.insert(out, "    " .. tostring(d.Name) .. " (" .. tostring(d.ClassName) .. ")")
+                    end
+                end
+            end
+            local map = workspace:FindFirstChild("Map")
+            table.insert(out, "Map.FrozenHeart now: " .. tostring(map ~= nil and map:FindFirstChild("FrozenHeart") ~= nil))
+            probeAdd(table.concat(out, "\n"))
+            print("[BFF] levi: its parts written to workspace/" .. PROBE)
+        end
+
+        -- One step. true = the Leviathan (or its heart) has the character;
+        -- false = nothing of it here (or the switch off): the other modes run.
+        function SE.leviStep()
+            local myEpoch = epoch
+            if not CFG.LeviFight then
+                if LV.hands then
+                    LV.hands = false
+                    P.handsOff = false
+                end
+                if LV.active then
+                    LV.active = false
+                    fightOff()
+                end
+                return false
+            end
+            local map = workspace:FindFirstChild("Map")
+            local heart = map and map:FindFirstChild("FrozenHeart")
+            if heart then
+                if not LV.hands then
+                    LV.hands, LV.active = true, false
+                    fightOff()
+                    if pileCur then releasePile() end
+                    P.handsOff, flying = true, false
+                    pcall(restoreBody)
+                    pcall(releaseCamera)
+                    LV.note = "THE LEVIATHAN'S HEART - the character is YOURS: the Beast Hunter's harpoon "
+                        .. "(its seat at the bow, M1), tow it to Tiki Outpost - dying loses it"
+                    print("[BFF] levi: " .. LV.note)
+                    S.notify("Leviathan heart - yours! Harpoon it, tow it to Tiki")
+                end
+                say(LV.note)
+                setState("LEVI")
+                task.wait(0.3)
+                return true
+            end
+            if LV.hands then
+                LV.hands = false
+                local _, rh = parts()
+                if rh then
+                    lastWritten = rh.Position
+                    lockAt(rh.Position)
+                end
+                P.handsOff = false
+                print("[BFF] levi: the heart is gone - the farm drives again")
+            end
+            local list = leviParts()
+            leviTrack(list)
+            if #list == 0 then
+                if LV.active then
+                    LV.active = false
+                    fightOff()
+                    LV.note = "the Leviathan is gone"
+                end
+                return false
+            end
+            if not LV.active then
+                LV.active, LV.downSaid, LV.cur = true, false, nil
+                LV.share = setmetatable({}, { __mode = "k" })
+                print(string.format("[BFF] levi: THE LEVIATHAN - %d parts up", #list))
+                S.notify("Leviathan up - fighting it")
+                probeLevi(list)
+            end
+            local _, r = parts()
+            if not r then return true end
+            local goal = math.clamp(tonumber(CFG.LeviShare) or 15, 1, 100) / 100
+            local h = tonumber(CFG.LeviHeight) or 75
+            local x = leviPick(list, LV.cur, LV.share, goal, r.Position)
+            if not x then
+                -- Nothing of it takes damage right now (a phase change): over it, waiting.
+                LV.cur = nil
+                local any = list[1]
+                fightOn(any, "beast", { height = h })
+                SE.lockPart = nil
+                local rp = any.root.Position
+                lockAt(Vector3.new(rp.X, math.max(rp.Y, seaTop()) + h, rp.Z), rp)
+                LV.note = "the Leviathan - no part takes damage right now (HealthEnabled off) - waiting over it"
+                say(LV.note)
+                setState("LEVI")
+                task.wait(0.3)
+                return true
+            end
+            if LV.cur ~= x.model then
+                LV.cur = x.model
+                print(string.format("[BFF] levi: on the %s (HP %s)", x.label, x.hp and tostring(math.floor(x.hp)) or "?"))
+            end
+            S.stopDrive()                  -- seated, the game refuses every skill (never a boat parked)
+            local want = formWanted("beast")
+            if want ~= inForm() then setForm(want, myEpoch) end
+            fightBeast(x, myEpoch, "beast", inForm(), { noBoat = true, dodge = true, height = h,
+                onCast = function(key, hpb, hpa)
+                    if key then LV.lastKeyAt = os.clock() end
+                    if hpb and hpa and hpa < hpb and os.clock() - (LV.lastKeyAt or 0) < 1.2 then
+                        LV.share[x.model] = (LV.share[x.model] or 0) + (hpb - hpa)
+                    end
+                end })
+            local m = x.max or x.maxSeen
+            LV.note = string.format("LEVIATHAN  ·  %s  ·  HP %s%s  ·  your share %s", x.label,
+                x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
+                m and string.format("%.1f%% (the next part at %d%%)", (LV.share[x.model] or 0) / m * 100, math.floor(goal * 100 + 0.5))
+                    or "not readable")
+            say(LV.note)
+            setState("LEVI")
+            return true
+        end
+
         -- For the tests.
         SE._t = {
             parseHP = parseHP, kindOf = kindOf, beastKind = beastKind, groupLabel = groupLabel,
@@ -10528,6 +10799,7 @@ do
             newTarget = newTarget, fightFish = fightFish, evadeSpot = evadeSpot, attackWatch = attackWatch,
             keyOk = keyOk, transformFruit = transformFruit, unlocked = unlocked, seaCast = seaCast,
             fightOn = fightOn, fightOff = fightOff, seaTop = seaTop,
+            leviParts = leviParts, leviPick = leviPick, leviTrack = leviTrack,
         }
     end
     build()
@@ -11785,7 +12057,18 @@ local function buildUI()
                 CFG.Volcano = x
                 say(x and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
             end)
+        switchRow(v, "Leviathan fight",
+            "Up in this server: fought like a Sea Beast, each segment your share; its heart is yours",
+            function() return CFG.LeviFight end,
+            function(x)
+                CFG.LeviFight = x
+                say(x and "Leviathan fight on - whenever it is up here" or "Leviathan fight off")
+            end)
         readout(v, function()
+            local lv = P.seaev and P.seaev.levi
+            if CFG.LeviFight and lv and (lv.active or lv.hands) then
+                return "LEVIATHAN  " .. tostring(lv.note) .. string.format("\n%d Leviathans down", lv.kills)
+            end
             if CFG.Volcano and P.sea.ev then
                 local ev = P.sea.ev
                 return string.format("VOLCANO  %s\n%d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
@@ -12833,7 +13116,7 @@ local function buildUI()
             local c = e.count
             local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
             local kinds = {}
-            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark" }) do
+            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark", "Leviathan" }) do
                 if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
             end
             local spy = e.spy
@@ -12870,7 +13153,7 @@ local function buildUI()
         caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
             .. "Boat and its crew, the haunted ships) are always sailed away from - "
             .. "slow, and they break the boat - then the boat waits, stopped, until "
-            .. "the ship is twice that far or gone. The Leviathan is never touched. The "
+            .. "the ship is twice that far or gone. The Leviathan: its own switch below. The "
             .. "boat patrols a slow circle at the danger you set (sea events come to a "
             .. "boat that is near); a fight takes you off the seat and holds the boat "
             .. "up out of the waves; then back to the wheel. Never the next server.")
@@ -12888,6 +13171,38 @@ local function buildUI()
             .. "despawned = not counted. Kept across joins - reset it after each Frozen "
             .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
             .. "5 min and after each count) is the truth; the count is the guide.")
+        heading2(v, "the leviathan")
+        switchRow(v, "Leviathan fight", "Its own switch, any mode: whenever it is up in this server",
+            function() return CFG.LeviFight end,
+            function(x) CFG.LeviFight = x end)
+        sliderRow(v, "Over the part being hit", 30, 300, 5,
+            function() return CFG.LeviHeight end,
+            function(x) CFG.LeviHeight = x end, " studs")
+        sliderRow(v, "Your share of each segment before the next", 8, 50, 1,
+            function() return CFG.LeviShare end,
+            function(x) CFG.LeviShare = x end, " %")
+        readout(v, function()
+            local lv = P.seaev.levi
+            local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills) }
+            local ok, list = pcall(P.seaev._t.leviParts)
+            for _, x in ipairs((ok and list) or {}) do
+                local m = x.max or x.maxSeen
+                table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
+                    x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
+                    x.enabled and "takes damage" or "not now",
+                    m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
+            end
+            return table.concat(lines, "\n")
+        end)
+        caption(v, "Fought like a Sea Beast - every ready key aimed at the part, no M1 out "
+            .. "of Kitsune form, round it dodging, the water a floor, dives waited out. "
+            .. "Only parts that take damage now (the head after the segments). The "
+            .. "reward needs 8% of the damage on EACH segment: yours is read off its HP "
+            .. "while your keys land (others' hits in that moment count too), so the next "
+            .. "one at your share. Its HEART: the character is yours - the Beast Hunter's "
+            .. "harpoon, tow it to Tiki. Killed: the sea event count back to 0 (the Spy's "
+            .. "cooldown starts). No boat is touched. The first one writes its parts to "
+            .. "workspace/bff_beast_probe.txt.")
         heading2(v, "the loadout at sea")
         radio(v, 122, {
             { "auto", "Kitsune form first, its M1 tested", "hurts them = form; else Kitsune + fighting style" },
