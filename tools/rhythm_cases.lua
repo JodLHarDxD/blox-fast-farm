@@ -117,6 +117,16 @@ print((dead and dead - clock <= 3.01 and dead - clock > 2 and "PASS " or "FAIL "
     .. "sea event: a refused key is tried again in 3 s (it may only have been too early), not a minute")
 all = (dead and dead - clock <= 3.01 and dead - clock > 2) and all
 REFUSE = false
+-- NO M1 at a sea event out of Kitsune form (noM1): skills only, whatever has M1 on.
+pileCur = { allKeys = function() return {} end, fastCast = true, noM1 = function() return true end }
+all = run("sea event out of form: no M1 - the skill, then nothing while it cools (no swing)",
+    cfg({ M1Between = 0 }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 3,
+    "swap Kitsune | cast Kitsune Z") and all
+P.m1Of = function(used) return used[1] end      -- your M1 pick / the mastery: still no swing
+all = run("...your M1 pick or the mastery weapon: still no swing",
+    cfg({ M1Between = 0 }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 3,
+    "swap Kitsune | cast Kitsune Z") and all
+P.m1Of = nil
 pileCur = nil
 all = run("...and outside a sea event \"M1 between\" holds again",
     cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 3,

@@ -316,9 +316,10 @@ local CFG = {
     SeaEvDanger        = 5,          -- 1-6: where the boat patrols
     SeaEvFight         = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true,
         Piranha = true, Shark = false },
-    -- Every carried weapon fires these at a sea event, its M1 between them
-    -- (user, 2026-10-08: sea events = M1 AND every skill; the Attack page is
-    -- for the normal farm). Each the INSTANT it is ready (user, 2026-10-09).
+    -- Every carried weapon fires these at a sea event (the Attack page is for
+    -- the normal farm), each the INSTANT it is ready (user, 2026-10-09). NO M1
+    -- at a sea event (user, 2026-10-09: an untransformed M1 does nothing to
+    -- one - never, not even to test) - only Kitsune's, in Kitsune form.
     -- V is never fired on a transformation fruit (Kitsune's V transforms) -
     -- on everything else it is (Dragon Talon's V).
     SeaEvKeys          = { Z = true, X = true, C = true, V = true, F = true },
@@ -440,7 +441,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.5" }
 _G.BFF = P
 
 -- =========================================================
@@ -3141,6 +3142,9 @@ local function attackTick()
     -- that swings M1 is never swapped out by the rotation (P.keepSword).
     local m1Of = (P :: any).m1Of
     if m1Of then m1u = m1Of(used) end
+    -- A fight that swings no M1 at all (SEA EVENTS out of Kitsune form, user
+    -- 2026-10-09) - whatever the Attack page, your M1 pick or the mastery say.
+    if pileCur and pileCur.noM1 and pileCur.noM1() then m1u = nil end
     P.m1Now = m1u and m1u.name or nil
     if m1u and m1u.tool and toolType(m1u.tool) == "Sword" then P.keepSword = m1u.name end
 
@@ -10003,6 +10007,14 @@ do
                     end
                 end
             end
+            -- No key ready. NO M1 out of Kitsune form (user, 2026-10-09: an
+            -- untransformed M1 does nothing to a sea event - never, not even to
+            -- test): wait a moment for the next key. In form, Kitsune's M1.
+            if not (v.m1Ok and v.m1Ok()) then
+                task.wait(0.05)
+                for _, x in ipairs(credit(v, os.clock())) do table.insert(resolved, x) end
+                return nil, resolved
+            end
             local m1 = v.m1Tool and v.m1Tool()
             if m1 then equip(m1) end
             local h2 = heldTool()
@@ -10210,6 +10222,7 @@ do
                 keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, toolOk = seaOk, noRotate = noRotate,
                 keyOk = keyOk, hp = hpNow }
             v.m1Tool = function() return bestM1(learn, suffix) end
+            v.m1Ok = function() return inForm() end        -- M1 only in Kitsune form
             v.alive = function()
                 local hp = hpNow()
                 return x.model.Parent ~= nil and not (hp and hp <= 0)
@@ -10271,8 +10284,7 @@ do
         end
 
         -- Terrorshark / Piranha / Shark out of form: the farm's own fight, in
-        -- place - its remote-hit M1 lands on a Humanoid from up there (your
-        -- fighting style, Dragon Talon), every skill of the sea's weapons.
+        -- place - every skill of the sea's weapons, NO M1 (user, 2026-10-09).
         local FISH_CUR
         FISH_CUR = {
             name = "sea event",
@@ -10282,6 +10294,7 @@ do
             keyOk = function(name, k) return keyOk(name, k) end,
             noRotate = function() return noRotate() end,
             fastCast = true,             -- every key the instant the game takes it (castSkill)
+            noM1 = function() return not inForm() end,     -- no M1 out of Kitsune form (attackTick)
             -- Where you are: round it, dodging (the heartbeat writes the same spot).
             pose = function()
                 local e = SE.ev
@@ -10338,7 +10351,7 @@ do
                 SE.fights += 1
             end
             activeName = x.label
-            SE.note = x.label .. "  ·  M1 + every skill, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
+            SE.note = x.label .. "  ·  every skill, no M1, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
                 .. (CFG.SeaDodge and ", round it, dodging" or "")
             say(SE.note)
             local why = fight(FISH_CUR, FISH)
@@ -12813,9 +12826,9 @@ local function buildUI()
             function() return CFG.SeaEvDanger end,
             function(x) CFG.SeaEvDanger = x end, "")
         for _, row in ipairs({
-            { "Sea Beast", "Hovered over, every key + M1 aimed at it, learned by its HP" },
+            { "Sea Beast", "Hovered over, every key aimed at it (M1 only in Kitsune form)" },
             { "Rumbling Waters", "Three beasts at once - one at a time, the nearest first" },
-            { "Terrorshark", "Fought where it swims - M1 + every skill" },
+            { "Terrorshark", "Round it, dodging - every key (M1 only in Kitsune form)" },
             { "Piranha", "A school of them = one sea event" },
             { "Shark", "Off: sailed away from" },
         }) do
@@ -12931,10 +12944,10 @@ local function buildUI()
                 end)
         end
         caption(v, "Every key the INSTANT it is ready (the moment the game takes it - not "
-            .. "during another move - and the next one the frame it fires), the M1 "
-            .. "in between - your Attack page is left for the normal "
-            .. "farm. On a Sea Beast which key and whose M1 hurt it is learned from its "
-            .. "HP: one that never did after 4 tries goes last.")
+            .. "during another move - and the next one the frame it fires) - your "
+            .. "Attack page is left for the normal farm. NO M1 at a sea event (an "
+            .. "untransformed M1 does nothing to one): only Kitsune's, in Kitsune form. "
+            .. "Which key hurts it is learned from its HP.")
         heading2(v, "what hurts a sea beast (learned)")
         readout(v, function()
             local rows = {}

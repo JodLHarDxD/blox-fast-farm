@@ -835,10 +835,11 @@ CFG.SeaEvKeys.X = true
 
 -- THE CASTER: the first ready key, the one in hand first, the instant the game takes it.
 local HPV = 100000
+local FORM_M1 = true          -- the caster's v.m1Ok: in Kitsune form (an M1 allowed)
 local function cv(extra)
     local v = { pos = Z5, part = tsk2.root, model = tsk2, learn = {}, hp = function() return HPV end,
         toolOk = function() return true end, keyOk = function(_, k) return k ~= "V" end,
-        m1Tool = function() return "Kitsune-Kitsune" end }
+        m1Tool = function() return "Kitsune-Kitsune" end, m1Ok = function() return FORM_M1 end }
     for k2, x in pairs(extra or {}) do v[k2] = x end
     return v
 end
@@ -857,7 +858,7 @@ check("...then the next ready one - Kitsune Z (swapped to)", k2 == "Kitsune-Kits
 READY["Kitsune-Kitsune Z"] = false
 local sentBefore = #KEYS_SENT
 local k3 = SEA_CAST(v1)
-check("...Kitsune's V is ready but NEVER pressed: nothing ready = the M1", string.sub(tostring(k3), 1, 3) == "M1 "
+check("...Kitsune's V is ready but NEVER pressed: nothing ready, in form = Kitsune's M1", string.sub(tostring(k3), 1, 3) == "M1 "
     and #KEYS_SENT == sentBefore and M1S == 1 and aimPixel == nil,
     tostring(k3) .. " sent " .. (#KEYS_SENT - sentBefore) .. " m1s " .. M1S .. " last " .. tostring(KEYS_SENT[#KEYS_SENT]))
 -- The game busy (another move playing): pressed the moment it takes keys, not before.
@@ -907,6 +908,7 @@ for _, rr in ipairs(res) do if rr.key == "Kitsune-Kitsune Z (form)" and rr.hit t
 check("...its HP went down by the next turn: credited, without waiting for it", credited
     and lv["Kitsune-Kitsune Z (form)"] and lv["Kitsune-Kitsune Z (form)"].closed == 1)
 -- An M1 with a key going off beside it does not count for the form's test.
+FORM_M1 = true
 local v3 = cv({ learn = {} })
 READY = {}
 SEA_CAST(v3)                                               -- an M1, pending
@@ -920,6 +922,37 @@ local m1solo = nil
 for _, rr in ipairs(res3) do if rr.m1 and rr.hit then m1solo = rr.solo end end
 check("an M1 with a key going off beside it: not counted for the form's test (who hit is unclear)", m1solo == false,
     tostring(m1solo))
+-- NO M1 OUT OF FORM (user, 2026-10-09: an untransformed M1 does nothing to a sea event).
+FORM_M1 = false
+READY, BARS = {}, {}
+local m1Before, sentB = M1S, #KEYS_SENT
+local kn, resn = SEA_CAST(cv())
+check("out of Kitsune form, nothing ready: NO M1 (not even to test) - nothing pressed, wait for the next key",
+    kn == nil and M1S == m1Before and #KEYS_SENT == sentB and type(resn) == "table", tostring(kn))
+READY = { ["Kitsune-Kitsune Z"] = true }
+local kk = SEA_CAST(cv())
+check("...a key ready: it goes as always", kk == "Kitsune-Kitsune Z" and M1S == m1Before, tostring(kk))
+FORM_M1 = true
+READY = {}
+SEA_CAST(cv())
+check("in Kitsune form: its M1 between the keys", M1S == m1Before + 1)
+-- The farm's fight (Terrorshark out of form) swings no M1; in form the caster takes over anyway.
+player.Character.kids = {}
+check("the farm's fight out of form: no M1 at all (noM1)", SE.FISH_CUR.noM1() == true)
+player.Character:add(inst("Kitsune", "Model"))
+check("...in Kitsune form it would (but the caster has it)", SE.FISH_CUR.noM1() == false)
+-- The beast fight gives its caster that rule, live.
+TOOLS = {}
+player.Character.kids = {}
+reset()
+clearWorld()
+CFG.Hunt, P.running = true, true
+beast("SeaBeast7", Z5 + vec(300, 0, 0), 100000, 100000)
+SE.step(epoch)
+check("a beast fight out of form: its caster swings no M1", CASTS[1] and CASTS[1].m1Ok and CASTS[1].m1Ok() == false)
+player.Character:add(inst("Kitsune", "Model"))
+check("...in Kitsune form: Kitsune's M1 allowed", CASTS[1].m1Ok() == true)
+player.Character.kids = {}
 ON_KEY, READY, BARS, CAN = nil, {}, {}, true
 TOOLS = {}
 end)()
