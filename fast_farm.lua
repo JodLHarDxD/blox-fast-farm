@@ -451,7 +451,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.9" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.10" }
 _G.BFF = P
 
 -- =========================================================
@@ -13975,6 +13975,14 @@ local function buildUI()
     end)
 end
 
+-- The panel. A failure is SAID now - it used to vanish inside a pcall (no
+-- panel, not a word). _G.BFF.panel() builds it again, from the console.
+function P.panel()
+    local ok, e = pcall(buildUI)
+    if not ok then warn("[BFF] the panel failed to build: " .. tostring(e)) end
+    return ok
+end
+
 -- =========================================================
 -- API
 -- =========================================================
@@ -14042,7 +14050,7 @@ function P.start()
         attacking = false
         releaseCamera()
     end))
-    if not (gui and gui.Parent) then pcall(buildUI) end
+    if not (gui and gui.Parent) then P.panel() end
 
     task.spawn(mainLoop)
     task.spawn(sideLoop)
@@ -14330,7 +14338,7 @@ do
     pcall(syncWeapons)
     say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
         or "loaded - pick targets, then press Start")
-    pcall(buildUI)
+    P.panel()
     if resumed then task.defer(P.start) end
 end
 -- Water is land from load, farm running or not (farm_pro's, unchanged).

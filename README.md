@@ -28,6 +28,17 @@ weapon and switch on what it fires → **Start**.
 _G.BFF.start()   _G.BFF.stop()   _G.BFF.config
 ```
 
+**Clear it from the server and load it fresh** (same server, no rejoin):
+
+```lua
+if _G.BFF and _G.BFF.stop then pcall(_G.BFF.stop) end
+_G.BFF = nil                      -- every loop / hook of the old copy lets go by itself
+local hud = game.Players.LocalPlayer.PlayerGui:FindFirstChild("BFFHUD")
+if hud then hud:Destroy() end
+```
+
+Then the loader above. **No panel?** The console says why (`[BFF] the panel failed to build: ...`, since build 2026-10-09.10); `_G.BFF.panel()` builds it again. Saved between loads: the sea event count (`bff_sea_events.json`) and learned keys (`bff_learn.json`); switches start at their defaults.
+
 ## Executor: Velocity (since 2026-09-30)
 
 Solara was removed: since 2026-09-29 the client freezes and closes on every
