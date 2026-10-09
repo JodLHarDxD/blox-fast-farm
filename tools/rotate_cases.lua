@@ -62,6 +62,12 @@ pileCur = { allKeys = function() return { Z = true, F = true } end }
 list = usedWeapons()
 check("a sea event's fight: every weapon you carry, its keys (F too)", #list == 3 and list[1].cfg.F == true
     and list[1].cfg.Z == true and not list[1].cfg.X, #list)
+pileCur.keyOk = function(n, k) return not (k == "Z" and n == "Dragon Talon") end
+list = usedWeapons()
+local dtz = nil
+for _, u in ipairs(list) do if u.name == "Dragon Talon" then dtz = u.cfg.Z end end
+check("a sea event's fight, per key (V never on a transformation fruit, a locked key): that key off", dtz == false)
+pileCur.keyOk = nil
 pileCur.toolOk = function(n) return n ~= "Kabucha" end
 list = usedWeapons()
 check("a sea event's fight with its weapon rule (fruit + melee): the gun left out", #list == 2

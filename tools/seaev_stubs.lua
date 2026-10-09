@@ -117,6 +117,12 @@ local function inst(name, class, opts)
         end
         return nil
     end
+    function o:FindFirstChildOfClass(c)
+        for _, k in ipairs(self:GetChildren()) do
+            if k.ClassName == c then return k end
+        end
+        return nil
+    end
     function o:GetAttribute(n) return self.attrs[n] end
     function o:GetAttributes() return self.attrs end
     function o:GetFullName()
@@ -131,6 +137,7 @@ end
 
 local WS = inst("Workspace", "Workspace")
 local workspace = WS
+WS.CurrentCamera = { ViewportSize = vec(1920, 1080, 0) }
 local MAP = WS:add(inst("Map", "Folder"))
 -- The sea plane: middle at Y -50, so the water's top (+56) is Y 6.
 local PLANE = MAP:add(inst("WaterBase-Plane", "Part", { Position = vec(0, -50, 0) }))
@@ -138,7 +145,9 @@ local SEABEASTS = WS:add(inst("SeaBeasts", "Folder"))
 local ENEMIES = WS:add(inst("Enemies", "Folder"))
 
 -- ---------------------------------------------------------------- the player
-local HUM = { Health = 100, SeatPart = nil, Sit = false }
+local HUM = { Health = 100, SeatPart = nil, Sit = false, states = {} }
+function HUM:SetStateEnabled(st, on) self.states[st] = on end
+local Enum = { HumanoidStateType = { Swimming = "Swimming" } }
 local ROOT = { Position = vec(0, 10, 0) }
 local player = { Name = "Me", Character = inst("Me", "Model") }
 local function parts() return {}, ROOT, HUM end
@@ -148,7 +157,8 @@ local CFG = {
     Hunt = true, HuntKind = "seaevents", SeaSpeed = 300, InstantHop = 150,
     SeaEvDanger = 5,
     SeaEvFight = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true, Piranha = true, Shark = false },
-    SeaEvKeys = { Z = true, X = true, C = true, V = false, F = true },
+    SeaEvKeys = { Z = true, X = true, C = true, V = true, F = true },
+    SeaDodge = true, DodgeRadius = 30, DodgeSpeed = 50, DodgeUp = 40, DodgeTime = 1.0,
     BeastHeight = 90, FishHeight = 30, BoatLift = 150, FleeTo = 1500,
     SeaEvGoal = 20, SeaEvStopAtGoal = false,
     SeaEvForm = "auto", SeaEvTrial = 20,
@@ -220,11 +230,27 @@ local HELD = nil
 local function equip(n) HELD = n return true end
 local BARS = {}
 local function barReady(w, k) return BARS[w .. " " .. k] end
-local KEYS_SENT, ON_KEY = {}, nil
-local function holdKey(code) table.insert(KEYS_SENT, code) if ON_KEY then ON_KEY(code) end end
+local KEYS_SENT, KEYS_AT, ON_KEY = {}, {}, nil
+local function holdKey(code, secs, before)
+    if before then before() end
+    table.insert(KEYS_SENT, code)
+    table.insert(KEYS_AT, CLOCK)
+    if ON_KEY then ON_KEY(code) end
+end
 local KEYCODE = { Z = "Z", X = "X", C = "C", V = "V", F = "F" }
 local CDS = {}
 local function cdOf(w, k) CDS[w .. k] = CDS[w .. k] or {} return CDS[w .. k] end
+local function heldTool() return HELD and { Name = HELD } or nil end
+local READY = {}
+local function skillReady(w, k) return READY[w .. " " .. k] == true end
+local CAN = true                      -- the game takes a key now (true) / from this clock on (a number)
+local function canCast() return CAN == true or (type(CAN) == "number" and CLOCK >= CAN) end
+local M1S = 0
+local function pressM1() M1S += 1 end
+local AIMED = {}
+local function aimSwapIn(at) table.insert(AIMED, at) end
+local aimPixel = nil
+local stats = { casts = 0 }
 -- CommF_: every call recorded; the Spy answers SPY_CODE.
 local CALLS, SPY_CODE = {}, 1
 local CF_REMOTE = { InvokeServer = function(_, ...)
@@ -235,10 +261,13 @@ local CF_REMOTE = { InvokeServer = function(_, ...)
 end }
 local function commF() return CF_REMOTE end
 local HEARTBEAT = {}
-local RunService = { Heartbeat = { Connect = function(_, f)
-    table.insert(HEARTBEAT, f)
-    return { Disconnect = function() end }
-end } }
+local RunService = { Heartbeat = {
+    Connect = function(_, f)
+        table.insert(HEARTBEAT, f)
+        return { Disconnect = function() end }
+    end,
+    Wait = function() CLOCK += 1 / 60 return 1 / 60 end,
+} }
 local function beat() for _, f in ipairs(HEARTBEAT) do f() end end
 -- HttpService: a table stored under a token (no real JSON needed here).
 local JSONS = {}
@@ -300,7 +329,7 @@ function S.keyScore(key, learn)
     if L.casts < 4 then return 0.5 end
     return 0
 end
-function S.ventCast(v)
+local function CASTER(v)
     table.insert(CASTS, v)
     if v.mark then v.mark() end
     local m = v.model
@@ -308,6 +337,7 @@ function S.ventCast(v)
     if hv then hv.Value = math.max(0, hv.Value - DAMAGE) end
     if m.hum then m.hum.Health = math.max(0, m.hum.Health - DAMAGE) end
     CLOCK += 0.5
-    return CAST_KEY, v.dropped and v.dropped() or false
+    local landed = v.dropped and v.dropped() or false
+    return CAST_KEY, { { key = CAST_KEY, hit = landed, m1 = string.sub(CAST_KEY, 1, 3) == "M1 ", solo = true } }
 end
 P.sea = S

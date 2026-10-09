@@ -23,7 +23,9 @@ local function say(_) end
 local function toolType(t) return t.kind end
 local function setPose(_) end
 local function aimCamera(_) end
-local function holdKey(code, _) ev("cast " .. held .. " " .. code) CD[held .. code] = clock + COOL end
+local REFUSE = false     -- the game refuses the key (its bar never starts)
+local function holdKey(code, _) ev("cast " .. held .. " " .. code) if not REFUSE then CD[held .. code] = clock + COOL end end
+local player = { Character = { FindFirstChild = function() return nil end, FindFirstChildOfClass = function() return nil end } }
 local cdStore = {}
 local function cdOf(w, k) cdStore[w .. k] = cdStore[w .. k] or {} return cdStore[w .. k] end
 local function barReady(w, k) if held ~= w then return nil end return clock >= (CD[w .. k] or 0) end

@@ -318,8 +318,19 @@ local CFG = {
         Piranha = true, Shark = false },
     -- Every carried weapon fires these at a sea event, its M1 between them
     -- (user, 2026-10-08: sea events = M1 AND every skill; the Attack page is
-    -- for the normal farm). V is often a transformation: off by default.
-    SeaEvKeys          = { Z = true, X = true, C = true, V = false, F = true },
+    -- for the normal farm). Each the INSTANT it is ready (user, 2026-10-09).
+    -- V is never fired on a transformation fruit (Kitsune's V transforms) -
+    -- on everything else it is (Dragon Talon's V).
+    SeaEvKeys          = { Z = true, X = true, C = true, V = true, F = true },
+    -- DODGING (user, 2026-10-09: "not held on a position to take attacks"):
+    -- round a Terrorshark / Piranha / Shark all the time, the direction
+    -- changing, the aim locked on it; up DodgeUp the moment it starts an
+    -- attack, charges at you or leaps, back down after DodgeTime.
+    SeaDodge           = true,
+    DodgeRadius        = 30,         -- studs round it
+    DodgeSpeed         = 50,         -- studs/s along the circle
+    DodgeUp            = 40,         -- studs up when it attacks
+    DodgeTime          = 1.0,        -- seconds up
     BeastHeight        = 90,         -- over the sea while a Sea Beast is fought
     FishHeight         = 30,         -- over a Terrorshark / Piranha / Shark
     BoatLift           = 150,        -- the boat held this high while you fight (0 = left on the water)
@@ -429,7 +440,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.4" }
 _G.BFF = P
 
 -- =========================================================
@@ -892,11 +903,17 @@ local function bodyHeartbeat()
         -- SOMETHING ELSE MOVED THE BODY. A respawn, the submarine, the game's
         -- own teleport: the body is far from where this script last put it.
         -- Stay where the game put us instead of dragging the body back.
-        if lastWritten and (r.Position - lastWritten).Magnitude > 50 then
+        -- P.keepLock (SEA EVENTS): a move under 500 studs is a knockback or a
+        -- pull (a Terrorshark's) - not adopted, the body goes back; a respawn
+        -- or a teleport is still followed.
+        local moved = lastWritten and (r.Position - lastWritten).Magnitude or 0
+        if moved > 50 and not (P.keepLock and moved < 500) then
             local rot = lockCF and (lockCF - lockCF.Position) or (r.CFrame - r.CFrame.Position)
             lockCF = CFrame.new(r.Position) * rot
         end
         if not lockCF then lockCF = r.CFrame end
+        local fy = P.floorY
+        if fy and lockCF.Position.Y < fy then lockCF = lockCF + Vector3.new(0, fy - lockCF.Position.Y, 0) end
         r.CFrame = lockCF
         lastWritten = lockCF.Position
     end
@@ -915,6 +932,9 @@ end
 
 -- Hold at pos, turned (yaw only) to face lookAt if given.
 local function lockAt(pos, lookAt)
+    -- THE WATER AS ROCK (SEA EVENTS, user 2026-10-09): never under it.
+    local fy = P.floorY
+    if fy and pos.Y < fy then pos = Vector3.new(pos.X, fy, pos.Z) end
     if lookAt then
         local flat = Vector3.new(lookAt.X, pos.Y, lookAt.Z)
         if (flat - pos).Magnitude > 0.5 then
@@ -2161,6 +2181,9 @@ local wantPose = "safe"      -- "safe" (high) or "melee" (close beside)
 
 local function poseTarget()
     if not pileCentre then return nil end
+    -- A fight that places you itself (SEA EVENTS: round a Terrorshark, dodging).
+    local own = pileCur and pileCur.pose and pileCur.pose() or nil
+    if own then return own end
     -- Height is counted from the HIGHEST living enemy in the pile, not from
     -- the pile's centre: one the magnet does not own stands where it really
     -- is (up on the ledges at Port Town, say), and "60 over them" has to mean
@@ -2315,6 +2338,15 @@ local function usedWeapons()
                 if pileCur.toolOk(u.name) then table.insert(only, u) end
             end
             list = only
+        end
+        -- ...and per key (SEA EVENTS: never V on a transformation fruit;
+        -- a key its mastery has not unlocked).
+        if pileCur.keyOk then
+            for _, u in ipairs(list) do
+                for _, k in ipairs(KEYS) do
+                    if u.cfg[k] and not pileCur.keyOk(u.name, k) then u.cfg[k] = false end
+                end
+            end
         end
         return list
     end
@@ -2997,6 +3029,22 @@ P.nextNote = ""
 P.lastCast = "none yet"
 P.skillTally = {}            -- ["weapon key"] = { cast, fired, hit }
 
+-- THE GAME'S OWN GATES (the decompiled casFunc, v4623): a key is refused
+-- while the character is Busy, stunned, or another tool's move is Holding.
+-- A key pressed then is not "a key that does not fire" - it was too early.
+local function canCast()
+    local ch = player and player.Character
+    if not ch then return false end
+    local busy, stun = ch:FindFirstChild("Busy"), ch:FindFirstChild("Stun")
+    if busy and busy.Value == true then return false end
+    if stun and (tonumber(stun.Value) or 0) > 0 then return false end
+    local tool = ch:FindFirstChildOfClass("Tool")
+    local holding = tool and tool:FindFirstChild("Holding")
+    if holding and holding.Value == true then return false end
+    return true
+end
+P.canCast = canCast
+
 local function castSkill(u, k)
     -- A gun's held M1 (THE GUN) is let go: the key is pressed alone.
     local gr = (P :: any).gunRelease
@@ -3028,12 +3076,25 @@ local function castSkill(u, k)
             if pileCentre then aimSwapIn(aimPoint(), pileCentre) end
         end
     end
+    -- A sea event's fight (pileCur.fastCast, user 2026-10-09: "the moment it
+    -- is out of cooldown it is pressed"): the key the moment the game takes
+    -- it, the next one the frame this one's bar starts - no fixed wait.
+    local fast = pileCur and pileCur.fastCast
+    if fast then
+        local tw = os.clock()
+        while os.clock() - tw < 0.6 and not canCast() do RunService.Heartbeat:Wait() end
+    end
     holdKey(KEYCODE[k], hold, before)
     local c = cdOf(u.name, k)
     c.lastCast = os.clock()
     stats.casts += 1
     actions += 1
-    task.wait(CFG.CastWait or 0.45)
+    if fast then
+        local tf = os.clock()
+        repeat RunService.Heartbeat:Wait() until barReady(u.name, k) == false or os.clock() - tf > 0.3
+    else
+        task.wait(CFG.CastWait or 0.45)
+    end
     aimUntil = 0
     -- Did it fire (its bar is cooling now)? Did it hit (the pile lost HP)?
     local lost = 0
@@ -3055,8 +3116,9 @@ local function castSkill(u, k)
         P.lastCast = key .. ": fired" .. tail
     elseif b == true then
         stats.castsMissed += 1
-        c.deadUntil = os.clock() + 60
-        P.lastCast = key .. ": key sent, the skill did NOT fire - left 1 min"
+        -- A sea event's fight: tried again in 3 s (it may only have been too early).
+        c.deadUntil = os.clock() + (fast and 3 or 60)
+        P.lastCast = key .. ": key sent, the skill did NOT fire - left " .. (fast and "3 s" or "1 min")
     else
         P.lastCast = key .. ": key sent (no bar to check)" .. tail
     end
@@ -9035,6 +9097,15 @@ end
 -- SeaEvWeapons' types). In form every fight is the HP-credited caster; out
 -- of form a fish is the farm's own fight (Dragon Talon's remote-hit M1).
 -- Re-tested every 5th target. The radio: auto / form always / never.
+-- EVERY READY KEY, AT ONCE (user, 2026-10-09): pressed the moment the game
+-- takes it (not Busy / stunned / another move Holding - its own gates), the
+-- next one the frame this one's bar starts; a refused press retried in 3 s;
+-- V never on a transformation fruit, on for the rest; mastery-locked keys
+-- skipped. THE WATER AS ROCK: every sea fight sets a floor (the sea's top + 4)
+-- the lock never goes under, swimming off, a knockback / pull not adopted.
+-- DODGING (a Terrorshark / Piranha / Shark): round it all the time, the
+-- direction flipping, the aim held on it; up when it starts an attack (a new
+-- animation that does not loop), charges at you or leaps.
 --               Which key and whose M1 hurt it is LEARNED from its HP (the
 --               vent caster, P.sea.ventCast, credited by HP); nothing lands
 --               for 6 s = in close.
@@ -9205,6 +9276,18 @@ do
             if S.drive and S.drive.waterY then return S.drive.waterY end
             local y = seaRef()
             return y and (y + 56) or 0
+        end
+        -- The sea's TOP as the slab stands now (walk on water keeps it at the
+        -- surface, Size.Y 112): what a sea fight never goes under.
+        local function seaTop()
+            local map = workspace:FindFirstChild("Map")
+            local p = map and map:FindFirstChild("WaterBase-Plane")
+            if p and p:IsA("BasePart") then
+                local ok, sz = pcall(function() return p.Size end)
+                if ok and sz then return p.Position.Y + sz.Y / 2 end
+                return p.Position.Y + 56
+            end
+            return surfaceY()
         end
 
         local function beastRoot(m)
@@ -9616,16 +9699,18 @@ do
                         end
                     end)
                 end
+                -- THE FIGHT'S FRAME (declared below, with the fights): round the
+                -- target dodging, the aim held on it the whole fight.
+                if SE.fightTick then pcall(SE.fightTick) end
                 local lp = SE.lockPart
                 if lp and lp.Parent and P.running and os.clock() < aimUntil then
                     P.aimAt, P.aimPart = lp.Position, lp
                 end
                 -- The hunt off (or the farm stopped) mid-fight: nothing of it stays
-                -- - the grown box, the far camera, the lock.
-                if not (P.running and huntOn()) and (SE.grown or SE.lockPart or SE.camSet) then
-                    if SE.shrink then SE.shrink() end      -- (declared below, with the fights)
-                    SE.lockPart, SE.camSet = nil, nil
-                    P.camDistance = nil
+                -- - the grown box, the far camera, the lock, the water's floor.
+                if not (P.running and huntOn()) and (SE.grown or SE.lockPart or SE.camSet or SE.ev or P.floorY) then
+                    if SE.fightOff then SE.fightOff() end   -- (declared below, with the fights)
+                    SE.camSet = nil
                 end
                 SE.camSet = P.camDistance ~= nil or nil
             end)
@@ -9679,6 +9764,268 @@ do
             if not ok then SE.grown = nil end
         end
         SE.shrink = shrink
+
+        -- ---------- EVERY READY KEY (user, 2026-10-09) ----------
+        -- "Anything not in cooldown, pressed immediately - Kitsune all but V
+        -- (V transforms), Dragon Talon all." A key fires when: its switch is on
+        -- (SeaEvKeys), it is not V on a transformation fruit, and the weapon's
+        -- mastery has unlocked it (its skill frame's Level against the tool's
+        -- Level - what the public hubs read; unreadable = allowed).
+        local function transformFruit(name)
+            local t = findTool(name)
+            if not (t and toolType(t) == "Blox Fruit") then return false end
+            for _, pat in pairs(RIGS) do
+                if string.find(name, pat) then return true end
+            end
+            return false
+        end
+        local function unlocked(name, k)
+            local ok, res = pcall(function()
+                local kf = player.PlayerGui.Main.Skills[name][k]
+                local lv = kf:FindFirstChild("Level")
+                if not lv then return true end
+                local txt = (lv.ContentText ~= nil and lv.ContentText ~= "") and lv.ContentText or lv.Text or ""
+                local req = tonumber(string.match(tostring(txt), "%d+"))
+                if not req then return true end
+                local t = findTool(name)
+                local lvl = t and t:FindFirstChild("Level")
+                local cur = (lvl and lvl:IsA("ValueBase")) and tonumber(lvl.Value) or (t and tonumber(t:GetAttribute("Level")))
+                if not cur then return true end
+                return cur >= req
+            end)
+            return (not ok) or res ~= false
+        end
+        local function keyOk(name, k)
+            if (CFG.SeaEvKeys or {})[k] ~= true then return false end
+            if k == "V" and transformFruit(name) then return false end
+            return unlocked(name, k)
+        end
+
+        -- ---------- THE WATER AS ROCK, AND DODGING (user, 2026-10-09) ----------
+        -- A sea fight sets P.floorY (the sea's top + 4): the lock never goes
+        -- under it - noclip lets you through the slab, and a fish's own height
+        -- once took you under with it when it dived. P.keepLock: a knockback /
+        -- a pull (under 500 studs) is not adopted - back to the lock. The
+        -- Humanoid's Swimming state off. Round a fish (SeaDodge): a circle of
+        -- DodgeRadius at DodgeSpeed, the direction flipping every 1.2-3 s, the
+        -- aim held on it; DodgeUp for DodgeTime the moment it starts an attack
+        -- (a new animation that does not loop - its wind-up), charges at you
+        -- (over 60 studs/s toward you) or leaps (its root over the sea + 10,
+        -- rising).
+        local function dodgeOpts()
+            return { r = tonumber(CFG.DodgeRadius) or 30, speed = tonumber(CFG.DodgeSpeed) or 50,
+                h = tonumber(CFG.FishHeight) or 30, up = tonumber(CFG.DodgeUp) or 40, top = seaTop() }
+        end
+        -- Pure (tools/seaev_test.py): the spot this frame. e = the circle's state.
+        local function evadeSpot(e, tp, now, rnd, o)
+            local dt = math.clamp(now - (e.lastT or now), 0, 0.1)
+            e.lastT = now
+            if now >= (e.flipAt or 0) then
+                e.dir = -(e.dir or -1)
+                e.flipAt = now + 1.2 + rnd() * 1.8
+            end
+            local r = math.max(o.r, 5)
+            e.angle = (e.angle or 0) + e.dir * (o.speed / r) * dt
+            local up = (now < (e.dodgeUntil or 0)) and o.up or 0
+            local y = math.max(tp.Y, o.top) + o.h + up
+            return Vector3.new(tp.X + math.cos(e.angle) * r, y, tp.Z + math.sin(e.angle) * r)
+        end
+        local function tracksOf(model)
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            local anim = hum and hum:FindFirstChildOfClass("Animator")
+            if not anim then return {} end
+            local ok, list = pcall(function() return anim:GetPlayingAnimationTracks() end)
+            return (ok and type(list) == "table") and list or {}
+        end
+        local function markPlaying(e)
+            for _, t in ipairs(tracksOf(e.model)) do e.seen[t] = true end
+        end
+        local animSaid = {}
+        -- Is it about to hit? -> why, or nil.
+        local function attackWatch(e, me, now, top)
+            local tp = e.root.Position
+            local vel = Vector3.zero
+            pcall(function() vel = e.root.AssemblyLinearVelocity end)
+            local why = nil
+            for _, t in ipairs(tracksOf(e.model)) do
+                if not e.seen[t] then
+                    e.seen[t] = true
+                    local looped = true
+                    pcall(function() looped = t.Looped end)
+                    if not looped then
+                        local id = "?"
+                        pcall(function() id = tostring(t.Animation.AnimationId) end)
+                        why = why or ("attack " .. id)
+                        if not animSaid[id] then
+                            animSaid[id] = true
+                            print("[BFF] seaev: " .. tostring(e.name) .. " attack animation " .. id .. " - dodged up")
+                        end
+                    end
+                end
+            end
+            local fv = flat(vel)
+            if not why and me and fv.Magnitude > 60 then
+                local to = flat(me - tp)
+                if to.Magnitude > 1 and fv.Unit:Dot(to.Unit) > 0.6 then why = "charge" end
+            end
+            if not why and top and tp.Y > top + 10 and vel.Y > 20 then why = "leap" end
+            return why
+        end
+
+        local function fightOff()
+            shrink()
+            SE.lockPart, SE.ev = nil, nil
+            P.camDistance, P.floorY, P.keepLock = nil, nil, nil
+            if SE.swimHum then
+                local h = SE.swimHum
+                SE.swimHum = nil
+                pcall(function() h:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
+            end
+        end
+        SE.fightOff = fightOff
+        -- A sea fight on target x: its hitbox, the camera off it, the water a
+        -- floor, knockback refused, no swimming, the aim on it; a fish = the circle.
+        local function fightOn(x, cls)
+            grow(x.root)
+            P.camDistance = 90
+            P.floorY = seaTop() + 4
+            P.keepLock = true
+            SE.lockPart = x.root
+            local _, _, h = parts()
+            if h and SE.swimHum ~= h then
+                if pcall(function() h:SetStateEnabled(Enum.HumanoidStateType.Swimming, false) end) then SE.swimHum = h end
+            end
+            if cls == "fish" and CFG.SeaDodge then
+                if not (SE.ev and SE.ev.root == x.root) then
+                    SE.ev = { root = x.root, model = x.model, name = x.label or x.kind, angle = math.random() * 2 * math.pi,
+                        dir = 1, flipAt = 0, dodgeUntil = 0, seen = setmetatable({}, { __mode = "k" }) }
+                    markPlaying(SE.ev)       -- what plays already is not an attack starting now
+                end
+            else
+                SE.ev = nil
+            end
+        end
+        -- Every frame of a fight (the heartbeat above): the aim held on the
+        -- target; round a fish, up when it attacks.
+        function SE.fightTick()
+            if not (P.running and huntOn()) or S.driving then return end
+            local now = os.clock()
+            local lp = SE.lockPart
+            if lp and lp.Parent then aimUntil = math.max(aimUntil, now + 0.25) end
+            local e = SE.ev
+            if not (e and e.root and e.root.Parent and CFG.SeaDodge) then return end
+            local _, r = parts()
+            if now - (e.watchAt or 0) >= 0.05 then
+                e.watchAt = now
+                local why = attackWatch(e, r and r.Position or nil, now, seaTop())
+                if why then
+                    e.dodgeUntil = now + (tonumber(CFG.DodgeTime) or 1)
+                    e.dir = -(e.dir or 1)
+                    SE.dodges = (SE.dodges or 0) + 1
+                    SE.lastDodge = why
+                end
+            end
+            lockAt(evadeSpot(e, e.root.Position, now, math.random, dodgeOpts()), e.root.Position)
+        end
+
+        -- ---------- THE SEA CASTER ----------
+        -- Every call fires the first READY key of the sea's weapons - the one
+        -- in hand first - the moment the game takes it (canCast: not Busy, not
+        -- stunned, no move Holding), and returns the frame its bar starts
+        -- cooling. Nothing ready: an aimed M1 with the weapon whose M1 hurts it.
+        -- Credited by the target's HP over the next second WITHOUT waiting
+        -- (v.pend); an M1 counts for the form's test only when no key went off
+        -- beside it (solo). A key the game would not take twice: 3 s off.
+        local refused = {}
+        local function credit(v, now)
+            local resolved, hp = {}, v.hp()
+            for i = #v.pend, 1, -1 do
+                local p = v.pend[i]
+                local hit = hp ~= nil and p.hp0 ~= nil and hp < p.hp0 - 0.5
+                if hit or now - p.t > (p.m1 and 0.6 or 1.2) then
+                    table.remove(v.pend, i)
+                    local L = v.learn[p.key] or { casts = 0, closed = 0 }
+                    v.learn[p.key] = L
+                    L.casts += 1
+                    if hit then L.closed += 1 end
+                    table.insert(resolved, { key = p.key, hit = hit, m1 = p.m1, solo = p.solo })
+                end
+            end
+            return resolved
+        end
+        local function seaCast(v)
+            v.pend = v.pend or {}
+            local now = os.clock()
+            local resolved = credit(v, now)
+            local held = heldTool()
+            local tools = {}
+            for _, t in ipairs(toolNames()) do
+                if v.toolOk(t.Name) then
+                    if held and t.Name == held.Name then table.insert(tools, 1, t) else table.insert(tools, t) end
+                end
+            end
+            local function aimed()
+                RunService.Heartbeat:Wait()
+                local at = P.aimAt or v.pos
+                pcall(aimSwapIn, at, at)
+            end
+            for _, t in ipairs(tools) do
+                for _, k in ipairs(KEYS5) do
+                    local rk = t.Name .. " " .. k
+                    local rf = refused[rk]
+                    if v.keyOk(t.Name, k) and not (rf and now < rf.untilT) and skillReady(t.Name, k) then
+                        if not equip(t.Name) then break end
+                        if barReady(t.Name, k) ~= false then
+                            local tw = os.clock()
+                            while os.clock() - tw < 0.6 and not canCast() do RunService.Heartbeat:Wait() end
+                            local hp0 = v.hp()
+                            local w = (CFG.Weapons or {})[t.Name]
+                            local hold = (w and w.hold and w.hold[k]) or 0.05
+                            aimUntil = math.max(aimUntil, os.clock() + hold + 1)
+                            holdKey(KEYCODE[k], hold, aimed)
+                            cdOf(t.Name, k).lastCast = os.clock()
+                            stats.casts += 1
+                            local tf = os.clock()
+                            repeat RunService.Heartbeat:Wait() until barReady(t.Name, k) == false or os.clock() - tf > 0.3
+                            if barReady(t.Name, k) ~= true then
+                                refused[rk] = nil
+                                for _, p in ipairs(v.pend) do
+                                    if p.m1 then p.solo = false end
+                                end
+                                local key = rk .. (v.suffix or "")
+                                table.insert(v.pend, { key = key, hp0 = hp0, t = os.clock(), m1 = false })
+                                for _, x in ipairs(credit(v, os.clock())) do table.insert(resolved, x) end
+                                return key, resolved
+                            end
+                            local n = ((rf and rf.n) or 0) + 1
+                            refused[rk] = { n = n, untilT = os.clock() + ((n >= 2) and 3 or 0) }
+                        end
+                    end
+                end
+            end
+            local m1 = v.m1Tool and v.m1Tool()
+            if m1 then equip(m1) end
+            local h2 = heldTool()
+            local key = "M1 " .. (h2 and h2.Name or "(empty hand)") .. (v.suffix or "")
+            local solo = true
+            for _, p in ipairs(v.pend) do
+                if not p.m1 then solo = false end
+            end
+            local hp0 = v.hp()
+            local cam = workspace.CurrentCamera
+            if cam then
+                aimUntil = math.max(aimUntil, os.clock() + 1)
+                aimPixel = cam.ViewportSize * 0.5
+                aimed()
+                pressM1()
+                aimPixel = nil
+            end
+            table.insert(v.pend, { key = key, hp0 = hp0, t = os.clock(), m1 = true, solo = solo })
+            task.wait(math.max(CFG.M1Every or 0.06, 0.03))
+            for _, x in ipairs(credit(v, os.clock())) do table.insert(resolved, x) end
+            return key, resolved
+        end
+        SE.caster = seaCast
 
         -- THE WEAPONS AT SEA (user, 2026-10-09: points in fruit + melee): out
         -- of form, only SeaEvWeapons' types; in a form, its own moves (the
@@ -9802,7 +10149,7 @@ do
             side = (side.Magnitude > 1) and side.Unit or Vector3.new(1, 0, 0)
             if cls == "fish" then
                 local h = close and 8 or (tonumber(CFG.FishHeight) or 30)
-                return rp + Vector3.new(0, h, 0) + side * (close and 8 or 15)
+                return Vector3.new(rp.X, math.max(rp.Y, sea) + h, rp.Z) + side * (close and 8 or 15)
             end
             local h = close and 25 or (tonumber(CFG.BeastHeight) or 90)
             return Vector3.new(rp.X, math.max(sea, rp.Y) + h, rp.Z) + side * (close and 20 or 50)
@@ -9823,8 +10170,7 @@ do
             end
             activeName = x.label
             setState("FIGHT")
-            grow(x.root)
-            P.camDistance = 90           -- the camera outside the target (and its grown box)
+            fightOn(x, cls)             -- the hitbox, the camera off it, the water a floor, the aim, the circle
             local function hpNow()
                 if x.hum then return x.hum.Health end
                 return hpOf(x.model)
@@ -9861,7 +10207,8 @@ do
             local learn = (cls == "fish") and SE.learnFish or SE.learn
             local suffix = formNow and " (form)" or nil
             local v = { pos = rp, part = x.root, model = x.model, learn = learn, suffix = suffix,
-                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, toolOk = seaOk, noRotate = noRotate }
+                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, toolOk = seaOk, noRotate = noRotate,
+                keyOk = keyOk, hp = hpNow }
             v.m1Tool = function() return bestM1(learn, suffix) end
             v.alive = function()
                 local hp = hpNow()
@@ -9879,18 +10226,21 @@ do
                 local _, r2 = parts()
                 if not r2 then break end
                 v.pos = x.root.Position
-                lockAt(hangSpot(v.pos, r2.Position, close, sea, cls), v.pos)
+                -- Round a fish, the heartbeat moves you (dodging); else hang here.
+                if not SE.ev then lockAt(hangSpot(v.pos, r2.Position, close, sea, cls), v.pos) end
                 local tc = os.clock()
-                local key, landed = S.ventCast(v)
-                if landed then SE.lastHurt = os.clock() end
-                SE.lastKey = tostring(key or "every key cooling") .. (landed and " - hurt it" or " - nothing")
-                if testing then
-                    f.up += os.clock() - tc
-                    if type(key) == "string" and string.sub(key, 1, 3) == "M1 " then
+                local key, resolved = SE.caster(v)
+                local landed = false
+                for _, rr in ipairs(resolved or {}) do
+                    if rr.hit then landed = true end
+                    if testing and rr.m1 and rr.solo then
                         f.casts += 1
-                        if landed then f.hits += 1 end
+                        if rr.hit then f.hits += 1 end
                     end
                 end
+                if landed then SE.lastHurt = os.clock() end
+                SE.lastKey = tostring(key or "every key cooling") .. (landed and " - hurt it" or "")
+                if testing then f.up += os.clock() - tc end
                 -- Its last HP, for the count: a beast sinks the moment it dies.
                 local mm = SE.members[x.model]
                 if mm and not x.hum then mm.hp = hpOf(x.model) or mm.hp end
@@ -9929,7 +10279,15 @@ do
             allKeys = function() return CFG.SeaEvKeys or {} end,
             height = function() return tonumber(CFG.FishHeight) or 30 end,
             toolOk = function(name) return seaOk(name) end,
+            keyOk = function(name, k) return keyOk(name, k) end,
             noRotate = function() return noRotate() end,
+            fastCast = true,             -- every key the instant the game takes it (castSkill)
+            -- Where you are: round it, dodging (the heartbeat writes the same spot).
+            pose = function()
+                local e = SE.ev
+                if not (e and CFG.SeaDodge and e.root and e.root.Parent) then return nil end
+                return evadeSpot(e, e.root.Position, os.clock(), math.random, dodgeOpts())
+            end,
             -- The M1: your fighting style first, then the fruit, a sword, a gun
             -- - of the weapons the sea fight takes.
             m1Weapon = function()
@@ -9953,7 +10311,7 @@ do
                     if on and FISH[k] and near(e.root.Position, h, me, RANGE)
                         and not (P.randomSkip[e.model] and now < P.randomSkip[e.model]) then
                         if e.model == SE.cur then
-                            grow(e.root)
+                            fightOn({ root = e.root, model = e.model, label = k, kind = k }, "fish")
                             return { e }, e.root.Position, true
                         end
                         local d = me and (e.root.Position - me).Magnitude or 0
@@ -9962,8 +10320,9 @@ do
                 end
                 if not best then return {}, nil, false end
                 SE.cur = best.model
-                remember({ model = best.model, root = best.root, hum = best.hum, kind = kindOf(best.name) }, now)
-                grow(best.root)
+                local bk = kindOf(best.name)
+                remember({ model = best.model, root = best.root, hum = best.hum, kind = bk }, now)
+                fightOn({ root = best.root, model = best.model, label = bk, kind = bk }, "fish")
                 return { best }, best.root.Position, true
             end,
             -- Into Kitsune form meanwhile (the test, or its verdict): the caster takes over.
@@ -9972,15 +10331,15 @@ do
         SE.FISH_CUR = FISH_CUR
 
         local function fightFish(x, myEpoch)
-            SE.lockPart = nil
             leaveBoat()
+            fightOn(x, "fish")
             if SE.cur ~= x.model then
                 SE.cur = x.model
                 SE.fights += 1
             end
             activeName = x.label
-            P.camDistance = 90
             SE.note = x.label .. "  ·  M1 + every skill, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
+                .. (CFG.SeaDodge and ", round it, dodging" or "")
             say(SE.note)
             local why = fight(FISH_CUR, FISH)
             if why == "empty" then releasePile() end
@@ -10041,8 +10400,8 @@ do
             end
             -- Nothing to fight: back at the wheel - out of the form first (it
             -- drains, and a fox does not sit).
-            SE.cur, SE.lockPart, P.camDistance = nil, nil, nil
-            shrink()
+            SE.cur = nil
+            fightOff()
             if pileCur then releasePile() end
             if inForm() then setForm(false, myEpoch) end
             if not board(myEpoch) then
@@ -10126,7 +10485,9 @@ do
             scan = scan, pick = pick, bestM1 = bestM1, hangSpot = hangSpot, fightBeast = fightBeast,
             board = board, leaveBoat = leaveBoat, ZONES = ZONES, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
             seaOk = seaOk, typeOk = typeOk, verdictOf = verdictOf, formWanted = formWanted, setForm = setForm,
-            newTarget = newTarget, fightFish = fightFish,
+            newTarget = newTarget, fightFish = fightFish, evadeSpot = evadeSpot, attackWatch = attackWatch,
+            keyOk = keyOk, transformFruit = transformFruit, unlocked = unlocked, seaCast = seaCast,
+            fightOn = fightOn, fightOff = fightOff, seaTop = seaTop,
         }
     end
     build()
@@ -12521,6 +12882,32 @@ local function buildUI()
                     CFG.SeaEvWeapons[ty] = x
                 end)
         end
+        heading2(v, "dodging (Terrorshark / Piranha / Shark)")
+        switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
+            function() return CFG.SeaDodge end,
+            function(x) CFG.SeaDodge = x end)
+        sliderRow(v, "Round it at", 10, 80, 5,
+            function() return CFG.DodgeRadius end,
+            function(x) CFG.DodgeRadius = x end, " studs")
+        sliderRow(v, "Moving at", 10, 150, 5,
+            function() return CFG.DodgeSpeed end,
+            function(x) CFG.DodgeSpeed = x end, " studs/s")
+        sliderRow(v, "Up when it attacks", 10, 120, 5,
+            function() return CFG.DodgeUp end,
+            function(x) CFG.DodgeUp = x end, " studs")
+        sliderRow(v, "Stay up for", 0.3, 3, 0.1,
+            function() return CFG.DodgeTime end,
+            function(x) CFG.DodgeTime = x end, " s")
+        readout(v, function()
+            local e = P.seaev
+            return string.format("dodged    %d times  ·  last: %s\nwater     %s", e.dodges or 0, tostring(e.lastDodge or "-"),
+                P.floorY and string.format("a floor at Y %.0f - you never go under it (swimming off, knockback refused)", P.floorY)
+                    or "a floor during every sea fight")
+        end)
+        caption(v, "It starts an attack (a new animation), charges at you or leaps: up "
+            .. "for a moment, then back. The water is a floor in every sea fight: you "
+            .. "are never under it, whatever the target does, and a knockback or a "
+            .. "pull is undone the next frame.")
         heading2(v, "fighting at sea")
         sliderRow(v, "Over a Sea Beast", 30, 250, 5,
             function() return CFG.BeastHeight end,
@@ -12536,15 +12923,16 @@ local function buildUI()
             function(x) CFG.FleeTo = x end, " studs off")
         heading2(v, "keys fired at a sea event")
         for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do
-            switchRow(v, k, (k == "V") and "Often a transformation - off by default" or nil,
+            switchRow(v, k, (k == "V") and "Never on a transformation fruit (Kitsune's V transforms) - on for the rest" or nil,
                 function() return (CFG.SeaEvKeys or {})[k] end,
                 function(x)
                     CFG.SeaEvKeys = CFG.SeaEvKeys or {}
                     CFG.SeaEvKeys[k] = x
                 end)
         end
-        caption(v, "Every weapon you carry fires these, each the moment its bar is "
-            .. "ready, the M1 in between - your Attack page is left for the normal "
+        caption(v, "Every key the INSTANT it is ready (the moment the game takes it - not "
+            .. "during another move - and the next one the frame it fires), the M1 "
+            .. "in between - your Attack page is left for the normal "
             .. "farm. On a Sea Beast which key and whose M1 hurt it is learned from its "
             .. "HP: one that never did after 4 tries goes last.")
         heading2(v, "what hurts a sea beast (learned)")

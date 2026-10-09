@@ -94,6 +94,29 @@ pileCur = { allKeys = function() return {} end }
 all = run("sea event: skills the moment they are ready (10 between and M1-first ignored)",
     cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 4,
     "swap Kitsune | cast Kitsune Z | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
+-- ...and each key the instant it is taken, the next the frame it fired (fastCast).
+pileCur = { allKeys = function() return {} end, fastCast = true }
+CFG = cfg({ M1Between = 0 }, { Kitsune = W{ Z = true }, ["Sanguine Art"] = W{}, Sword = W{} })
+LOG, clock, held, CD, m1Count = {}, 0, nil, {}, 0
+attackTick()
+local fastT = clock
+print((fastT < 0.2 and "PASS " or "FAIL ") .. "sea event: the next action the frame the key fired - no 0.5 s CastWait (" .. fastT .. " s)")
+all = (fastT < 0.2) and all
+pileCur = nil
+LOG, clock, held, CD, m1Count = {}, 0, nil, {}, 0
+attackTick()
+print((clock >= 0.5 and "PASS " or "FAIL ") .. "...the normal farm keeps its CastWait (" .. clock .. " s)")
+all = (clock >= 0.5) and all
+-- A key the game refused in a sea fight: tried again in 3 s, not left a minute.
+pileCur = { allKeys = function() return {} end, fastCast = true }
+REFUSE = true
+LOG, clock, held, CD, m1Count = {}, 0, nil, {}, 0
+attackTick()
+local dead = cdStore["KitsuneZ"] and cdStore["KitsuneZ"].deadUntil
+print((dead and dead - clock <= 3.01 and dead - clock > 2 and "PASS " or "FAIL ")
+    .. "sea event: a refused key is tried again in 3 s (it may only have been too early), not a minute")
+all = (dead and dead - clock <= 3.01 and dead - clock > 2) and all
+REFUSE = false
 pileCur = nil
 all = run("...and outside a sea event \"M1 between\" holds again",
     cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 3,

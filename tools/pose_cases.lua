@@ -37,6 +37,11 @@ CFG.HeightSafe = 120
 check("120 over the pile", poseTarget().Y == 160, poseTarget().Y)
 
 -- 5b. a fight with its own height (SEA EVENTS: 30 over a Terrorshark), then back to yours
+pileCur = { pose = function() return v3(7, 99, 7) end }
+local own = poseTarget()
+check("a fight that places you itself (SEA EVENTS: the dodge circle): its spot", own and own.X == 7 and own.Y == 99)
+pileCur = { pose = function() return nil end, height = function() return 30 end }
+check("...its pose answering nil: the normal rules", poseTarget().Y == 70, poseTarget().Y)
 pileCur = { height = function() return 30 end }
 check("a sea event's own height: 30 over it, not your 120", poseTarget().Y == 70, poseTarget().Y)
 pileCur = nil

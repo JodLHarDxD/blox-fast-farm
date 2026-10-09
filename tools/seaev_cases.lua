@@ -17,6 +17,8 @@ FILES["bff_sea_events.json"] = HS:JSONEncode({ total = 7, kinds = { ["Sea Beast"
 SECTION()
 useFiles()
 local SE = P.seaev
+local SEA_CAST = SE.caster        -- the real one (its own cases below)
+SE.caster = CASTER                -- the fights' cases: a recorder
 local T = SE._t
 check("load: the count kept from the last session (7) and its kinds", SE.count.total == 7 and SE.count.kinds["Sea Beast"] == 7,
     SE.count.total)
@@ -664,7 +666,8 @@ check("a Terrorshark, auto: in Kitsune form, the caster (not the farm's fight), 
     #FIGHTS)
 check("...its M1 hurt it (the Humanoid's HP): FORM for Terrorshark etc.", SE.form.fish.verdict == "form")
 local last = LOCKS[#LOCKS]
-check("...30 over it, 15 off", last and near(last.Y, tsf.kids.HumanoidRootPart.Position.Y + 30, 0.01)
+check("...30 over it - over the WATER when it is under it (its root Y 0, the sea's top 5) - 15 off",
+    last and near(last.Y, math.max(tsf.kids.HumanoidRootPart.Position.Y, 5) + 30, 0.01)
     and near(horiz(last, tsf.kids.HumanoidRootPart.Position), 15, 0.01), vs(last))
 -- Base for fish: the farm's own fight, fighting style M1, fruit + melee only.
 reset()
@@ -705,5 +708,220 @@ check("the fish's learned keys are saved with the count", saved() and saved().le
     and saved().learnFish["M1 Dragon Talon"] and saved().learnFish["M1 Dragon Talon"].closed == 3)
 CAST_KEY, DAMAGE, ON_KEY = "Kitsune-Kitsune C", 0, nil
 freshForm()
+
+-- ---------------------------------------------------------------- DODGING, THE WATER AS ROCK (2026-10-09)
+;(function()
+do
+    local o = { r = 30, speed = 60, h = 30, up = 40, top = 5 }
+    local e = { angle = 0, dir = 1, flipAt = 1e9, dodgeUntil = 0, lastT = 100 }
+    local tp = vec(1000, -40, 2000)                      -- dived 45 under the sea's top
+    local p1 = T.evadeSpot(e, tp, 100, function() return 0 end, o)
+    check("the circle: 30 studs round it", near(horiz(p1, tp), 30, 0.01), horiz(p1, tp))
+    check("...30 over the WATER while it is under it (never under with it)", near(p1.Y, 5 + 30, 0.01), p1.Y)
+    local a0 = e.angle
+    local p2 = T.evadeSpot(e, tp, 100.05, function() return 0 end, o)
+    check("...moving round it at 60 studs/s (2 rad/s at 30 studs: 0.1 rad in 0.05 s)", near(e.angle - a0, 0.1, 1e-6), e.angle - a0)
+    T.evadeSpot(e, tp, 105, function() return 0 end, o)
+    check("...a long frame counts as 0.1 s at most (no jump across the circle)", near(e.angle - a0, 0.1 + 0.2, 1e-6), e.angle - a0)
+    local tp2 = vec(1000, 50, 2000)                      -- leaping out
+    check("...30 over IT when it is over the water", near(T.evadeSpot(e, tp2, 105.01, function() return 0 end, o).Y, 80, 0.01))
+    e.dodgeUntil = 106
+    check("...its attack: 40 higher for the dodge", near(T.evadeSpot(e, tp, 105.02, function() return 0 end, o).Y, 75, 0.01))
+    check("...the dodge over: back down", near(T.evadeSpot(e, tp, 106.5, function() return 0 end, o).Y, 35, 0.01))
+    e.flipAt = 107
+    local before = e.dir
+    T.evadeSpot(e, tp, 107, function() return 0.5 end, o)
+    check("...the direction flips (1.2-3 s, at random)", e.dir == -before and near(e.flipAt, 107 + 1.2 + 0.9, 1e-6), e.flipAt)
+end
+
+-- The attack watch: a fish with an Animator.
+local function animFish(name, pos)
+    local m = fish(name, pos, 150000)
+    local hum = m:add(inst("Humanoid", "Humanoid"))
+    local animr = hum:add(inst("Animator", "Animator"))
+    animr.tracks = {}
+    function animr:GetPlayingAnimationTracks() return self.tracks end
+    m.root = m.kids.HumanoidRootPart
+    m.root.AssemblyLinearVelocity = vec(0, 0, 0)
+    return m, animr
+end
+reset()
+clearWorld()
+local tsk2, animr = animFish("Terrorshark", Z5 + vec(100, 0, 0))
+local swim = { Looped = true, Animation = { AnimationId = "rbxassetid://swim" } }
+animr.tracks = { swim }
+local ev = { root = tsk2.root, model = tsk2, name = "Terrorshark", seen = setmetatable({}, { __mode = "k" }) }
+check("the watch: only its looping swim playing - no attack", T.attackWatch(ev, Z5 + vec(100, 40, 30), CLOCK, 5) == nil)
+local bite = { Looped = false, Animation = { AnimationId = "rbxassetid://splash" } }
+animr.tracks = { swim, bite }
+local why = T.attackWatch(ev, Z5 + vec(100, 40, 30), CLOCK, 5)
+check("the watch: a new animation that does not loop = an attack starting - dodge, its id said once",
+    why ~= nil and string.find(why, "splash", 1, true) ~= nil and printed("rbxassetid://splash"), tostring(why))
+check("...the same one playing on: not a new attack", T.attackWatch(ev, Z5 + vec(100, 40, 30), CLOCK, 5) == nil)
+animr.tracks = { swim }
+tsk2.root.AssemblyLinearVelocity = vec(-90, 0, 0)       -- toward you (you are on its -X side)
+check("the watch: rushing at you over 60 studs/s = a charge", T.attackWatch(ev, Z5 + vec(40, 40, 0), CLOCK, 5) == "charge")
+check("...the same speed AWAY from you = nothing", T.attackWatch(ev, Z5 + vec(160, 40, 0), CLOCK, 5) == nil)
+tsk2.root.AssemblyLinearVelocity = vec(0, 30, 0)
+tsk2.root.Position = Z5 + vec(100, 20, 0)
+check("the watch: out of the water and rising = a leap", T.attackWatch(ev, Z5 + vec(100, 60, 30), CLOCK, 5) == "leap")
+tsk2.root.Position, tsk2.root.AssemblyLinearVelocity = Z5 + vec(100, 0, 0), vec(0, 0, 0)
+
+-- A fight on: the water a floor, knockback refused, no swimming, the circle.
+CFG.Hunt, P.running = true, true
+BOAT = makeBoat(Z5 + vec(0, 5, 0))
+S.driving, HUM.SeatPart = false, nil
+HUM.states = {}
+T.fightOn({ root = tsk2.root, model = tsk2, label = "Terrorshark", kind = "Terrorshark" }, "fish")
+check("a sea fight: the water is a floor (the sea's top + 4)", P.floorY ~= nil and near(P.floorY, T.seaTop() + 4, 1e-6),
+    tostring(P.floorY))
+check("...a knockback / pull is not adopted", P.keepLock == true)
+check("...the Humanoid cannot swim", HUM.states.Swimming == false)
+check("...round it: the circle, its watch fed with what plays already", SE.ev and SE.ev.root == tsk2.root
+    and SE.ev.seen[swim] == true)
+LOCKS = {}
+aimUntil = 0
+beat()
+local l1 = LOCKS[#LOCKS]
+check("every frame: on the circle round it, 30 over the water", l1 and near(horiz(l1, tsk2.root.Position), 30, 0.01)
+    and near(l1.Y, math.max(tsk2.root.Position.Y, T.seaTop()) + 30, 0.01), vs(l1))
+check("...the aim held on it the whole fight", aimUntil > CLOCK and P.aimAt and vnear(P.aimAt, tsk2.root.Position))
+animr.tracks = { swim, { Looped = false, Animation = { AnimationId = "rbxassetid://tail" } } }
+CLOCK += 0.06
+beat()
+local l2 = LOCKS[#LOCKS]
+check("it starts an attack: up 40 the next frame, counted", l2 and near(l2.Y, l1.Y + 40, 0.01) and SE.dodges and SE.dodges >= 1,
+    vs(l2))
+CLOCK += 1.1
+beat()
+check("...a second later: back down to 30 over the water", near(LOCKS[#LOCKS].Y, l1.Y, 0.01), vs(LOCKS[#LOCKS]))
+check("the farm's fight stands you on the same circle (its pose)", SE.FISH_CUR.pose() and
+    near(horiz(SE.FISH_CUR.pose(), tsk2.root.Position), 30, 0.01))
+check("...and presses every key the instant it can (fastCast)", SE.FISH_CUR.fastCast == true)
+CFG.SeaDodge = false
+local spotsBefore = #LOCKS
+beat()
+check("Dodge off: no circle (the fight's own spot instead)", #LOCKS == spotsBefore and SE.FISH_CUR.pose() == nil)
+CFG.SeaDodge = true
+-- A beast: the floor and the rest, no circle.
+T.fightOn({ root = tsk2.root, model = tsk2, label = "Sea Beast", kind = "beast" }, "beast")
+check("a beast: the floor, no circle (it hovers high)", P.floorY ~= nil and SE.ev == nil)
+-- The hunt off mid-fight: all of it undone.
+T.fightOn({ root = tsk2.root, model = tsk2, label = "Terrorshark", kind = "Terrorshark" }, "fish")
+CFG.Hunt = false
+beat()
+check("the hunt off mid-fight: no floor, knockback adopted again, swimming back, no circle",
+    P.floorY == nil and P.keepLock == nil and HUM.states.Swimming == true and SE.ev == nil and P.camDistance == nil)
+CFG.Hunt = true
+
+-- EVERY READY KEY: the rule.
+local KIT2 = { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" }
+local DT2 = inst("Dragon Talon", "Tool", { ToolTip = "Melee" })
+DT2:add(inst("Level", "IntValue", { Value = 300 }))
+TOOLS = { KIT2, DT2 }
+player.PlayerGui = { Main = { Skills = { ["Dragon Talon"] = {
+    C = (function() local f = inst("C", "Frame") f:add(inst("Level", "TextLabel", { Text = "Mastery 400" })) return f end)(),
+    X = (function() local f = inst("X", "Frame") f:add(inst("Level", "TextLabel", { Text = "Mastery 200" })) return f end)(),
+} } } }
+check("keys: Kitsune's V never (it transforms)", T.keyOk("Kitsune-Kitsune", "V") == false)
+check("keys: Dragon Talon's V yes (an attack)", T.keyOk("Dragon Talon", "V") == true)
+check("keys: Kitsune's Z X C F yes", T.keyOk("Kitsune-Kitsune", "Z") and T.keyOk("Kitsune-Kitsune", "X")
+    and T.keyOk("Kitsune-Kitsune", "C") and T.keyOk("Kitsune-Kitsune", "F"))
+check("keys: a key its mastery has not unlocked (C at 400, you 300) - never pressed", T.keyOk("Dragon Talon", "C") == false)
+check("keys: one it has (X at 200) - pressed", T.keyOk("Dragon Talon", "X") == true)
+CFG.SeaEvKeys.X = false
+check("keys: a switch off - not pressed", T.keyOk("Kitsune-Kitsune", "X") == false)
+CFG.SeaEvKeys.X = true
+
+-- THE CASTER: the first ready key, the one in hand first, the instant the game takes it.
+local HPV = 100000
+local function cv(extra)
+    local v = { pos = Z5, part = tsk2.root, model = tsk2, learn = {}, hp = function() return HPV end,
+        toolOk = function() return true end, keyOk = function(_, k) return k ~= "V" end,
+        m1Tool = function() return "Kitsune-Kitsune" end }
+    for k2, x in pairs(extra or {}) do v[k2] = x end
+    return v
+end
+BARS, KEYS_SENT, KEYS_AT, M1S = {}, {}, {}, 0
+ON_KEY = function(code) BARS[HELD .. " " .. code] = false end      -- the game: it fires, its bar cools
+READY = { ["Kitsune-Kitsune Z"] = true, ["Dragon Talon Z"] = true, ["Kitsune-Kitsune V"] = true }
+HELD, CAN = "Dragon Talon", true
+local v1 = cv()
+local t0 = CLOCK
+local k1 = SEA_CAST(v1)
+check("the caster: the weapon in hand first - Dragon Talon Z", k1 == "Dragon Talon Z" and KEYS_SENT[1] == "Z", tostring(k1))
+check("...the next key the frame it fired - no 0.45 s wait", CLOCK - t0 < 0.05, CLOCK - t0)
+READY["Dragon Talon Z"] = false
+local k2 = SEA_CAST(v1)
+check("...then the next ready one - Kitsune Z (swapped to)", k2 == "Kitsune-Kitsune Z" and HELD == "Kitsune-Kitsune", tostring(k2))
+READY["Kitsune-Kitsune Z"] = false
+local sentBefore = #KEYS_SENT
+local k3 = SEA_CAST(v1)
+check("...Kitsune's V is ready but NEVER pressed: nothing ready = the M1", string.sub(tostring(k3), 1, 3) == "M1 "
+    and #KEYS_SENT == sentBefore and M1S == 1 and aimPixel == nil,
+    tostring(k3) .. " sent " .. (#KEYS_SENT - sentBefore) .. " m1s " .. M1S .. " last " .. tostring(KEYS_SENT[#KEYS_SENT]))
+-- The game busy (another move playing): pressed the moment it takes keys, not before.
+READY["Kitsune-Kitsune X"] = true
+BARS["Kitsune-Kitsune X"] = nil
+CAN = CLOCK + 0.2
+local tw = CLOCK
+SEA_CAST(v1)
+check("the game busy: the key goes the moment it takes keys (0.2 s), not before",
+    KEYS_AT[#KEYS_AT] >= tw + 0.2 - 1e-9 and KEYS_AT[#KEYS_AT] < tw + 0.3, KEYS_AT[#KEYS_AT] - tw)
+CAN = true
+READY["Kitsune-Kitsune X"] = false
+-- A key the game would not take: tried again at once, then 3 s off - and the next key goes meanwhile.
+ON_KEY = function(code)
+    if code ~= "C" then BARS[HELD .. " " .. code] = false end      -- C: refused (its bar stays ready)
+end
+READY["Kitsune-Kitsune C"], READY["Kitsune-Kitsune F"] = true, true
+BARS["Kitsune-Kitsune C"], BARS["Kitsune-Kitsune F"] = true, nil
+local k4 = SEA_CAST(v1)
+check("a key refused: the next ready key goes in the same turn", k4 == "Kitsune-Kitsune F", tostring(k4))
+READY["Kitsune-Kitsune F"] = false
+local nC = 0
+for _, c in ipairs(KEYS_SENT) do if c == "C" then nC += 1 end end
+SEA_CAST(v1)
+local nC2 = 0
+for _, c in ipairs(KEYS_SENT) do if c == "C" then nC2 += 1 end end
+check("...the refused key tried again at once (it may have been too early)", nC2 == nC + 1, nC2 - nC)
+SEA_CAST(v1)
+local nC3 = 0
+for _, c in ipairs(KEYS_SENT) do if c == "C" then nC3 += 1 end end
+check("...refused twice: left 3 s (the M1 meanwhile)", nC3 == nC2, nC3 - nC2)
+READY["Kitsune-Kitsune C"] = false
+ON_KEY = function(code) BARS[HELD .. " " .. code] = false end
+-- The credit: the target's HP over the next second, without waiting.
+local lv = {}
+local v2 = cv({ learn = lv, suffix = " (form)" })
+READY = { ["Kitsune-Kitsune Z"] = true }
+BARS = {}
+HELD = "Kitsune-Kitsune"
+local kz = SEA_CAST(v2)
+check("in form: the key learned apart - \"Kitsune-Kitsune Z (form)\"", kz == "Kitsune-Kitsune Z (form)", tostring(kz))
+READY = {}
+HPV = HPV - 900
+local _, res = SEA_CAST(v2)
+local credited = false
+for _, rr in ipairs(res) do if rr.key == "Kitsune-Kitsune Z (form)" and rr.hit then credited = true end end
+check("...its HP went down by the next turn: credited, without waiting for it", credited
+    and lv["Kitsune-Kitsune Z (form)"] and lv["Kitsune-Kitsune Z (form)"].closed == 1)
+-- An M1 with a key going off beside it does not count for the form's test.
+local v3 = cv({ learn = {} })
+READY = {}
+SEA_CAST(v3)                                               -- an M1, pending
+READY = { ["Kitsune-Kitsune X"] = true }
+BARS = {}
+SEA_CAST(v3)                                               -- a key while the M1 waits
+READY = {}
+HPV = HPV - 500
+local _, res3 = SEA_CAST(v3)
+local m1solo = nil
+for _, rr in ipairs(res3) do if rr.m1 and rr.hit then m1solo = rr.solo end end
+check("an M1 with a key going off beside it: not counted for the form's test (who hit is unclear)", m1solo == false,
+    tostring(m1solo))
+ON_KEY, READY, BARS, CAN = nil, {}, {}, true
+TOOLS = {}
+end)()
 
 realPrint(all and "ALL PASS" or "SOME FAILED")
