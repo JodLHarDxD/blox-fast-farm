@@ -151,6 +151,8 @@ local CFG = {
     SeaEvKeys = { Z = true, X = true, C = true, V = false, F = true },
     BeastHeight = 90, FishHeight = 30, BoatLift = 150, FleeTo = 1500,
     SeaEvGoal = 20, SeaEvStopAtGoal = false,
+    SeaEvForm = "auto", SeaEvTrial = 20,
+    SeaEvWeapons = { ["Blox Fruit"] = true, Melee = true, Sword = false, Gun = false },
 }
 local SET_HUNT, STOPPED = {}, 0
 local P = { running = true, elite = { note = "" }, randomSkip = {} }
@@ -212,6 +214,17 @@ end
 local TOOLS = {}
 local function toolNames() return TOOLS end
 local function toolType(t) return t.ToolTip end
+local function findTool(n) for _, t in ipairs(TOOLS) do if t.Name == n then return t end end return nil end
+-- The weapons in hand and the keys: recorded. ON_KEY(code) = what the game does with a key.
+local HELD = nil
+local function equip(n) HELD = n return true end
+local BARS = {}
+local function barReady(w, k) return BARS[w .. " " .. k] end
+local KEYS_SENT, ON_KEY = {}, nil
+local function holdKey(code) table.insert(KEYS_SENT, code) if ON_KEY then ON_KEY(code) end end
+local KEYCODE = { Z = "Z", X = "X", C = "C", V = "V", F = "F" }
+local CDS = {}
+local function cdOf(w, k) CDS[w .. k] = CDS[w .. k] or {} return CDS[w .. k] end
 -- CommF_: every call recorded; the Spy answers SPY_CODE.
 local CALLS, SPY_CODE = {}, 1
 local CF_REMOTE = { InvokeServer = function(_, ...)
@@ -273,7 +286,12 @@ function S.boatHP() return 2500, 2500 end
 local DANGER = 5
 function S.dangerNow() return DANGER end
 function S.notify(t) table.insert(NOTES, t) end
-function S.stopDrive() STOPS += 1 S.driving = false HUM.SeatPart = nil end
+-- As the real one: only a seat or a wheel to leave counts.
+function S.stopDrive()
+    if S.driving or HUM.SeatPart then STOPS += 1 end
+    S.driving = false
+    HUM.SeatPart = nil
+end
 -- The vent caster's ranking, as it is (SEA HUNT).
 function S.keyScore(key, learn)
     local L = learn[key]
@@ -288,6 +306,7 @@ function S.ventCast(v)
     local m = v.model
     local hv = m.kids.Health
     if hv then hv.Value = math.max(0, hv.Value - DAMAGE) end
+    if m.hum then m.hum.Health = math.max(0, m.hum.Health - DAMAGE) end
     CLOCK += 0.5
     return CAST_KEY, v.dropped and v.dropped() or false
 end

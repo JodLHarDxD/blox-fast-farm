@@ -62,6 +62,11 @@ pileCur = { allKeys = function() return { Z = true, F = true } end }
 list = usedWeapons()
 check("a sea event's fight: every weapon you carry, its keys (F too)", #list == 3 and list[1].cfg.F == true
     and list[1].cfg.Z == true and not list[1].cfg.X, #list)
+pileCur.toolOk = function(n) return n ~= "Kabucha" end
+list = usedWeapons()
+check("a sea event's fight with its weapon rule (fruit + melee): the gun left out", #list == 2
+    and list[1].name ~= "Kabucha" and list[2].name ~= "Kabucha", #list)
+pileCur.toolOk = nil
 P.masteryUsed = function() return { { name = "Kabucha", cfg = {}, tool = {} } } end
 check("...the mastery farm still wins (only that weapon hurts anything)", usedWeapons()[1].name == "Kabucha"
     and #usedWeapons() == 1)
@@ -123,6 +128,11 @@ check("rotate: ...but the volcano still asks (any mode)", P.rotate(true) == true
 pileCur = { allKeys = function() return {} end }
 T += 2
 check("rotate: ...and a sea event's fight (every weapon you carry) - open to it too", P.rotate(false) == true)
+pileCur.noRotate = function() return true end
+T += 2
+check("rotate: ...but not one that takes no sword / gun (fruit + melee)", P.rotate(false) == false)
+check("rotate: ...the volcano's own ask still goes (any mode)", P.rotate(true) == true)
+pileCur.noRotate = nil
 pileCur = nil
 CFG.AutoAttack = true
 CFG.InvSwap = false

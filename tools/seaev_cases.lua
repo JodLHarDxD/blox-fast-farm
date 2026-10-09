@@ -447,9 +447,13 @@ TOOLS = { { Name = "Dragon Talon", ToolTip = "Melee" }, { Name = "Skull Guitar",
 SE.learn = {}
 check("whose M1 on a beast: nothing learned - the fruit's first (Kitsune hits them)", T.bestM1() == "Kitsune-Kitsune")
 SE.learn["M1 Kitsune-Kitsune"] = { casts = 4, closed = 0 }
-check("the fruit's M1 never hurt it in 4: the gun next", T.bestM1() == "Skull Guitar")
-SE.learn["M1 Dragon Talon"] = { casts = 5, closed = 4 }
-check("one that did hurt it goes first", T.bestM1() == "Dragon Talon")
+check("the fruit's M1 never hurt it in 4: your fighting style next (guns off - your points)", T.bestM1() == "Dragon Talon",
+    T.bestM1())
+CFG.SeaEvWeapons.Gun = true
+SE.learn["M1 Skull Guitar"] = { casts = 5, closed = 4 }
+check("guns switched on: one that did hurt it goes first", T.bestM1() == "Skull Guitar", T.bestM1())
+CFG.SeaEvWeapons.Gun = false
+SE.learn = {}
 
 -- ---------------------------------------------------------------- THE BOAT LOST
 reset()
@@ -523,7 +527,9 @@ TOOLS = { { Name = "Skull Guitar", ToolTip = "Gun" }, { Name = "Kitsune-Kitsune"
 SE.learn = { ["M1 Skull Guitar"] = { casts = 5, closed = 5 }, ["M1 Kitsune-Kitsune"] = { casts = 5, closed = 0 } }
 check("Kitsune form: the M1 is Kitsune's, whatever was learned in base", T.bestM1() == "Kitsune-Kitsune", T.bestM1())
 player.Character.kids.Kitsune = nil
-check("...back in base: the learned best again", T.bestM1() == "Skull Guitar")
+CFG.SeaEvWeapons.Gun = true
+check("...back in base (guns on): the learned best again", T.bestM1() == "Skull Guitar")
+CFG.SeaEvWeapons.Gun = false
 player.Character:add(inst("Dragon", "Model"))
 check("Dragon form: Dragon-Dragon's moves, never Dragon Talon's (a different weapon)", T.toolOk("Dragon-Dragon")
     and not T.toolOk("Dragon Talon"))
@@ -533,5 +539,171 @@ clearWorld()
 local hb3 = beast("SeaBeast3", Z5 + vec(300, 0, 0), 100000, 100000)
 SE.step(epoch)
 check("the beast's caster is given the transform rule", CASTS[1] and CASTS[1].toolOk ~= nil and CASTS[1].toolOk("Kitsune-Kitsune"))
+
+-- ---------------------------------------------------------------- KITSUNE FORM FIRST (2026-10-09)
+-- The verdict, pure.
+check("form verdict: its M1 hurt it twice = form",
+    T.verdictOf({ hits = 2, casts = 3, up = 2 }, 20) == "form")
+check("form verdict: 20 s, 6 M1s, one hit = base",
+    T.verdictOf({ hits = 1, casts = 6, up = 20 }, 20) == "base")
+check("form verdict: 25 s but only 3 M1s = still testing (the skills took the turns)",
+    T.verdictOf({ hits = 0, casts = 3, up = 25 }, 20) == nil)
+check("form verdict: 10 M1s in 10 s = still testing (the time is not up)",
+    T.verdictOf({ hits = 0, casts = 10, up = 10 }, 20) == nil)
+
+local KIT = { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" }
+local DT = { Name = "Dragon Talon", ToolTip = "Melee" }
+local HS2 = { Name = "Hallow Scythe", ToolTip = "Sword" }
+local SG = { Name = "Skull Guitar", ToolTip = "Gun" }
+local function freshForm()
+    SE.form = { beast = { hits = 0, casts = 0, up = 0, since = 0 }, fish = { hits = 0, casts = 0, up = 0, since = 0 } }
+    SE.formRetryAt, SE.formFails = nil, 0
+    player.Character.kids = {}
+end
+-- The game's answer to V: the rig comes (or goes).
+local V_WORKS = true
+ON_KEY = function(code)
+    if code ~= "V" or not V_WORKS then return end
+    if player.Character.kids.Kitsune then player.Character.kids.Kitsune = nil
+    else player.Character:add(inst("Kitsune", "Model")) end
+end
+
+TOOLS = { DT }
+freshForm()
+check("no Kitsune fruit carried: never in form", T.formWanted("beast") == false)
+TOOLS = { KIT, DT, HS2, SG }
+CFG.SeaEvForm = "base"
+check("\"never transformed\": no form", T.formWanted("beast") == false)
+CFG.SeaEvForm = "form"
+SE.form.beast.verdict = "base"
+check("\"Kitsune form, always\": form, whatever the test said", T.formWanted("beast") == true)
+CFG.SeaEvForm = "auto"
+check("auto, its M1 found useless on beasts: no form for beasts", T.formWanted("beast") == false)
+check("...but untested on Terrorshark etc.: form for them (the test)", T.formWanted("fish") == true)
+freshForm()
+check("auto, untested: form first", T.formWanted("beast") == true)
+
+-- Into the form: Kitsune in hand, V, the rig.
+KEYS_SENT, HELD = {}, nil
+check("into the form: Kitsune in hand, V - the rig is on you", T.setForm(true, epoch) == true
+    and HELD == "Kitsune-Kitsune" and KEYS_SENT[1] == "V" and SE.inForm())
+check("in form: Dragon Talon refused (the game's rule), Kitsune's moves allowed",
+    not T.seaOk("Dragon Talon") and T.seaOk("Kitsune-Kitsune"))
+CFG.SeaEvWeapons["Blox Fruit"] = false
+check("in form: the fruit's moves fight even with the fruit type off (the form takes nothing else)",
+    T.seaOk("Kitsune-Kitsune"))
+CFG.SeaEvWeapons["Blox Fruit"] = true
+KEYS_SENT = {}
+check("out of the form: V again - the rig gone", T.setForm(false, epoch) == true and KEYS_SENT[1] == "V" and not SE.inForm())
+check("out of form: fruit + melee fight (your points); the sword and the gun do not",
+    T.seaOk("Kitsune-Kitsune") and T.seaOk("Dragon Talon") and not T.seaOk("Hallow Scythe") and not T.seaOk("Skull Guitar"))
+-- V cooling: no key.
+BARS["Kitsune-Kitsune V"] = false
+KEYS_SENT = {}
+check("V's bar cooling: no key sent, not now", T.setForm(true, epoch) == false and #KEYS_SENT == 0)
+BARS["Kitsune-Kitsune V"] = nil
+SE.formRetryAt = nil
+-- V that does nothing, three times: left alone a minute.
+V_WORKS = false
+for _ = 1, 3 do
+    SE.formRetryAt = nil
+    T.setForm(true, epoch)
+end
+check("V did nothing 3 times: left alone a minute (said)", SE.formRetryAt and SE.formRetryAt - CLOCK > 50
+    and string.find(tostring(SE.formNote), "left alone", 1, true) ~= nil, tostring(SE.formNote))
+V_WORKS = true
+freshForm()
+
+-- A beast, auto: into the form, its M1 tested - it lands = form for beasts.
+reset()
+clearWorld()
+CFG.Hunt, P.running = true, true
+BOAT = makeBoat(Z5 + vec(0, 5, 0))
+S.drive.waterY = 5
+S.driving, HUM.SeatPart = true, BOAT.seat
+KEYS_SENT = {}
+local fbx = beast("SeaBeast1", Z5 + vec(300, 0, 0), 100000, 100000)
+CAST_KEY, DAMAGE = "M1 Kitsune-Kitsune (form)", 1000
+SE.step(epoch)
+check("a beast, auto: off the seat, into Kitsune form, fought in it", STOPS >= 1 and SE.inForm()
+    and CASTS[1] and CASTS[1].suffix == " (form)", CASTS[1] and tostring(CASTS[1].suffix))
+check("...its M1 hurt it (3 of 3): FORM for beasts, said", SE.form.beast.verdict == "form" and printed("HURTS Sea Beasts"),
+    tostring(SE.form.beast.verdict))
+-- Its M1 lands nothing: the test runs out, out of the form, base for them.
+reset()
+clearWorld()
+freshForm()
+player.Character:add(inst("Kitsune", "Model"))
+local fb2 = beast("SeaBeast2", Z5 + vec(300, 0, 0), 100000, 100000)
+DAMAGE = 0
+for _ = 1, 20 do
+    if SE.form.beast.verdict then break end
+    SE.step(epoch)
+end
+check("its M1 hurt nothing for 20 s (6+ M1s): base for beasts, out of the form, said",
+    SE.form.beast.verdict == "base" and not SE.inForm() and printed("does NOT hurt Sea Beasts"),
+    tostring(SE.form.beast.verdict) .. " " .. tostring(SE.inForm()))
+CASTS = {}
+CAST_KEY = "Kitsune-Kitsune C"
+SE.step(epoch)
+check("...the next turns: untransformed - learned apart from the form (no suffix)", CASTS[1] and CASTS[1].suffix == nil
+    and not SE.inForm())
+-- Every 5th new beast since the verdict: tested again.
+for _ = 1, 5 do T.newTarget("beast") end
+check("5 beasts since the verdict: the form tested again", SE.form.beast.verdict == nil and printed("testing it again"))
+
+-- A Terrorshark in form: the caster (credited by its Humanoid), its own learned table.
+reset()
+clearWorld()
+freshForm()
+local tsf = fish("Terrorshark", Z5 + vec(100, 0, 0), 150000)
+CAST_KEY, DAMAGE = "M1 Kitsune-Kitsune (form)", 500
+SE.step(epoch)
+check("a Terrorshark, auto: in Kitsune form, the caster (not the farm's fight), the fish's own learning",
+    SE.inForm() and CASTS[1] and CASTS[1].model == tsf and CASTS[1].learn == SE.learnFish and #FIGHTS == 0,
+    #FIGHTS)
+check("...its M1 hurt it (the Humanoid's HP): FORM for Terrorshark etc.", SE.form.fish.verdict == "form")
+local last = LOCKS[#LOCKS]
+check("...30 over it, 15 off", last and near(last.Y, tsf.kids.HumanoidRootPart.Position.Y + 30, 0.01)
+    and near(horiz(last, tsf.kids.HumanoidRootPart.Position), 15, 0.01), vs(last))
+-- Base for fish: the farm's own fight, fighting style M1, fruit + melee only.
+reset()
+clearWorld()
+freshForm()
+SE.form.fish.verdict = "base"
+fish("Terrorshark", Z5 + vec(100, 0, 0), 150000)
+SE.step(epoch)
+local fc = FIGHTS[1]
+check("Terrorshark, base: the farm's own fight (remote-hit M1 lands from up there)", fc == SE.FISH_CUR and not SE.inForm())
+check("...its M1: your fighting style (Dragon Talon)", fc and fc.m1Weapon() == "Dragon Talon", fc and fc.m1Weapon())
+check("...the sword and the gun out (your points), the fruit and melee in",
+    fc and fc.toolOk("Kitsune-Kitsune") and fc.toolOk("Dragon Talon") and not fc.toolOk("Hallow Scythe")
+    and not fc.toolOk("Skull Guitar"))
+check("...no sword / gun loaded from your inventory either", fc and fc.noRotate() == true)
+CFG.SeaEvWeapons.Melee = false
+check("melee switched off: the fruit swings M1", fc.m1Weapon() == "Kitsune-Kitsune", fc.m1Weapon())
+CFG.SeaEvWeapons.Melee, CFG.SeaEvWeapons.Sword = true, true
+check("a sword switched on: inventory loads allowed again", fc.noRotate() == false and fc.toolOk("Hallow Scythe"))
+CFG.SeaEvWeapons.Sword = false
+player.Character:add(inst("Kitsune", "Model"))
+check("into the form mid-fight: the farm's fight hands over to the caster", fc.breakIf() == true)
+player.Character.kids = {}
+-- Nothing left to fight while in form: out of it before the wheel.
+reset()
+clearWorld()
+freshForm()
+player.Character:add(inst("Kitsune", "Model"))
+HUM.SeatPart, S.driving = nil, false
+KEYS_SENT = {}
+SE.step(epoch)
+check("nothing to fight, still in form: V - out of it, then the wheel", KEYS_SENT[1] == "V" and not SE.inForm()
+    and S.driving == true)
+-- The learned tables are kept, the fish's too.
+SE.learnFish["M1 Dragon Talon"] = { casts = 3, closed = 3 }
+SE.reset()
+check("the fish's learned keys are saved with the count", saved() and saved().learnFish
+    and saved().learnFish["M1 Dragon Talon"] and saved().learnFish["M1 Dragon Talon"].closed == 3)
+CAST_KEY, DAMAGE, ON_KEY = "Kitsune-Kitsune C", 0, nil
+freshForm()
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

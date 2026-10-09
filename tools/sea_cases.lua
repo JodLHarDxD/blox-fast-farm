@@ -1669,6 +1669,29 @@ end)()
         keys = { "Z" }, keyOn = { Z = true }, toolOk = function(n) return n == "Kitsune-Kitsune" end })
     check("sea beast, Kitsune form: the gun's Z (refused by the game) is never fired - Kitsune's is",
         HELD == "Kitsune-Kitsune" and KEYS_SENT[1] == "Z", tostring(HELD))
+    -- v.suffix: a transformed fruit's moves learned apart ("(form)").
+    READY = { ["Kitsune-Kitsune Z"] = true }
+    HELD = nil
+    local lf = {}
+    reset()
+    local fk = T.ventCast({ pos = part.Position, part = part, model = part, learn = lf, alive = function() return true end,
+        keys = { "Z" }, keyOn = { Z = true }, suffix = " (form)" })
+    check("sea beast in form: its key learned apart - \"Kitsune-Kitsune Z (form)\"", fk == "Kitsune-Kitsune Z (form)"
+        and lf["Kitsune-Kitsune Z (form)"] and lf["Kitsune-Kitsune Z"] == nil, tostring(fk))
+    READY = {}
+    local mk = T.ventCast({ pos = part.Position, part = part, model = part, learn = lf, alive = function() return true end,
+        keys = { "Z" }, keyOn = { Z = true }, suffix = " (form)", m1Tool = function() return "Kitsune-Kitsune" end })
+    check("...its M1 too - \"M1 Kitsune-Kitsune (form)\"", mk == "M1 Kitsune-Kitsune (form)", tostring(mk))
+    -- v.noRotate: every key cooling, no sword / gun loaded (a fruit + melee fight).
+    local loads = 0
+    P.rotate = function() loads += 1 return false end
+    T.ventCast({ pos = part.Position, part = part, model = part, learn = {}, alive = function() return true end,
+        keys = { "Z" }, keyOn = { Z = true }, noRotate = function() return true end })
+    check("sea beast, fruit + melee only: every key cooling - nothing loaded from the inventory", loads == 0, loads)
+    T.ventCast({ pos = part.Position, part = part, model = part, learn = {}, alive = function() return true end,
+        keys = { "Z" }, keyOn = { Z = true } })
+    check("...a vent (no such rule): the inventory asked as before", loads == 1, loads)
+    P.rotate = nil
     -- A vent never fires F (no keys of its own): unchanged.
     READY = { ["Kitsune-Kitsune F"] = true }
     HELD = nil

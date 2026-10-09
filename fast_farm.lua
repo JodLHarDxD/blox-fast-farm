@@ -328,6 +328,16 @@ local CFG = {
     -- events before he takes fragments again - the wiki). Kept across joins.
     SeaEvGoal          = 20,
     SeaEvStopAtGoal    = false,      -- on: the hunt stops the moment the count reaches the goal
+    -- THE LOADOUT AT SEA (user, 2026-10-09: stats in fruit + melee, Kitsune +
+    -- Dragon Talon). "auto": Kitsune FORM first (V pressed for you), its M1
+    -- tested on each kind of target (Sea Beasts / Terrorshark-Piranha-Shark):
+    -- it hurts that kind = stay in form for it; it does not = untransformed
+    -- Kitsune + your fighting style. Re-tested every 5th target. "form" /
+    -- "base" force one.
+    SeaEvForm          = "auto",
+    SeaEvTrial         = 20,         -- seconds in form, at most, for the test
+    -- The weapons that fight at sea out of form (your points: fruit + melee).
+    SeaEvWeapons       = { ["Blox Fruit"] = true, Melee = true, Sword = false, Gun = false },
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -419,7 +429,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.3" }
 _G.BFF = P
 
 -- =========================================================
@@ -2297,7 +2307,16 @@ local function usedWeapons()
     -- A sea event (SEA EVENTS; user, 2026-10-08): M1 AND every skill of every
     -- weapon you carry, whatever the Attack page says.
     if pileCur and pileCur.allKeys and (P :: any).autoWeapons then
-        return (P :: any).autoWeapons(pileCur.allKeys())
+        local list = (P :: any).autoWeapons(pileCur.allKeys())
+        -- ...the fight's own weapon rule (SEA EVENTS: fruit + melee, the form's).
+        if pileCur.toolOk then
+            local only = {}
+            for _, u in ipairs(list) do
+                if pileCur.toolOk(u.name) then table.insert(only, u) end
+            end
+            list = only
+        end
+        return list
     end
     if CFG.AutoAttack and (P :: any).autoWeapons then return (P :: any).autoWeapons() end
     local out = {}
@@ -2583,6 +2602,8 @@ do
         function P.rotate(vents)
             if not CFG.InvSwap then return false end
             if not vents and not CFG.AutoAttack and not (pileCur and pileCur.allKeys) then return false end
+            -- A fight that takes no sword / gun (SEA EVENTS: fruit + melee): none loaded.
+            if not vents and pileCur and pileCur.noRotate and pileCur.noRotate() then return false end
             -- The mastery farm: nothing else is put in your hands.
             if not vents and (CFG.MasteryWeapon or "") ~= "" then return false end
             local now = os.clock()
@@ -7235,7 +7256,8 @@ do
                 for ki, k in ipairs(v.keys or VENT_KEYS) do
                     -- v.toolOk: a transformed fruit takes only its own moves (SEA EVENTS).
                     if (v.keyOn or CFG.VentKeys or {})[k] and (not v.toolOk or v.toolOk(t.Name)) then
-                        local key = t.Name .. " " .. k
+                        -- v.suffix: " (form)" - a transformed fruit's moves learned apart.
+                        local key = t.Name .. " " .. k .. (v.suffix or "")
                         table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key, v.learn), order = ti * 10 + ki })
                     end
                 end
@@ -7266,7 +7288,8 @@ do
             end
             -- Nothing ready: a rested sword / gun from your inventory, once.
             local rot = (P :: any).rotate
-            if not rotated and rot and rot(true) then return ventCast(v, true) end
+            -- (v.noRotate: a fight that takes no sword / gun - SEA EVENTS.)
+            if not rotated and not (v.noRotate and v.noRotate()) and rot and rot(true) then return ventCast(v, true) end
             -- A thing only blasts break (v.noM1, the ember hunt's trees): no
             -- plain M1 - wait for a key. nil key = nothing was fired.
             if v.noM1 then
@@ -7279,7 +7302,7 @@ do
             local want = v.m1Tool and v.m1Tool()
             if want then equip(want) end
             local held = heldTool()
-            local key = "M1 " .. (held and held.Name or "(empty hand)")
+            local key = "M1 " .. (held and held.Name or "(empty hand)") .. (v.suffix or "")
             local cam = workspace.CurrentCamera
             if cam then
                 aimOn(v, 1.2)
@@ -9004,6 +9027,14 @@ end
 --               script does), the camera 90 off so it is never inside it.
 --               Transformed (a fruit's rig on you), the game refuses every
 --               other weapon's key: only that fruit's moves are fired.
+-- THE LOADOUT (user, 2026-10-09: points in fruit + melee - Kitsune, Dragon
+-- Talon). Kitsune FORM first (V pressed for you, off the seat): its M1 tested
+-- per class - Sea Beasts / Terrorshark-Piranha-Shark - credited by the
+-- target's HP; it hurts them (2 hits) = form for that class; 20 s and 6 M1s
+-- without = out of form, untransformed Kitsune + your fighting style (only
+-- SeaEvWeapons' types). In form every fight is the HP-credited caster; out
+-- of form a fish is the farm's own fight (Dragon Talon's remote-hit M1).
+-- Re-tested every 5th target. The radio: auto / form always / never.
 --               Which key and whose M1 hurt it is LEARNED from its HP (the
 --               vent caster, P.sea.ventCast, credited by HP); nothing lands
 --               for 6 s = in close.
@@ -9026,7 +9057,7 @@ do
             note = "off", mode = "-", cur = nil, lockPart = nil, parkAt = nil, parkBoat = nil,
             members = {}, groups = {}, shift = 0, wrong = 0,
             count = { total = 0, kinds = {}, since = os.time(), log = {} },
-            learn = {}, spy = nil, last = "-", fights = 0, flees = 0, seenNames = {},
+            learn = {}, learnFish = {}, spy = nil, last = "-", fights = 0, flees = 0, seenNames = {},
         }
         P.seaev = SE
         local FILE, PROBE = "bff_sea_events.json", "bff_beast_probe.txt"
@@ -9288,7 +9319,7 @@ do
             pcall(function()
                 writefile(FILE, HS:JSONEncode({
                     total = SE.count.total, kinds = SE.count.kinds, since = SE.count.since,
-                    log = SE.count.log, learn = SE.learn,
+                    log = SE.count.log, learn = SE.learn, learnFish = SE.learnFish,
                 }))
             end)
         end
@@ -9307,7 +9338,7 @@ do
             for _, s in ipairs(type(d.log) == "table" and d.log or {}) do
                 if type(s) == "string" and #SE.count.log < 8 then table.insert(SE.count.log, s) end
             end
-            if P.learnClean then SE.learn = P.learnClean(d.learn) end
+            if P.learnClean then SE.learn, SE.learnFish = P.learnClean(d.learn), P.learnClean(d.learnFish) end
         end
         load()
 
@@ -9649,31 +9680,141 @@ do
         end
         SE.shrink = shrink
 
-        -- Whose M1 hurts a beast: learned ("M1 <weapon>"); untried ones fruit
-        -- first (Kitsune's M1 hits them - the wiki), then guns (Skull Guitar).
-        -- Transformed: the fruit's own, nothing else swings.
-        local M1_RANK = { ["Blox Fruit"] = 1, Gun = 2, Melee = 3, Sword = 4 }
-        local function bestM1()
+        -- THE WEAPONS AT SEA (user, 2026-10-09: points in fruit + melee): out
+        -- of form, only SeaEvWeapons' types; in a form, its own moves (the
+        -- game's rule, above) whatever the types say.
+        local function typeOk(name)
+            local t = findTool(name)
+            local ty = t and toolType(t)
+            return ty ~= nil and (CFG.SeaEvWeapons or {})[ty] == true
+        end
+        local function seaOk(name)
+            if not toolOk(name) then return false end
+            if formOf() then return true end
+            return typeOk(name)
+        end
+        local function noRotate()
+            local w = CFG.SeaEvWeapons or {}
+            return not (w.Sword or w.Gun)
+        end
+
+        -- ---------- KITSUNE FORM FIRST (user, 2026-10-09) ----------
+        -- "If transformed Kitsune's M1 lands on the sea beast / Terrorshark,
+        -- good; if not, untransformed Kitsune + Dragon Talon." Per CLASS of
+        -- target - "beast" (immune to most M1s, the wiki) and "fish"
+        -- (Terrorshark / Piranha / Shark, Humanoids) - one test each: fought in
+        -- form, its M1 credited by the target's HP. Re-tested every 5th target.
+        local CLASS_NAME = { beast = "Sea Beasts", fish = "Terrorshark / Piranha / Shark" }
+        SE.form = { beast = { hits = 0, casts = 0, up = 0, since = 0 }, fish = { hits = 0, casts = 0, up = 0, since = 0 } }
+        local function kitsune()
+            for _, t in ipairs(toolNames()) do
+                if toolType(t) == "Blox Fruit" and string.find(t.Name, "Kitsune", 1, true) then return t.Name end
+            end
+            return nil
+        end
+        local function inForm() return select(2, formOf()) == "Kitsune" end
+        SE.inForm, SE.kitsune = inForm, kitsune
+
+        -- The verdict (pure): its M1 hurt it twice = "form"; SeaEvTrial s in
+        -- form with 6 M1s or more and fewer hits = "base"; else nil (testing).
+        local function verdictOf(f, trialSecs)
+            if f.hits >= 2 then return "form" end
+            if f.up >= trialSecs and f.casts >= 6 then return "base" end
+            return nil
+        end
+        -- In form for this class? (Kitsune carried, the radio, the verdict.)
+        local function formWanted(cls)
+            local mode = CFG.SeaEvForm or "auto"
+            if mode == "base" or not kitsune() then return false end
+            if mode == "form" then return true end
+            return SE.form[cls].verdict ~= "base"
+        end
+        -- A new target of this class: one more since the verdict; the 5th = test again.
+        local function newTarget(cls)
+            local f = SE.form[cls]
+            if not f.verdict then return end
+            f.since += 1
+            if f.since >= 5 then
+                SE.form[cls] = { hits = 0, casts = 0, up = 0, since = 0 }
+                print("[BFF] seaev: 5 " .. CLASS_NAME[cls] .. " since the Kitsune form's verdict - testing it again")
+            end
+        end
+
+        -- Into / out of the form: Kitsune in hand, V. Seated, the game refuses
+        -- every skill - off the seat first (the caller). V's bar cooling = not
+        -- now (the fight goes on as it is). The rig not there / not gone in
+        -- 2.5 s, 3 times running = left alone a minute (V may not undo it - a
+        -- form then ends by itself; meanwhile only its moves are fired).
+        local function setForm(want, myEpoch)
+            if inForm() == want then return true end
+            if os.clock() < (SE.formRetryAt or 0) then return false end
+            local k = kitsune()
+            if not k then return false end
+            if not equip(k) then return false end
+            if barReady(k, "V") == false then
+                SE.formNote = want and "Kitsune V cooling - fighting out of form meanwhile" or "Kitsune V cooling"
+                SE.formRetryAt = os.clock() + 1
+                return false
+            end
+            holdKey(KEYCODE.V, 0.05)
+            cdOf(k, "V").lastCast = os.clock()
+            local t0 = os.clock()
+            while os.clock() - t0 < 2.5 and not stale(myEpoch) do
+                if inForm() == want then
+                    SE.formFails = 0
+                    SE.formNote = want and "Kitsune FORM" or "out of form"
+                    print("[BFF] seaev: " .. (want and "into Kitsune form" or "out of Kitsune form"))
+                    return true
+                end
+                task.wait(0.1)
+            end
+            SE.formFails = (SE.formFails or 0) + 1
+            SE.formRetryAt = os.clock() + ((SE.formFails >= 3) and 60 or 3)
+            SE.formNote = string.format("V did not %s (%d)%s", want and "transform" or "untransform", SE.formFails,
+                (SE.formFails >= 3) and " - left alone a minute" or "")
+            print("[BFF] seaev: " .. SE.formNote)
+            if SE.formFails >= 3 then SE.formFails = 0 end
+            return false
+        end
+        SE.setForm = setForm
+
+        -- Whose M1 hurts it: learned ("M1 <weapon>"[" (form)"]); untried ones
+        -- fruit first (Kitsune's M1 hits beasts - the wiki), then melee.
+        -- Only weapons the sea fight takes (seaOk); in form, the fruit's own.
+        local M1_RANK = { ["Blox Fruit"] = 1, Melee = 2, Gun = 3, Sword = 4 }
+        local function bestM1(learn, suffix)
+            learn = learn or SE.learn
             local best, bs, br = nil, -1, 99
             for _, t in ipairs(toolNames()) do
-                if not toolOk(t.Name) then continue end
-                local s = S.keyScore("M1 " .. t.Name, SE.learn)
+                if not seaOk(t.Name) then continue end
+                local s = S.keyScore("M1 " .. t.Name .. (suffix or ""), learn)
                 local rk = M1_RANK[toolType(t)] or 9
                 if s > bs or (s == bs and rk < br) then best, bs, br = t.Name, s, rk end
             end
             return best
         end
 
-        -- Where to hang over a beast: BeastHeight over the water, 50 to your
-        -- side of it; close (25 over, 20 off) when nothing has landed for 6 s.
-        local function hangSpot(rp, from, close, sea)
+        -- Where to hang. A beast: BeastHeight over the water, 50 to your side;
+        -- close: 25 over, 20 off. A fish: FishHeight over it, 15 off; close:
+        -- 8 over, 8 off. Close = nothing landed for 6 s.
+        local function hangSpot(rp, from, close, sea, cls)
             local side = flat(from - rp)
             side = (side.Magnitude > 1) and side.Unit or Vector3.new(1, 0, 0)
+            if cls == "fish" then
+                local h = close and 8 or (tonumber(CFG.FishHeight) or 30)
+                return rp + Vector3.new(0, h, 0) + side * (close and 8 or 15)
+            end
             local h = close and 25 or (tonumber(CFG.BeastHeight) or 90)
             return Vector3.new(rp.X, math.max(sea, rp.Y) + h, rp.Z) + side * (close and 20 or 50)
         end
 
-        local function fightBeast(x, myEpoch)
+        -- THE CASTER FIGHT: a beast (always), a fish in Kitsune form. Every
+        -- move aimed at it, credited by its HP (a fish's Humanoid, a beast's
+        -- value), learned per class and per form; the form's M1 counted for
+        -- the test.
+        local function fightBeast(x, myEpoch, cls, formNow)
+            cls = cls or "beast"
+            if formNow == nil then formNow = inForm() end
             if pileCur then releasePile() end
             leaveBoat()
             if SE.cur ~= x.model then
@@ -9683,14 +9824,18 @@ do
             activeName = x.label
             setState("FIGHT")
             grow(x.root)
-            P.camDistance = 90           -- the camera outside the beast (and its grown box)
+            P.camDistance = 90           -- the camera outside the target (and its grown box)
+            local function hpNow()
+                if x.hum then return x.hum.Health end
+                return hpOf(x.model)
+            end
             local ref, sea = seaRef(), surfaceY()
             local rp = x.root.Position
             local _, r = parts()
             if not r then return end
             -- Under the water: it cannot be seen or hurt (the wiki). Wait over
             -- it; the no-damage clock waits too (not a miss of ours).
-            if ref and math.abs(rp.Y - ref) > 175 then
+            if cls == "beast" and ref and math.abs(rp.Y - ref) > 175 then
                 SE.lockPart = nil
                 SE.lastHurt = os.clock()
                 local over = Vector3.new(rp.X, sea + 200, rp.Z)
@@ -9700,59 +9845,102 @@ do
                 task.wait(0.3)
                 return
             end
-            -- Nothing landed for 6 s from up there: in close, for this beast.
+            -- Nothing landed for 6 s from up there: in close, for this target.
             if not SE.closeOn and os.clock() - (SE.lastHurt or SE.fightStart) > 6 then
                 SE.closeOn = true
-                print("[BFF] seaev: nothing hurt " .. x.label .. " for 6 s from " .. math.floor(tonumber(CFG.BeastHeight) or 90)
-                    .. " up - in close")
+                print("[BFF] seaev: nothing hurt " .. x.label .. " for 6 s - in close")
             end
             local close = SE.closeOn
-            local spot = hangSpot(rp, r.Position, close, sea)
+            local spot = hangSpot(rp, r.Position, close, sea, cls)
             if (r.Position - spot).Magnitude > (CFG.InstantHop or 150) then
                 flyTo(spot, { face = rp })
                 if stale(myEpoch) then return end
             end
             lockAt(spot, rp)
             SE.lockPart = x.root
-            local v = { pos = rp, part = x.root, model = x.model, learn = SE.learn,
-                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, m1Tool = bestM1, toolOk = toolOk }
+            local learn = (cls == "fish") and SE.learnFish or SE.learn
+            local suffix = formNow and " (form)" or nil
+            local v = { pos = rp, part = x.root, model = x.model, learn = learn, suffix = suffix,
+                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, toolOk = seaOk, noRotate = noRotate }
+            v.m1Tool = function() return bestM1(learn, suffix) end
             v.alive = function()
-                local hp = hpOf(x.model)
+                local hp = hpNow()
                 return x.model.Parent ~= nil and not (hp and hp <= 0)
             end
-            v.mark = function() v.hp0 = hpOf(x.model) end
+            v.mark = function() v.hp0 = hpNow() end
             v.dropped = function()
-                local hp = v.hp0 and hpOf(x.model)
+                local hp = v.hp0 and hpNow()
                 return hp ~= nil and hp < v.hp0 - 0.5
             end
+            local f = SE.form[cls]
+            local testing = formNow and (CFG.SeaEvForm or "auto") == "auto" and not f.verdict
             local t0 = os.clock()
             while os.clock() - t0 < 1.5 and P.running and huntOn() and not stale(myEpoch) and v.alive() do
                 local _, r2 = parts()
                 if not r2 then break end
                 v.pos = x.root.Position
-                lockAt(hangSpot(v.pos, r2.Position, close, sea), v.pos)
+                lockAt(hangSpot(v.pos, r2.Position, close, sea, cls), v.pos)
+                local tc = os.clock()
                 local key, landed = S.ventCast(v)
                 if landed then SE.lastHurt = os.clock() end
                 SE.lastKey = tostring(key or "every key cooling") .. (landed and " - hurt it" or " - nothing")
-                -- Its last HP, for the count: it sinks the moment it dies.
+                if testing then
+                    f.up += os.clock() - tc
+                    if type(key) == "string" and string.sub(key, 1, 3) == "M1 " then
+                        f.casts += 1
+                        if landed then f.hits += 1 end
+                    end
+                end
+                -- Its last HP, for the count: a beast sinks the moment it dies.
                 local mm = SE.members[x.model]
-                if mm then mm.hp = hpOf(x.model) or mm.hp end
+                if mm and not x.hum then mm.hp = hpOf(x.model) or mm.hp end
             end
-            local hp = hpOf(x.model)
+            -- The test's verdict for this class.
+            if testing then
+                local vd = verdictOf(f, tonumber(CFG.SeaEvTrial) or 20)
+                if vd then
+                    f.verdict, f.since = vd, 0
+                    local line = string.format("Kitsune form's M1 %s %s (%d of %d M1s, %.0f s) - %s",
+                        (vd == "form") and "HURTS" or "does NOT hurt", CLASS_NAME[cls], f.hits, f.casts, f.up,
+                        (vd == "form") and "staying in form for them" or "untransformed Kitsune + your fighting style for them")
+                    SE.last = line
+                    print("[BFF] seaev: " .. line)
+                    if vd == "base" then setForm(false, myEpoch) end
+                end
+            end
+            local hp = hpNow()
             local _, rig = formOf()
             SE.note = string.format("%s  ·  HP %s%s  ·  %s  ·  last: %s%s", x.label,
                 hp and tostring(math.floor(hp)) or "?", (x.max and x.max > 0) and (" / " .. math.floor(x.max)) or "",
-                close and "IN CLOSE (nothing landed for 6 s)" or (math.floor(tonumber(CFG.BeastHeight) or 90) .. " up"),
-                tostring(SE.lastKey or "-"), rig and ("  ·  " .. rig .. " form: only its moves") or "")
+                close and "IN CLOSE (nothing landed for 6 s)"
+                    or (math.floor(tonumber((cls == "fish") and CFG.FishHeight or CFG.BeastHeight) or 90) .. " up"),
+                tostring(SE.lastKey or "-"),
+                rig and ("  ·  " .. rig .. " FORM" .. (testing and string.format(" (testing its M1: %d of %d)", f.hits, f.casts) or ""))
+                    or "")
             say(SE.note)
         end
 
-        -- Terrorshark / Piranha / Shark: the farm's own fight, in place.
+        -- Terrorshark / Piranha / Shark out of form: the farm's own fight, in
+        -- place - its remote-hit M1 lands on a Humanoid from up there (your
+        -- fighting style, Dragon Talon), every skill of the sea's weapons.
         local FISH_CUR
         FISH_CUR = {
             name = "sea event",
             allKeys = function() return CFG.SeaEvKeys or {} end,
             height = function() return tonumber(CFG.FishHeight) or 30 end,
+            toolOk = function(name) return seaOk(name) end,
+            noRotate = function() return noRotate() end,
+            -- The M1: your fighting style first, then the fruit, a sword, a gun
+            -- - of the weapons the sea fight takes.
+            m1Weapon = function()
+                local best, br = nil, 99
+                local rank = { Melee = 1, ["Blox Fruit"] = 2, Sword = 3, Gun = 4 }
+                for _, t in ipairs(toolNames()) do
+                    local rk = rank[toolType(t)] or 9
+                    if seaOk(t.Name) and rk < br then best, br = t.Name, rk end
+                end
+                return best
+            end,
             build = function()
                 local now = os.clock()
                 local h = home()
@@ -9778,7 +9966,8 @@ do
                 grow(best.root)
                 return { best }, best.root.Position, true
             end,
-            breakIf = function() return not (P.running and huntOn()) end,
+            -- Into Kitsune form meanwhile (the test, or its verdict): the caster takes over.
+            breakIf = function() return not (P.running and huntOn()) or inForm() end,
         }
         SE.FISH_CUR = FISH_CUR
 
@@ -9838,14 +10027,24 @@ do
             local x = pick(fights, r and r.Position or nil)
             if x then
                 SE.mode = "fight"
-                if x.kind == "beast" then fightBeast(x, myEpoch) else fightFish(x, myEpoch) end
+                local cls = (x.kind == "beast") and "beast" or "fish"
+                if x.model ~= SE.cur then newTarget(cls) end
+                -- Off the seat (seated, the game refuses every skill), then the
+                -- form this class wants (KITSUNE FORM FIRST).
+                leaveBoat()
+                local want = formWanted(cls)
+                if want ~= inForm() then setForm(want, myEpoch) end
+                local formNow = inForm()
+                if cls == "beast" or formNow then fightBeast(x, myEpoch, cls, formNow) else fightFish(x, myEpoch) end
                 E.note = SE.note
                 return true
             end
-            -- Nothing to fight: back at the wheel.
+            -- Nothing to fight: back at the wheel - out of the form first (it
+            -- drains, and a fox does not sit).
             SE.cur, SE.lockPart, P.camDistance = nil, nil, nil
             shrink()
             if pileCur then releasePile() end
+            if inForm() then setForm(false, myEpoch) end
             if not board(myEpoch) then
                 E.note = SE.note
                 return true
@@ -9910,6 +10109,7 @@ do
                     task.wait(15)
                     local n = 0
                     for _, L in pairs(SE.learn) do n += (tonumber(L.casts) or 0) end
+                    for _, L in pairs(SE.learnFish) do n += (tonumber(L.casts) or 0) end
                     if n ~= saved then
                         saved = n
                         save()
@@ -9925,6 +10125,8 @@ do
             fleeDir = fleeDir, wheelMode = wheelMode, nudge = nudge, centreOf = centreOf, spyText = spyText, beastHP = beastHP,
             scan = scan, pick = pick, bestM1 = bestM1, hangSpot = hangSpot, fightBeast = fightBeast,
             board = board, leaveBoat = leaveBoat, ZONES = ZONES, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
+            seaOk = seaOk, typeOk = typeOk, verdictOf = verdictOf, formWanted = formWanted, setForm = setForm,
+            newTarget = newTarget, fightFish = fightFish,
         }
     end
     build()
@@ -12285,6 +12487,40 @@ local function buildUI()
             .. "despawned = not counted. Kept across joins - reset it after each Frozen "
             .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
             .. "5 min and after each count) is the truth; the count is the guide.")
+        heading2(v, "the loadout at sea")
+        radio(v, 122, {
+            { "auto", "Kitsune form first, its M1 tested", "hurts them = form; else Kitsune + fighting style" },
+            { "form", "Kitsune form, always", "" },
+            { "base", "Never transformed", "Kitsune + fighting style (the weapons below)" },
+        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
+        sliderRow(v, "Test the form's M1 for at most", 10, 60, 5,
+            function() return CFG.SeaEvTrial end,
+            function(x) CFG.SeaEvTrial = x end, " s")
+        readout(v, function()
+            local e = P.seaev
+            local lines = {}
+            for _, cls in ipairs({ "beast", "fish" }) do
+                local f = e.form[cls]
+                local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
+                local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
+                    or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
+                    or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
+                table.insert(lines, string.format("%-17s %s", name, what))
+            end
+            table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
+                .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
+            return table.concat(lines, "\n")
+        end)
+        caption(v, "Out of form, only these weapons fight at sea (your points: fruit + melee). "
+            .. "In form, the game takes only the fruit's moves anyway.")
+        for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
+            switchRow(v, ty, nil,
+                function() return (CFG.SeaEvWeapons or {})[ty] == true end,
+                function(x)
+                    CFG.SeaEvWeapons = CFG.SeaEvWeapons or {}
+                    CFG.SeaEvWeapons[ty] = x
+                end)
+        end
         heading2(v, "fighting at sea")
         sliderRow(v, "Over a Sea Beast", 30, 250, 5,
             function() return CFG.BeastHeight end,
