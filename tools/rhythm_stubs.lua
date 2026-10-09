@@ -7,6 +7,7 @@ local function ev(s) table.insert(LOG, s) end
 local P = {}
 local stats = { casts = 0, m1 = 0, castsTook = 0, castsMissed = 0, castsHit = 0 }
 local pile, aimUntil = {}, 0
+local pileCur = nil      -- the fight's own rules (SEA EVENTS: allKeys)
 local RunService = { Heartbeat = { Wait = function() clock += 0.016 end } }
 local function aimSwapIn(_, _) end
 local function aimPoint() return nil end

@@ -21,12 +21,15 @@ a = src.index("-- WEAPON ROTATION\n")
 rot = src[a:src.index(SEP + "-- M1: THREE WAYS", a)]
 b = src.index("-- LEARNED KEYS, KEPT\n")
 learn = src[b:src.index(SEP + "-- MAIN LOOP", b)]
+# The attack list (WEAPONS: WHAT EACH ONE FIRES): which list a fight uses.
+c = src.index("local function usedWeapons()")
+used = src[c:src.index("local function equip(", c)]
 stubs = open(os.path.join(HERE, "rotate_stubs.lua"), encoding="utf-8").read()
 cases = open(os.path.join(HERE, "rotate_cases.lua"), encoding="utf-8").read()
 # The learn section: no files on this "executor" (it only defines the cleaner).
 learn_stubs = "local game = { GetService = function() return {} end }\nlocal readfile, isfile, writefile = nil, nil, nil\nlocal _G = {}\n"
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
-    f.write(stubs + rot + "\n" + learn_stubs + learn + "\n" + cases)
+    f.write(stubs + rot + "\n" + used + "\n" + learn_stubs + learn + "\n" + cases)
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)

@@ -49,6 +49,24 @@ check("auto: Z X C on, V off, F (flight) never", list[2].cfg.Z and list[2].cfg.X
 CFG.AutoKeys.V = true
 check("auto: V on when you switch it on", P.autoWeapons()[1].cfg.V == true)
 CFG.AutoKeys.V = false
+list = P.autoWeapons({ Z = true, X = false, C = true, V = false, F = true })
+check("a sea event's keys: its own Z X C V F - F included, X left off", list[1].cfg.Z and not list[1].cfg.X
+    and list[1].cfg.C and not list[1].cfg.V and list[1].cfg.F == true and list[1].cfg.M1)
+check("...your own AutoKeys untouched by it (F still never)", not P.autoWeapons()[1].cfg.F and P.autoWeapons()[1].cfg.X)
+-- THE ATTACK LIST a fight uses: a sea event's fight = every weapon you carry
+-- with its keys, even with the Attack page mode on and nothing switched on.
+CFG.AutoAttack = false
+CFG.Weapons, CFG.WeaponOrder = {}, {}
+check("the Attack page mode, nothing switched on: an empty attack list", #usedWeapons() == 0)
+pileCur = { allKeys = function() return { Z = true, F = true } end }
+list = usedWeapons()
+check("a sea event's fight: every weapon you carry, its keys (F too)", #list == 3 and list[1].cfg.F == true
+    and list[1].cfg.Z == true and not list[1].cfg.X, #list)
+P.masteryUsed = function() return { { name = "Kabucha", cfg = {}, tool = {} } } end
+check("...the mastery farm still wins (only that weapon hurts anything)", usedWeapons()[1].name == "Kabucha"
+    and #usedWeapons() == 1)
+P.masteryUsed, pileCur = nil, nil
+CFG.AutoAttack = true
 CARRY = { ["Dragon Talon"] = "Melee", ["Kabucha"] = "Gun" }
 check("auto: no sword - M1 with the fighting style", P.autoWeapons()[1].name == "Dragon Talon" and P.keepSword == nil)
 
@@ -102,6 +120,10 @@ CFG.AutoAttack = false
 T += 2
 check("rotate: off with the Attack page mode for the farm...", P.rotate(false) == false)
 check("rotate: ...but the volcano still asks (any mode)", P.rotate(true) == true)
+pileCur = { allKeys = function() return {} end }
+T += 2
+check("rotate: ...and a sea event's fight (every weapon you carry) - open to it too", P.rotate(false) == true)
+pileCur = nil
 CFG.AutoAttack = true
 CFG.InvSwap = false
 T += 2

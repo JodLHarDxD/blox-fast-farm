@@ -18,6 +18,7 @@ local function lockAt(pos, _) LOCK = pos end
 local function flyTo(pos, _) LOCK = pos end
 local attacking = false
 local pile, pileCentre, pileSide = {}, nil, nil
+local pileCur = nil      -- the fight's own rules (SEA EVENTS: its height)
 local P = {}
 local CFG = { HeightMode = "auto", StayHigh = true, HeightSafe = 60, HeightMelee = 3, MeleeDistance = 5,
     HeightFixed = 12, SideFixed = 0, InstantHop = 150, HitRange = 60, PileSpread = 3 }

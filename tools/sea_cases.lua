@@ -1603,4 +1603,70 @@ end)()
     S.ev, CFG.Volcano = nil, false
 end)()
 
+-- ---------------------------------------------------------------- SEA EVENTS' HOOKS (2026-10-09)
+;(function()
+    -- The wheel steered by the sea events hunt: { dir, speed } every frame.
+    local b2, s2 = makeBoat(vec(-38000, 5, 4000), math.pi / 2)      -- facing west
+    S.boat, S.seat, S.driving = b2, s2, true
+    HUM.SeatPart = s2
+    T.drive.waterY = 5
+    S.steerFn = function() return { dir = vec(0, 0, 1), speed = 60 } end
+    T.driveTick(0.1)
+    check("steered by another hunt: along its direction at its speed (6 studs +Z), on the water line",
+        vnear(b2.pivot.Position, vec(-38000, 5, 4006)), vs(b2.pivot.Position))
+    check("steered by another hunt: the bow turns toward it, 90 deg/s at most",
+        near(math.abs(b2.pivot.yaw - math.pi / 2), math.rad(9), 1e-6), b2.pivot.yaw)
+    S.steerFn = function() return nil end
+    CFG.SeaSteer = "auto"
+    T.drive.wobbleAt, T.drive.want, T.drive.base = 1e9, 0, 0
+    b2.pivot, s2.CFrame = cf(vec(-38000, 5, 4000), math.pi / 2), cf(vec(-38000, 5, 4000), math.pi / 2)
+    T.driveTick(0.1)
+    check("the hook answering nil: the hunt's own steering (west at SeaSpeed)",
+        vnear(b2.pivot.Position, vec(-38030, 5, 4000)), vs(b2.pivot.Position))
+    S.steerFn, S.driving, HUM.SeatPart = nil, false, nil
+
+    -- The vent caster on a sea beast: its own keys (F too), credited by its HP.
+    local part = inst("Beast", "Part", { Position = vec(0, 60, 0) })
+    local HP = 1000
+    TOOLS = { { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" }, { Name = "Skull Guitar", ToolTip = "Gun" } }
+    READY = { ["Kitsune-Kitsune F"] = true }
+    BARS = {}
+    P.rotate = nil
+    local learn = {}
+    local v = { pos = part.Position, part = part, model = part, learn = learn,
+        keys = { "Z", "X", "C", "V", "F" }, keyOn = { Z = true, F = true }, m1Watch = 0.5,
+        alive = function() return HP > 0 end }
+    v.mark = function() v.hp0 = HP end
+    v.dropped = function() return HP < v.hp0 end
+    ON_KEY = function(code) if code == "F" then HP -= 50 end end
+    reset()
+    local key, landed = T.ventCast(v)
+    check("sea beast: F (a sea event key, never a vent key) fired and credited by the HP drop",
+        KEYS_SENT[1] == "F" and landed == true and learn["Kitsune-Kitsune F"] and learn["Kitsune-Kitsune F"].closed == 1,
+        tostring(key) .. " " .. tostring(KEYS_SENT[1]))
+    -- A key that did not lower the HP: fired, NOT credited.
+    ON_KEY = nil
+    CLOCK += 100
+    reset()
+    key, landed = T.ventCast(v)
+    check("sea beast: a key that took no HP is a miss (cast counted, not credited)",
+        landed == false and learn["Kitsune-Kitsune F"].casts == 2 and learn["Kitsune-Kitsune F"].closed == 1, tostring(landed))
+    -- Every key cooling: the M1 of the weapon v.m1Tool names, in hand first.
+    READY, HELD = {}, "Skull Guitar"
+    v.m1Tool = function() return "Kitsune-Kitsune" end
+    local m1s0 = M1S
+    v.dropped = function() return M1S > m1s0 end
+    reset()
+    key, landed = T.ventCast(v)
+    check("sea beast: every key cooling - the M1 of the weapon that hurts it, in hand first, credited",
+        HELD == "Kitsune-Kitsune" and M1S == m1s0 + 1 and key == "M1 Kitsune-Kitsune" and landed == true
+        and learn["M1 Kitsune-Kitsune"].closed == 1, tostring(key) .. " " .. tostring(HELD))
+    -- A vent never fires F (no keys of its own): unchanged.
+    READY = { ["Kitsune-Kitsune F"] = true }
+    HELD = nil
+    reset()
+    T.ventCast({ pos = part.Position, part = part, model = part, learn = {}, alive = function() return true end })
+    check("a vent: F is not one of its keys - nothing fired but the aimed M1", #KEYS_SENT == 0, #KEYS_SENT)
+end)()
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

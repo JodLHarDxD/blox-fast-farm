@@ -88,4 +88,14 @@ all = run("hold switched off: the gun keeps \"M1 between\" like any weapon", gun
     "let go | swap Dragonstorm | cast Dragonstorm Z | M1 Dragonstorm | M1 Dragonstorm | M1 Dragonstorm"
     .. " | M1 Dragonstorm | M1 Dragonstorm | M1 Dragonstorm") and all
 P.gunInfo, P.gunRelease = nil, nil
+-- A SEA EVENT (SEA EVENTS, user 2026-10-08): M1 AND every skill - a skill the
+-- moment it is ready, whatever "M1 between" says, the M1 in the gaps.
+pileCur = { allKeys = function() return {} end }
+all = run("sea event: skills the moment they are ready (10 between and M1-first ignored)",
+    cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 4,
+    "swap Kitsune | cast Kitsune Z | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
+pileCur = nil
+all = run("...and outside a sea event \"M1 between\" holds again",
+    cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 3,
+    "swap Kitsune | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
 print(all and "ALL PASS" or "SOME FAILED")

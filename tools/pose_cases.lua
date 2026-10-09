@@ -36,6 +36,12 @@ reset()
 CFG.HeightSafe = 120
 check("120 over the pile", poseTarget().Y == 160, poseTarget().Y)
 
+-- 5b. a fight with its own height (SEA EVENTS: 30 over a Terrorshark), then back to yours
+pileCur = { height = function() return 30 end }
+check("a sea event's own height: 30 over it, not your 120", poseTarget().Y == 70, poseTarget().Y)
+pileCur = nil
+check("...the fight over: your 120 again", poseTarget().Y == 160, poseTarget().Y)
+
 -- 6. fixed mode counts from the highest enemy too
 CFG.HeightMode, CFG.HeightFixed = "fixed", 30
 pile = { enemy(v3(0, 40, 0)), enemy(v3(0, 55, 0)) }

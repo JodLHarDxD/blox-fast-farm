@@ -221,6 +221,7 @@ local CFG = {
     Hunt               = false,
     HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric"
                                      -- | "mirage" | "dealer" | "mchest" | "gear" (the four Mirage hunts)
+                                     -- | "seaevents"
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -307,6 +308,26 @@ local CFG = {
     -- night; the other three take every one):
     --   "any" every one  ·  "night" one that sees night  ·  "full" a full-moon night
     MirageNeed         = "night",
+    -- SEA EVENTS HUNT (user, 2026-10-09; Third Sea): the same boat patrols a
+    -- slow circle at Sea Danger SeaEvDanger and what comes is FOUGHT or FLED,
+    -- each its own switch. Ship raids (the pirate brigades, the Fish Boat and
+    -- its crew, the haunted ships) are ALWAYS fled - slow, and they break the
+    -- boat. The Leviathan is never touched. Never the next server.
+    SeaEvDanger        = 5,          -- 1-6: where the boat patrols
+    SeaEvFight         = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true,
+        Piranha = true, Shark = false },
+    -- Every carried weapon fires these at a sea event, its M1 between them
+    -- (user, 2026-10-08: sea events = M1 AND every skill; the Attack page is
+    -- for the normal farm). V is often a transformation: off by default.
+    SeaEvKeys          = { Z = true, X = true, C = true, V = false, F = true },
+    BeastHeight        = 90,         -- over the sea while a Sea Beast is fought
+    FishHeight         = 30,         -- over a Terrorshark / Piranha / Shark
+    BoatLift           = 150,        -- the boat held this high while you fight (0 = left on the water)
+    FleeTo             = 1500,       -- a ship raid this near the boat: sailed away until it is this far
+    -- THE COUNT (the Spy: after a Frozen Dimension, 20 or more KILLED sea
+    -- events before he takes fragments again - the wiki). Kept across joins.
+    SeaEvGoal          = 20,
+    SeaEvStopAtGoal    = false,      -- on: the hunt stops the moment the count reaches the goal
 
     -- ---------- THE VOLCANO EVENT ----------
     -- Its own switch, any mode: whenever a Prehistoric Island is up in this
@@ -398,7 +419,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-07.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -2147,7 +2168,9 @@ local function poseTarget()
     elseif wantPose == "melee" or P.forceClose then
         return c + Vector3.new(0, CFG.HeightMelee or 3, 0) + pileSide * (CFG.MeleeDistance or 5)
     end
-    return c + Vector3.new(0, CFG.HeightSafe or 20, 0)
+    -- A fight's own height (SEA EVENTS: over a Terrorshark, out of its splash).
+    local own = pileCur and pileCur.height and pileCur.height() or nil
+    return c + Vector3.new(0, own or CFG.HeightSafe or 20, 0)
 end
 
 -- Put the lock where the pose says. Far away (back from an escape, a fresh
@@ -2269,6 +2292,11 @@ local function usedWeapons()
     local mu = (P :: any).masteryUsed
     local only = mu and mu()
     if only then return only end
+    -- A sea event (SEA EVENTS; user, 2026-10-08): M1 AND every skill of every
+    -- weapon you carry, whatever the Attack page says.
+    if pileCur and pileCur.allKeys and (P :: any).autoWeapons then
+        return (P :: any).autoWeapons(pileCur.allKeys())
+    end
     if CFG.AutoAttack and (P :: any).autoWeapons then return (P :: any).autoWeapons() end
     local out = {}
     for _, name in ipairs(CFG.WeaponOrder) do
@@ -2341,7 +2369,7 @@ local function cdTick()
     local now = os.clock()
     for name, w in pairs(CFG.Weapons) do
         for _, k in ipairs(KEYS) do
-            if w[k] or CFG.AutoAttack then
+            if w[k] or CFG.AutoAttack or (pileCur and pileCur.allKeys) then
                 local b = barReady(name, k)
                 if b ~= nil then
                     local c = cdOf(name, k)
@@ -2442,20 +2470,23 @@ do
             return best
         end
 
-        function P.autoWeapons()
+        -- keysIn: a fight's own keys (SEA EVENTS: CFG.SeaEvKeys, F included);
+        -- nil = CFG.AutoKeys, never F.
+        function P.autoWeapons(keysIn)
             local tools = toolNames()
             table.sort(tools, function(a, b)
                 local ra, rb = M1_RANK[toolType(a)] or 9, M1_RANK[toolType(b)] or 9
                 if ra ~= rb then return ra < rb end
                 return a.Name < b.Name
             end)
-            local keys = CFG.AutoKeys or {}
+            local keys = keysIn or CFG.AutoKeys or {}
             local out = {}
             for _, t in ipairs(tools) do
                 local w = wcfg(t.Name)
                 -- M1 allowed on all; P.m1Of picks the one that swings.
                 local cfg = { use = true, M1 = true, hold = w.hold,
-                    Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true, F = false }
+                    Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true,
+                    F = keysIn ~= nil and keys.F == true }
                 table.insert(out, { name = t.Name, cfg = cfg, tool = t })
             end
             local m1 = P.m1Of(out)
@@ -2549,7 +2580,7 @@ do
         -- swapped in over it.
         function P.rotate(vents)
             if not CFG.InvSwap then return false end
-            if not vents and not CFG.AutoAttack then return false end
+            if not vents and not CFG.AutoAttack and not (pileCur and pileCur.allKeys) then return false end
             -- The mastery farm: nothing else is put in your hands.
             if not vents and (CFG.MasteryWeapon or "") ~= "" then return false end
             local now = os.clock()
@@ -3035,6 +3066,8 @@ local function attackTick()
     local between = CFG.M1Between or 0
     local gi = m1u and m1u.tool and (P :: any).gunInfo and (P :: any).gunInfo(m1u.tool)
     if gi and ((gi.gatling and CFG.GunHold) or CFG.GunFast) then between = 0 end
+    -- A sea event: every skill the moment it is ready, M1 in the gaps.
+    if pileCur and pileCur.allKeys then between = 0 end
 
     if anySkill and (not m1u or m1Count >= between) then
         for _, u in ipairs(used) do
@@ -5492,6 +5525,9 @@ do
                 -- SEA HUNT: true while it sails (or holds the island); false
                 -- = nothing came by the far edge, E.why says so.
                 if (P :: any).sea.huntStep(myEpoch, kind) then return end
+            elseif kind == "seaevents" then
+                -- SEA EVENTS: always busy (never hops).
+                if (P :: any).seaev.step(myEpoch) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -6074,7 +6110,15 @@ do
             local pv = b:GetPivot()
             local look = flat(seat.CFrame.LookVector)
             local turn, dir = 0, nil
-            if CFG.SeaSteer == "manual" then
+            -- Steered by another hunt (SEA EVENTS: the patrol, away from a
+            -- ship raid): { dir, speed } every frame; nil = the steering below.
+            local own = S.steerFn and S.steerFn(pv.Position, look)
+            if own then
+                dir, speed = own.dir, own.speed
+                if look.Magnitude > 0.1 then
+                    turn = turnStep(yawOf(look), yawOf(dir), math.rad(90) * step)
+                end
+            elseif CFG.SeaSteer == "manual" then
                 local k = keysDown()
                 if k.go then drive.cruise = true elseif k.stop then drive.cruise = false end
                 turn = k.steer * math.rad(tonumber(CFG.SeaTurnRate) or 60) * step
@@ -6188,6 +6232,9 @@ do
             end
             return nil
         end
+        -- The boat's parts, for the sea events hunt (SEA EVENTS, after the main loop).
+        S.seatOf, S.sit, S.buyBoat, S.boatHP, S.dangerNow, S.notify, S.drive, S.TIKI =
+            seatOf, sit, buyBoat, boatHP, dangerNow, notify, drive, TIKI_DEALER
 
         -- ---------- the Mirage ----------
         local MIRAGE_LIFE, GEAR_MARGIN = 900, 120
@@ -7150,6 +7197,8 @@ do
         -- Did the vent (or v.alive's thing: a tree) go within `secs`?
         local function watchClosed(v, secs)
             local function live()
+                -- A sea beast (SEA EVENTS): its HP went down = the move landed.
+                if v.dropped and v.dropped() then return false end
                 if v.alive then return v.alive() end
                 return ventLive(v.model)
             end
@@ -7167,17 +7216,22 @@ do
             L.casts += 1
             if closed then L.closed += 1 end
         end
+        -- A sea beast (SEA EVENTS) brings its own: v.keys / v.keyOn (Z-F and
+        -- its switches), v.mark (its HP before each action), v.dropped (went
+        -- down since), v.m1Tool (whose M1 to swing), v.m1Watch (seconds).
         local function ventCast(v, rotated)
             local pos = v.pos
             local now = os.clock()
             local function aimIt()
                 RunService.Heartbeat:Wait()
-                pcall(aimSwapIn, pos, pos)
+                -- P.aimAt: a moving target's live body (SEA EVENTS keeps it on it).
+                local at = P.aimAt or pos
+                pcall(aimSwapIn, at, at)
             end
             local cands = {}
             for ti, t in ipairs(ventTools()) do
-                for ki, k in ipairs(VENT_KEYS) do
-                    if (CFG.VentKeys or {})[k] then
+                for ki, k in ipairs(v.keys or VENT_KEYS) do
+                    if (v.keyOn or CFG.VentKeys or {})[k] then
                         local key = t.Name .. " " .. k
                         table.insert(cands, { tool = t, k = k, key = key, score = keyScore(key, v.learn), order = ti * 10 + ki })
                     end
@@ -7193,6 +7247,7 @@ do
                     local w = CFG.Weapons[c.tool.Name]
                     local hold = (w and w.hold and w.hold[c.k]) or 0.05
                     aimOn(v, hold + (CFG.CastWait or 0.45) + 1.5)
+                    if v.mark then v.mark() end
                     holdKey(KEYCODE[c.k], hold, aimIt)
                     cdOf(c.tool.Name, c.k).lastCast = os.clock()
                     stats.casts += 1
@@ -7216,24 +7271,29 @@ do
                 return nil, false
             end
             -- Still nothing: an aimed M1 with what is in hand (Skull Guitar,
-            -- Bazooka, Cannon and Gravity close vents with M1 - the wiki).
+            -- Bazooka, Cannon and Gravity close vents with M1 - the wiki). A
+            -- sea beast: the weapon whose M1 hurt it (v.m1Tool) in hand first.
+            local want = v.m1Tool and v.m1Tool()
+            if want then equip(want) end
             local held = heldTool()
             local key = "M1 " .. (held and held.Name or "(empty hand)")
             local cam = workspace.CurrentCamera
             if cam then
                 aimOn(v, 1.2)
+                if v.mark then v.mark() end
                 aimPixel = cam.ViewportSize * 0.5
                 aimIt()
                 pressM1()
                 aimPixel = nil
             end
-            local closed = watchClosed(v, 0.3)
+            local closed = watchClosed(v, v.m1Watch or 0.3)
             aimOff()
             credit(key, closed, v.learn)
             if not v.learn then S.lastVent = key .. " (every key cooling)" end
             task.wait(0.05)
             return key, closed
         end
+        S.ventCast = ventCast
 
         -- ---------- the gun M1 at the vents ----------
         -- Skull Guitar first (its M1 has Destructible Physics - the wiki;
@@ -8909,6 +8969,887 @@ local function sideLoop()
     end
 end
 
+-- =========================================================
+-- SEA EVENTS
+-- =========================================================
+-- THE SEA EVENTS HUNT (HuntKind "seaevents", Third Sea; user, 2026-10-09).
+-- The Prehistoric hunt's boat (bought at Tiki's back dealer, you at the
+-- wheel, driven by its pivot) patrols a slow circle at Sea Danger
+-- SeaEvDanger: sea events come to a boat that is near, moving or not (the
+-- wiki). What comes:
+--   FOUGHT, each its own switch   Sea Beast, Rumbling Waters (three beasts),
+--                                 Terrorshark, Piranha (Shark off by default)
+--   FLED, always                  ship raids: the pirate brigades, the Fish
+--                                 Boat and its crew, the haunted ships (user:
+--                                 slow, and they break the boat)
+--   NEVER TOUCHED                 the Leviathan (user: no Leviathan code)
+-- A fight: off the seat, the boat held BoatLift up (out of the waves), one
+-- target at a time - the nearest, kept until it dies.
+--   SEA BEAST   workspace.SeaBeasts, no Humanoid: its HP is a Health value,
+--               the HealthBBG text or an attribute (the hubs read all three;
+--               the first beast writes which to workspace/bff_beast_probe.txt).
+--               Under the water = unhittable: wait over where it went, cast
+--               nothing. Up: hover BeastHeight over the sea, every ready key
+--               of every weapon you carry (SeaEvKeys) and the M1 between,
+--               aimed AT it - the silent aim follows its body every frame.
+--               Which key and whose M1 hurt it is LEARNED from its HP (the
+--               vent caster, P.sea.ventCast, credited by HP); nothing lands
+--               for 6 s = in close.
+--   TERRORSHARK / PIRANHA / SHARK   Humanoid enemies: the farm's own fight,
+--               where they swim, FishHeight over them, M1 AND every skill
+--               whatever the Attack page says.
+-- THE COUNT (user: the Spy's cooldown - 20 or more KILLED sea events after a
+-- Frozen Dimension, the wiki). One event = one group: the same kind seen
+-- within 20 s of each other (five piranhas = one event, the wiki; three
+-- beasts = Rumbling Waters = one). Counted when every member is gone and at
+-- least one was KILLED (its HP read 0, or gone at 10% or less) - under-counted
+-- rather than over. Kept in workspace/bff_sea_events.json. The Spy is asked
+-- (read only, CommF_ "InfoLeviathan" "1") at the start, after each count and
+-- every 5 min: his word is the truth, the count a guide.
+-- Never the next server. Only P.seaev leaves the block.
+do
+    local function build()
+        local S = P.sea
+        local SE: { [string]: any } = {
+            note = "off", mode = "-", cur = nil, lockPart = nil, parkAt = nil, parkBoat = nil,
+            members = {}, groups = {}, shift = 0, wrong = 0,
+            count = { total = 0, kinds = {}, since = os.time(), log = {} },
+            learn = {}, spy = nil, last = "-", fights = 0, flees = 0, seenNames = {},
+        }
+        P.seaev = SE
+        local FILE, PROBE = "bff_sea_events.json", "bff_beast_probe.txt"
+        local HS = game:GetService("HttpService")
+        local UP = Vector3.new(0, 1, 0)
+        -- Sea Danger 1-6: a public hub's points (BFX, 2026-09), checked against
+        -- the user's compass (Danger 6 ~2,630 m = 26.3k studs from the Tiki
+        -- dealer; zone 6 here is 26.5k).
+        local ZONES = {
+            Vector3.new(-22814, 0, 448), Vector3.new(-28500, 0, 1099), Vector3.new(-30724, 0, 1704),
+            Vector3.new(-34336, 0, 2569), Vector3.new(-38460, 0, 4007), Vector3.new(-42865, 0, 5736),
+        }
+        local FISH = { Terrorshark = true, Piranha = true, Shark = true }
+        local SHIP_WORDS = { "brigade", "fishboat", "fish boat", "fish crew", "ghost", "haunted" }
+        local KEYS5 = { "Z", "X", "C", "V", "F" }
+        local GROUP_GAP, DONE_WAIT = 20, 5     -- s: a group's members; quiet this long = over
+        local RANGE, RADIUS, PATROL = 1500, 400, 60   -- studs: events near the boat; the circle; its speed
+
+        -- ---------- the arithmetic (pure: tools/seaev_test.py) ----------
+        local function flat(v) return Vector3.new(v.X, 0, v.Z) end
+
+        -- "12,500/100,000" -> 12500, 100000.
+        local function parseHP(t)
+            if type(t) ~= "string" then return nil end
+            local s = (string.gsub(t, "[,%s]", ""))
+            local a, b = string.match(s, "([%d%.]+)/([%d%.]+)")
+            return tonumber(a), tonumber(b)
+        end
+
+        -- What a name in workspace.Enemies is to this hunt.
+        local function kindOf(name)
+            if type(name) ~= "string" then return nil end
+            if string.find(string.lower(name), "terrorshark", 1, true) then return "Terrorshark" end
+            if string.find(name, "Piranha", 1, true) then return "Piranha" end
+            local low = string.lower(name)
+            for _, w in ipairs(SHIP_WORDS) do
+                if string.find(low, w, 1, true) then return "ship" end
+            end
+            if name == "Shark" then return "Shark" end
+            return nil
+        end
+
+        -- Three beasts or more = Rumbling Waters (the wiki: "composed of three").
+        local function beastKind(size) return (size >= 3) and "Rumbling Waters" or "Sea Beast" end
+        local function groupLabel(g) return (g.base == "beast") and beastKind(g.size) or g.base end
+
+        -- A member joins the newest open group of its kind that saw one alive
+        -- within GROUP_GAP s; else a new group.
+        local function joinGroup(groups, base, now)
+            for i = #groups, 1, -1 do
+                local g = groups[i]
+                if g.base == base and not g.closed and now - g.lastSeen <= GROUP_GAP then return g end
+            end
+            local g = { base = base, size = 0, killed = 0, lastSeen = now, closed = false }
+            table.insert(groups, g)
+            return g
+        end
+
+        -- A member no longer alive: "killed" (its HP read 0, or it went at 10%
+        -- or less - a beast sinks the moment it dies, before the 0 is read)
+        -- or "lost" (went with HP left, or HP never read); nil = alive.
+        local function verdict(hpZero, gone, frac)
+            if hpZero then return "killed" end
+            if gone then return (frac ~= nil and frac <= 0.1) and "killed" or "lost" end
+            return nil
+        end
+
+        -- Over when nothing of it has lived for DONE_WAIT s: "count" with a
+        -- kill, else "lost"; nil = still on.
+        local function groupOver(g, alive, now)
+            if alive > 0 then
+                g.lastSeen = now
+                return nil
+            end
+            if now - g.lastSeen < DONE_WAIT then return nil end
+            return (g.killed > 0) and "count" or "lost"
+        end
+
+        -- The circle: far off it = straight at its middle at `fast`; on it =
+        -- round it at `slow`, pulled back onto its edge.
+        local function patrolDir(pos, centre, radius, slow, fast)
+            local d = flat(pos - centre)
+            local r = d.Magnitude
+            if r < 1 then return Vector3.new(0, 0, 1), slow end
+            if r > radius * 2 then return flat(centre - pos).Unit, fast end
+            local out = d.Unit
+            local round = Vector3.new(-out.Z, 0, out.X)
+            local pull = math.clamp((radius - r) / radius, -1, 1) * 1.5
+            return (round + out * pull).Unit, slow
+        end
+
+        local function fleeDir(pos, threat)
+            local d = flat(pos - threat)
+            if d.Magnitude < 1 then return Vector3.new(1, 0, 0) end
+            return d.Unit
+        end
+
+        -- The wheel with the nearest threat `d` studs off: "flee" inside
+        -- fleeTo (fleeTo + 300 once fleeing, so it does not flicker); a ship
+        -- still within twice that = "hold" (stopped, out of its way - the
+        -- circle may lead back into it); else "patrol".
+        local function wheelMode(d, kind, fleeing, fleeTo)
+            if d == nil then return "patrol" end
+            if d < fleeTo or (fleeing and d < fleeTo + 300) then return "flee" end
+            if kind == "ship" and d < fleeTo * 2 then return "hold" end
+            return "patrol"
+        end
+
+        -- The compass says another level twice running: the circle one step
+        -- (1,500 studs) out from Tiki when too low, in when too high; 4 at most.
+        local function nudge(shift, danger, want)
+            if not danger then return shift end
+            if danger < want then return math.min(shift + 1, 4) end
+            if danger > want then return math.max(shift - 1, -4) end
+            return shift
+        end
+        local function centreOf(want, shift)
+            local z = ZONES[math.clamp(want, 1, #ZONES)]
+            return z + flat(z - S.TIKI).Unit * (shift * 1500)
+        end
+
+        -- The Spy's answer (read as one public hub reads it, 2026).
+        local function spyText(code)
+            if code == 1 then return "on cooldown - \"I don't know anything yet\"" end
+            if code == 2 or code == 3 or code == 4 then
+                return "past the cooldown - takes fragments (stage " .. (code - 1) .. ")"
+            end
+            if code == 5 then return "\"the Leviathan is out there\"" end
+            return "answered " .. tostring(code)
+        end
+
+        -- ---------- what the game shows ----------
+        local function huntOn() return CFG.Hunt and CFG.HuntKind == "seaevents" end
+        SE.huntOn = huntOn
+
+        -- The sea plane's middle (the surfaced test's reference, the hubs')
+        -- and the water's top (a boat's water line; else the plane's top as
+        -- walk on water sets it: Size.Y 112).
+        local function seaRef()
+            local map = workspace:FindFirstChild("Map")
+            local p = map and map:FindFirstChild("WaterBase-Plane")
+            return (p and p:IsA("BasePart")) and p.Position.Y or nil
+        end
+        local function surfaceY()
+            if S.drive and S.drive.waterY then return S.drive.waterY end
+            local y = seaRef()
+            return y and (y + 56) or 0
+        end
+
+        local function beastRoot(m)
+            local r = m:FindFirstChild("HumanoidRootPart")
+            if r and r:IsA("BasePart") then return r end
+            if m:IsA("Model") and m.PrimaryPart then return m.PrimaryPart end
+            return m:FindFirstChildWhichIsA("BasePart", true)
+        end
+
+        -- A beast's HP: its Health value, its HealthBBG text, its attribute.
+        local function beastHP(m)
+            local hv = m:FindFirstChild("Health")
+            if hv and hv:IsA("ValueBase") then
+                local mx = m:FindFirstChild("MaxHealth")
+                local max = (mx and mx:IsA("ValueBase")) and tonumber(mx.Value) or tonumber(m:GetAttribute("MaxHealth"))
+                return tonumber(hv.Value), max, "its Health value"
+            end
+            local bbg = m:FindFirstChild("HealthBBG", true)
+            if bbg then
+                for _, d in ipairs(bbg:GetDescendants()) do
+                    if d:IsA("TextLabel") then
+                        local a, b = parseHP(d.Text)
+                        if a then return a, b, "its HealthBBG text" end
+                    end
+                end
+            end
+            local a = tonumber(m:GetAttribute("Health"))
+            if a then return a, tonumber(m:GetAttribute("MaxHealth")), "its Health attribute" end
+            return nil, nil, "not found"
+        end
+        local function hpOf(m)
+            local ok, hp = pcall(beastHP, m)
+            return ok and hp or nil
+        end
+
+        local function beasts()
+            local f = workspace:FindFirstChild("SeaBeasts")
+            local out = {}
+            for _, m in ipairs(f and f:GetChildren() or {}) do
+                -- "SeaBeast1".. only: the Leviathan's parts live here too.
+                if string.find(string.lower(tostring(m.Name)), "seabeast", 1, true) then
+                    local root = beastRoot(m)
+                    local ok, hp, max, src = pcall(beastHP, m)
+                    if root and ok then
+                        table.insert(out, { model = m, root = root, hp = hp, max = max, src = src, kind = "beast" })
+                    end
+                end
+            end
+            return out
+        end
+
+        -- Where the hunt is: your boat (it stays at sea when you die), else you.
+        local function home()
+            local b = S.myBoat()
+            if b and b.Parent then
+                local ok, cf = pcall(function() return b:GetPivot() end)
+                if ok and cf then return cf.Position end
+            end
+            local _, r = parts()
+            return r and r.Position or nil
+        end
+        local function near(pos, a, b, dist)
+            return (a ~= nil and flat(pos - a).Magnitude <= dist) or (b ~= nil and flat(pos - b).Magnitude <= dist)
+        end
+
+        -- ---------- the probe ----------
+        local function probeAdd(text)
+            SE.probeText = (SE.probeText and (SE.probeText .. "\n") or "") .. text
+            if writefile then pcall(writefile, PROBE, SE.probeText) end
+        end
+        local function probeBeast(x)
+            if SE.probed then return end
+            SE.probed = true
+            local m = x.model
+            local out = { "[sea beast] " .. os.date("!%Y-%m-%d %H:%M:%S") .. "Z  " .. m:GetFullName() .. " (" .. m.ClassName .. ")" }
+            local ok, a = pcall(function() return m:GetAttributes() end)
+            local t = {}
+            if ok and type(a) == "table" then
+                for k, v in pairs(a) do table.insert(t, tostring(k) .. "=" .. tostring(v)) end
+            end
+            table.insert(out, "attributes: " .. table.concat(t, ", "))
+            local n = 0
+            for _, d in ipairs(m:GetDescendants()) do
+                if not d:IsA("BasePart") and n < 80 then
+                    n += 1
+                    local v = ""
+                    pcall(function()
+                        if d:IsA("ValueBase") then v = " = " .. tostring(d.Value)
+                        elseif d:IsA("TextLabel") then v = " text '" .. tostring(d.Text) .. "'"
+                        elseif d:IsA("Animation") then v = " " .. tostring(d.AnimationId) end
+                    end)
+                    table.insert(out, "  " .. d:GetFullName() .. " (" .. d.ClassName .. ")" .. v)
+                end
+            end
+            local ref = seaRef()
+            table.insert(out, string.format("read: HP %s / %s from %s  ·  root %s at Y %.0f  ·  sea plane Y %s",
+                tostring(x.hp), tostring(x.max), tostring(x.src), x.root.Name, x.root.Position.Y, tostring(ref)))
+            probeAdd(table.concat(out, "\n"))
+            print("[BFF] seaev: first Sea Beast - HP from " .. tostring(x.src) .. " (all of it: workspace/" .. PROBE .. ")")
+        end
+        -- A name near the boat this hunt does not know: said once.
+        local function newName(n, where)
+            if SE.seenNames[n] then return end
+            SE.seenNames[n] = true
+            print("[BFF] seaev: near the boat, unknown here: " .. n .. " (" .. where .. ") - left alone")
+            probeAdd("[new name] " .. n .. "  in " .. where)
+        end
+
+        -- ---------- the count ----------
+        local function save()
+            if not writefile then return end
+            pcall(function()
+                writefile(FILE, HS:JSONEncode({
+                    total = SE.count.total, kinds = SE.count.kinds, since = SE.count.since,
+                    log = SE.count.log, learn = SE.learn,
+                }))
+            end)
+        end
+        local function load()
+            if not (readfile and isfile) then return end
+            local ok, d = pcall(function()
+                if not isfile(FILE) then return nil end
+                return HS:JSONDecode(readfile(FILE))
+            end)
+            if not (ok and type(d) == "table") then return end
+            SE.count.total = math.max(0, math.floor(tonumber(d.total) or 0))
+            SE.count.since = tonumber(d.since) or SE.count.since
+            for k, v in pairs(type(d.kinds) == "table" and d.kinds or {}) do
+                if type(k) == "string" and tonumber(v) then SE.count.kinds[k] = math.floor(tonumber(v)) end
+            end
+            for _, s in ipairs(type(d.log) == "table" and d.log or {}) do
+                if type(s) == "string" and #SE.count.log < 8 then table.insert(SE.count.log, s) end
+            end
+            if P.learnClean then SE.learn = P.learnClean(d.learn) end
+        end
+        load()
+
+        function SE.reset()
+            SE.count = { total = 0, kinds = {}, since = os.time(), log = {} }
+            SE.goalHit = false
+            save()
+            SE.last = "count reset to 0"
+            print("[BFF] seaev: the count is back to 0")
+        end
+
+        local spyAsk
+        local function addCount(label)
+            local c = SE.count
+            c.total += 1
+            c.kinds[label] = (c.kinds[label] or 0) + 1
+            table.insert(c.log, 1, string.format("%s %s", os.date("%H:%M"), label))
+            while #c.log > 8 do table.remove(c.log) end
+            save()
+            local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
+            SE.last = string.format("%s done - counted (%d of %d)", label, c.total, goal)
+            print("[BFF] seaev: " .. SE.last)
+            if c.total == goal then
+                SE.goalHit = true
+                S.notify(goal .. " sea events - the Spy should take fragments again")
+            end
+            task.spawn(function() pcall(spyAsk) end)
+        end
+
+        function spyAsk()
+            if SE.spyBusy then return end
+            SE.spyBusy, SE.spyAt = true, os.clock()
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("InfoLeviathan", "1") end)
+            SE.spyBusy = false
+            local code = ok and tonumber(res) or nil
+            local before = SE.spy and SE.spy.code
+            -- "Past the cooldown at N" stays until he is on cooldown again.
+            local overAt = (code ~= 1) and SE.spy and SE.spy.overAt or nil
+            SE.spy = { code = code, at = os.clock(), overAt = overAt,
+                text = ok and spyText(code) or ("not answered (" .. tostring(res) .. ")") }
+            if before == 1 and code ~= nil and code ~= 1 then
+                SE.spy.overAt = SE.count.total
+                print(string.format("[BFF] seaev: the Spy is past his cooldown - at %d counted sea events", SE.count.total))
+                S.notify("The Spy takes fragments again")
+            end
+        end
+        SE.spyAsk = spyAsk
+
+        -- ---------- the groups, every step ----------
+        local function remember(x, now)
+            local m = SE.members[x.model]
+            if not m then
+                local g = joinGroup(SE.groups, x.kind, now)
+                g.size += 1
+                m = { group = g, kind = x.kind, hum = x.hum }
+                SE.members[x.model] = m
+                print(string.format("[BFF] seaev: %s up (%s, %d in it)", (x.kind == "beast") and "a Sea Beast" or x.kind,
+                    groupLabel(g), g.size))
+                if x.kind == "beast" then probeBeast(x) end
+            end
+            m.group.lastSeen = now
+            if x.hp then m.hp = x.hp end
+            if x.max then m.max = x.max end
+            return m
+        end
+
+        -- Everything near: { fights, threats }. Each entry { model, root, kind,
+        -- pos, hum?, fight }. Members judged, groups closed and counted.
+        local function scan(now)
+            local h = home()
+            local _, r = parts()
+            local me = r and r.Position or nil
+            local live, fights, threats, seen = {}, {}, {}, {}
+            local function consider(x)
+                live[x.model] = x
+                x.member = remember(x, now)
+                table.insert(seen, x)
+            end
+            for _, x in ipairs(beasts()) do
+                if (x.hp == nil or x.hp > 0) and near(x.root.Position, h, me, RANGE) then consider(x) end
+            end
+            for _, e in ipairs(liveEnemies(nil)) do
+                local k = kindOf(e.name)
+                if FISH[k] and near(e.root.Position, h, me, RANGE) then
+                    if not (P.randomSkip[e.model] and now < P.randomSkip[e.model]) then
+                        consider({ model = e.model, root = e.root, hum = e.hum, name = e.name, kind = k })
+                    end
+                end
+            end
+            -- Named once every member is in: the third beast makes the first
+            -- two Rumbling Waters too.
+            for _, x in ipairs(seen) do
+                x.label = groupLabel(x.member.group)
+                x.pos = x.root.Position
+                x.fight = (CFG.SeaEvFight or {})[x.label] == true
+                table.insert(x.fight and fights or threats, x)
+            end
+            -- Ship raids, any shape (a boat model, its crew): always fled -
+            -- seen out to twice FleeTo (kept away from, not only run from).
+            local shipRange = math.max(RANGE, (tonumber(CFG.FleeTo) or 1500) * 2 + 300)
+            local ef = workspace:FindFirstChild("Enemies")
+            for _, m in ipairs(ef and ef:GetChildren() or {}) do
+                local n = cleanName(m)
+                local k = kindOf(n)
+                local ok, cf = pcall(function() return m:GetPivot() end)
+                local pos = ok and cf and cf.Position or nil
+                if pos and k == "ship" and near(pos, h, me, shipRange) then
+                    table.insert(threats, { model = m, kind = "ship", label = n, pos = pos })
+                elseif pos and not k and near(pos, h, me, RANGE) then
+                    newName(n, "workspace.Enemies")
+                end
+            end
+            local sb = workspace:FindFirstChild("SeaBeasts")
+            for _, m in ipairs(sb and sb:GetChildren() or {}) do
+                if not string.find(string.lower(tostring(m.Name)), "seabeast", 1, true) then
+                    newName(tostring(m.Name), "workspace.SeaBeasts")
+                end
+            end
+            -- Judge the members: alive (near, HP left), killed, or lost.
+            local alive = {}
+            for model, m in pairs(SE.members) do
+                local g = m.group
+                if live[model] then
+                    alive[g] = (alive[g] or 0) + 1
+                elseif not m.out then
+                    local gone = model.Parent == nil
+                    local hpZero
+                    if m.hum then
+                        hpZero = m.hum.Health <= 0
+                    else
+                        -- Read even when gone: its last value is still on it.
+                        local hp = hpOf(model)
+                        if hp then m.hp = hp end
+                        hpZero = hp ~= nil and hp <= 0
+                    end
+                    -- Alive but left far behind (the boat fled): out of this event.
+                    local far = not gone and not hpZero
+                    local frac = (m.hp and m.max and m.max > 0) and (m.hp / m.max) or nil
+                    local v = verdict(hpZero, gone or far, frac)
+                    if v then
+                        m.out = v
+                        if v == "killed" then g.killed += 1 end
+                    end
+                end
+            end
+            for i = #SE.groups, 1, -1 do
+                local g = SE.groups[i]
+                if not g.closed then
+                    local over = groupOver(g, alive[g] or 0, now)
+                    if over then
+                        g.closed = true
+                        for model, m in pairs(SE.members) do
+                            if m.group == g then SE.members[model] = nil end
+                        end
+                        if over == "count" then
+                            addCount(groupLabel(g))
+                        else
+                            SE.last = groupLabel(g) .. " gone without a kill - not counted"
+                            print("[BFF] seaev: " .. SE.last)
+                        end
+                    end
+                end
+            end
+            while #SE.groups > 30 do table.remove(SE.groups, 1) end
+            return fights, threats
+        end
+
+        -- ---------- the boat ----------
+        -- Off the seat; the boat held BoatLift up while you fight.
+        local function leaveBoat()
+            S.stopDrive()
+            local b = S.boat or S.myBoat()
+            local lift = tonumber(CFG.BoatLift) or 0
+            if b and b.Parent and lift > 0 and SE.parkBoat ~= b then
+                local p = b:GetPivot().Position
+                local wy = (S.drive and S.drive.waterY) or p.Y
+                SE.parkBoat, SE.parkSeat, SE.parkAt = b, S.seatOf(b), Vector3.new(p.X, wy + lift, p.Z)
+            end
+        end
+
+        -- The boat's water line: its own height, unless it is plainly held up.
+        local function waterLine(b)
+            local y = b:GetPivot().Position.Y
+            local ref = seaRef()
+            if ref and y > ref + 56 + 60 then return ref + 56 end
+            return y
+        end
+
+        -- At the wheel: bought, flown to, sat in. true = driving.
+        local function board(myEpoch)
+            local b = S.myBoat()
+            if not b then
+                b = S.buyBoat(myEpoch)
+                if not b then
+                    SE.buyFails = (SE.buyFails or 0) + 1
+                    if SE.buyFails >= 3 then
+                        SE.note = "could not buy a boat 3 times (" .. tostring(S.boatNote) .. ") - hunt stopped"
+                        P.setHunt(false)
+                    end
+                    task.wait(1)
+                    return false
+                end
+            end
+            SE.buyFails = 0
+            local seat = S.seatOf(b)
+            if not seat then
+                SE.note = b.Name .. " has no VehicleSeat"
+                task.wait(1)
+                return false
+            end
+            S.boat, S.seat = b, seat
+            if S.drive.boat ~= b then S.drive.boat, S.drive.waterY = b, nil end
+            local _, r, h = parts()
+            if not (h and h.SeatPart == seat) then
+                S.driving = false
+                if r and (r.Position - seat.Position).Magnitude > 30 then
+                    flying = false
+                    S.boatNote = "to your boat"
+                    setState("FLY")
+                    say(S.boatNote)
+                    flyTo(seat.Position + UP * 6)
+                    if stale(myEpoch) then return false end
+                end
+                if not S.sit(seat, myEpoch) then
+                    S.boatNote = "could not sit in " .. b.Name .. " - trying again"
+                    task.wait(0.5)
+                    return false
+                end
+                for _, d in ipairs(b:GetDescendants()) do
+                    if d:IsA("BasePart") then pcall(function() d.CanCollide = false end) end
+                end
+                S.boatNote = "at the wheel of " .. b.Name
+            end
+            if not S.driving then
+                SE.parkBoat, SE.parkSeat, SE.parkAt = nil, nil, nil     -- the wheel puts it back on the water
+                S.drive.waterY = S.drive.waterY or waterLine(b)
+                flying = true
+                S.driving, S.everDriven = true, true
+            end
+            return true
+        end
+
+        -- The wheel asks every frame (P.sea's driveTick): the patrol, or away.
+        function SE.steer(pos, look)
+            if not (P.running and huntOn()) then return nil end
+            local fast = math.clamp(tonumber(CFG.SeaSpeed) or 300, 100, 350)
+            if SE.mode == "flee" and SE.threatPos then
+                return { dir = fleeDir(pos, SE.threatPos), speed = fast }
+            end
+            if SE.mode == "hold" then
+                return { dir = (look.Magnitude > 0.1) and look.Unit or Vector3.new(0, 0, 1), speed = 0 }
+            end
+            if not SE.centre then return nil end
+            local dir, spd = patrolDir(pos, SE.centre, RADIUS, PATROL, fast)
+            return { dir = dir, speed = spd }
+        end
+        S.steerFn = SE.steer
+
+        -- Every frame: the boat held up while you fight; the aim on the
+        -- target's body while a move is fired.
+        do
+            local conn
+            conn = RunService.Heartbeat:Connect(function()
+                if _G.BFF ~= P then conn:Disconnect() return end
+                local b, at = SE.parkBoat, SE.parkAt
+                if b and at and P.running and not S.driving and b.Parent then
+                    pcall(function()
+                        local pv = b:GetPivot()
+                        b:PivotTo(CFrame.new(at) * (pv - pv.Position))
+                        local seat = SE.parkSeat
+                        if seat then
+                            seat.AssemblyLinearVelocity = Vector3.zero
+                            seat.AssemblyAngularVelocity = Vector3.zero
+                        end
+                    end)
+                end
+                local lp = SE.lockPart
+                if lp and lp.Parent and P.running and os.clock() < aimUntil then
+                    P.aimAt, P.aimPart = lp.Position, lp
+                end
+            end)
+        end
+
+        -- ---------- the fights ----------
+        -- Whose M1 hurts a beast: learned ("M1 <weapon>"); untried ones fruit
+        -- first (Kitsune's M1 hits them - the wiki), then guns (Skull Guitar).
+        local M1_RANK = { ["Blox Fruit"] = 1, Gun = 2, Melee = 3, Sword = 4 }
+        local function bestM1()
+            local best, bs, br = nil, -1, 99
+            for _, t in ipairs(toolNames()) do
+                local s = S.keyScore("M1 " .. t.Name, SE.learn)
+                local rk = M1_RANK[toolType(t)] or 9
+                if s > bs or (s == bs and rk < br) then best, bs, br = t.Name, s, rk end
+            end
+            return best
+        end
+
+        -- Where to hang over a beast: BeastHeight over the water, 50 to your
+        -- side of it; close (25 over, 20 off) when nothing has landed for 6 s.
+        local function hangSpot(rp, from, close, sea)
+            local side = flat(from - rp)
+            side = (side.Magnitude > 1) and side.Unit or Vector3.new(1, 0, 0)
+            local h = close and 25 or (tonumber(CFG.BeastHeight) or 90)
+            return Vector3.new(rp.X, math.max(sea, rp.Y) + h, rp.Z) + side * (close and 20 or 50)
+        end
+
+        local function fightBeast(x, myEpoch)
+            if pileCur then releasePile() end
+            leaveBoat()
+            if SE.cur ~= x.model then
+                SE.cur, SE.fightStart, SE.lastHurt, SE.closeOn = x.model, os.clock(), nil, false
+                SE.fights += 1
+            end
+            activeName = x.label
+            setState("FIGHT")
+            local ref, sea = seaRef(), surfaceY()
+            local rp = x.root.Position
+            local _, r = parts()
+            if not r then return end
+            -- Under the water: it cannot be seen or hurt (the wiki). Wait over
+            -- it; the no-damage clock waits too (not a miss of ours).
+            if ref and math.abs(rp.Y - ref) > 175 then
+                SE.lockPart = nil
+                SE.lastHurt = os.clock()
+                local over = Vector3.new(rp.X, sea + 200, rp.Z)
+                SE.note = x.label .. " under the water - waiting over it"
+                say(SE.note)
+                if (r.Position - over).Magnitude > (CFG.InstantHop or 150) then flyTo(over) else lockAt(over, rp) end
+                task.wait(0.3)
+                return
+            end
+            -- Nothing landed for 6 s from up there: in close, for this beast.
+            if not SE.closeOn and os.clock() - (SE.lastHurt or SE.fightStart) > 6 then
+                SE.closeOn = true
+                print("[BFF] seaev: nothing hurt " .. x.label .. " for 6 s from " .. math.floor(tonumber(CFG.BeastHeight) or 90)
+                    .. " up - in close")
+            end
+            local close = SE.closeOn
+            local spot = hangSpot(rp, r.Position, close, sea)
+            if (r.Position - spot).Magnitude > (CFG.InstantHop or 150) then
+                flyTo(spot, { face = rp })
+                if stale(myEpoch) then return end
+            end
+            lockAt(spot, rp)
+            SE.lockPart = x.root
+            local v = { pos = rp, part = x.root, model = x.model, learn = SE.learn,
+                keys = KEYS5, keyOn = CFG.SeaEvKeys or {}, m1Watch = 0.5, m1Tool = bestM1 }
+            v.alive = function()
+                local hp = hpOf(x.model)
+                return x.model.Parent ~= nil and not (hp and hp <= 0)
+            end
+            v.mark = function() v.hp0 = hpOf(x.model) end
+            v.dropped = function()
+                local hp = v.hp0 and hpOf(x.model)
+                return hp ~= nil and hp < v.hp0 - 0.5
+            end
+            local t0 = os.clock()
+            while os.clock() - t0 < 1.5 and P.running and huntOn() and not stale(myEpoch) and v.alive() do
+                local _, r2 = parts()
+                if not r2 then break end
+                v.pos = x.root.Position
+                lockAt(hangSpot(v.pos, r2.Position, close, sea), v.pos)
+                local key, landed = S.ventCast(v)
+                if landed then SE.lastHurt = os.clock() end
+                SE.lastKey = tostring(key or "every key cooling") .. (landed and " - hurt it" or " - nothing")
+                -- Its last HP, for the count: it sinks the moment it dies.
+                local mm = SE.members[x.model]
+                if mm then mm.hp = hpOf(x.model) or mm.hp end
+            end
+            local hp = hpOf(x.model)
+            SE.note = string.format("%s  ·  HP %s%s  ·  %s  ·  last: %s", x.label,
+                hp and tostring(math.floor(hp)) or "?", (x.max and x.max > 0) and (" / " .. math.floor(x.max)) or "",
+                close and "IN CLOSE (nothing landed for 6 s)" or (math.floor(tonumber(CFG.BeastHeight) or 90) .. " up"),
+                tostring(SE.lastKey or "-"))
+            say(SE.note)
+        end
+
+        -- Terrorshark / Piranha / Shark: the farm's own fight, in place.
+        local FISH_CUR
+        FISH_CUR = {
+            name = "sea event",
+            allKeys = function() return CFG.SeaEvKeys or {} end,
+            height = function() return tonumber(CFG.FishHeight) or 30 end,
+            build = function()
+                local now = os.clock()
+                local h = home()
+                local _, r = parts()
+                local me = r and r.Position or nil
+                local best, bd = nil, math.huge
+                for _, e in ipairs(liveEnemies(nil)) do
+                    local k = kindOf(e.name)
+                    local on = (CFG.SeaEvFight or {})[k] == true
+                    if on and FISH[k] and near(e.root.Position, h, me, RANGE)
+                        and not (P.randomSkip[e.model] and now < P.randomSkip[e.model]) then
+                        if e.model == SE.cur then return { e }, e.root.Position, true end
+                        local d = me and (e.root.Position - me).Magnitude or 0
+                        if d < bd then best, bd = e, d end
+                    end
+                end
+                if not best then return {}, nil, false end
+                SE.cur = best.model
+                remember({ model = best.model, root = best.root, hum = best.hum, kind = kindOf(best.name) }, now)
+                return { best }, best.root.Position, true
+            end,
+            breakIf = function() return not (P.running and huntOn()) end,
+        }
+        SE.FISH_CUR = FISH_CUR
+
+        local function fightFish(x, myEpoch)
+            SE.lockPart = nil
+            leaveBoat()
+            if SE.cur ~= x.model then
+                SE.cur = x.model
+                SE.fights += 1
+            end
+            activeName = x.label
+            SE.note = x.label .. "  ·  M1 + every skill, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
+            say(SE.note)
+            local why = fight(FISH_CUR, FISH)
+            if why == "empty" then releasePile() end
+        end
+
+        -- The fight's target: the one being fought while it lives, else the nearest.
+        local function pick(fights, from)
+            for _, x in ipairs(fights) do
+                if x.model == SE.cur then return x end
+            end
+            local best, bd = nil, math.huge
+            for _, x in ipairs(fights) do
+                local d = from and (x.pos - from).Magnitude or 0
+                if d < bd then best, bd = x, d end
+            end
+            return best
+        end
+
+        -- ---------- THE HUNT, one step (always true: it never hops) ----------
+        function SE.step(myEpoch)
+            local E = P.elite
+            local sea = mySea()
+            if sea and sea ~= 3 then
+                SE.note = "sea events are hunted in the Third Sea only - hunt stopped"
+                P.setHunt(false)
+                E.note = SE.note
+                say(SE.note)
+                return true
+            end
+            local now = os.clock()
+            if now - (SE.spyAt or -1000) > 300 then task.spawn(function() pcall(spyAsk) end) end
+            local fights, threats = scan(now)
+            if SE.goalHit and CFG.SeaEvStopAtGoal then
+                SE.goalHit = false
+                SE.note = string.format("GOAL: %d sea events - the hunt stopped (go to the Spy)", SE.count.total)
+                print("[BFF] seaev: " .. SE.note)
+                E.note = SE.note
+                say(SE.note)
+                P.setHunt(false)
+                task.defer(function() pcall((P :: any).stop) end)
+                return true
+            end
+            local _, r = parts()
+            local x = pick(fights, r and r.Position or nil)
+            if x then
+                SE.mode = "fight"
+                if x.kind == "beast" then fightBeast(x, myEpoch) else fightFish(x, myEpoch) end
+                E.note = SE.note
+                return true
+            end
+            -- Nothing to fight: back at the wheel.
+            SE.cur, SE.lockPart = nil, nil
+            if pileCur then releasePile() end
+            if not board(myEpoch) then
+                E.note = SE.note
+                return true
+            end
+            local b = S.boat
+            local bp = b:GetPivot().Position
+            -- A ship raid (or what you switched off) near: away from it.
+            local threat, td = nil, math.huge
+            for _, t in ipairs(threats) do
+                local d = flat(t.pos - bp).Magnitude
+                if d < td then threat, td = t, d end
+            end
+            local fleeTo = tonumber(CFG.FleeTo) or 1500
+            local fleeing = SE.mode == "flee"
+            local wm = wheelMode(threat and td or nil, threat and threat.kind, fleeing, fleeTo)
+            if wm == "flee" then
+                if not fleeing then
+                    SE.flees += 1
+                    print(string.format("[BFF] seaev: %s %d studs off - sailing away", tostring(threat.label), math.floor(td)))
+                end
+                SE.mode, SE.threatPos = "flee", threat.pos
+                SE.note = string.format("AWAY from %s  ·  %d of %d studs", tostring(threat.label), math.floor(td), fleeTo)
+            elseif wm == "hold" then
+                SE.mode, SE.threatPos = "hold", nil
+                SE.note = string.format("stopped out of %s's way  ·  %d studs  ·  the patrol when it is %d off or gone",
+                    tostring(threat.label), math.floor(td), fleeTo * 2)
+            else
+                SE.mode, SE.threatPos = "patrol", nil
+                local want = math.clamp(math.floor(tonumber(CFG.SeaEvDanger) or 5), 1, 6)
+                if SE.want ~= want then SE.want, SE.shift, SE.wrong = want, 0, 0 end
+                SE.centre = centreOf(want, SE.shift)
+                SE.danger = S.dangerNow()
+                if flat(bp - SE.centre).Magnitude <= RADIUS * 2 and now - (SE.checkAt or 0) > 10 then
+                    SE.checkAt = now
+                    SE.wrong = (SE.danger and SE.danger ~= want) and SE.wrong + 1 or 0
+                    if SE.wrong >= 2 then
+                        SE.wrong = 0
+                        SE.shift = nudge(SE.shift, SE.danger, want)
+                        SE.centre = centreOf(want, SE.shift)
+                        print(string.format("[BFF] seaev: the compass says danger %s, not %d - the circle moves %s",
+                            tostring(SE.danger), want, (SE.danger < want) and "out" or "in"))
+                    end
+                end
+                local dist = flat(bp - SE.centre).Magnitude
+                SE.note = string.format("%s danger %d  ·  compass %s%s",
+                    (dist > RADIUS * 2) and "sailing to" or "patrolling", want, tostring(SE.danger or "?"),
+                    (dist > RADIUS * 2) and string.format("  ·  %d studs to go", math.floor(dist)) or "")
+            end
+            S.hp, S.maxHp = S.boatHP(b)
+            E.note = SE.note
+            say(SE.note)
+            setState("SAIL")
+            task.wait(0.25)
+            return true
+        end
+
+        -- The learned keys, kept with the count (every 15 s when one was added).
+        if writefile then
+            task.spawn(function()
+                local saved = -1
+                while _G.BFF == nil or _G.BFF == P do
+                    task.wait(15)
+                    local n = 0
+                    for _, L in pairs(SE.learn) do n += (tonumber(L.casts) or 0) end
+                    if n ~= saved then
+                        saved = n
+                        save()
+                    end
+                end
+            end)
+        end
+
+        -- For the tests.
+        SE._t = {
+            parseHP = parseHP, kindOf = kindOf, beastKind = beastKind, groupLabel = groupLabel,
+            joinGroup = joinGroup, verdict = verdict, groupOver = groupOver, patrolDir = patrolDir,
+            fleeDir = fleeDir, wheelMode = wheelMode, nudge = nudge, centreOf = centreOf, spyText = spyText, beastHP = beastHP,
+            scan = scan, pick = pick, bestM1 = bestM1, hangSpot = hangSpot, fightBeast = fightBeast,
+            board = board, leaveBoat = leaveBoat, ZONES = ZONES,
+        }
+    end
+    build()
+end
 
 -- =========================================================
 -- SERVER NEWS
@@ -9859,6 +10800,7 @@ local function buildUI()
         { "dealer", "Advanced Fruit Dealer hunt", "On the Mirage: in front of him, his shop open - you buy" },
         { "mchest", "Mirage chest hunt", "On the Mirage: every chest, nearest first" },
         { "gear", "Blue Gear hunt", "On the Mirage: your turn at the moon, the gear picked when it shows" },
+        { "seaevents", "Sea events hunt", "Beasts, Rumbling Waters, Terrorshark, Piranha fought - ship raids fled - counted" },
     }
     local function huntSwitches(view)
         for _, h in ipairs(HUNTS) do
@@ -10175,6 +11117,9 @@ local function buildUI()
                         P.handsOff and "YOUR TURN - the character is yours"
                             or (P.sea.mirage and "on the Mirage")
                             or (P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing"))
+                    or (k == "seaevents") and string.format("%d of %d sea events  ·  Spy: %s", P.seaev.count.total,
+                        math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)),
+                        P.seaev.spy and tostring(P.seaev.spy.text) or "not asked yet")
                     or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
                     or (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
@@ -10239,6 +11184,10 @@ local function buildUI()
         hairline(v)
         navRow(v, "Sea", function()
             local s = P.sea
+            if CFG.Hunt and CFG.HuntKind == "seaevents" then
+                return string.format("sea events  ·  %d of %d", P.seaev.count.total,
+                    math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)))
+            end
             if s.driving and s.meters then return string.format("sailing  ·  %d m", math.floor(s.meters)) end
             return math.floor(CFG.SeaSpeed) .. " studs/s  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m"
                 .. (CFG.Volcano and "  ·  volcano on" or "")
@@ -11196,6 +12145,112 @@ local function buildUI()
     do
         local v = makeView("sea")
         gap(v, 6)
+        heading2(v, "sea events hunt  (Third Sea)")
+        readout(v, function()
+            local s, e = P.sea, P.seaev
+            local c = e.count
+            local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
+            local kinds = {}
+            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark" }) do
+                if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
+            end
+            local spy = e.spy
+            return table.concat({
+                "now       " .. tostring(e.note),
+                string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
+                "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
+                "spy       " .. (spy and string.format("%s  ·  asked %d min ago%s", tostring(spy.text),
+                    math.floor((os.clock() - spy.at) / 60),
+                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "") or "not asked yet"),
+                "last      " .. tostring(e.last),
+                string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
+                    s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
+            }, "\n")
+        end)
+        sliderRow(v, "Patrol at Sea Danger", 1, 6, 1,
+            function() return CFG.SeaEvDanger end,
+            function(x) CFG.SeaEvDanger = x end, "")
+        for _, row in ipairs({
+            { "Sea Beast", "Hovered over, every key + M1 aimed at it, learned by its HP" },
+            { "Rumbling Waters", "Three beasts at once - one at a time, the nearest first" },
+            { "Terrorshark", "Fought where it swims - M1 + every skill" },
+            { "Piranha", "A school of them = one sea event" },
+            { "Shark", "Off: sailed away from" },
+        }) do
+            local k = row[1]
+            switchRow(v, "Fight: " .. k, row[2],
+                function() return (CFG.SeaEvFight or {})[k] == true end,
+                function(x)
+                    CFG.SeaEvFight = CFG.SeaEvFight or {}
+                    CFG.SeaEvFight[k] = x
+                end)
+        end
+        caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
+            .. "Boat and its crew, the haunted ships) are always sailed away from - "
+            .. "slow, and they break the boat - then the boat waits, stopped, until "
+            .. "the ship is twice that far or gone. The Leviathan is never touched. The "
+            .. "boat patrols a slow circle at the danger you set (sea events come to a "
+            .. "boat that is near); a fight takes you off the seat and holds the boat "
+            .. "up out of the waves; then back to the wheel. Never the next server.")
+        sliderRow(v, "Count goal (the Spy: 20 or more)", 1, 60, 1,
+            function() return CFG.SeaEvGoal end,
+            function(x) CFG.SeaEvGoal = x end, " events")
+        switchRow(v, "Stop at the goal", "The hunt and the farm stop the moment the count reaches it",
+            function() return CFG.SeaEvStopAtGoal end,
+            function(x) CFG.SeaEvStopAtGoal = x end)
+        actionRow(v, "Ask the Spy now", nil, function() P.seaev.spyAsk() end)
+        actionRow(v, "Reset the count to 0", "danger", function() P.seaev.reset() end)
+        caption(v, "One sea event = one group of the same kind (five piranhas count "
+            .. "once - the wiki; three beasts = Rumbling Waters = once), counted when "
+            .. "every one of it is gone and at least one was KILLED. Escaped or "
+            .. "despawned = not counted. Kept across joins - reset it after each Frozen "
+            .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
+            .. "5 min and after each count) is the truth; the count is the guide.")
+        heading2(v, "fighting at sea")
+        sliderRow(v, "Over a Sea Beast", 30, 250, 5,
+            function() return CFG.BeastHeight end,
+            function(x) CFG.BeastHeight = x end, " studs")
+        sliderRow(v, "Over a Terrorshark / Piranha / Shark", 10, 100, 5,
+            function() return CFG.FishHeight end,
+            function(x) CFG.FishHeight = x end, " studs")
+        sliderRow(v, "Boat held up while you fight (0 = left)", 0, 300, 10,
+            function() return CFG.BoatLift end,
+            function(x) CFG.BoatLift = x end, " studs")
+        sliderRow(v, "Ship raid: sail away until it is", 500, 4000, 100,
+            function() return CFG.FleeTo end,
+            function(x) CFG.FleeTo = x end, " studs off")
+        heading2(v, "keys fired at a sea event")
+        for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do
+            switchRow(v, k, (k == "V") and "Often a transformation - off by default" or nil,
+                function() return (CFG.SeaEvKeys or {})[k] end,
+                function(x)
+                    CFG.SeaEvKeys = CFG.SeaEvKeys or {}
+                    CFG.SeaEvKeys[k] = x
+                end)
+        end
+        caption(v, "Every weapon you carry fires these, each the moment its bar is "
+            .. "ready, the M1 in between - your Attack page is left for the normal "
+            .. "farm. On a Sea Beast which key and whose M1 hurt it is learned from its "
+            .. "HP: one that never did after 4 tries goes last.")
+        heading2(v, "what hurts a sea beast (learned)")
+        readout(v, function()
+            local rows = {}
+            for key, L in pairs(P.seaev.learn or {}) do table.insert(rows, { key = key, L = L }) end
+            table.sort(rows, function(a, b)
+                local sa, sb = P.sea.keyScore(a.key, P.seaev.learn), P.sea.keyScore(b.key, P.seaev.learn)
+                if sa ~= sb then return sa > sb end
+                return a.key < b.key
+            end)
+            if #rows == 0 then return "nothing fired at a sea beast yet" end
+            local out = {}
+            for i, r in ipairs(rows) do
+                if i > 10 then break end
+                table.insert(out, string.format("%-24s hurt it %d of %d%s", r.key, r.L.closed, r.L.casts,
+                    (r.L.closed == 0 and r.L.casts >= 4) and "  - does not" or ""))
+            end
+            return table.concat(out, "\n")
+        end)
+
         heading2(v, "prehistoric hunt  (Third Sea)")
         readout(v, function()
             local s = P.sea
