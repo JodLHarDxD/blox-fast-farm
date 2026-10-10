@@ -205,6 +205,27 @@ local CFG = {
     -- one pile. Observation is not pressed (raids switch it off).
     RaidMode           = false,
     RaidRadius         = 450,    -- the public raid scripts' "on this island"
+    -- STALE ISLANDS (user, 2026-10-10: the raid over and back at the Castle
+    -- on the Sea, it flew off to the raid's islands). An island marker
+    -- counts within RaidReach of you (the public hubs: 2500), a farther one
+    -- only while the raid timer is up. Outside a raid nothing is fought and
+    -- you stay where you are (the loop's own steps excepted).
+    RaidReach          = 2500,
+    -- THE STUCK FIGHT (user, 2026-10-10: the last island's last enemies
+    -- "stuck, not killing"): no kill and no HP off any enemy within
+    -- RaidStuckReach of the island for RaidStuckSecs = relocate - the
+    -- nearest one fought where it stands from a new spot (over it, then
+    -- round it), its skip forgotten; again while it lasts.
+    RaidStuckSecs      = 12,
+    RaidStuckReach     = 1500,
+    -- THE LOOP (user, 2026-10-10): the raid over - a RaidChip chip from the
+    -- Mysterious Scientist for your cheapest STORED fruit worth at most
+    -- RaidFruitMax (loaded into the backpack, never your hand; none = his
+    -- $100,000 way, every 2 h), the raid button pressed, the raid again.
+    -- Anything that fails = you stay where you are, tried again later.
+    RaidLoop           = true,
+    RaidChip           = "Flame",    -- Flame Ice Quake Light Dark Spider Magma Buddha Sand
+    RaidFruitMax       = 200000,     -- Beli: the common fruits (Rocket .. Spike)
 
     -- ---------- RANDOM MODE ----------
     -- Quests forgotten: every living enemy within RandomRadius of you -- at
@@ -468,7 +489,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-10.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-10.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -1865,15 +1886,24 @@ local function buildRandomPile(around, radius, pullAll)
 end
 
 -- RAID MODE's pile: random mode's rules round the newest raid island
--- (P.raidAt), or round you outside a raid, within RaidRadius - every one
+-- (P.raidAt; round you if only the timer says raid), within RaidRadius - every one
 -- pulled (raid enemies have no leash). One that takes no damage when pulled
 -- is no longer put back and LEFT OUT: that left the wave stuck with it alive
 -- while the farm waited over the island (2026-09-28, "2 of 5 never hurt").
 -- It is fought where it stands once the free ones are dead.
-P.raidAt, P.raidNote = nil, "raid mode: starting"
+P.raidAt, P.raidNote, P.raidFocus = nil, "raid mode: starting", nil
 local function buildRaidPile()
     local _, r = parts()
     if not r then return {}, nil, false end
+    -- THE STUCK FIGHT (RAID MODE's watch): the one taken as THE target is
+    -- fought where it stands, wherever it is, until it dies.
+    local f = P.raidFocus
+    if f then
+        for _, e in ipairs(liveEnemies(nil)) do
+            if e.model == f then return { e }, e.root.Position, true end
+        end
+        P.raidFocus = nil
+    end
     return buildRandomPile(P.raidAt or r.Position, CFG.RaidRadius or 450, true)
 end
 
@@ -4185,6 +4215,13 @@ end
 -- workspace._WorldOrigin.Locations named "Island 1" .. "Island 5". So: the
 -- newest island there is where the fight is; nobody left near it = wait over
 -- it for the wave, or for the next island to open.
+-- The user, 2026-10-10: the raid over (the game puts you back at the Castle
+-- on the Sea), it flew off to the raid's islands - their markers stay. Now a
+-- marker counts within RaidReach of you (any distance only while the timer
+-- is up), and OUTSIDE A RAID nothing is fought and you stay put; with the
+-- loop on, a chip and the button (Map["Boat Castle"].RaidSummon2) start the
+-- next one. And the last island's last enemies "stuck, not killing": the
+-- stuck watch relocates (RaidStuckSecs).
 local raidStep, randomStep
 do
     local function raidState()
@@ -4201,52 +4238,473 @@ do
         local wo  = workspace:FindFirstChild("_WorldOrigin")
         local loc = wo and wo:FindFirstChild("Locations")
         if loc then
+            -- STALE ISLANDS (user, 2026-10-10): the newest within RaidReach
+            -- of you; one only farther counts while the timer is up (a raid's
+            -- islands left behind after it ended are not a raid).
+            local _, r = parts()
+            local reach = tonumber(CFG.RaidReach) or 2500
+            local far, farN = nil, 0
             for i = 5, 1, -1 do
                 local p = loc:FindFirstChild("Island " .. i)
                 local pos = p and ((p:IsA("BasePart") and p.Position) or (p:IsA("Model") and p:GetPivot().Position))
-                if pos then return on, pos, i, text end
+                if pos then
+                    if not r or (pos - r.Position).Magnitude <= reach then return on, pos, i, text end
+                    if not far then far, farN = pos, i end
+                end
             end
+            if on and far then return on, far, farN, text end
         end
         return on, nil, 0, text
     end
     P.raidState = raidState
 
-    function raidStep()
-        local on, islandPos, n, text = raidState()
-        P.raidAt = islandPos
-        local list = buildRaidPile()
-        if islandPos or on then
+    -- The raid's life, the stuck watch and the loop: a function of their own
+    -- (the main chunk is at Luau's register limit). Only P.raid leaves it.
+    local function build()
+        -- inside: in a raid now; done: raids over this session; n: the newest
+        -- island this raid; prog: the stuck watch's last progress; streak:
+        -- relocations since the last kill.
+        local RD = { inside = false, done = 0, n = 0, overAt = nil, prog = nil, moves = 0, streak = 0,
+            checkAt = 0, note = nil }
+        -- The loop: tries since the last raid began, when it may try again, what it says.
+        local RL = { nextAt = 0, tries = 0, note = "-", chips = 0, presses = 0, paid = nil }
+        RD.loop = RL
+        P.raid = RD
+
+        -- ---------- THE STUCK FIGHT ----------
+        -- Every live enemy within RaidStuckReach of `at`, skipped or not.
+        local function wideList(at)
+            local out = {}
+            local reach = tonumber(CFG.RaidStuckReach) or 1500
+            for _, e in ipairs(liveEnemies(nil)) do
+                if (e.root.Position - at).Magnitude <= reach then table.insert(out, e) end
+            end
+            return out
+        end
+        -- Pure (tools/raidloop_test.py): where relocation k stands round
+        -- `pos` - 1 straight over it, close; then round it, 120 deg apart.
+        local function spotFor(pos, k)
+            local i = (math.max(k, 1) - 1) % 4
+            if i == 0 then return pos + Vector3.new(0, 8, 0) end
+            local a = math.rad((i - 1) * 120)
+            return pos + Vector3.new(math.cos(a) * 14, 5, math.sin(a) * 14)
+        end
+        -- Progress = a kill, HP off any of them, or how many changed (a wave
+        -- came, one left). None for RaidStuckSecs while some are alive =
+        -- RELOCATE: the nearest one is THE target (P.raidFocus, fought where
+        -- it stands, buildRaidPile), every skip forgotten, a new spot
+        -- (spotFor), the pile let go. true = it relocated now.
+        local function watch(list, n)
+            local now = os.clock()
+            local hp = 0
+            for _, e in ipairs(list) do hp += e.hum.Health end
+            local p = RD.prog
+            if not p or #list == 0 or #list ~= p.n or stats.kills ~= p.kills or hp < p.hp - 1 then
+                if p and stats.kills ~= p.kills then RD.streak = 0 end
+                RD.prog = { at = now, hp = hp, n = #list, kills = stats.kills }
+                return false
+            end
+            if now - p.at < (tonumber(CFG.RaidStuckSecs) or 12) then return false end
+            local _, r = parts()
+            local from = r and r.Position or list[1].root.Position
+            local best, bd = nil, math.huge
+            for _, e in ipairs(list) do
+                P.randomSkip[e.model] = nil
+                local d = (e.root.Position - from).Magnitude
+                if d < bd then best, bd = e, d end
+            end
+            RD.moves += 1
+            RD.streak += 1
+            P.raidFocus = best.model
+            RD.note = string.format("stuck %ds on Island %d (%d left, no HP off) - relocating (%d): %s",
+                math.floor(now - p.at), n, #list, RD.streak, best.name)
+            print("[BFF] raid: " .. RD.note)
+            RD.prog = { at = now, hp = hp, n = #list, kills = stats.kills }
+            releasePile()
+            return true
+        end
+        -- The raid's fight: the stuck watch runs inside it (a fight lasts up
+        -- to 30 s), twice a second; the relocation's spot while it has a target.
+        local RAID_CUR = { name = "raid", raid = true }
+        function RAID_CUR.breakIf()
+            local now = os.clock()
+            if now - RD.checkAt < 0.5 then return false end
+            RD.checkAt = now
+            local _, r = parts()
+            local at = P.raidAt or (r and r.Position)
+            return at ~= nil and watch(wideList(at), RD.n)
+        end
+        function RAID_CUR.pose()
+            local f = P.raidFocus
+            local root = f and f.Parent and f:FindFirstChild("HumanoidRootPart")
+            if not (root and RD.streak > 0) then return nil end
+            return spotFor(root.Position, RD.streak)
+        end
+
+        -- ---------- THE LOOP: a chip, the button ----------
+        -- By the Castle on the Sea's raid button (the Kaitun hub flies here
+        -- when the button has not streamed in).
+        local BUTTON3 = Vector3.new(-5036, 315, -3179)
+        -- Map["Boat Castle"] (Third Sea) / Map.CircleIsland (Second Sea):
+        -- RaidSummon2.Button.Main and its ClickDetector (every public hub).
+        local function raidButton()
+            local map = workspace:FindFirstChild("Map")
+            local where = { "Boat Castle", "CircleIsland" }
+            for i = 1, 2 do
+                local m = map and map:FindFirstChild(where[i])
+                local s = m and m:FindFirstChild("RaidSummon2")
+                local b = s and s:FindFirstChild("Button")
+                local main = b and b:FindFirstChild("Main")
+                local cd = main and main:FindFirstChildWhichIsA("ClickDetector")
+                if main and cd then return main, cd end
+            end
+            return nil, nil
+        end
+        -- Tools you carry (backpack + hand) that `test` says yes to.
+        local function carried(test)
+            local out = {}
+            local holders = { player:FindFirstChild("Backpack"), player.Character }
+            for i = 1, 2 do
+                local h = holders[i]
+                for _, t in ipairs(h and h:GetChildren() or {}) do
+                    if t:IsA("Tool") and test(t) then table.insert(out, t) end
+                end
+            end
+            return out
+        end
+        local function chipTool()
+            return carried(function(t) return string.find(string.lower(t.Name), "microchip", 1, true) ~= nil end)[1]
+        end
+        local function physical() return carried(P.isPhysicalFruit) end
+        -- A physical fruit's own name ("Rocket Fruit" -> "Rocket-Rocket").
+        local function origOf(t)
+            local o = t:GetAttribute("OriginalName")
+            if type(o) == "string" and o ~= "" then return o end
+            local base = string.match(t.Name, "^(.-) Fruit$")
+            return base and (base .. "-" .. base) or t.Name
+        end
+        -- Prices: the game's list (GetFruits), read every 5 min; these when
+        -- it gives nothing (the cheap ones only - the wiki).
+        local PRICE_FALLBACK = {
+            ["Rocket-Rocket"] = 5000, ["Spin-Spin"] = 7500, ["Blade-Blade"] = 30000, ["Spring-Spring"] = 60000,
+            ["Bomb-Bomb"] = 80000, ["Smoke-Smoke"] = 100000, ["Spike-Spike"] = 180000, ["Flame-Flame"] = 250000,
+            ["Ice-Ice"] = 350000, ["Sand-Sand"] = 420000, ["Dark-Dark"] = 500000,
+        }
+        local prices, pricesAt = nil, -1e9
+        local function priceOf(orig)
+            if os.clock() - pricesAt > 300 then
+                pricesAt = os.clock()
+                local cf = commF()
+                local ok, res = pcall(function() return cf and cf:InvokeServer("GetFruits", false) end)
+                if ok and type(res) == "table" then
+                    prices = {}
+                    for _, f in pairs(res) do
+                        if type(f) == "table" and f.Name then prices[f.Name] = tonumber(f.Price) end
+                    end
+                end
+            end
+            return (prices and prices[orig]) or PRICE_FALLBACK[orig]
+        end
+        -- STORED FRUITS. The game's item list counts them under their
+        -- "PhysicalFruit" ItemIds (ReplicatedStorage.Economy.ItemId.RawSource,
+        -- client v4623); the module itself is read when it loads, these
+        -- when it does not.
+        local PHYS_IDS = {
+            [1389] = "Quake-Quake", [1390] = "Rocket-Rocket", [1391] = "Magma-Magma", [1392] = "Ice-Ice",
+            [1393] = "Buddha-Buddha", [1394] = "Flame-Flame", [1395] = "Dark-Dark", [1396] = "Rubber-Rubber",
+            [1397] = "Bomb-Bomb", [1398] = "Spike-Spike", [1399] = "Blade-Blade", [1400] = "Smoke-Smoke",
+            [1401] = "Phoenix-Phoenix", [1402] = "Spring-Spring", [1403] = "Spider-Spider", [1404] = "Sand-Sand",
+            [1405] = "Gravity-Gravity", [1406] = "Pain-Pain", [1407] = "Light-Light", [1408] = "Love-Love",
+            [1409] = "Control-Control", [1410] = "Venom-Venom", [1411] = "Spin-Spin", [1412] = "Ghost-Ghost",
+            [1413] = "Shadow-Shadow", [1414] = "Portal-Portal", [1415] = "Spirit-Spirit", [1416] = "Blizzard-Blizzard",
+            [1417] = "Dough-Dough", [1418] = "Mammoth-Mammoth", [1419] = "Sound-Sound", [1420] = "T-Rex-T-Rex",
+            [1421] = "Diamond-Diamond", [1422] = "Gas-Gas", [1423] = "Kitsune-Kitsune", [1424] = "Yeti-Yeti",
+            [1425] = "Eagle-Eagle", [1426] = "Creation-Creation", [1427] = "Lightning-Lightning",
+            [1428] = "Celestial-Celestial", [1429] = "Oni-Oni", [1430] = "Tiger-Tiger", [1431] = "Meme-Meme",
+            [1447] = "Dragon-Dragon",
+        }
+        local physMap = nil
+        local function physIds()
+            if physMap then return physMap end
+            physMap = {}
+            for id, n in pairs(PHYS_IDS) do physMap[id] = n end
+            pcall(function()
+                local src = require((RS :: any).Economy.ItemId.RawSource)
+                for _, row in pairs(src) do
+                    local id = type(row) == "table" and row.Id
+                    if type(id) == "table" and id.Type == "PhysicalFruit" and tonumber(id.ItemId)
+                        and type(id.StorageKey) == "string" then
+                        physMap[tonumber(id.ItemId)] = id.StorageKey
+                    end
+                end
+            end)
+            return physMap
+        end
+        -- { [name] = count } of your stored fruits and where it was read;
+        -- nil + why. getInventoryFruits (the hubs), the game's item list,
+        -- getInventory (legacy) - the first that names any.
+        local function storedFruits()
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("getInventoryFruits") end)
+            if ok and type(res) == "table" then
+                local out, any = {}, false
+                for _, f in pairs(res) do
+                    if type(f) == "table" and type(f.Name) == "string" then
+                        out[f.Name] = (out[f.Name] or 0) + (tonumber(f.Count) or 1)
+                        any = true
+                    end
+                end
+                if any then return out, "getInventoryFruits" end
+            end
+            local rf = netRemote("RF", "GetAllItemValues")
+            local ok2, list = pcall(function() return rf and rf:InvokeServer() end)
+            if ok2 and type(list) == "table" then
+                local ids, out, any = physIds(), {}, false
+                for _, it in pairs(list) do
+                    if type(it) == "table" and it.Key == "Quantity" then
+                        local n, q = ids[tonumber(it.ItemId) or -1], tonumber(it.Value) or 0
+                        if n and q > 0 then
+                            out[n] = (out[n] or 0) + q
+                            any = true
+                        end
+                    end
+                end
+                if any then return out, "the game's item list" end
+            end
+            local ok3, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+            if ok3 and type(inv) == "table" then
+                local out, any = {}, false
+                for _, it in pairs(inv) do
+                    if type(it) == "table" and it.Type == "Blox Fruit" and type(it.Name) == "string" then
+                        out[it.Name] = (out[it.Name] or 0) + (tonumber(it.Count) or 1)
+                        any = true
+                    end
+                end
+                if any then return out, "getInventory" end
+            end
+            return nil, "no stored fruit read"
+        end
+        -- Pure (tools/raidloop_test.py): the cheapest of `stored` at most
+        -- `cap` (priceFn(name) -> Beli or nil; unpriced = never). -> name, price.
+        local function cheapest(stored, cap, priceFn)
+            local best, bp = nil, math.huge
+            for name, count in pairs(stored) do
+                local pr = (count or 0) > 0 and priceFn(name) or nil
+                if pr and pr <= cap and (pr < bp or (pr == bp and name < best)) then best, bp = name, pr end
+            end
+            return best, best and bp or nil
+        end
+
+        -- A chip from the Mysterious Scientist (RaidsNpc "Select" <theme>:
+        -- 1 = given, 0 = under level 1100, a string = why not - the game's
+        -- dialogue). He takes a PHYSICAL fruit (or $100,000 every 2 h): one
+        -- you carry worth more than the cap could be the one he takes - none
+        -- traded then. -> true, or false + why.
+        local function buyChip(myEpoch)
+            local theme = tostring(CFG.RaidChip or "Flame")
+            local cap = tonumber(CFG.RaidFruitMax) or 200000
+            local spend = nil
+            for _, t in ipairs(physical()) do
+                local o = origOf(t)
+                local pr = priceOf(o)
+                if not pr or pr > cap then
+                    return false, string.format("%s is in your backpack (%s) - the scientist could take it; store it first",
+                        t.Name, pr and ("$" .. tostring(pr)) or "price unknown")
+                end
+                spend = spend or o
+            end
+            if not spend then
+                local st, src = storedFruits()
+                local pick, pr = nil, nil
+                if st then pick, pr = cheapest(st, cap, priceOf) end
+                if pick then
+                    local before = #physical()
+                    local cf = commF()
+                    pcall(function() return cf and cf:InvokeServer("LoadFruit", pick) end)
+                    local t0 = os.clock()
+                    while #physical() <= before and os.clock() - t0 < 3 and not stale(myEpoch) do task.wait(0.1) end
+                    if #physical() <= before then
+                        return false, "LoadFruit " .. pick .. " put nothing in your backpack (" .. tostring(src) .. ")"
+                    end
+                    spend = pick .. " ($" .. tostring(pr) .. ", from " .. tostring(src) .. ")"
+                else
+                    spend = "no fruit (none stored at most $" .. tostring(cap) .. ": " .. tostring(src)
+                        .. ") - his $100,000 way"
+                end
+            end
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("RaidsNpc", "Select", theme) end)
+            local t0 = os.clock()
+            while not chipTool() and os.clock() - t0 < 3 and not stale(myEpoch) do task.wait(0.1) end
+            if chipTool() or (ok and res == 1) then
+                RL.chips += 1
+                RL.paid = spend
+                print(string.format("[BFF] raid loop: a %s chip - paid with %s", theme, spend))
+                return true
+            end
+            if ok and res == 0 then
+                CFG.RaidLoop = false
+                return false, "raids need level 1100 - the raid loop is off"
+            end
+            return false, string.format("no %s chip - the scientist said %s (offered %s)", theme,
+                ok and tostring(res) or ("an error: " .. tostring(res)), spend)
+        end
+
+        -- The raid button: flown to, clicked; the raid's start awaited
+        -- (the timer, or Island 1 in reach). -> true, or false + why.
+        local function pressButton(myEpoch)
+            local main, cd = raidButton()
+            if not main then
+                if mySea() ~= 3 then return false, "the raid button is not loaded here" end
+                setState("FLY")
+                say("raid loop: to the raid button (Castle on the Sea)")
+                flyTo(BUTTON3)
+                if stale(myEpoch) then return false, "stopped" end
+                task.wait(1)
+                main, cd = raidButton()
+                if not main then return false, "the raid button did not load at the Castle on the Sea" end
+            end
+            local _, r = parts()
+            if r and (r.Position - main.Position).Magnitude > 12 then
+                setState("FLY")
+                flyTo(main.Position + Vector3.new(0, 4, 0))
+                if stale(myEpoch) then return false, "stopped" end
+            end
+            if not fireclickdetector then
+                return false, "this executor has no fireclickdetector - press the raid button yourself"
+            end
+            pcall(fireclickdetector, cd)
+            RL.presses += 1
+            local t0 = os.clock()
+            while os.clock() - t0 < 20 and not stale(myEpoch) do
+                local on, pos = raidState()
+                if on or pos then return true end
+                say(string.format("raid loop: button pressed - the raid starting  %.0fs", os.clock() - t0))
+                task.wait(0.25)
+            end
+            return false, "the button was pressed - no raid in 20 s"
+        end
+
+        local function loopFail(why, secs)
+            RL.note, RL.nextAt = why, os.clock() + secs
+            print(string.format("[BFF] raid loop: %s - staying here, again in %d s", why, secs))
+        end
+        -- OUTSIDE A RAID with the loop on: a chip if you have none, then the
+        -- button. Anything that fails = you stay where you are.
+        local function loopStep(myEpoch)
+            local now = os.clock()
+            if RD.overAt and now - RD.overAt < 5 then
+                P.raidNote = "raid over - staying here a moment"
+                return
+            end
+            if now < RL.nextAt then
+                P.raidNote = string.format("%s - staying here, again in %ds", RL.note, math.ceil(RL.nextAt - now))
+                return
+            end
+            if mySea() == 1 then
+                loopFail("raids are Second / Third Sea", 60)
+                return
+            end
+            if not chipTool() then
+                P.raidNote = "raid loop: a " .. tostring(CFG.RaidChip) .. " chip from the Mysterious Scientist"
+                say(P.raidNote)
+                setState("CHIP")
+                local ok, why = buyChip(myEpoch)
+                if stale(myEpoch) then return end
+                if not ok then
+                    loopFail(why, 60)
+                    return
+                end
+            end
+            P.raidNote = "raid loop: the raid button"
+            say(P.raidNote)
+            local ok, why = pressButton(myEpoch)
+            if stale(myEpoch) then return end
+            if ok then
+                RL.note, RL.tries = "raid started", 0
+                print("[BFF] raid loop: the raid started")
+                return
+            end
+            RL.tries += 1
+            loopFail(why, RL.tries >= 3 and 120 or 10)
+        end
+
+        function raidStep()
+            local myEpoch = epoch
+            local on, islandPos, n, text = raidState()
+            P.raidAt = islandPos
+            local now = os.clock()
+            local inRaid = islandPos ~= nil or on
+            if inRaid then
+                if not RD.inside then
+                    RD.inside, RD.n, RD.prog, RD.streak = true, 0, nil, 0
+                    print("[BFF] raid: in a raid")
+                end
+                if n > RD.n then
+                    RD.n, RD.prog = n, nil
+                    print(string.format("[BFF] raid: Island %d", n))
+                end
+                RL.tries = 0
+            elseif RD.inside then
+                RD.inside, RD.overAt = false, now
+                RD.done += 1
+                P.raidFocus, RD.streak = nil, 0
+                print(string.format("[BFF] raid: over (Island %d) - %d this session; staying here%s", RD.n, RD.done,
+                    CFG.RaidLoop and ", then the next chip" or ""))
+            end
+            if not inRaid then
+                -- OUTSIDE A RAID (user, 2026-10-10): nothing fought, never
+                -- anywhere else - you stay where the game put you (the Castle
+                -- on the Sea after a raid). The loop's own steps excepted.
+                if pileCur then releasePile() end
+                if CFG.RaidLoop then
+                    loopStep(myEpoch)
+                else
+                    P.raidNote = "not in a raid - staying here (the raid loop is off)"
+                end
+                say(P.raidNote)
+                setState("WAIT")
+                task.wait(0.25)
+                return
+            end
+            local list = buildRaidPile()
             P.raidNote = string.format("in a raid  ·  Island %d%s  ·  %d enemies here", n,
                 text and ("  ·  " .. text) or "", #list)
-        else
-            P.raidNote = string.format("not in a raid  ·  everything within %d studs of you  ·  %d enemies",
-                math.floor(CFG.RaidRadius or 450), #list)
-        end
-        -- The damage check at work: fought where it stands (it took no damage
-        -- when pulled), and how many could not be hurt at all.
-        if P.pileInPlace then P.raidNote = P.raidNote .. "  ·  one fought where it stands" end
-        if P.randomCant > 0 then P.raidNote = P.raidNote .. "  ·  could not hurt " .. P.randomCant end
-        if #list > 0 then
-            activeName = "raid"
-            fight({ name = "raid", raid = true }, nil)
-            return
-        end
-        -- Nobody here: over the newest island, and wait for its wave.
-        local _, r = parts()
-        if islandPos and r then
-            local over = islandPos + Vector3.new(0, 45, 0)
-            if (r.Position - over).Magnitude > 60 then
-                releasePile()
-                setState("FLY")
-                say("raid: to Island " .. n)
-                flyTo(over)
+            -- The damage check at work: fought where it stands (it took no damage
+            -- when pulled), and how many could not be hurt at all.
+            if P.pileInPlace then P.raidNote = P.raidNote .. "  ·  one fought where it stands" end
+            if P.randomCant > 0 then P.raidNote = P.raidNote .. "  ·  could not hurt " .. P.randomCant end
+            if RD.streak > 0 and P.raidFocus then
+                P.raidNote = P.raidNote .. string.format("  ·  RELOCATED %d", RD.streak)
             end
+            local _, r = parts()
+            local at = islandPos or (r and r.Position)
+            if at and watch(wideList(at), n) then return end
+            if #list > 0 then
+                activeName = "raid"
+                fight(RAID_CUR, nil)
+                return
+            end
+            -- Nobody here: over the newest island, and wait for its wave.
+            if islandPos and r then
+                local over = islandPos + Vector3.new(0, 45, 0)
+                if (r.Position - over).Magnitude > 60 then
+                    releasePile()
+                    setState("FLY")
+                    say("raid: to Island " .. n)
+                    flyTo(over)
+                end
+            end
+            setState("WAIT")
+            say(islandPos and ("raid: Island " .. n .. " - waiting for enemies") or "raid: waiting for enemies")
+            task.wait(0.25)
         end
-        setState("WAIT")
-        say(islandPos and ("raid: Island " .. n .. " - waiting for enemies")
-            or "raid mode: no enemy near you")
-        task.wait(0.25)
+
+        -- For the tests.
+        RD._t = { spotFor = spotFor, cheapest = cheapest, origOf = origOf, watch = watch, wideList = wideList,
+            storedFruits = storedFruits, buyChip = buyChip, pressButton = pressButton, RAID_CUR = RAID_CUR }
     end
+    build()
 
     -- =========================================================
     -- RANDOM MODE
@@ -12439,7 +12897,7 @@ local function buildUI()
         gap(v, 16)
 
         switchRow(v, "Raid mode",
-            "Every enemy near you, any kind - no quests, no Observation",
+            "Every enemy on the raid's island, any kind - outside a raid you stay where you are",
             function() return CFG.RaidMode end,
             function(x)
                 if x and CFG.Hunt then P.setHunt(false) end
@@ -12447,6 +12905,13 @@ local function buildUI()
                 if x then CFG.RandomMode = false end
                 releasePile()
                 say(x and "raid mode on" or "raid mode off - back to the circuit")
+            end)
+        switchRow(v, "Raid loop",
+            "Raid over: a chip for your cheapest stored fruit, the button, again - else you stay",
+            function() return CFG.RaidLoop end,
+            function(x)
+                CFG.RaidLoop = x
+                if x and P.raid then P.raid.loop.nextAt = 0 end
             end)
         switchRow(v, "Random mode",
             "Any enemy near you, every one damaged - Castle on the Sea raid",
@@ -13121,8 +13586,41 @@ local function buildUI()
         sliderRow(v, "Raid mode pulls within", 100, 1500, 50,
             function() return CFG.RaidRadius end,
             function(x) CFG.RaidRadius = x end, " studs")
-        caption(v, "Of the newest raid island (Island 1 to 5), or of you outside "
-            .. "a raid. Every kind of enemy in that circle goes in the pile.")
+        caption(v, "Of the newest raid island (Island 1 to 5). Every kind of "
+            .. "enemy in that circle goes in the pile. Outside a raid nothing "
+            .. "is fought and you stay where you are.")
+        sliderRow(v, "A raid island counts within", 500, 5000, 100,
+            function() return CFG.RaidReach end,
+            function(x) CFG.RaidReach = x end, " studs of you")
+        sliderRow(v, "Stuck: relocate after", 5, 60, 1,
+            function() return CFG.RaidStuckSecs end,
+            function(x) CFG.RaidStuckSecs = x end, " s with no HP off")
+        readout(v, function()
+            local rd = P.raid
+            if not rd then return "-" end
+            local rl = rd.loop
+            return table.concat({
+                "raid      " .. tostring(P.raidNote),
+                string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
+                    rd.note and ("  ·  last: " .. rd.note) or ""),
+                string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
+                    rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
+            }, "\n")
+        end)
+        heading2(v, "raid loop: the chip")
+        radio(v, 164, {
+            { "Flame", "Flame", "" }, { "Ice", "Ice", "" }, { "Quake", "Quake", "" },
+            { "Light", "Light", "" }, { "Dark", "Dark", "" }, { "Spider", "Spider", "" },
+            { "Magma", "Magma", "" }, { "Buddha", "Buddha", "" }, { "Sand", "Sand", "" },
+        }, function() return CFG.RaidChip end, function(x) CFG.RaidChip = x end)
+        sliderRow(v, "Trade a stored fruit worth at most", 0, 1000000, 10000,
+            function() return CFG.RaidFruitMax end,
+            function(x) CFG.RaidFruitMax = x end, " Beli")
+        caption(v, "The Mysterious Scientist takes a physical fruit for a chip (or "
+            .. "$100,000 every 2 hours): your cheapest stored one under this is "
+            .. "loaded into the backpack - never your hand - and traded. A "
+            .. "dearer fruit already in your backpack = nothing traded (he "
+            .. "could take it). Anything fails: you stay, tried again later.")
         heading2(v, "keeping them hittable")
         caption(v, "The pile sits at the middle of the camp's spawn points - the "
             .. "spot where the farthest pull is shortest, so every one stays "

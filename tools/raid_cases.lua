@@ -44,4 +44,27 @@ LOC.kids = { node("Starter Island", "Part", {}, { Position = v3(9, 9, 9) }), nod
 on, pos, n = raidState()
 check("'Starter Island' / 'Island' are not raid islands", pos == nil and n == 0)
 
+-- 7. STALE ISLANDS (user, 2026-10-10): the raid over, back at the castle, its
+--    markers left behind far away - never followed without the timer.
+PG.kids = { node("Main", "Frame", { node("TopHUDList", "Frame", { node("RaidTimer", "Frame", {}, { Visible = false }) }) }) }
+LOC.kids = { node("Island 5", "Part", {}, { Position = v3(6000, 0, 0) }) }
+on, pos, n = raidState()
+check("timer off, the only island 6,000 away: no raid (stale - never flown to)", not on and pos == nil and n == 0, tostring(n))
+-- 8. ...the timer up: any distance (in the raid)
+PG.kids[1].kids[1].kids[1].Visible = true
+on, pos, n = raidState()
+check("timer up, the island 6,000 away: followed", on and n == 5 and pos and pos.X == 6000, tostring(n))
+-- 9. a new raid's Island 1 near you beats the old raid's Island 5 far away, timer up or not
+LOC.kids = { node("Island 5", "Part", {}, { Position = v3(6000, 0, 0) }), node("Island 1", "Part", {}, { Position = v3(300, 0, 0) }) }
+on, pos, n = raidState()
+check("timer up: Island 1 near you before the far Island 5", n == 1 and pos.X == 300, tostring(n))
+PG.kids[1].kids[1].kids[1].Visible = false
+on, pos, n = raidState()
+check("timer off (between islands): Island 1 near you followed", not on and n == 1 and pos.X == 300, tostring(n))
+-- 10. the reach is the setting
+CFG.RaidReach = 200
+on, pos, n = raidState()
+check("RaidReach 200: Island 1 at 300 is out of reach, timer off = none", pos == nil, tostring(n))
+CFG.RaidReach = 2500
+
 print(all and "ALL PASS" or "SOME FAILED")
