@@ -28,4 +28,6 @@ local function flowerStep() log("flower") if not FLOWER_BUSY then E.why = FLOWER
 local function hop(why, keep) log("hop: " .. tostring(why) .. (keep and (" +" .. keep) or "")) return false end
 local function say() end
 local function setState() end
+-- The sea hunts' own step (SEA HUNT): logged with its kind; true = busy.
+local P = { sea = { huntStep = function(_, kind) log("sea " .. tostring(kind)) return true end } }
 local huntStep

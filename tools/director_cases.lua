@@ -10,7 +10,7 @@ local KITSUNE = { orig = "Kitsune-Kitsune" }
 local PIG = { names = { "Pink Pig Berry" } }
 
 -- THE CHALICE, whichever hunt is on
-for _, k in ipairs({ "elite", "fruit", "berry", "recipe", "flower" }) do
+for _, k in ipairs({ "elite", "fruit", "berry", "recipe", "flower", "sail" }) do
     reset() CFG.HuntKind = k HOLD = true FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true RECIPE_BUSY = true
     check("THE CHALICE (" .. k .. " hunt): nothing else runs, no hop", run() == "chalice")
 end
@@ -60,5 +60,10 @@ check("flower picked: hop, this server kept away 600 s longer", got == "flower |
 
 reset() CFG.HuntKind = "berry" CFG.HuntHop = false
 check("hop off: wait here", run() == "" and E.note:find("waiting", 1, true))
+
+-- SEA TRAVEL (user, 2026-10-10): the sea step with its kind, nothing else, never a hop
+reset() CFG.HuntKind = "sail" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
+got = run()
+check("sea travel: the sea step (kind \"sail\") only - no fruit, berry, elite, hop", got == "sea sail", got)
 
 print(all and "ALL PASS" or "SOME FAILED")

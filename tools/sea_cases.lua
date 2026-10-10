@@ -585,11 +585,18 @@ ON_FLY = function(pos)
         grant(585, 1)
     end
 end
-S.volcanoStep()
-ON_FLY = nil
-check("a bone: flown onto it, counted as the game's count went up (14 -> 15)", vnear(FLIGHTS[1], vec(-69790, 20, 6920))
-    and S.ev.phase == "loot" and S.ev.bones == 1 and S.tally.bones == 1 and saidP("Dinosaur Bones 14 -> 15"),
-    vs(FLIGHTS[1]) .. " " .. S.ev.bones)
+do
+    local boneT0 = CLOCK
+    S.volcanoStep()
+    local boneTook = CLOCK - boneT0
+    ON_FLY = nil
+    check("a bone: flown onto it, counted as the game's count went up (14 -> 15)", vnear(FLIGHTS[1], vec(-69790, 20, 6920))
+        and S.ev.phase == "loot" and S.ev.bones == 1 and S.tally.bones == 1 and saidP("Dinosaur Bones 14 -> 15"),
+        vs(FLIGHTS[1]) .. " " .. S.ev.bones)
+    -- Slowly (user, 2026-10-10: "light speed"): 0.5-1 s on each bone, given at once or not.
+    check("a bone takes 0.5-1 s on it (the count up at once)", boneTook >= 0.5 - 1e-6 and boneTook <= 1.0 + 0.06,
+        string.format("%.2f s", boneTook))
+end
 -- A bone that goes WITHOUT reaching your inventory: never counted as picked.
 local bone2 = WS:add(inst("DinoBone", "Part", { Position = vec(-69780, 20, 6925) }))
 ON_FLY = function(pos)
@@ -605,10 +612,19 @@ check("a bone gone with the count unchanged: NOT picked, said so", S.ev.bones ==
     and saidP("Dinosaur Bones stayed 15"), tostring(S.ev.bonesGone))
 -- The egg: held, then stayed by until the game's count goes up.
 reset()
-egg.onHold = function(p) p.Enabled = false grant(565, 1) end
-S.volcanoStep()
-check("the egg: held, counted as the count went up (1 -> 2)", egg.held == 1 and S.ev.eggs == 1 and S.tally.eggs == 1
-    and saidP("Dragon Egg 1 -> 2"), tostring(egg.held) .. " " .. S.ev.eggs)
+do
+    local eggAt, eggFlights = nil, nil
+    egg.onHold = function(p) p.Enabled = false grant(565, 1) eggAt, eggFlights = CLOCK, #FLIGHTS end
+    S.volcanoStep()
+    check("the egg: held, counted as the count went up (1 -> 2)", egg.held == 1 and S.ev.eggs == 1 and S.tally.eggs == 1
+        and saidP("Dragon Egg 1 -> 2"), tostring(egg.held) .. " " .. S.ev.eggs)
+    -- Its ~3 s animation (user, 2026-10-10: moved before it ends = not yours):
+    -- stood still 4 s after E even with the count up at once, locked on the spot.
+    check("the egg: stood still 4 s after E (the count up at once), no move meanwhile",
+        eggAt and CLOCK - eggAt >= 4 and #FLIGHTS == eggFlights and vnear(LOCKS[#LOCKS], vec(-69800, 25, 6910)),
+        string.format("%.2f s, flights %s -> %d, lock %s", eggAt and CLOCK - eggAt or -1, tostring(eggFlights), #FLIGHTS,
+            vs(LOCKS[#LOCKS])))
+end
 -- An egg whose prompt goes with no egg for you.
 local egg3 = prompt(true)
 egg3.Name = "P3"
@@ -831,9 +847,64 @@ check("you steer past the far edge: no hop, the note says the keys", ok == true 
     and string.find(S.note, "A/D turn", 1, true) ~= nil, S.note)
 CFG.SeaSteer = "auto"
 
+-- ---------------------------------------------------------------- SEA TRAVEL (user, 2026-10-10)
+-- The hunts' fast boat with no target: your keys even with "auto" picked, no
+-- island, no clock, never the next server.
+;(function()
+    CFG.Hunt, CFG.HuntKind, CFG.SeaSearchMinutes = true, "sail", 21
+    S.driving, S.mirage, S.sailStart = false, nil, nil
+    HUM.SeatPart = nil
+    reset()
+    local okS = S.huntStep(epoch, "sail")
+    check("sea travel past the far edge, steering on auto: no hop - your keys at the wheel", okS == true
+        and P.elite.why == nil and S.driving and string.find(S.note, "A/D turn", 1, true) ~= nil, S.note)
+    check("...no clock (the Prehistoric hunt's only)", string.find(S.note, "in this server", 1, true) == nil, S.note)
+    sb.pivot = cf(vec(-40000, 5, 0), 0)
+    ss.CFrame = sb.pivot
+    T.drive.cruise, T.drive.waterY = true, 5
+    KEYS_DOWN = { A = true }
+    T.driveTick(0.1)
+    KEYS_DOWN = {}
+    check("sea travel, steering on auto: A turns the boat (your keys, not the auto heading)",
+        near(sb.pivot.yaw, math.rad(6), 1e-6), sb.pivot.yaw)
+    -- A Prehistoric and a Mirage up: sailed past, never flown to.
+    sb.pivot = cf(TIKI + vec(-120000, 0, 0), 0)
+    local mkP = LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 55, 6800) }))
+    local mkM = LOCS:add(inst("Mirage Island", "Part", { Position = vec(-60000, 55, 6800) }))
+    reset()
+    okS = S.huntStep(epoch, "sail")
+    check("sea travel: a Prehistoric and a Mirage up - sailed past, never flown to", okS == true and #FLIGHTS == 0
+        and S.driving and P.elite.why == nil and S.foundAt == nil, tostring(#FLIGHTS) .. " " .. S.note)
+    LOCS.kids["Prehistoric Island"], LOCS.kids["Mirage Island"] = nil, nil
+    -- 22 min at sea: still sailing.
+    S.sailStart = CLOCK - 22 * 60
+    reset()
+    okS = S.huntStep(epoch, "sail")
+    check("sea travel: 22 min at sea - still sailing", okS == true and P.elite.why == nil and S.driving)
+    -- The boat lost far out: the switch goes off - never the next server.
+    BOATS.kids[sb.Name] = nil
+    S.everDriven = true
+    ROOT.Position = TIKI + vec(-40000, 10, 0)
+    reset()
+    okS = S.huntStep(epoch, "sail")
+    check("sea travel: the boat lost far out - Sea travel off, never the next server", okS == true
+        and SET_HUNT[1] == false and P.elite.why == nil and #BUY_CALLS == 0
+        and string.find(S.note, "Sea travel off", 1, true) ~= nil, S.note)
+    BOATS:add(sb)
+    -- Second Sea: off, said.
+    SEA = 2
+    reset()
+    okS = S.huntStep(epoch, "sail")
+    check("sea travel in the Second Sea: stopped, says why", okS == true and SET_HUNT[1] == false
+        and string.find(S.note, "Sea travel is Third Sea only", 1, true) ~= nil, S.note)
+    SEA = 3
+    S.driving, S.everDriven, S.sailStart = false, false, nil
+    CFG.Hunt, CFG.HuntKind, CFG.SeaSearchMinutes = false, nil, 0
+end)()
+
 
 -- ---------------------------------------------------------------- THE MIRAGE HUNTS: EACH ITS OWN JOB
-(function()
+;(function()
 -- A fresh Mirage with 3 chests (2 in its Chests folder, 1 only tagged), one
 -- already taken, the gear hidden.
 local function freshMirage()
@@ -1304,6 +1375,114 @@ end)()
     check("...the game's count written for the next server", string.find(tostring(FILES["bff_loot.json"]),
         "bones=20;eggs=3", 1, true) ~= nil, tostring(FILES["bff_loot.json"]))
     check("...DONE says the count before -> after", saidP("Dinosaur Bones"))
+    -- 6b. HOME BY RESPAWN (user, 2026-10-10): the stay over, the character
+    --     reset - the game's new one at your spawn (Tiki) - then the next server.
+    CFG.RespawnHome, CFG.RespawnWait = true, 20
+    local oldLife, newLife = player.Character, { name = "life 3" }
+    local healthWrites = 0
+    -- The game: Health 0 = dead, the new character at the spawn.
+    local function gameRespawns(onRung)
+        HUM.Health = nil
+        setmetatable(HUM, {
+            __index = function(_, k) if k == "Health" then return 100 end return nil end,
+            __newindex = function(t, k, v)
+                if k ~= "Health" then rawset(t, k, v) return end
+                healthWrites += 1
+                if onRung == "Health 0" and v == 0 then
+                    player.Character = newLife
+                    ROOT.Position = TIKI + vec(0, 5, 0)
+                end
+            end,
+        })
+    end
+    local function gameDone() setmetatable(HUM, nil) HUM.Health = 100 end
+    local islandAt = ROOT.Position
+    gameRespawns("Health 0")
+    reset()
+    PRINTED = {}
+    local okH = S.huntStep(epoch, "prehistoric")
+    check("home by respawn: Health 0, the new character at your spawn (Tiki), then the next server", okH == false
+        and player.Character == newLife and S.ev.home == "done"
+        and string.find(tostring(P.elite.why), "next server", 1, true) ~= nil and saidP("home by respawn (Health 0) - 0 m from Tiki"),
+        tostring(P.elite.why) .. " / " .. tostring(S.ev.home))
+    check("...never a flight (home is not travel)", #FLIGHTS == 0, #FLIGHTS)
+    check("...the inventory read again at home", saidP("you have 20 Dinosaur Bones, 3 Dragon Egg"))
+    -- At Tiki the island streams out: only its far marker is left.
+    local keepIsle = MAP.kids.PrehistoricIsland
+    MAP.kids.PrehistoricIsland = nil
+    LOCS:add(inst("Prehistoric Island", "Part", { Position = vec(-69800, 55, 6800) }))
+    reset()
+    check("...at Tiki (the island streamed out, its marker up): the event step never flies back",
+        S.volcanoStep() == false and #FLIGHTS == 0, #FLIGHTS)
+    reset()
+    okH = S.huntStep(epoch, "prehistoric")
+    check("...a failed hop: the next server again, no second respawn, no flight", okH == false and healthWrites == 1
+        and #FLIGHTS == 0)
+    MAP.kids.PrehistoricIsland = keepIsle
+    LOCS.kids["Prehistoric Island"] = nil
+    -- 6c. Health 0 refused: BreakJoints, then the Head; nothing = the next server after 20 s.
+    player.Character = oldLife
+    local joints, heads = 0, 0
+    function oldLife:BreakJoints() joints += 1 end
+    function oldLife:FindFirstChild(n)
+        if n == "Head" then return { Destroy = function() heads += 1 end } end
+        return nil
+    end
+    gameRespawns("none")
+    S.ev.home = nil
+    reset()
+    PRINTED = {}
+    local t0 = CLOCK
+    okH = S.huntStep(epoch, "prehistoric")
+    check("respawn refused: Health 0, then BreakJoints, then the Head; 20 s, then the next server anyway",
+        okH == false and joints == 1 and heads == 1 and CLOCK - t0 >= 20 and S.ev.home == "failed"
+        and saidP("no respawn in 20 s (tried: Health 0, BreakJoints, the Head off)"),
+        string.format("joints %d heads %d %.1f s %s", joints, heads, CLOCK - t0, tostring(S.ev.home)))
+    -- 6c2. Health 0 kills, the game's respawn takes 4 s: nothing more done to the dead body.
+    gameDone()
+    player.Character = nil
+    local dueAt = nil
+    setmetatable(player, { __index = function(_, k)
+        if k == "Character" then return (dueAt and CLOCK >= dueAt) and newLife or oldLife end
+        return nil
+    end })
+    HUM.Health = nil
+    setmetatable(HUM, {
+        __index = function(_, k) if k == "Health" then return dueAt and 0 or 100 end return nil end,
+        __newindex = function(t, k, v)
+            if k ~= "Health" then rawset(t, k, v) return end
+            if v == 0 and not dueAt then dueAt = CLOCK + 4 end
+        end,
+    })
+    joints, heads = 0, 0
+    S.ev.home = nil
+    reset()
+    PRINTED = {}
+    okH = S.huntStep(epoch, "prehistoric")
+    check("dead by Health 0, the respawn 4 s later: BreakJoints / the Head never tried on the dead body",
+        okH == false and joints == 0 and heads == 0 and S.ev.home == "done" and saidP("home by respawn (Health 0)"),
+        string.format("joints %d heads %d %s", joints, heads, tostring(S.ev.home)))
+    setmetatable(player, nil)
+    player.Character = oldLife
+    gameRespawns("none")
+    -- 6d. The God's Chalice on you: no respawn (a death loses it).
+    P.holdingChalice = function() return true end
+    S.ev.home, healthWrites = nil, 0
+    reset()
+    PRINTED = {}
+    okH = S.huntStep(epoch, "prehistoric")
+    check("the God's Chalice on you: NOT home by respawn, said", healthWrites == 0 and joints == 0 and heads == 0
+        and saidP("God's Chalice is on you"), healthWrites)
+    P.holdingChalice = nil
+    -- 6e. The switch off: no respawn.
+    CFG.RespawnHome = false
+    S.ev.home = nil
+    reset()
+    okH = S.huntStep(epoch, "prehistoric")
+    check("home by respawn off: no reset, the next server", okH == false and healthWrites == 0 and S.ev.home == "skipped")
+    CFG.RespawnHome = true
+    gameDone()
+    ROOT.Position = islandAt
     player.Character = nil
     player.attrs.PrehistoricIslandParticipant = nil
     -- Nothing picked: no stay.

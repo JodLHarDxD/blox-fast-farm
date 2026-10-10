@@ -221,7 +221,7 @@ local CFG = {
     Hunt               = false,
     HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric"
                                      -- | "mirage" | "dealer" | "mchest" | "gear" (the four Mirage hunts)
-                                     -- | "seaevents"
+                                     -- | "seaevents" | "sail" (Sea travel: the boat only)
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -265,9 +265,10 @@ local CFG = {
     -- THE SEARCH, auto (user, 2026-10-06): out to SeaSearchTo m from Tiki; no
     -- island = a SeaTurnBack-degree turn to the LEFT and SeaLeg2 m more (as
     -- sailed); still none = the next server. The island mostly came late.
-    SeaSearchTo        = 20000,      -- meters from Tiki: the first leg ends here
+    -- (user, 2026-10-10: 17,000 out, 7,000 after the turn)
+    SeaSearchTo        = 17000,      -- meters from Tiki: the first leg ends here
     SeaTurnBack        = 120,        -- degrees left at the end of it
-    SeaLeg2            = 8000,       -- meters sailed after the turn (0 = the next server at once)
+    SeaLeg2            = 7000,       -- meters sailed after the turn (0 = the next server at once)
     -- THE SERVER'S CLOCK (user, 2026-10-06): the legs are the plan; this is
     -- the safety cap - whatever goes wrong (back at Tiki, a boat that will
     -- not come, stuck in a loop), no island this many minutes after the hunt
@@ -292,7 +293,9 @@ local CFG = {
     -- so you keep the boat where you want): your keys at the wheel - A / D
     -- (or the arrows) turn, W goes (and keeps going), S stops - at SeaSpeed;
     -- never the next server by distance. "auto": west, the heading wandering,
-    -- the next server at SeaSearchTo.
+    -- the next server at SeaSearchTo. SEA TRAVEL (the Hunt page; user,
+    -- 2026-10-10: "just the boat fast" - for the Leviathan, no island wanted)
+    -- is always your keys, never an island, never the next server.
     SeaSteer           = "manual",
     SeaTurnRate        = 60,         -- degrees a second while A / D is held
     -- THE MIRAGE: FOUR HUNTS, each its own switch on the Hunt page (user,
@@ -397,7 +400,21 @@ local CFG = {
     -- game's own count goes up; then the hunt stays this many seconds after
     -- the last pick before the next server, so the game saves it. The next
     -- server checks the count the last one said - less = the hunt stops.
-    LootStay           = 60,
+    -- (user, 2026-10-10: 20 s, the inventory checked, then home)
+    LootStay           = 20,
+    -- THE PICKS, slowly (user, 2026-10-10: bones taken "at light speed"; the
+    -- egg goes into the inventory by a ~3 s animation - leave before it ends
+    -- and it is not yours). Each bone: BoneMin..BoneMax s (random) stood on
+    -- it. The egg: stood still EggStay s after E, whatever the count says.
+    BoneMin            = 0.5,
+    BoneMax            = 1.0,
+    EggStay            = 4,
+    -- HOME BY RESPAWN (user, 2026-10-10): the stay over, the character is
+    -- reset - the game puts you back at your spawn (Tiki Outpost, where the
+    -- sail began), never a flight. No new character in RespawnWait s = the
+    -- next server from where you stand. Never with the God's Chalice on you.
+    RespawnHome        = true,
+    RespawnWait        = 20,
     VentM1Every        = 0.3,        -- seconds between shots
     VentM1Time         = 3,          -- seconds of shots at one vent per turn         -- stand this far out from a vent (and 8 up), aiming at it
     -- Magnet on: every golem is held this far from the relic (away from the
@@ -451,7 +468,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-09.10" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-10.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -5639,9 +5656,10 @@ do
                 -- BLAZE EMBERS: always busy (never hops) - EMBER HUNT.
                 if (P :: any).ember.step(myEpoch) then return end
             elseif kind == "prehistoric" or kind == "mirage" or kind == "dealer"
-                or kind == "mchest" or kind == "gear" then
+                or kind == "mchest" or kind == "gear" or kind == "sail" then
                 -- SEA HUNT: true while it sails (or holds the island); false
-                -- = nothing came by the far edge, E.why says so.
+                -- = nothing came by the far edge, E.why says so. Sea travel
+                -- ("sail"): always true.
                 if (P :: any).sea.huntStep(myEpoch, kind) then return end
             elseif kind == "seaevents" then
                 -- SEA EVENTS: always busy (never hops).
@@ -5691,6 +5709,8 @@ do
                 E.note = tostring(CFG.HuntKind) .. " hunt on"
             else
                 carryOff()
+                -- The boat stops with the hunt; you stay in your seat.
+                if (P :: any).sea then (P :: any).sea.driving = false end
                 E.note = "hunt off"
             end
             say(E.note)
@@ -6236,7 +6256,7 @@ do
                 if look.Magnitude > 0.1 then
                     turn = turnStep(yawOf(look), yawOf(dir), math.rad(90) * step)
                 end
-            elseif CFG.SeaSteer == "manual" then
+            elseif CFG.SeaSteer == "manual" or (CFG.Hunt and CFG.HuntKind == "sail") then
                 local k = keysDown()
                 if k.go then drive.cruise = true elseif k.stop then drive.cruise = false end
                 turn = k.steer * math.rad(tonumber(CFG.SeaTurnRate) or 60) * step
@@ -6743,16 +6763,96 @@ do
             return true
         end
 
+        -- HOME BY RESPAWN (user, 2026-10-10): the loot in and the stay over,
+        -- the character reset - the game puts the new one at your spawn (Tiki
+        -- Outpost, where the sail began), never a flight back. The rungs in
+        -- order, the next only while the last left you alive (the ladder of
+        -- the old teleport, its spawn-point trick left out): Health 0,
+        -- BreakJoints, the Head off. No new character in RespawnWait s = the
+        -- next server from where you stand. Once an island (ev.home); never
+        -- with the God's Chalice on you (a death loses it); only with
+        -- something picked.
+        local RESPAWN = {
+            { "Health 0", function(_, h) h.Health = 0 end },
+            { "BreakJoints", function(c) c:BreakJoints() end },
+            { "the Head off", function(c)
+                local hd = c:FindFirstChild("Head")
+                if hd then hd:Destroy() end
+            end },
+        }
+        local function goHome(ev, myEpoch)
+            if ev.home then return end
+            ev.home = "skipped"
+            local picked = ev.bones + ev.eggs + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
+            if not CFG.RespawnHome or picked == 0 then return end
+            local chalice = (P :: any).holdingChalice
+            if chalice and chalice() then
+                print("[BFF] loot: NOT home by respawn - the God's Chalice is on you (a death loses it)")
+                return
+            end
+            local old = player.Character
+            local _, _, h = parts()
+            if not (old and h) then return end
+            if S.driving then stopDrive() end
+            local limit = math.max(tonumber(CFG.RespawnWait) or 20, 1)
+            ev.note = "home by respawn (your spawn - Tiki Outpost), then the next server"
+            S.note = ev.note
+            say(ev.note)
+            setState("HOME")
+            local t0, i, nextAt, tried = os.clock(), 0, os.clock(), {}
+            while os.clock() - t0 < limit and not stale(myEpoch) do
+                local c = player.Character
+                if c and c ~= old then
+                    local _, r = parts()
+                    local t1 = os.clock()
+                    while not r and os.clock() - t1 < 5 and not stale(myEpoch) do
+                        task.wait(0.25)
+                        _, r = parts()
+                    end
+                    flying = false              -- the body lock adopts where the game put you
+                    ev.home = "done"
+                    local m = r and metersFrom(r.Position, CFG.SeaStudsPerM)
+                    local hv = S.have and S.have(S.LOOT, true)
+                    print(string.format("[BFF] loot: home by respawn (%s) - %s from Tiki  ·  you have %s",
+                        table.concat(tried, ", "), m and (math.floor(m) .. " m") or "?", S.lootText(hv)))
+                    return
+                end
+                -- The next rung only while the last left you alive.
+                if os.clock() >= nextAt and i < #RESPAWN and (i == 0 or (tonumber(h.Health) or 0) > 0) then
+                    i += 1
+                    table.insert(tried, RESPAWN[i][1])
+                    pcall(RESPAWN[i][2], old, h)
+                    nextAt = os.clock() + 1.5
+                end
+                task.wait(0.25)
+            end
+            ev.home = "failed"
+            print(string.format("[BFF] loot: no respawn in %d s (tried: %s) - the next server from here",
+                math.floor(limit), table.concat(tried, ", ")))
+        end
+
         -- THE HUNT, one step. true = keep going here; false = the next server
-        -- (E.why says why). kind: "prehistoric" (default), or a Mirage hunt
-        -- ("mirage" / "dealer" / "mchest" / "gear").
+        -- (E.why says why). kind: "prehistoric" (default), a Mirage hunt
+        -- ("mirage" / "dealer" / "mchest" / "gear"), or "sail" - SEA TRAVEL
+        -- (user, 2026-10-10: the boat at sea speed and nothing else - for the
+        -- Leviathan; the Mirage / Prehistoric hunts fly you to a Mirage that
+        -- is up, or to Hydra for the magnet): your keys at the wheel, no
+        -- island, no clock, never the next server.
         function S.huntStep(myEpoch, kind)
             kind = kind or "prehistoric"
             local E = P.elite
+            -- Sea travel never leaves the server: what sends a hunt on turns it off.
+            local function sailOff(why)
+                S.note = why .. " - Sea travel off"
+                P.setHunt(false)
+                E.note = S.note
+                say(S.note)
+                return true
+            end
             local sea = mySea()
             if sea and sea ~= 3 then
-                S.note = (MIRAGE_HUNT[kind] and "the Mirage" or "the Prehistoric Island")
-                    .. " is Third Sea only - hunt stopped"
+                S.note = (MIRAGE_HUNT[kind] and "the Mirage" or (kind == "sail") and "Sea travel"
+                    or "the Prehistoric Island") .. " is Third Sea only - hunt stopped"
                 P.setHunt(false)
                 E.note = S.note
                 say(S.note)
@@ -6776,6 +6876,8 @@ do
                 if S.driving then stopDrive() end
                 local ev = S.ev
                 if ev and ev.complete and (ev.stuck or (CFG.VolcanoAfter or "hop") == "hop") then
+                    goHome(ev, myEpoch)
+                    if stale(myEpoch) then return true end
                     E.why = ev.stuck and "the volcano event would not start here (the game's bug) - the next server"
                         or string.format("volcano done (%d vents, %d bones, %d egg) - the next server",
                             ev.vents, ev.bones, ev.eggs)
@@ -6849,6 +6951,7 @@ do
                     -- Sunk far out: a new one is a long flight back - the
                     -- next server. Near Tiki: just buy another.
                     S.everDriven = false
+                    if kind == "sail" then return sailOff("the boat was lost at sea") end
                     E.why = "the boat was lost at sea"
                     return false
                 end
@@ -6869,6 +6972,7 @@ do
             local seat = seatOf(b)
             if not seat then
                 S.boatNote = b.Name .. " has no VehicleSeat"
+                if kind == "sail" then return sailOff(S.boatNote) end
                 E.why = S.boatNote
                 return false
             end
@@ -6912,11 +7016,11 @@ do
             S.meters = metersFrom(pos, CFG.SeaStudsPerM)
             S.danger = dangerNow()
             S.hp, S.maxHp = boatHP(b)
-            local to = tonumber(CFG.SeaSearchTo) or 23000
-            local back, leg2 = tonumber(CFG.SeaTurnBack) or 120, tonumber(CFG.SeaLeg2) or 10000
+            local to = tonumber(CFG.SeaSearchTo) or 17000
+            local back, leg2 = tonumber(CFG.SeaTurnBack) or 120, tonumber(CFG.SeaLeg2) or 7000
             local spm = math.max(tonumber(CFG.SeaStudsPerM) or 10, 1)
             setState("SAIL")
-            local manual = CFG.SeaSteer == "manual"
+            local manual = CFG.SeaSteer == "manual" or kind == "sail"
             -- Near Tiki again (a new boat): a fresh search.
             if S.meters < 2000 then drive.leg, drive.base, drive.odo0 = 1, 0, nil end
             local leg = manual and "manual" or searchLeg(drive, S.meters, (drive.odo or 0) / spm, to, back, leg2)
@@ -7773,9 +7877,15 @@ do
                 local h0 = S.have({ "Dinosaur Bones" }, true)
                 local before = h0 and h0["Dinosaur Bones"]
                 flyTo(bn.part.Position)
+                local onAt = os.clock()
                 task.wait(0.3)
                 lockAt(bn.part.Position + UP * 2)
                 local now, up = gained("Dinosaur Bones", before, 2, myEpoch)
+                -- Slowly (user, 2026-10-10): BoneMin..BoneMax s on each bone.
+                local lo = math.max(tonumber(CFG.BoneMin) or 0.5, 0)
+                local hi = math.max(tonumber(CFG.BoneMax) or 1, lo)
+                local dwell = lo + math.random() * (hi - lo)
+                while os.clock() - onAt < dwell and not stale(myEpoch) do task.wait(0.05) end
                 if up then
                     local n = now - before
                     ev.bones += n
@@ -7809,12 +7919,21 @@ do
                 local before = h0 and h0["Dragon Egg"]
                 if at then flyTo(at + UP * 3) end
                 if stale(myEpoch) then return end
+                if at then lockAt(at + UP * 3) end         -- still, right here, the whole pickup
                 holdPrompt(pp, myEpoch)
+                local pressAt = os.clock()
+                local stay = math.max(tonumber(CFG.EggStay) or 4, 0)
                 -- Stay by it while the game hands it over (its pickup plays);
                 -- a prompt still there after 2.5 s = it was not taken.
-                local now, up = gained("Dragon Egg", before, 6, myEpoch, function(t)
+                local now, up = gained("Dragon Egg", before, math.max(6, stay + 2), myEpoch, function(t)
                     return t > 2.5 and pp.Parent ~= nil and pp.Enabled
                 end)
+                -- ITS ANIMATION (user, 2026-10-10: ~3 s into the inventory;
+                -- moved before it ends = not yours): stood still EggStay s
+                -- after E, the count up or not. Prompt still on = not taken.
+                if not (pp.Parent and pp.Enabled) then
+                    while os.clock() - pressAt < stay and not stale(myEpoch) do task.wait(0.1) end
+                end
                 if up then
                     ev.eggs += 1
                     S.tally.eggs += 1
@@ -8000,6 +8119,15 @@ do
                 P.keepGun = nil
                 return false
             end
+            -- Gone home by respawn after the loot (S.huntStep): the island is
+            -- behind you, never flown back to - the hunt goes to the next server.
+            local home = S.ev and S.ev.home
+            if (home == "done" or home == "failed") and CFG.Hunt and CFG.HuntKind == "prehistoric"
+                and (CFG.VolcanoAfter or "hop") == "hop" then
+                letGolemsGo()
+                P.keepGun = nil
+                return false
+            end
             local myEpoch = epoch
             if S.driving then stopDrive() end
             if isle then S.lavaOff(isle) end
@@ -8094,12 +8222,12 @@ do
                 -- last bone, ~10 s after the egg).
                 local picked = ev.bones + ev.eggs + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
                 local leaving = CFG.Hunt and CFG.HuntKind == "prehistoric" and (CFG.VolcanoAfter or "hop") == "hop"
-                local stay = (picked > 0 and leaving) and math.max(tonumber(CFG.LootStay) or 60, 0) or 0
+                local stay = (picked > 0 and leaving) and math.max(tonumber(CFG.LootStay) or 20, 0) or 0
                 local since = os.clock() - (ev.lastPickAt or ev.overAt)
                 if since < stay then
                     letGolemsGo()
-                    ev.note = string.format("loot in - staying %s so the game saves it before the next server",
-                        mmss(stay - since))
+                    ev.note = string.format("loot in - staying %s so the game saves it, then %sthe next server",
+                        mmss(stay - since), CFG.RespawnHome and "home by respawn and " or "")
                     S.note = ev.note
                     say(ev.note)
                     setState("VOLCANO")
@@ -8123,7 +8251,7 @@ do
             end
             if ev.complete then
                 -- "again": a fresh event on this island.
-                ev.complete, ev.ran, ev.overAt = false, false, nil
+                ev.complete, ev.ran, ev.overAt, ev.home = false, false, nil, nil
             end
             local ph = phase(active, pp ~= nil and pp.Enabled, lootLeft)
             ev.phase = ph
@@ -12026,6 +12154,8 @@ local function buildUI()
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
+        -- Sea travel (user, 2026-10-10): the hunts' fast boat with no target.
+        { "sail", "Sea travel", "Your boat at sea speed, you steer (A/D turn, W go, S stop) - no island, never the next server" },
         { "prehistoric", "Prehistoric hunt", "Sail to the island, run the volcano event, loot, next server - the loop" },
         -- The Mirage (user, 2026-10-07): four hunts, each only its job. One
         -- up already = straight to the job; none = the boat sails for one.
@@ -12368,6 +12498,8 @@ local function buildUI()
                         P.seaev.spy and tostring(P.seaev.spy.text) or "not asked yet")
                     or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
+                    or (k == "sail") and ((P.sea.driving and P.sea.meters) and string.format("%d m from Tiki  ·  danger %s",
+                        math.floor(P.sea.meters), tostring(P.sea.danger or "?")) or "not sailing")
                     or (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
                     or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
@@ -13714,9 +13846,28 @@ local function buildUI()
             { "hop",   "After the loot: the next server", "the hunt goes on there - the loop" },
             { "again", "After the loot: again on this island", "the wiki: the event has no cooldown" },
         }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
-        sliderRow(v, "Stay after the loot (the game saves it) before the next server", 0, 300, 10,
+        sliderRow(v, "Stay after the loot (the game saves it) before the next server", 0, 300, 5,
             function() return CFG.LootStay end,
             function(x) CFG.LootStay = x end, " s")
+        switchRow(v, "Home by respawn after the loot",
+            "The stay over: reset - back at your spawn (Tiki), then the next server. Never with the chalice",
+            function() return CFG.RespawnHome end,
+            function(x) CFG.RespawnHome = x end)
+        sliderRow(v, "The egg: stand still after E (its animation)", 0, 10, 0.5,
+            function() return CFG.EggStay end,
+            function(x) CFG.EggStay = x end, " s")
+        sliderRow(v, "Each bone, at least", 0, 2, 0.1,
+            function() return CFG.BoneMin end,
+            function(x)
+                CFG.BoneMin = x
+                CFG.BoneMax = math.max(tonumber(CFG.BoneMax) or 1, x)
+            end, " s")
+        sliderRow(v, "Each bone, at most", 0, 3, 0.1,
+            function() return CFG.BoneMax end,
+            function(x)
+                CFG.BoneMax = x
+                CFG.BoneMin = math.min(tonumber(CFG.BoneMin) or 0.5, x)
+            end, " s")
         readout(v, function()
             local s = P.sea
             local ev = s.ev
