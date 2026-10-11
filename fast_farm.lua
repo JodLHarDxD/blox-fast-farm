@@ -240,7 +240,7 @@ local CFG = {
     -- ONE hunt at a time, the one you switch on; it does only that, then the
     -- next server. Nothing picks for you.
     Hunt               = false,
-    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "flower" | "ember" | "prehistoric"
+    HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "sword" | "flower" | "ember" | "prehistoric"
                                      -- | "mirage" | "dealer" | "mchest" | "gear" (the four Mirage hunts)
                                      -- | "seaevents" | "sail" (Sea travel: the boat only)
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
@@ -266,6 +266,11 @@ local CFG = {
     RecipeWant         = {
         ["Winter Sky"] = true, ["Snow White"] = true, ["Pure Red"] = true,
     },
+    -- LEGENDARY SWORD HUNT (Second Sea, user 2026-10-11): the Legendary
+    -- Sword Dealer's three swords for True Triple Katana, $2,000,000 each.
+    -- Renamed in Update 24: Shisui = Shizu, Saddi = Saishi, Wando = Oroshi.
+    -- One bought (or already yours) goes off by itself.
+    SwordWant          = { Shizu = true, Saishi = true, Oroshi = true },
     -- FIRE FLOWER HUNT (Draco V2, Third Sea): Forest + Mythological Pirates
     -- killed one at a time where they stand (no magnet), the flower picked
     -- the moment it lies there, then the next server. None this long after
@@ -508,7 +513,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -5427,6 +5432,7 @@ do
         -- A fresh look in this server (arrival, or after the last one went down).
         local function lookAgain()
             E.lookStart, E.foundHere, E.asks, E.reply, E.replyText = os.clock(), false, 0, nil, nil
+            E.swordFlown = false
             E.isleTried, E.missSince = false, nil
             -- The Fire Flower clock starts again at the next kill.
             E.flowerFirstKill, E.flowerKills0, E.flowerAtCamp = nil, stats.kills, nil
@@ -5771,6 +5777,222 @@ do
             return true
         end
         P.cousinOffer = cousinOffer
+
+        -- THE LEGENDARY SWORD DEALER (user, 2026-10-11: for True Triple
+        -- Katana). Second Sea only; ONE of the three per visit, $2,000,000
+        -- each. Renamed in Update 24: Shisui = Shizu, Saddi = Saishi, Wando =
+        -- Oroshi - the game's own item table (v4623) has only the new names
+        -- (Shizu 66, Saishi 69, Oroshi 70). TTK wants all three at 300
+        -- mastery each (the wiki).
+        -- His own dialogue (decompiled v4623) asks the server straight:
+        -- CommF_("LegendarySwordDealer", "1") -> the sword's name while he is
+        -- here, nothing while he is not; ("LegendarySwordDealer", "2") buys:
+        -- 1 bought, 0 not enough money, 2 already yours, else gone. No Cafe
+        -- Manager and no 10 minutes - that is the Manager's own rule (his "1"
+        -- answers -1, "new to this island"). Asked from anywhere, as the
+        -- public hubs do; not answered or refused from afar while his model
+        -- is loaded = flown to him and asked again. Nothing for you = the
+        -- next server.
+        local SWORDS = { "Shizu", "Saishi", "Oroshi" }
+        local SWORD_ALIAS = { Shisui = "Shizu", Saddi = "Saishi", Wando = "Oroshi" }
+        -- The item id, and the id of its moves (both in the game's table).
+        local SWORD_IDS = { Shizu = { 66, 1142 }, Saishi = { 69, 1145 }, Oroshi = { 70, 1146 } }
+        local SWORD_PRICE = 2000000
+        P.SWORDS = SWORDS
+
+        local function swordOffer()
+            local cf = commF()
+            if not cf then return nil end
+            local ok, name = pcall(function() return cf:InvokeServer("LegendarySwordDealer", "1") end)
+            if ok and type(name) == "string" and name ~= "" then return SWORD_ALIAS[name] or name end
+            return nil
+        end
+
+        -- Where he stands, if the game has him loaded (or parked).
+        local function swordDealerAt()
+            local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
+            for i = 1, 2 do
+                local m = folders[i] and folders[i]:FindFirstChild("Legendary Sword Dealer")
+                if m then
+                    local ok, p = pcall(function() return m:GetPivot().Position end)
+                    if ok and p then return p end
+                end
+            end
+            return nil
+        end
+
+        local function beli()
+            local d = player:FindFirstChild("Data")
+            local b = d and d:FindFirstChild("Beli")
+            return b and tonumber(b.Value) or nil
+        end
+
+        local function swordWords(res)
+            if res == 1 then return "bought" end
+            if res == 2 then return "already yours" end
+            if res == 0 then return "not enough money" end
+            return "the game said " .. tostring(res) .. " (he left?)"
+        end
+
+        -- Which of the three are yours already: the game's item list (the
+        -- reader the Volcanic Magnet check uses - any entry under the sword's
+        -- ids; a count of 0 is not owning it), else the legacy list, plus
+        -- what you carry. nil = nothing could be read.
+        local function swordOf(name)
+            local n = SWORD_ALIAS[name] or name
+            return SWORD_IDS[n] and n or nil
+        end
+        local function swordsOwned()
+            local out, read = {}, false
+            local rf = netRemote("RF", "GetAllItemValues")
+            local ok, list = false, nil
+            if rf then ok, list = pcall(function() return rf:InvokeServer() end) end
+            if ok and type(list) == "table" then
+                read = true
+                for _, it in pairs(list) do
+                    if type(it) == "table" and not (it.Key == "Quantity" and (tonumber(it.Value) or 0) <= 0) then
+                        local id = tonumber(it.ItemId)
+                        for n, ids in pairs(SWORD_IDS) do
+                            if id == ids[1] or id == ids[2] then out[n] = true end
+                        end
+                    end
+                end
+            else
+                local cf = commF()
+                local ok2, inv = pcall(function() return cf and cf:InvokeServer("getInventory") end)
+                if ok2 and type(inv) == "table" then
+                    read = true
+                    for _, it in pairs(inv) do
+                        local n = type(it) == "table" and swordOf(it.Name)
+                        if n then out[n] = true end
+                    end
+                end
+            end
+            local srcs = { player:FindFirstChild("Backpack"), player.Character }
+            for i = 1, 2 do
+                for _, t in ipairs(srcs[i] and srcs[i]:GetChildren() or {}) do
+                    local n = swordOf(t.Name)
+                    if n then out[n], read = true, true end
+                end
+            end
+            return read and out or nil
+        end
+
+        -- true = busy with it here; false = nothing for you here (E.why).
+        local function swordStep(myEpoch)
+            if mySea() ~= 2 then
+                E.swordNote = "the Legendary Sword Dealer is only in the Second Sea - go there, then switch it on"
+                E.note = E.swordNote
+                say(E.note)
+                P.stop("not the Second Sea")
+                return true
+            end
+            local _, r = parts()
+            if not r then
+                -- Fully in first: an answer before you have a character
+                -- could be a "not here" that is not true.
+                E.note = "waiting for your character"
+                say(E.note)
+                task.wait(0.25)
+                return true
+            end
+            -- Yours already: switched off, once per hunt-on (and per server copy).
+            if not E.swordChecked then
+                E.swordChecked = true
+                local own = swordsOwned()
+                E.swordsOwned = own
+                for n in pairs(own or {}) do
+                    if CFG.SwordWant[n] then
+                        CFG.SwordWant[n] = false
+                        print("[BFF] sword: " .. n .. " is yours already - switched off")
+                    end
+                end
+            end
+            local any = false
+            for _, n in ipairs(SWORDS) do
+                if CFG.SwordWant[n] then any = true break end
+            end
+            if not any then
+                E.swordNote = "all three are yours - now 300 mastery on each, then the Mysterious Man (True Triple Katana)"
+                E.note = E.swordNote
+                say(E.note)
+                P.stop("swords done")
+                return true
+            end
+            local b = beli()
+            if b and b < SWORD_PRICE then
+                E.swordNote = string.format("you have $%d - a sword is $2,000,000: the hunt waits until you have it", b)
+                E.note = E.swordNote
+                say(E.note)
+                P.stop("not enough money")
+                return true
+            end
+            local name = swordOffer()
+            E.swordOffer = name or "he is not here now"
+            if not name then
+                -- His model loaded all the same: the server may want you near.
+                local at = swordDealerAt()
+                if at and not E.swordFlown then
+                    E.swordFlown = true
+                    releasePile()
+                    flyTo(at + Vector3.new(0, 3, 0))
+                    if stale(myEpoch) then return true end
+                    name = swordOffer()
+                    E.swordOffer = name or "he stands here, but did not answer"
+                end
+                if not name then
+                    E.why = "the Legendary Sword Dealer is not here now"
+                    return false
+                end
+            end
+            if not CFG.SwordWant[name] then
+                E.why = "he sells " .. name .. " here - "
+                    .. (SWORD_IDS[name] and "yours already, or switched off" or "not one of the three")
+                return false
+            end
+            E.swordNote = "he sells " .. name .. " here - buying it"
+            E.note = E.swordNote
+            say(E.note)
+            setState("SWORD")
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("LegendarySwordDealer", "2") end)
+            if not (ok and (res == 1 or res == 2 or res == 0)) then
+                -- Not from here: from in front of him.
+                local at = swordDealerAt()
+                if at then
+                    releasePile()
+                    flyTo(at + Vector3.new(0, 3, 0))
+                    if stale(myEpoch) then return true end
+                    ok, res = pcall(function() return cf and cf:InvokeServer("LegendarySwordDealer", "2") end)
+                end
+            end
+            local words = ok and swordWords(res) or ("error: " .. tostring(res))
+            if ok and (res == 1 or res == 2) then
+                CFG.SwordWant[name] = false
+                if res == 1 then
+                    E.tally.swords = (E.tally.swords or 0) + 1
+                    notify("Legendary sword: " .. name)
+                end
+                E.swordNote = name .. ": " .. words
+            elseif ok and res == 0 then
+                E.swordNote = name .. ": NOT bought - not enough money ($2,000,000)"
+                E.note = E.swordNote
+                print("[BFF] sword: " .. E.swordNote)
+                P.stop("not enough money")
+                return true
+            else
+                -- He left as you asked, or refused even in front of him.
+                E.swordNote = name .. ": not bought - " .. words
+                E.why = E.swordNote
+                print("[BFF] sword: " .. E.swordNote)
+                return false
+            end
+            E.note = E.swordNote
+            say(E.note)
+            print("[BFF] sword: " .. E.swordNote)
+            return true
+        end
+        P.swordOffer = swordOffer
 
         -- FIRE FLOWERS (Draco V2: the Dragon Wizard wants 5 and $1,000,000).
         -- While his V2 quest runs, any Third Sea kill can drop one (Fandom,
@@ -6127,6 +6349,8 @@ do
                 E.why = "no berry you want here"
             elseif kind == "recipe" then
                 if recipeStep(myEpoch) then return end
+            elseif kind == "sword" then
+                if swordStep(myEpoch) then return end
             elseif kind == "flower" then
                 if flowerStep(myEpoch) then return end
             elseif kind == "ember" then
@@ -6148,7 +6372,8 @@ do
             -- Nothing worth doing here. A moment after a join first: the
             -- world is still arriving.
             local waited = os.clock() - E.lookStart
-            if waited < 3 then
+            -- The sword hunt's answer is the server's, not the world's: 1 s.
+            if waited < ((kind == "sword") and 1 or 3) then
                 E.note = string.format("looking  %.0fs", waited)
                 say(E.note)
                 setState("LOOK")
@@ -6182,6 +6407,7 @@ do
             if x then
                 CFG.RaidMode, CFG.RandomMode = false, false
                 E.used = true
+                E.swordChecked = false       -- your swords read again
                 lookAgain()
                 E.note = tostring(CFG.HuntKind) .. " hunt on"
             else
@@ -12629,6 +12855,7 @@ local function buildUI()
         { "fruit", "Fruit hunt",        "Fruits on the ground - grabbed and STORED, never eaten" },
         { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
         { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
+        { "sword", "Legendary Sword hunt", "Shizu / Saishi / Oroshi for True Triple Katana - asked the moment you join, else the next server" },
         { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
         { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
         -- Sea travel (user, 2026-10-10): the hunts' fast boat with no target.
@@ -12992,6 +13219,8 @@ local function buildUI()
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
                     or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
                         tostring(P.elite.offer or "not asked yet"))
+                    or (k == "sword") and string.format("%d swords bought  ·  here: %s", t.swords or 0,
+                        tostring(P.elite.swordOffer or "not asked yet"))
                     or (k == "ember") and string.format("%d Blaze Embers  ·  you have %s", P.ember.tally.embers,
                         P.ember.have and tostring(P.ember.have) or "?")
                     or (k == "flower") and string.format("%d Fire Flowers picked  ·  you have %s", t.flowers or 0,
@@ -13911,6 +14140,27 @@ local function buildUI()
             .. "stays 20, is gone 2. Switch off the ones you already have. A "
             .. "recipe learned goes off by itself; not learned (fragments, Aura "
             .. "stage 5) stops the hunt and says why.")
+
+        heading2(v, "legendary sword hunt  (Second Sea)  -  which swords")
+        local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
+        for _, n in ipairs(P.SWORDS) do
+            switchRow(v, n, "was " .. OLD[n] .. "  ·  $2,000,000",
+                function() return CFG.SwordWant[n] == true end,
+                function(x) CFG.SwordWant[n] = x and true or false end)
+        end
+        readout(v, function()
+            local el = P.elite
+            return table.concat({
+                "here      " .. tostring(el.swordOffer or "not asked yet"),
+                "last      " .. tostring(el.swordNote or "-"),
+                string.format("bought    %d", el.tally.swords or 0),
+            }, "\n")
+        end)
+        caption(v, "The Legendary Sword Dealer sells ONE of the three per visit. "
+            .. "He is asked the moment you join - from anywhere, no Cafe Manager, "
+            .. "no 10 minutes - and bought from; not here, or not one you need = "
+            .. "the next server. Swords you own are switched off by themselves. "
+            .. "True Triple Katana: all three at 300 mastery, then the Mysterious Man.")
 
         heading2(v, "fire flower hunt  (Draco V2, Third Sea)")
         readout(v, function()

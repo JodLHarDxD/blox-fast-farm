@@ -48,6 +48,7 @@ director = cut("function huntStep()", "-- The hunt switches.")
 listing = cut("-- What a page came back as, in words", "local function robloxList(")
 join = cut("-- One join. Returns only if", "-- THE HOP.")
 recipe = cut("-- AURA RECIPES: the Barista Cousin (Second", "P.cousinOffer = cousinOffer")
+sword = cut("-- THE LEGENDARY SWORD DEALER (user", "P.swordOffer = swordOffer")
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
@@ -56,6 +57,7 @@ runs = [
         + read("join_cases.lua")),
     ("carry", read("carry_stubs.lua") + carry + read("carry_cases.lua")),
     ("recipe", read("elite_stubs.lua") + pure + read("recipe_stubs.lua") + recipe + read("recipe_cases.lua")),
+    ("sword", read("elite_stubs.lua") + pure + read("sword_stubs.lua") + sword + read("sword_cases.lua")),
     ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
 ]
 ok = True
