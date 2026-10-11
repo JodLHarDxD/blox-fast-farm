@@ -17,6 +17,20 @@ check("loaded but silent: one flight, asked twice, then next server", r == false
 swordStep(0)
 check("no second flight in the same server", FLIGHTS == 1)
 
+-- not answered, his model only PARKED in ReplicatedStorage (not in the
+-- world): never flown to (user, 2026-10-11: every server it flew them under
+-- Kingdom of Rose, into the sea) - next server
+reset() AT = V(1, -60, 3) PARKED = true
+r = swordStep(0)
+check("silent + only a parked copy (ReplicatedStorage): no flight, next server", r == false and FLIGHTS == 0
+    and count("LegendarySwordDealer 1") == 1 and E.why == "the Legendary Sword Dealer is not here now", FLIGHTS)
+
+-- he sells one but refuses from afar, his model parked: flown to (he IS here)
+reset() AT = V(1, 2, 3) PARKED = true OFFER = "Saishi" BUY = { nil, 1 }
+r = swordStep(0)
+check("he sells one, refuses from afar, model parked: one flight, bought there", r == true and FLIGHTS == 1
+    and CFG.SwordWant.Saishi == false, E.swordNote)
+
 -- in front of him he answers: bought there
 reset() AT = V(1, 2, 3) OFFER = { nil, "Saishi" } BUY = { 1 }
 r = swordStep(0)

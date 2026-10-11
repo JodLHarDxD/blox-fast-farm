@@ -517,7 +517,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.4" }
 _G.BFF = P
 
 -- =========================================================
@@ -948,6 +948,51 @@ local lastWritten = nil      -- where this script last put the body
 local savedCollide = {}
 local bodyChar, bodyList, bodyListAt = nil, {}, 0
 
+local SUB_Y = -1000          -- below this = Submerged Island (the deep sea)
+
+-- WATER IS ROCK, EVERY MODE (user, 2026-10-11, the Legendary Sword hunt at
+-- Kingdom of Rose: "water should be solid on every mode when the script is
+-- on - I will glide on the water, not penetrate it"). Noclip turns the
+-- character's collisions off every frame, so the raised sea slab (WALK ON
+-- WATER) cannot hold the body: a flight's straight line to a point under the
+-- water - or a lock on one - went through the island and into the sea under
+-- it (water damage, death). Only a sea fight had a floor (P.floorY). Now the
+-- line is in the writes themselves: the body is never put lower than the
+-- sea's top + 4 (the root over the feet) - the lock, every frame, a flight,
+-- an instant hop. Only over the sea slab's own footprint, and not down in
+-- the deep sea (Submerged Island has its own floor).
+do
+    local slab, slabAt = nil, -1e9
+    -- The lowest the ROOT may be written at pos, or nil. The top as walk on
+    -- water raises it (Size.Y 112 = the surface), read as the middle + 56 so
+    -- it holds before the raise too.
+    function P.waterLine(pos)
+        if pos.Y < SUB_Y then return nil end
+        local now = os.clock()
+        if now - slabAt > 2 or not (slab and slab.Parent) then
+            slabAt = now
+            local map = workspace:FindFirstChild("Map")
+            local p = map and map:FindFirstChild("WaterBase-Plane")
+            slab = (p and p:IsA("BasePart")) and p or nil
+        end
+        if not slab then return nil end
+        local ok, top = pcall(function()
+            local lp = slab.CFrame:PointToObjectSpace(pos)
+            local sz = slab.Size
+            if math.abs(lp.X) > sz.X / 2 or math.abs(lp.Z) > sz.Z / 2 then return nil end
+            return slab.Position.Y + math.max(sz.Y / 2, 56)
+        end)
+        if not ok or not top then return nil end
+        return top + 4
+    end
+    -- The floor at pos: the water line, or a sea fight's own if higher.
+    function P.floorAt(pos)
+        local fy, wl = P.floorY, P.waterLine(pos)
+        if wl and (not fy or wl > fy) then fy = wl end
+        return fy
+    end
+end
+
 local function charParts(char)
     local out = {}
     for _, d in ipairs(char:GetDescendants()) do
@@ -989,7 +1034,7 @@ local function bodyHeartbeat()
             lockCF = CFrame.new(r.Position) * rot
         end
         if not lockCF then lockCF = r.CFrame end
-        local fy = P.floorY
+        local fy = P.floorAt(lockCF.Position)
         if fy and lockCF.Position.Y < fy then lockCF = lockCF + Vector3.new(0, fy - lockCF.Position.Y, 0) end
         r.CFrame = lockCF
         lastWritten = lockCF.Position
@@ -1009,8 +1054,8 @@ end
 
 -- Hold at pos, turned (yaw only) to face lookAt if given.
 local function lockAt(pos, lookAt)
-    -- THE WATER AS ROCK (SEA EVENTS, user 2026-10-09): never under it.
-    local fy = P.floorY
+    -- THE WATER AS ROCK (a sea fight 2026-10-09, every mode 2026-10-11).
+    local fy = P.floorAt(pos)
     if fy and pos.Y < fy then pos = Vector3.new(pos.X, fy, pos.Z) end
     if lookAt then
         local flat = Vector3.new(lookAt.X, pos.Y, lookAt.Z)
@@ -1176,8 +1221,7 @@ end
 -- frame, collisions off, so there is nothing in the way to go round. "Pulled
 -- back" counts frames where the body was not where it was written -- that is
 -- the server correcting you, and the sign the speed is too high.
-local SUB_Y    = -1000                                -- below this = Submerged Island
-local TIKI_SUB = Vector3.new(-16269, 23, 1371)        -- the Submarine Worker
+local TIKI_SUB = Vector3.new(-16269, 23, 1371)        -- the Submarine Worker (SUB_Y: BODY)
 P.lastFlight = "none yet"
 
 local function flatFace(pos, dir)
@@ -1224,6 +1268,12 @@ flyTo = function(goal, opts)
         r = r2
     end
 
+    -- Water is rock (BODY): a goal under the water is reached ON it, and no
+    -- frame of the way is written under it - a line from a body already in
+    -- the water starts by coming up.
+    local gy = P.waterLine(goal)
+    if gy and goal.Y < gy then goal = Vector3.new(goal.X, gy, goal.Z) end
+
     local dist = (goal - r.Position).Magnitude
     if dist <= arrive then
         lockAt(goal, opts.face)
@@ -1259,6 +1309,8 @@ flyTo = function(goal, opts)
         if os.clock() - t0 > budget then break end
         speed = math.max(CFG.TravelSpeed or 330, 50)
         local nextPos = here + d.Unit * math.min(m, speed * math.min(dt, 0.1))
+        local ny = P.waterLine(nextPos)
+        if ny and nextPos.Y < ny then nextPos = Vector3.new(nextPos.X, ny, nextPos.Z) end
         r2.CFrame = flatFace(nextPos, d)
         r2.AssemblyLinearVelocity = Vector3.zero
         wrote = nextPos
@@ -5812,14 +5864,16 @@ do
             return nil
         end
 
-        -- Where he stands, if the game has him loaded (or parked).
+        -- Where he stands, if the game has him loaded (or parked), and
+        -- whether that is in the world (workspace) - a copy parked in
+        -- ReplicatedStorage is not where anyone stands.
         local function swordDealerAt()
             local folders = { workspace:FindFirstChild("NPCs"), RS:FindFirstChild("NPCs") }
             for i = 1, 2 do
                 local m = folders[i] and folders[i]:FindFirstChild("Legendary Sword Dealer")
                 if m then
                     local ok, p = pcall(function() return m:GetPivot().Position end)
-                    if ok and p then return p end
+                    if ok and p then return p, i == 1 end
                 end
             end
             return nil
@@ -5934,11 +5988,16 @@ do
             local name = swordOffer()
             E.swordOffer = name or "he is not here now"
             if not name then
-                -- His model loaded all the same: the server may want you near.
-                local at = swordDealerAt()
-                if at and not E.swordFlown then
+                -- His model loaded IN THE WORLD all the same: the server may
+                -- want you near. Not a copy parked in ReplicatedStorage (user,
+                -- 2026-10-11: every server it flew them under Kingdom of Rose,
+                -- into the sea - he had said he was not here).
+                local at, inWorld = swordDealerAt()
+                if at and inWorld and not E.swordFlown then
                     E.swordFlown = true
                     releasePile()
+                    print(string.format("[BFF] sword: no answer from here - flying to his model at (%.0f, %.0f, %.0f)",
+                        at.X, at.Y, at.Z))
                     flyTo(at + Vector3.new(0, 3, 0))
                     if stale(myEpoch) then return true end
                     name = swordOffer()

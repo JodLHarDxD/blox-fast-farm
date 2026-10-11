@@ -11,9 +11,12 @@ local function at(p)
     rawset(ROOT, "Position", p)
 end
 
--- THE LOCK, as before: no floor.
+-- THE LOCK, EVERY MODE (2026-10-11): over the sea, never under the water line
+-- (the slab's top + 4); off the slab, held where asked.
 lockAt(vec(10, -30, 10))
-check("no floor: held where asked (under the sea is allowed outside a sea fight)", near(lockCF.Position.Y, -30))
+check("any mode: asked to hold under the sea - held on the water line", near(lockCF.Position.Y, 4), lockCF.Position.Y)
+lockAt(vec(15000, -30, 10))
+check("off the sea slab: held where asked", near(lockCF.Position.Y, -30))
 
 -- THE WATER AS ROCK (SEA EVENTS): a sea fight's floor.
 P.floorY = 9

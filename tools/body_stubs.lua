@@ -33,3 +33,12 @@ local HUM = { AutoRotate = true }
 local player = { Character = nil }
 local function parts() return {}, ROOT, HUM end
 local P = { running = true, handsOff = false }
+
+-- The sea: one slab (workspace.Map["WaterBase-Plane"]), its top at Y 0 ->
+-- the water line (every mode, 2026-10-11) at Y 4.
+local SLAB = { Name = "WaterBase-Plane", Position = vec(0, -56, 0), Size = vec(20000, 112, 20000) }
+SLAB.CFrame = { PointToObjectSpace = function(_, p) return p - SLAB.Position end }
+function SLAB:IsA(c) return c == "BasePart" end
+local MAP = { FindFirstChild = function(_, n) return n == "WaterBase-Plane" and SLAB or nil end }
+SLAB.Parent = MAP
+local workspace = { FindFirstChild = function(_, n) return n == "Map" and MAP or nil end }
