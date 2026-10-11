@@ -26,7 +26,9 @@ def read(name):
 
 src = read(os.path.join("..", "fast_farm.lua"))
 a = src.index("function P.pickTeam()")
-b = src.index("-- Arrived by an elite hunt's hop", a)
+# Up to the end of SILENT AIM: the PVP section after it builds at load and
+# needs the real game (2026-10-11); the team code never reaches it.
+b = src.index("-- (end of silent aim)", a)
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
     f.write(read("team_stubs.lua") + src[a:b] + read("team_cases.lua"))

@@ -484,12 +484,31 @@ local CFG = {
     AutoKen            = true,
     KenEvery           = 300,
 
+    -- ---------- PVP (user, 2026-10-11) ----------
+    -- Its own switch on Home. You fight with your own hands; the script keeps
+    -- the GAME'S OWN Observation view on (yours is V2: the clean one), your
+    -- screen clean, and aims what you fire. On = the farm stops.
+    Pvp                = false,
+    PvpVision          = true,   -- the game's Ken view is never turned off
+    PvpClean           = true,   -- other players' screen effects off (Ghoul / Angel V4, Dark)
+    PvpNoShake         = true,   -- no camera shake
+    PvpKenBack         = true,   -- Ken itself (the dodges) back: 2 s after, every 0.5 s
+    PvpAim             = true,   -- your skills, fruit M1 and gun land on the player
+    PvpRange           = 300,    -- a player farther than this is not picked
+    PvpFace            = true,   -- melee / sword M1: your body turned to him for the swing
+    PvpFaceRange       = 25,
+    PvpLead            = false,  -- aim where a moving player will be
+    PvpDash            = true,
+    PvpDashX           = 1.5,    -- your Q dash this many times as far
+    PvpSpeed           = true,
+    PvpSpeedTo         = 112.5,  -- Mink V3 + Kitsune 3 tails + Pilot Helmet
+
     Debug              = false,
 }
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-10.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -12406,7 +12425,7 @@ local function buildUI()
         home = "Fast Farm  ·  " .. tostring(P.build), target = "Targets", attack = "Attack", weapon = "Weapon",
         magnet = "Magnet", position = "Position", travel = "Travel",
         safety = "Safety", stats = "Stats",
-        elite = "Hunt",
+        elite = "Hunt", pvp = "PvP",
     }
 
     local function show(name, back)
@@ -12896,6 +12915,10 @@ local function buildUI()
 
         gap(v, 16)
 
+        switchRow(v, "PvP mode",
+            "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm)",
+            function() return CFG.Pvp end,
+            function(x) P.pvpSet(x) end)
         switchRow(v, "Raid mode",
             "Every enemy on the raid's island, any kind - outside a raid you stay where you are",
             function() return CFG.RaidMode end,
@@ -12983,6 +13006,12 @@ local function buildUI()
 
         gap(v, 8)
 
+        navRow(v, "PvP", function()
+            if not CFG.Pvp then return "Off" end
+            local t = P.pvp and P.pvp.target
+            return t and ("on  ·  " .. tostring(t.plr.DisplayName or t.plr.Name)) or "on  ·  no player near"
+        end, "pvp")
+        hairline(v)
         navRow(v, "Targets", function()
             local list = circuit()
             if #list == 0 then return "none" end
@@ -14539,6 +14568,86 @@ local function buildUI()
     end
 
     -- =====================================================
+    -- PVP
+    -- =====================================================
+    do
+        local v = makeView("pvp")
+        local S = P.pvp
+        gap(v, 8)
+        switchRow(v, "PvP mode", "You fight with your own hands - the farm stops",
+            function() return CFG.Pvp end,
+            function(x) P.pvpSet(x) end)
+        readout(v, function()
+            if not CFG.Pvp then return "off" end
+            return "PLAYER  " .. S.targetText()
+        end)
+        hairline(v)
+
+        caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
+            .. "ends your Ken; your screen kept clear of other players' effects.")
+        switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
+            function() return CFG.PvpVision end,
+            function(x) CFG.PvpVision = x end)
+        switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
+            function() return CFG.PvpClean end,
+            function(x) CFG.PvpClean = x end)
+        switchRow(v, "No camera shake", nil,
+            function() return CFG.PvpNoShake end,
+            function(x) CFG.PvpNoShake = x end)
+        switchRow(v, "Ken back by itself", "The dodges: 2 s after, every 0.5 s, the moment the game allows",
+            function() return CFG.PvpKenBack end,
+            function(x) CFG.PvpKenBack = x end)
+        readout(v, function()
+            if not CFG.Pvp then return "PvP mode is off" end
+            return "view    " .. tostring(S.view.note)
+                .. "\nken     " .. tostring(S.ken.note)
+                .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
+                .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
+        end)
+        hairline(v)
+
+        caption(v, "AIM - you press every key; what you fire goes to the player.")
+        switchRow(v, "Aim at the player", "Skills, fruit M1, gun - land on him",
+            function() return CFG.PvpAim end,
+            function(x) CFG.PvpAim = x end)
+        sliderRow(v, "Pick players within", 50, 1000, 25,
+            function() return CFG.PvpRange end,
+            function(x) CFG.PvpRange = x end, " studs")
+        switchRow(v, "Melee / sword: face him", "Your swing turns your body to him - the game's hitbox does the rest",
+            function() return CFG.PvpFace end,
+            function(x) CFG.PvpFace = x end)
+        sliderRow(v, "Face him within", 8, 40, 1,
+            function() return CFG.PvpFaceRange end,
+            function(x) CFG.PvpFaceRange = x end, " studs")
+        switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
+            function() return CFG.PvpLead end,
+            function(x) CFG.PvpLead = x end)
+        actionRow(v, "Next player", nil, function() S.next() end)
+        readout(v, function()
+            if not CFG.Pvp then return "" end
+            return S.targetText() .. string.format("\nswings turned to him: %d", S.faced)
+        end)
+        hairline(v)
+
+        caption(v, "MOVEMENT")
+        switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
+            function() return CFG.PvpDash end,
+            function(x) CFG.PvpDash = x end)
+        sliderRow(v, "Dash", 1, 2.5, 0.1,
+            function() return CFG.PvpDashX end,
+            function(x) CFG.PvpDashX = x end, "x")
+        readout(v, function() return "dash   " .. S.dashNote() end)
+        switchRow(v, "Faster run", "The game's own speed number - Mink V3 + Kitsune 3 tails + Pilot Helmet = 112",
+            function() return CFG.PvpSpeed end,
+            function(x) CFG.PvpSpeed = x end)
+        sliderRow(v, "Run speed", 40, 185, 1,
+            function() return CFG.PvpSpeedTo end,
+            function(x) CFG.PvpSpeedTo = x end)
+        readout(v, function() return "speed  " .. tostring(S.speed.note) end)
+        gap(v, 10)
+    end
+
+    -- =====================================================
     -- STATS
     -- =====================================================
     do
@@ -14637,6 +14746,8 @@ end
 -- =========================================================
 function P.start()
     if P.running then P.stop() end
+    -- PvP and the farm both drive your character and the aim: one at a time.
+    if P.pvp and P.pvp.on then pcall(P.pvpSet, false) end
     for k in pairs(stats) do stats[k] = 0 end
     stats.startedAt = os.clock()
     activeName, countedDead, circuitIdx = nil, {}, 1
@@ -14710,6 +14821,9 @@ end
 -- the file) -- not you stopping, so a hunt carried over a hop stays carried.
 function P.stop(why)
     if why ~= "reload" then pcall(P.carryOff) end
+    -- A new copy replacing this one: PvP's view switch, screen and
+    -- attributes are given back first (the new copy starts with PvP off).
+    if why == "reload" then pcall(P.pvpSet, false) end
     P.running = false
     epoch += 1                 -- everything in flight gives up on this line
     moveEnabled = false
@@ -14812,6 +14926,12 @@ do
         _G.BFF_SILENT_V2 = true
 
         local function aimNow()
+            -- PvP (2026-10-11): the player you fight, whatever YOU fire.
+            if P.pvp and P.pvp.on then
+                if not CFG.PvpAim then return nil end
+                local ok, t = pcall(P.pvp.aimPoint)
+                return ok and t or nil
+            end
             if not (P.running and CFG.SilentAim) then return nil end
             local ok, t = pcall(P.aimTarget)
             return ok and t or nil
@@ -14904,8 +15024,7 @@ do
                     or (P.gameAimSeen and "  ·  the game never wrote it while hooked - not its table?" or ""))
         end
 
-        function P.silentOff()
-            modOff()
+        local function hookOff()
             if not oldIndex then return end
             local o = oldIndex
             oldIndex = nil
@@ -14914,6 +15033,10 @@ do
             if not (_G.BFF_SILENT_HOOKED and P.silentNote and string.find(P.silentNote, "REJOIN", 1, true)) then
                 P.silentNote = "ready (hooks only while casting)"
             end
+        end
+        function P.silentOff()
+            modOff()
+            hookOff()
         end
 
         local function silentOn()
@@ -14973,10 +15096,739 @@ do
                 P.silentOff()
             end
         end
+
+        -- PvP (2026-10-11): YOUR casts, aimed. The game's skill-aim table is
+        -- taken over while a player is picked - its own metatable, pure Lua,
+        -- no game call goes through it, so it may stay in for the fight. The
+        -- mouse hook (__index) goes in ONLY while a gun is in your hand (only
+        -- the gun reads your mouse) and out 3 s after - the window rule above.
+        local lastModWant, lastHookWant = 0, 0
+        function P.pvpAimTick(wantMod, wantHook, now)
+            now = now or os.clock()
+            if wantMod then
+                lastModWant = now
+                modOn()
+            elseif modOld and now - lastModWant > IDLE_OFF then
+                modOff()
+            end
+            if wantHook then
+                lastHookWant = now
+                silentOn()
+            elseif oldIndex and now - lastHookWant > IDLE_OFF then
+                hookOff()
+            end
+        end
     end
     build()
 end
 -- (end of silent aim)
+
+-- =========================================================
+-- PVP
+-- =========================================================
+-- User, 2026-10-11 (voice): one PvP switch. You fight with your own hands;
+-- the script helps. Read in the game's own client (decompiled v4623):
+--
+-- THE KEN VIEW is drawn by your client only: require(RS.Global).OM, an
+-- ObservationManager - outlines and HP bars out to your VisionRadius, and
+-- the screen look (yours is Observation V2: the clean one). The game turns
+-- it OFF through that object: DisableKen (out of dodges) ->
+-- OM:setActive(false) and radius 0, and the character's Observation loop
+-- turns it off again every 0.3 s while KenDisabled (the cooldown) is on
+-- you. So while PvP is on that object's OFF is dropped (an instance field
+-- over the class method - no hook) and its radius is kept full. It IS the
+-- game's own view, never a copy (user: "don't make a new vision, just keep
+-- it on"). Only when that object cannot be reached does a second copy of
+-- the same class stand in. In PvP your E therefore always asks for Ken ON.
+--
+-- KEN ITSELF (the dodges) is the server's: player attributes KenActive /
+-- KenDodgesLeft. Off -> 2 s, then every 0.5 s: CommE("Ken", true), the call
+-- E sends, as soon as KenDisabled is gone.
+--
+-- CLEAN SCREEN: a Ghoul V4 near you adds a red, grey ColorCorrection to
+-- Lighting and a "Dark/Gradient" screen to your PlayerGui; an Angel V4 a
+-- grey ColorCorrection and camera shake. Every screen effect that was not
+-- there when PvP went on is switched off, Dark/Gradient too, and the camera
+-- shaker's ShakeOnce / Shake do nothing.
+--
+-- AIM: skills and a fruit's M1 read require(RS.Mouse).Hit -> SILENT AIM's
+-- table override, in while a player is picked; a gun reads your mouse ->
+-- the __index hook, only with a gun in your hand. A melee / sword M1 has no
+-- aim at all: a box ~8 studs in front of your body (CombatUtil
+-- RunHitDetection). So while you swing at a player in reach, your body is
+-- turned to him and the game's own hitbox and hit sender do the rest.
+--
+-- SPEED: the game writes WalkSpeed itself every frame, 36 x (race +
+-- bonuses), and the character attribute SpeedMultiplier (Pilot Helmet 1.3)
+-- is one of the bonuses. So that attribute is set so the game's OWN number
+-- comes out at PvpSpeedTo - never WalkSpeed (a fight: it rewrites it).
+-- DASH: the character attribute DashLength (accessories add 7-10). Your
+-- first ground dash is measured, then the attribute is set for x PvpDashX,
+-- and every dash after checks it.
+do
+    local function build()
+        local UIS      = game:GetService("UserInputService")
+        local Lighting = game:GetService("Lighting")
+        local CS       = game:GetService("CollectionService")
+
+        -- PVP LOGIC (pure: tools/pvp_test.py runs these on their own)
+        local L = {}
+
+        -- Can he be hit: alive, his PvP on, not on your side (two Marines
+        -- cannot hurt each other; pirates can).
+        function L.attackable(alive, pvpOff, myTeam, hisTeam)
+            if not alive or pvpOff then return false end
+            if myTeam == "Marines" and hisTeam == "Marines" then return false end
+            return true
+        end
+
+        -- WHO. cands = { {id, dist, ok} }. The one you fight is kept while he
+        -- can be hit and is near (10% over the range, so a step out and back
+        -- does not flick to someone else); otherwise the nearest one.
+        function L.pick(cands, cur, range)
+            local best = nil
+            for _, c in ipairs(cands) do
+                if c.ok then
+                    if cur ~= nil and c.id == cur and c.dist <= range * 1.1 then return c end
+                    if c.dist <= range and (best == nil or c.dist < best.dist) then best = c end
+                end
+            end
+            return best
+        end
+        -- The panel's "Next player": the next one out by distance.
+        function L.nextOf(cands, cur, range)
+            local list = {}
+            for _, c in ipairs(cands) do
+                if c.ok and c.dist <= range then table.insert(list, c) end
+            end
+            if #list == 0 then return nil end
+            table.sort(list, function(a, b) return a.dist < b.dist end)
+            for i, c in ipairs(list) do
+                if c.id == cur then return list[i % #list + 1] end
+            end
+            return list[1]
+        end
+
+        -- Where to aim: him, or where he will be (PvpLead).
+        function L.lead(pos, vel, dist, on)
+            if not on or vel == nil then return pos end
+            return pos + vel * math.clamp(dist / 250, 0, 0.6)
+        end
+
+        -- SPEED. s = { base = the server's SpeedMultiplier (nil = none), mine
+        -- = the last value written here }. attr = the attribute now, ws = the
+        -- game's WalkSpeed now, clean = that number can be read (not busy,
+        -- swimming, walking, nor right after a write), rigged = transformed.
+        -- Returns the value to write, or nil = leave it. Outside a
+        -- transformation WalkSpeed = 36 x (race + bonuses + attr - 1), so one
+        -- unit of the attribute is exactly 36 speed.
+        function L.speed(s, attr, ws, target, clean, rigged)
+            if attr ~= s.mine then s.base = attr end     -- the server set it (gear, a new life)
+            local b = s.base or 1
+            local cur = attr or 1
+            local want
+            if rigged then
+                want = b                                 -- a transformation has its own speed
+            elseif not clean then
+                return nil
+            else
+                local own = ws - 36 * (cur - b)          -- the game's number without this
+                want = (own >= target) and b or (b + (target - own) / 36)
+                want = math.min(want, b + 8)
+            end
+            if math.abs(want - cur) < 0.005 then return nil end
+            s.mine = want
+            return want
+        end
+
+        -- DASH. d = { base = the server's DashLength (nil = none), mine, d0 =
+        -- your dash in studs with the base, k = studs per unit (measured) }.
+        function L.dashSeen(d, attr)
+            if attr ~= d.mine then
+                -- The server's own value changed (other gear): measure again.
+                -- The same value back (a new life) keeps what was measured.
+                if attr ~= d.base then d.d0, d.k = nil, nil end
+                d.base = attr
+            end
+        end
+        function L.dashWant(d, x)
+            if d.d0 == nil or x <= 1 then return d.base end
+            return (d.base or 0) + (x - 1) * d.d0 / (d.k or 1)
+        end
+        -- One measured ground dash: dist studs, done with the attribute at a.
+        function L.dashLearn(d, a, dist)
+            if dist < 4 or dist > 400 then return end
+            local b = d.base or 0
+            a = a or 0
+            if math.abs(a - b) < 0.001 then
+                d.d0 = dist
+            elseif d.d0 and a > b and dist > d.d0 + 1 then
+                local k = (dist - d.d0) / (a - b)
+                if k > 0.05 then d.k = k end
+            end
+        end
+
+        -- KEN BACK. k = { offAt, nextAt, tries }. true = send the Ken call now.
+        function L.kenStep(k, now, active, cooling, hasKen)
+            if active then
+                k.offAt, k.tries = nil, 0
+                return false
+            end
+            if not hasKen then return false end
+            if k.offAt == nil then
+                k.offAt, k.nextAt = now, now + 2
+                return false
+            end
+            if now < (k.nextAt or 0) then return false end
+            if cooling then
+                k.nextAt = now + 0.5
+                return false
+            end
+            k.tries = (k.tries or 0) + 1
+            -- The server not taking it 20 times in a row: slower, not forever.
+            k.nextAt = now + ((k.tries > 20) and 3 or 0.5)
+            return true
+        end
+
+        -- A screen effect that blinds: greyed, darkened, hard contrast, or a
+        -- heavy blur that is not the game's own Blur.
+        function L.blinding(kind, name, sat, bright, contrast, size)
+            if kind == "ColorCorrectionEffect" then
+                return (sat or 0) < -0.05 or (bright or 0) < -0.05 or (contrast or 0) > 0.25
+            elseif kind == "BlurEffect" then
+                return name ~= "Blur" and (size or 0) > 3
+            end
+            return false
+        end
+        -- (end of pvp logic)
+
+        local S = {
+            on = false, epoch = 0, L = L,
+            target = nil,              -- { plr, char, root, dist }
+            conns = {},
+            view  = { note = "-", blocked = 0, ons = 0 },
+            ken   = { note = "-", st = {}, sent = 0 },
+            clean = { base = setmetatable({}, { __mode = "k" }), off = {}, count = 0 },
+            shake = { saved = {}, done = false, note = "-" },
+            speed = { note = "-", st = {} },
+            dash  = { note = "-", st = {}, tries = 0 },
+            faceUntil = 0, faced = 0, m1Held = false,
+        }
+        P.pvp = S
+        local function hold(c) table.insert(S.conns, c) return c end
+
+        local globalMod = nil
+        local function G()
+            if globalMod then return globalMod end
+            local ok, g = pcall(function()
+                local m = RS:FindFirstChild("Global")
+                return m and require(m)
+            end)
+            if ok and type(g) == "table" then globalMod = g end
+            return globalMod
+        end
+        local function visionRadius()
+            local vr = player:FindFirstChild("VisionRadius")
+            return vr and tonumber(vr.Value) or nil
+        end
+
+        -- ---------- THE KEN VIEW ----------
+        local V = S.view
+        V.om, V.orig, V.rawOld, V.own = nil, nil, nil, nil
+        -- sync: back in step with the server (its Ken off = the view off, so
+        -- E works as before). Not for a dead life's object: its OFF could
+        -- reach the shared screen look the new life is using.
+        local function unwrap(sync)
+            local om = V.om
+            if not om then return end
+            V.om = nil
+            pcall(rawset, om, "setActive", V.rawOld)
+            if sync and V.orig and not player:GetAttribute("KenActive") then
+                pcall(V.orig, om, false)
+            end
+            V.orig, V.rawOld = nil, nil
+        end
+        local function wrap(om)
+            if V.om == om then return true end
+            unwrap(false)
+            local orig = om.setActive
+            if type(orig) ~= "function" then return false end
+            local rawOld = rawget(om, "setActive")
+            local ok = pcall(rawset, om, "setActive", function(self, on, ...)
+                -- OFF is dropped while PvP keeps the view - except for a life
+                -- that is over (its object being taken down).
+                local _, _, hum = parts()
+                if on or not (S.on and CFG.PvpVision) or not hum or rawget(self, "_destroyed") then
+                    return orig(self, on, ...)
+                end
+                V.blocked += 1
+                return nil
+            end)
+            if not ok or rawget(om, "setActive") == rawOld then return false end
+            V.om, V.orig, V.rawOld = om, orig, rawOld
+            return true
+        end
+
+        local function viewTick(now)
+            if not CFG.PvpVision then
+                if V.om then unwrap(true) end
+                if V.own then pcall(V.own.destroy, V.own) V.own = nil end
+                V.note = "off"
+                return
+            end
+            local char, root = parts()
+            if not root then V.note = "waiting for your character" return end
+            if V.char ~= char then V.char, V.charAt = char, now end
+            local settled = now - (V.charAt or 0) > 1.5
+            local r = visionRadius()
+            local g = G()
+            local om = g and g.OM
+            if type(om) == "table" and not rawget(om, "_destroyed") then
+                if V.own then pcall(V.own.destroy, V.own) V.own = nil end
+                local held = wrap(om)
+                if not settled then V.note = "a new life - on in a moment" return end
+                if not om.active then
+                    -- The game's own ON: its look, its outlines.
+                    pcall(V.orig or om.setActive, om, true)
+                    V.ons += 1
+                end
+                if r then pcall(function() if (om.radius or 0) < r then om.radius = r end end) end
+                V.note = held and string.format("ON  ·  the game's own view  ·  %d offs kept off", V.blocked)
+                    or "ON  ·  the game's view would not take the switch - turned back on when it goes off"
+                return
+            end
+            -- The game's own object out of reach (this executor's require
+            -- gave a copy of the Global module): a second view of the same
+            -- class. Kept active; emptied (radius 0) while the game's own Ken
+            -- view is on, so no enemy is outlined twice; its screen look put
+            -- back when the game's turns off (both share one).
+            if not settled then return end
+            local gameOn = false
+            pcall(function() gameOn = RS.Events.IsObservationActive:Invoke() == true end)
+            if V.own and V.ownChar ~= char then pcall(V.own.destroy, V.own) V.own = nil end
+            if not V.own then
+                local ok, o = pcall(function() return require(RS.ObservationManager).new(player) end)
+                if ok and type(o) == "table" then
+                    V.own, V.ownChar, V.ownGame = o, char, gameOn
+                    pcall(o.setActive, o, true)
+                end
+            end
+            local o = V.own
+            if not o then V.note = "the game's Ken view could not be reached" return end
+            if V.ownGame and not gameOn then
+                pcall(o.setActive, o, false)
+                pcall(o.setActive, o, true)
+            end
+            V.ownGame = gameOn
+            pcall(function()
+                o.radius = gameOn and 0 or (r or 300)
+                if now - (V.ownRef or 0) > 0.3 then V.ownRef = now o:refresh() end
+            end)
+            V.note = gameOn and "ON  ·  the game's own (Ken on)" or "ON  ·  a copy of the game's view (its own object out of reach)"
+        end
+
+        -- ---------- KEN ITSELF ----------
+        local K = S.ken
+        local function kenTick(now)
+            local char, root = parts()
+            local active = player:GetAttribute("KenActive") == true
+            local cooling = char ~= nil and char:FindFirstChild("KenDisabled") ~= nil
+            local hasKen = char ~= nil and CS:HasTag(char, "Ken")
+            if CFG.PvpKenBack and root and L.kenStep(K.st, now, active, cooling, hasKen) then
+                local rem = RS:FindFirstChild("Remotes")
+                local ce = rem and rem:FindFirstChild("CommE")
+                if ce then
+                    pcall(function() ce:FireServer("Ken", true) end)
+                    K.sent += 1
+                end
+            end
+            local left, max = player:GetAttribute("KenDodgesLeft"), player:GetAttribute("KenMaxDodges")
+            if active then
+                K.note = string.format("ON  ·  %s / %s dodges", tostring(left or "?"), tostring(max or "?"))
+            elseif not CFG.PvpKenBack then
+                K.note = "OFF  ·  bringing it back is off"
+            elseif not hasKen then
+                K.note = "OFF  ·  this character has no Observation"
+            elseif cooling then
+                K.note = "OFF  ·  cooldown - back the moment it ends"
+            else
+                K.note = string.format("OFF  ·  asking again in %.1f s  (%d asked)",
+                    math.max(0, (K.st.nextAt or now) - now), K.st.tries or 0)
+            end
+        end
+
+        -- ---------- CLEAN SCREEN ----------
+        local CL = S.clean
+        local function eachEffect(fn)
+            -- Not ipairs over the pair: no camera for a moment = a nil.
+            local srcs = { Lighting, workspace.CurrentCamera }
+            for i = 1, 2 do
+                local src = srcs[i]
+                if src then
+                    for _, e in ipairs(src:GetChildren()) do
+                        if e:IsA("PostEffect") then fn(e) end
+                    end
+                end
+            end
+        end
+        local function cleanBaseline()
+            for e in pairs(CL.base) do CL.base[e] = nil end
+            eachEffect(function(e)
+                local sat, br, ct, sz
+                if e:IsA("ColorCorrectionEffect") then
+                    sat, br, ct = e.Saturation, e.Brightness, e.Contrast
+                elseif e:IsA("BlurEffect") then
+                    sz = e.Size
+                end
+                if not L.blinding(e.ClassName, e.Name, sat, br, ct, sz) then CL.base[e] = true end
+            end)
+        end
+        local function cleanTick()
+            eachEffect(function(e)
+                if not CL.base[e] and e.Enabled then
+                    e.Enabled = false
+                    if not CL.off[e] then CL.off[e] = true CL.count += 1 end
+                end
+            end)
+            local pg = player:FindFirstChildOfClass("PlayerGui")
+            for _, g in ipairs(pg and pg:GetChildren() or {}) do
+                if string.sub(g.Name, 1, 13) == "Dark/Gradient" and g:IsA("LayerCollector") and g.Enabled then
+                    g.Enabled = false
+                    if not CL.off[g] then CL.off[g] = true CL.count += 1 end
+                end
+            end
+        end
+        local function cleanRestore()
+            for e in pairs(CL.off) do
+                if e.Parent then pcall(function() e.Enabled = true end) end
+            end
+            table.clear(CL.off)
+        end
+
+        -- ---------- NO CAMERA SHAKE ----------
+        local SH = S.shake
+        local DUMMY = setmetatable({}, { __index = function() return function() end end })
+        local function shakeTables()
+            local out = {}
+            local u = RS:FindFirstChild("Util")
+            if not u then return out end
+            local cs = u:FindFirstChild("CameraShaker")
+            if cs then
+                local ok, m = pcall(require, cs)
+                if ok and type(m) == "table" then table.insert(out, m) end
+            end
+            local ok, um = pcall(require, u)
+            if ok and type(um) == "table" then
+                local ok2, inst = pcall(function() return um.CameraShaker end)
+                if ok2 and type(inst) == "table" then table.insert(out, inst) end
+            end
+            return out
+        end
+        local function shakeOff()
+            if SH.done then return end
+            SH.done = true
+            local n = 0
+            for _, t in ipairs(shakeTables()) do
+                for _, m in ipairs({ "ShakeOnce", "Shake" }) do
+                    if type(t[m]) == "function" then
+                        local raw = rawget(t, m)
+                        if pcall(rawset, t, m, function() return DUMMY end) then
+                            table.insert(SH.saved, { t, m, raw })
+                            n += 1
+                        end
+                    end
+                end
+            end
+            SH.note = (n > 0) and ("off  ·  " .. n .. " shake calls stilled")
+                or "the game's camera shaker not found (or locked) - shake stays"
+        end
+        local function shakeOn()
+            for i = #SH.saved, 1, -1 do
+                local s = SH.saved[i]
+                pcall(rawset, s[1], s[2], s[3])
+            end
+            table.clear(SH.saved)
+            SH.done = false
+            SH.note = "on"
+        end
+
+        -- ---------- SPEED ----------
+        local SP = S.speed
+        local RIGS = { "Kitsune", "TigerRig", "WesternDragonRig", "Mammoth" }
+        local function speedRestore()
+            local char, st = player.Character, SP.st
+            if char and st.mine ~= nil and char:GetAttribute("SpeedMultiplier") == st.mine then
+                pcall(function() char:SetAttribute("SpeedMultiplier", st.base) end)
+            end
+            SP.st = {}
+        end
+        local function speedTick(now)
+            if not CFG.PvpSpeed then
+                if SP.st.mine ~= nil then speedRestore() end
+                SP.note = "off"
+                return
+            end
+            local char, _, hum = parts()
+            if not hum then SP.note = "waiting for your character" return end
+            if SP.char ~= char then SP.char, SP.charAt = char, now end
+            local rigged = false
+            for _, n in ipairs(RIGS) do
+                if char:FindFirstChild(n) then rigged = true break end
+            end
+            local busy = char:FindFirstChild("Busy")
+            local g = G()
+            local walking = g ~= nil and g.Running == false
+            local clean = not (busy and busy.Value) and not walking and hum.WalkSpeed > 0 and not hum.Sit
+                and hum:GetState() ~= Enum.HumanoidStateType.Swimming
+                and now - (SP.wroteAt or 0) > 0.15 and now - (SP.charAt or 0) > 1
+            local want = L.speed(SP.st, char:GetAttribute("SpeedMultiplier"), hum.WalkSpeed,
+                CFG.PvpSpeedTo, clean, rigged)
+            if want then
+                char:SetAttribute("SpeedMultiplier", want)
+                SP.wroteAt = now
+            end
+            SP.note = string.format("%.0f now  ·  goal %.0f%s", hum.WalkSpeed, CFG.PvpSpeedTo,
+                rigged and "  ·  transformed: the game's own speed"
+                    or (walking and "  ·  walking (Ctrl)" or ""))
+        end
+
+        -- ---------- DASH ----------
+        local D = S.dash
+        local function dashRestore()
+            local char, st = player.Character, D.st
+            if char and st.mine ~= nil and char:GetAttribute("DashLength") == st.mine then
+                pcall(function() char:SetAttribute("DashLength", st.base) end)
+            end
+            st.mine = nil
+        end
+        local function dashTick()
+            if not CFG.PvpDash then
+                if D.st.mine ~= nil then dashRestore() end
+                return
+            end
+            local char = player.Character
+            if not char then return end
+            local attr = char:GetAttribute("DashLength")
+            L.dashSeen(D.st, attr)
+            local want = L.dashWant(D.st, CFG.PvpDashX)
+            if want ~= attr then
+                char:SetAttribute("DashLength", want)
+                D.st.mine = want
+            end
+        end
+        -- Your Q on the ground: how far did it carry you? The dash is the run
+        -- of frames faster than you can run; the rest of the walk is not counted.
+        local function dashMeasure()
+            local char, root, hum = parts()
+            if not hum or hum.FloorMaterial == Enum.Material.Air then return end
+            local a = char:GetAttribute("DashLength")
+            local t0 = os.clock()
+            local last = root.Position
+            local dist, fast, slow = 0, 0, 0
+            local done = false
+            local conn
+            local function finish()
+                if done then return end
+                done = true
+                conn:Disconnect()
+                if fast >= 2 then
+                    D.last, D.lastAttr = dist, a
+                    L.dashLearn(D.st, a, dist)
+                else
+                    D.tries += 1
+                    -- Three dashes never seen (yours slower than your run?):
+                    -- a guess, and the panel says it is one.
+                    if D.st.d0 == nil and D.tries >= 3 then D.st.d0, D.guess = 30, true end
+                end
+            end
+            conn = RunService.Heartbeat:Connect(function(dt)
+                if not root.Parent or os.clock() - t0 > 0.9 then finish() return end
+                local p = root.Position
+                local step = Vector3.new(p.X - last.X, 0, p.Z - last.Z).Magnitude
+                last = p
+                local spd = step / math.max(dt, 1 / 240)
+                local ws = hum.WalkSpeed
+                if spd > math.max(ws * 1.35, ws + 20) then
+                    dist += step
+                    fast += 1
+                    slow = 0
+                elseif fast > 0 then
+                    slow += 1
+                    if slow >= 3 then finish() end
+                end
+            end)
+        end
+        local function dashNote()
+            if not CFG.PvpDash then return "off" end
+            local st = D.st
+            if st.d0 == nil then return "dash once on the ground - it is measured first" end
+            return string.format("yours %.0f studs%s  ·  last %s  ·  x%.1f",
+                st.d0, D.guess and " (a guess - never measured)" or "",
+                D.last and string.format("%.0f studs", D.last) or "-", CFG.PvpDashX)
+        end
+        S.dashNote = dashNote
+
+        -- ---------- AIM ----------
+        local function candidates()
+            local _, root = parts()
+            if not root then return {} end
+            local out = {}
+            local mine = player.Team and player.Team.Name or nil
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player then
+                    local ch = p.Character
+                    local r = ch and ch:FindFirstChild("HumanoidRootPart")
+                    local h = ch and ch:FindFirstChildOfClass("Humanoid")
+                    if r and h then
+                        table.insert(out, {
+                            id = p, plr = p, char = ch, root = r,
+                            dist = (r.Position - root.Position).Magnitude,
+                            ok = L.attackable(h.Health > 0, p:GetAttribute("PvpDisabled") == true,
+                                mine, p.Team and p.Team.Name or nil),
+                        })
+                    end
+                end
+            end
+            return out
+        end
+        local function targetTick(forceNext)
+            local cands = candidates()
+            local cur = S.target and S.target.plr
+            local c = forceNext and L.nextOf(cands, cur, CFG.PvpRange) or L.pick(cands, cur, CFG.PvpRange)
+            S.target = c
+            P.aimPart = c and c.root or nil
+        end
+        function S.next() pcall(targetTick, true) end
+        function S.aimPoint()
+            local t = S.target
+            if not (t and t.root and t.root.Parent) then return nil end
+            local vel = CFG.PvpLead and t.root.AssemblyLinearVelocity or nil
+            return L.lead(t.root.Position, vel, t.dist, CFG.PvpLead)
+        end
+        function S.targetText()
+            if not CFG.PvpAim then return "aim off" end
+            local t = S.target
+            if not t then return "no player in " .. math.floor(CFG.PvpRange) .. " studs (alive, PvP on, not your side)" end
+            return string.format("%s  ·  %.0f studs%s", t.plr.DisplayName or t.plr.Name, t.dist,
+                (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "")
+        end
+
+        -- Melee / sword: the swing is a box in front of your body, so the
+        -- body is turned to him for as long as you swing.
+        local function faceWanted()
+            local t = S.target
+            if not (CFG.PvpFace and t and t.dist <= CFG.PvpFaceRange) then return false end
+            local tt = toolType(heldTool())
+            return tt == "Melee" or tt == "Sword"
+        end
+        local function faceNow()
+            if os.clock() > S.faceUntil then return end
+            local t = S.target
+            local _, root = parts()
+            if not (t and root and t.root.Parent) then return end
+            local p, q = root.Position, t.root.Position
+            local flat = Vector3.new(q.X, p.Y, q.Z)
+            if (flat - p).Magnitude < 1 then return end
+            root.CFrame = CFrame.lookAt(p, flat)
+        end
+
+        local function loop(myEpoch)
+            local nextSlow = 0
+            while S.on and S.epoch == myEpoch and _G.BFF == P do
+                local now = os.clock()
+                pcall(viewTick, now)
+                pcall(kenTick, now)
+                if CFG.PvpClean then pcall(cleanTick) elseif next(CL.off) then pcall(cleanRestore) end
+                if CFG.PvpNoShake then pcall(shakeOff) elseif SH.done then pcall(shakeOn) end
+                if now >= nextSlow then
+                    nextSlow = now + 0.2
+                    pcall(speedTick, now)
+                    pcall(dashTick)
+                end
+                task.wait(0.1)
+            end
+        end
+
+        function P.pvpSet(on)
+            on = on and true or false
+            CFG.Pvp = on
+            if on == S.on then return end
+            if on then
+                if P.running then P.stop() end
+                S.on = true
+                S.epoch += 1
+                S.faceUntil, S.m1Held = 0, false
+                -- The life you are in has settled long ago: on at once (only
+                -- a NEW life waits a moment before its view is switched on).
+                V.char, V.charAt = player.Character, -1e9
+                SP.char, SP.charAt = player.Character, -1e9
+                pcall(cleanBaseline)
+                local nextPick = 0
+                hold(RunService.Heartbeat:Connect(function()
+                    if not S.on then return end
+                    local now = os.clock()
+                    if now >= nextPick then
+                        nextPick = now + 0.1
+                        pcall(targetTick)
+                    end
+                    -- The game sets the view's radius to 0 when Ken ends; it
+                    -- is put back before its next refresh can empty the view.
+                    local om = V.om
+                    if om and CFG.PvpVision then
+                        local r = visionRadius()
+                        if r then pcall(function() if (om.radius or 0) < r then om.radius = r end end) end
+                    end
+                    local want = CFG.PvpAim and S.target ~= nil
+                    pcall(P.pvpAimTick, want, want and toolType(heldTool()) == "Gun", now)
+                    if S.m1Held and faceWanted() then S.faceUntil = math.max(S.faceUntil, now + 0.3) end
+                    pcall(faceNow)
+                end))
+                hold(RunService.Stepped:Connect(function() if S.on then pcall(faceNow) end end))
+                pcall(function()
+                    RunService:BindToRenderStep("BFFPvpFace", Enum.RenderPriority.Last.Value, function()
+                        if S.on then pcall(faceNow) end
+                    end)
+                end)
+                hold(UIS.InputBegan:Connect(function(i, gp)
+                    if gp or not S.on then return end
+                    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+                        S.m1Held = true
+                        if faceWanted() then
+                            S.faceUntil = os.clock() + 0.5
+                            S.faced += 1
+                        end
+                    elseif i.KeyCode == Enum.KeyCode.Q and CFG.PvpDash then
+                        task.spawn(function() pcall(dashMeasure) end)
+                    end
+                end))
+                hold(UIS.InputEnded:Connect(function(i)
+                    if i.UserInputType == Enum.UserInputType.MouseButton1 then S.m1Held = false end
+                end))
+                task.spawn(loop, S.epoch)
+                say("PvP mode on - the farm is stopped")
+                print("[BFF] PvP mode on - build " .. tostring(P.build))
+            else
+                S.on = false
+                S.epoch += 1
+                for _, c in ipairs(S.conns) do pcall(function() c:Disconnect() end) end
+                table.clear(S.conns)
+                pcall(function() RunService:UnbindFromRenderStep("BFFPvpFace") end)
+                pcall(unwrap, true)
+                if V.own then pcall(V.own.destroy, V.own) V.own = nil end
+                pcall(cleanRestore)
+                pcall(shakeOn)
+                pcall(speedRestore)
+                pcall(dashRestore)
+                S.target, P.aimPart = nil, nil
+                pcall(P.silentOff)
+                say("PvP mode off")
+                print("[BFF] PvP mode off")
+            end
+        end
+    end
+    build()
+end
+-- (end of pvp)
 
 -- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
 do
@@ -14988,7 +15840,8 @@ do
     say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
         or "loaded - pick targets, then press Start")
     P.panel()
-    if resumed then task.defer(P.start) end
+    if resumed then task.defer(P.start)
+    elseif CFG.Pvp then CFG.Pvp = false task.defer(P.pvpSet, true) end
 end
 -- Water is land from load, farm running or not (farm_pro's, unchanged).
 task.spawn(function()

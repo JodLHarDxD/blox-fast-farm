@@ -233,6 +233,19 @@ Third Sea, Dragonstorm carried (or in your inventory), your usual Random mode sp
 6. **Skills:** Z unlocks at 125, X at 250. "last skill  Dragonstorm Z: fired, hit the pile" every ~9 s, X every ~15 s; a locked one says "did NOT fire - left 1 min" (expected below its mastery).
 7. **Past the heat** (off by default): switch on for a few minutes, then Stats page "which setup is better": `mastery: Dragonstorm, gun held` vs `gun past the heat 0.08 s` kills/min. The readout's `the game's shot` line says whether the game's shot function was found (`this executor has no getupvalues` = Velocity lacks it; held is all there is). Watch the mastery bar too - if kills "past the heat" give no mastery (the wiki's "suspicious kills"), switch it back off.
 
+## PvP mode: first test (2026-10-11, build 2026-10-11.1)
+
+Home: **PvP mode** on (it stops the farm), or the PvP page. You fight with your own hands; each helper has its own switch on the PvP page.
+
+1. **Observation view (the most important).** Ken (V2) on, let an NPC or a player hit you until the dodges run out. The outlines and your clean V2 screen should **stay**. PvP page: `view  ON · the game's own view · N offs kept off` (N goes up each time the game tried to turn it off). `would not take the switch` or `a copy of the game's view` = send the line.
+2. **Ken back.** Same moment: `ken  OFF · cooldown - back the moment it ends`, then `ON · x / y dodges` without you pressing E. In PvP your **E always turns Ken ON** (it can't turn the view off).
+3. **Clean screen.** Next to a Ghoul or Angel V4 with their V4 on: no red / grey tint, no dark edges, no shake. `screen  N effects switched off` counts what was removed. Still dark / grey = say whose race and what it looked like.
+4. **Aim.** A player near with PvP on: `PLAYER  <name> · N studs`. A skill / fruit M1 with your cursor pointed away from him: it should go to him (`aimed` shows on the line). Gun: the same. **Melee / sword M1** within 25 studs: your body turns to him on each swing (`swings turned to him` counts). If a flying move now steers to him too, turn **Aim at the player** off for it and tell me.
+5. **Dash.** One Q dash on flat ground: `dash  yours N studs · last N studs · x1.5`. The next dashes should go about 1.5x as far. `a guess - never measured` = send it.
+6. **Speed.** Run: `speed  112 now · goal 112`. If you get pulled back while running (rubber-band), lower **Run speed** and tell me at what number it stops.
+
+PvP off puts everything back: the view goes back in step with your real Ken, the screen effects, the shake, the speed and dash attributes.
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava
@@ -313,6 +326,7 @@ python tools/vmagnet_test.py                     # the Volcanic Magnet before th
 python tools/fruitguard_test.py                  # the fruit guard, real code: never a weapon, never equipped, no click with one in hand
 python tools/elite_test.py                       # the hunt, real code, 95 checks: Elite Hunter words, server pick, pickFruit (price, drops, traders), berries (names, nearest wanted), the Barista Cousin's recipe (not here / not picked / learned / cannot pay), hop() refusing on the chalice, the join (always the game's; a token refusal remembered; why in words), carry-over, the director (the chalice in every hunt; ONLY the hunt switched on)
 python tools/news_test.py                        # the server news, real code, 96 checks: MoonPhase attribute / decal / blue, day+night number round the clock (the noon turn, midnight), the full moon tonight / now / in N nights in real minutes, the measured speed (jumps, stops, gaps ignored), the turn learned + bff_sky.json, islands (up at the join / spawned / gone / lasted), elites + raid bosses, Cake Prince asked only on screen, fruit, order + BREAKING, the chip
+python tools/pvp_test.py                         # PvP mode, real code, 95 checks: who is picked (kept while near, let go dead / far, two Marines never, Next player cycles), lead, the speed attribute (the game's own 36 x formula hits the goal in one write and stays; helmet = the base; already faster = the base back; transformed = the base; capped), the dash (measured base, slope learned, gear change = measured again, a new life keeps it), the Ken clock (2 s, every 0.5 s, cooldown waits, 3 s after 20 refusals), blinding effects; the Ken view switch on a fake game object (the game's OFF dropped in PvP, through for a dead life / PvP off / view off, unwrap gives the class method back and syncs to your real Ken, a new life's old object gets no OFF, a frozen object refused)
 python tools/trial_test.py                       # v4_trial.lua's pure decisions, real code, 41 checks: relic by its painted metal (not gem / particles), Next's step (carried -> its extractor, empty -> lowest not in, all in -> out), the lava floor (+ the climb's lookahead, none for draining), the route (up: climb first; down: across first), travel never overshoots / hitch-capped, the fly keys (flat W never sinks, diagonal not faster), the game's teleports adopted, drift held
 ```
 
