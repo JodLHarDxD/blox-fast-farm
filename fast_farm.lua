@@ -337,6 +337,10 @@ local CFG = {
     -- night; the other three take every one):
     --   "any" every one  ·  "night" one that sees night  ·  "full" a full-moon night
     MirageNeed         = "night",
+    -- Which of the four the Mirage row runs when it is switched on (panel,
+    -- 2026-10-11: one Mirage mode, its page picks the job) - kept while the
+    -- Mirage is off: "mirage" / "dealer" / "mchest" / "gear".
+    MirageJob          = "mirage",
     -- SEA EVENTS HUNT (user, 2026-10-09; Third Sea): the same boat patrols a
     -- slow circle at Sea Danger SeaEvDanger and what comes is FOUGHT or FLED,
     -- each its own switch. Ship raids (the pirate brigades, the Fish Boat and
@@ -513,7 +517,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.3" }
 _G.BFF = P
 
 -- =========================================================
@@ -12407,12 +12411,22 @@ end
 -- =========================================================
 -- PANEL
 -- =========================================================
--- farm_pro's panel piece for piece -- the same switches that say On or Off,
--- the same sliders, choosers and readouts, the same colours -- with one
--- change: it is OPAQUE. farm_pro's carried a UIGradient meant as a faint
--- sheen, and a UIGradient's transparency is applied TO its own frame, so that
--- panel was 94-100% see-through and every row was text over the game world.
--- Solid background, solid dividers, solid list rows.
+-- farm_pro's panel kit -- switches that say On or Off, sliders, radio lists,
+-- readouts; OPAQUE (farm_pro's UIGradient made its background 94-100%
+-- see-through) -- organized round three questions, one place each (user,
+-- 2026-10-11: "anybody new should not need to learn it"):
+--   What is it doing?    the top of Home, and the top of every page
+--   What should it do?   MODE: one list of everything it can do; each mode
+--                        has ONE page holding all its settings
+--   How does it fight?   FIGHT: Attack, Magnet, Position, Safety & haki -
+--                        shared by every mode
+--   the rest             MORE: Travel & boat, Servers & team, Stats & debug
+-- A setting lives on the page of the thing it changes. One that changes
+-- several things lives on the page named after the mechanism (boat speed:
+-- Travel & boat) and the pages that use it link there. Nothing exists twice.
+-- Every page has one shape: what it is doing now, the mode's own switch,
+-- sections, links, "How it works" (the long text) and "Details" (learned
+-- tables, lists) - both closed until tapped.
 local gui
 local function buildUI()
     local pg = player:WaitForChild("PlayerGui", 10)
@@ -12464,9 +12478,11 @@ local function buildUI()
         DisplayOrder = 45, Parent = pg,
     })
 
-    -- 30 px taller than farm_pro's: the server news strip under the title.
+    -- Tall enough that Home ends without a scroll bar (2026-10-11; it was
+    -- 570): the title, the news strip, then the body.
+    local PANEL_H = 666
     local panel = mk("Frame", {
-        Size = UDim2.fromOffset(342, 570),
+        Size = UDim2.fromOffset(342, PANEL_H),
         Position = UDim2.new(1, -360, 0, 18),
         BackgroundColor3 = C.base, BorderSizePixel = 0,
         Active = true, Draggable = true, Parent = gui,
@@ -12618,15 +12634,18 @@ local function buildUI()
         bodyFrame.Visible = not folded
         foldBtn.Text = folded and "Show" or "Hide"
         -- Folded: the title and the news strip stay.
-        tween(panel, { Size = UDim2.fromOffset(342, folded and 82 or 570) })
+        tween(panel, { Size = UDim2.fromOffset(342, folded and 82 or PANEL_H) })
     end)
 
+    -- A live line refreshes only while its page is on screen - and, inside a
+    -- closed "How it works" / "Details", only while that is open.
     local live = {}
-    local buildingView = nil
-    local function addLive(fn) table.insert(live, { v = buildingView, f = fn }) end
+    local buildingView, buildingFold = nil, nil
+    local function addLive(fn) table.insert(live, { v = buildingView, w = buildingFold, f = fn }) end
 
     local views = {}
     local currentView = "home"
+    local trail = {}            -- the pages you came through: Back walks it
 
     local function makeView(name)
         local v = mk("ScrollingFrame", {
@@ -12647,17 +12666,30 @@ local function buildUI()
         return v
     end
 
+    -- Every page's title. The modes' are their names everywhere (the Modes
+    -- list, the Start button, the Mode row).
     local TITLES = {
-        home = "Fast Farm  ·  " .. tostring(P.build), target = "Targets", attack = "Attack", weapon = "Weapon",
-        magnet = "Magnet", position = "Position", travel = "Travel",
-        safety = "Safety", stats = "Stats",
-        elite = "Hunt", pvp = "PvP",
+        home = "Fast Farm  ·  " .. tostring(P.build), modes = "Modes",
+        circuit = "Circuit farm", random = "Random", raid = "Raid",
+        elite = "Elite pirates", fruit = "Fruits", berry = "Haki berries",
+        recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
+        ember = "Blaze Ember", sail = "Sea travel", seaevents = "Sea events",
+        prehistoric = "Prehistoric", mirage = "Mirage", levi = "Leviathan", pvp = "PvP",
+        volcano = "Volcano event", seafight = "Fighting at sea",
+        attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
+        safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
+        stats = "Stats & debug",
     }
 
     local function show(name, back)
         if name == currentView then return end
         local from, to = views[currentView], views[name]
         if not to then return end
+        if name == "home" then
+            table.clear(trail)
+        elseif not back then
+            table.insert(trail, currentView)
+        end
         to.Position = UDim2.fromScale(back and -1 or 1, 0)
         to.Visible = true
         tween(to, { Position = UDim2.fromScale(0, 0) })
@@ -12672,9 +12704,13 @@ local function buildUI()
         heading.Position = UDim2.fromOffset(name == "home" and 20 or 76, 18)
         backBtn.Visible = (name ~= "home")
     end
+    -- Back = the page you came from (a link can bring you to a shared page
+    -- from more than one place: Fighting at sea from Sea events or the
+    -- Leviathan).
     backBtn.Activated:Connect(function()
-        show(currentView == "weapon" and "attack" or "home", true)
+        show(table.remove(trail) or "home", true)
     end)
+
 
     -- =====================================================
     -- PIECES
@@ -12738,12 +12774,13 @@ local function buildUI()
         return t
     end
 
-    -- A line that reports what the last action actually did, and keeps
-    -- reporting it. This is what a momentary button owes you.
+    -- A line that reports what is happening, and keeps reporting it. Code, the
+    -- fixed-width font: its digits do not jitter while they change, and the
+    -- readouts' columns ("now       ...") line up.
     local function readout(view, fn)
         local t = mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+            BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
             TextWrapped = true, Text = "", LayoutOrder = nextOrder(), Parent = view,
         })
@@ -12758,27 +12795,30 @@ local function buildUI()
         return t
     end
 
+    -- A ROW THAT OPENS A PAGE: its name, what is set there now, ">".
+    -- valueFn may return a second value: true = that word is green (On).
     local function navRow(view, label, valueFn, target)
         local b = mk("TextButton", {
-            Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = C.base,
+            Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base,
             BorderSizePixel = 0, Text = "", AutoButtonColor = false,
             LayoutOrder = nextOrder(), Parent = view,
         })
         mk("TextLabel", {
-            Size = UDim2.new(0, 116, 1, 0), Position = UDim2.fromOffset(20, 0),
+            Size = UDim2.new(0, 128, 1, 0), Position = UDim2.fromOffset(20, 0),
             BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = label, Parent = b,
         })
         local val = mk("TextLabel", {
-            Size = UDim2.new(1, -176, 1, 0), Position = UDim2.fromOffset(136, 0),
+            Size = UDim2.new(1, -188, 1, 0), Position = UDim2.fromOffset(148, 0),
             BackgroundTransparency = 1, Font = Enum.Font.Gotham,
             TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Right,
             TextColor3 = C.second, TextTruncate = Enum.TextTruncate.AtEnd,
             Text = "", Parent = b,
         })
         mk("TextLabel", {
-            Size = UDim2.fromOffset(20, 48), Position = UDim2.new(1, -28, 0, 0),
+            Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -28, 0, 0),
             BackgroundTransparency = 1, Font = Enum.Font.Gotham,
             TextSize = 14, TextColor3 = C.third, Text = ">", Parent = b,
         })
@@ -12786,48 +12826,125 @@ local function buildUI()
         b.Activated:Connect(function() show(target) end)
         if valueFn then
             addLive(function()
-                local ok, v = pcall(valueFn)
-                val.Text = ok and tostring(v) or ""
+                local ok, v, on = pcall(valueFn)
+                val.Text = ok and tostring(v or "") or ""
+                val.TextColor3 = (ok and on) and C.live or C.second
             end)
         end
         return b
     end
 
-    -- THE SWITCH.
-    -- Pill, knob, AND the word. The word is the point: a pill on its own still
-    -- asks you to remember which side means on.
-    local function switchRow(view, label, sub, get, set)
-        local h = sub and 60 or 48
-        local f = mk("Frame", {
-            Size = UDim2.new(1, 0, 0, h), BackgroundTransparency = 1,
+    -- A MODE IN THE MODES LIST: its name, one line of what it is, and On in
+    -- green when it is the one running. Tapping opens its page - the switch
+    -- is there, at the top, over everything you set for it.
+    local function modeRow(view, label, sub, valueFn, target)
+        local b = mk("TextButton", {
+            Size = UDim2.new(1, 0, 0, 54), BackgroundColor3 = C.base,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false,
             LayoutOrder = nextOrder(), Parent = view,
         })
         mk("TextLabel", {
-            Size = UDim2.new(1, -132, 0, 20),
-            Position = UDim2.fromOffset(20, sub and 9 or 14),
+            Size = UDim2.new(1, -112, 0, 20), Position = UDim2.fromOffset(20, 9),
             BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = C.text, Text = label, Parent = f,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextColor3 = C.text, Text = label, Parent = b,
         })
-        if sub then
-            mk("TextLabel", {
-                Size = UDim2.new(1, -132, 0, 16), Position = UDim2.fromOffset(20, 30),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.third, Text = sub, Parent = f,
-            })
-        end
-        local word = mk("TextLabel", {
-            Size = UDim2.fromOffset(30, 20),
-            Position = UDim2.new(1, -106, 0, (h - 20) / 2),
+        mk("TextLabel", {
+            Size = UDim2.new(1, -112, 0, 16), Position = UDim2.fromOffset(20, 29),
+            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+            TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextColor3 = C.third, Text = sub, Parent = b,
+        })
+        local val = mk("TextLabel", {
+            Size = UDim2.new(0, 56, 1, 0), Position = UDim2.new(1, -88, 0, 0),
             BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
             TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
-            TextColor3 = C.third, Text = "Off", Parent = f,
+            TextColor3 = C.third, Text = "", Parent = b,
+        })
+        mk("TextLabel", {
+            Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -28, 0, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+            TextSize = 14, TextColor3 = C.third, Text = ">", Parent = b,
+        })
+        pressable(b)
+        b.Activated:Connect(function() show(target) end)
+        addLive(function()
+            local ok, v, on = pcall(valueFn)
+            val.Text = ok and tostring(v or "") or ""
+            val.TextColor3 = (ok and on) and C.live or C.third
+        end)
+        return b
+    end
+
+    -- THE SWITCH.
+    -- Pill, knob, AND the word. The word is the point: a pill on its own still
+    -- asks you to remember which side means on. The label and the line under
+    -- it wrap: a long one makes the row taller, it never runs under the
+    -- switch. sub can be a function - a line that changes (what On turns off).
+    local function switchRow(view, label, sub, get, set)
+        -- A row of two: the words, then the switch, centred on them. A list
+        -- layout sizes the row (AutomaticSize grows to what a layout holds).
+        local f = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 48), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
+        })
+        mk("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder, Parent = f,
+        })
+        mk("UIPadding", {
+            PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = f,
+        })
+        local col = mk("Frame", {
+            Size = UDim2.new(1, -112, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = 1, Parent = f,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = col,
+        })
+        mk("UIPadding", {
+            PaddingTop = UDim.new(0, sub and 9 or 14),
+            PaddingBottom = UDim.new(0, sub and 10 or 14), Parent = col,
+        })
+        mk("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
+            TextWrapped = true, TextColor3 = C.text, Text = label,
+            LayoutOrder = 1, Parent = col,
+        })
+        if sub then
+            local s = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true, TextColor3 = C.third,
+                Text = (type(sub) == "string") and sub or "", LayoutOrder = 2, Parent = col,
+            })
+            if type(sub) == "function" then
+                addLive(function()
+                    local ok, t = pcall(sub)
+                    s.Text = ok and tostring(t or "") or ""
+                end)
+            end
+        end
+        -- The switch side: 112 wide, its word and pill where they always were.
+        local ctl = mk("Frame", {
+            Size = UDim2.fromOffset(112, 27), BackgroundTransparency = 1,
+            LayoutOrder = 2, Parent = f,
+        })
+        local word = mk("TextLabel", {
+            Size = UDim2.fromOffset(30, 20), Position = UDim2.fromOffset(26, 4),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+            TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
+            TextColor3 = C.third, Text = "Off", Parent = ctl,
         })
         local pill = mk("TextButton", {
-            Size = UDim2.fromOffset(46, 27),
-            Position = UDim2.new(1, -66, 0, (h - 27) / 2),
-            BackgroundColor3 = C.hair, Text = "", AutoButtonColor = false, Parent = f,
+            Size = UDim2.fromOffset(46, 27), Position = UDim2.fromOffset(66, 0),
+            BackgroundColor3 = C.hair, Text = "", AutoButtonColor = false, Parent = ctl,
         })
         corner(pill, 13)
         local knob = mk("Frame", {
@@ -12848,37 +12965,174 @@ local function buildUI()
         return f
     end
 
-    -- THE HUNTS: one switch each, one at a time. On = that hunt and nothing
-    -- else (the others go off); off = no hunt.
-    local HUNTS = {
-        { "elite", "Elite pirate hunt", "Diablo, Deandre, Urban - last hit, God's Chalice" },
-        { "fruit", "Fruit hunt",        "Fruits on the ground - grabbed and STORED, never eaten" },
-        { "berry", "Berry hunt",        "Haki colors - Legendary Aura berries" },
-        { "recipe", "Aura recipe hunt", "Barista Cousin - the recipe you pick, else the next server" },
-        { "sword", "Legendary Sword hunt", "Shizu / Saishi / Oroshi for True Triple Katana - asked the moment you join, else the next server" },
-        { "flower", "Fire Flower hunt", "Draco V2 - pirates one at a time, the flower, next server" },
-        { "ember", "Blaze Ember hunt",  "Dragon Hunter quests on Hydra Island, over and over - the embers picked" },
-        -- Sea travel (user, 2026-10-10): the hunts' fast boat with no target.
-        { "sail", "Sea travel", "Your boat at sea speed, you steer (A/D turn, W go, S stop) - no island, never the next server" },
-        { "prehistoric", "Prehistoric hunt", "Sail to the island, run the volcano event, loot, next server - the loop" },
-        -- The Mirage (user, 2026-10-07): four hunts, each only its job. One
-        -- up already = straight to the job; none = the boat sails for one.
-        { "mirage", "Mirage hunt", "Sail till a Mirage comes, onto it - nothing else" },
-        { "dealer", "Advanced Fruit Dealer hunt", "On the Mirage: in front of him, his shop open - you buy" },
-        { "mchest", "Mirage chest hunt", "On the Mirage: every chest, nearest first" },
-        { "gear", "Blue Gear hunt", "On the Mirage: your turn at the moon, the gear picked when it shows" },
-        { "seaevents", "Sea events hunt", "Beasts, Rumbling Waters, Terrorshark, Piranha fought - ship raids fled - counted" },
-    }
-    local function huntSwitches(view)
-        for _, h in ipairs(HUNTS) do
-            local kind = h[1]
-            switchRow(view, h[2], h[3],
-                function() return CFG.Hunt and CFG.HuntKind == kind end,
-                function(x)
-                    if x then P.setHunt(true, kind)
-                    elseif CFG.HuntKind == kind then P.setHunt(false) end
-                end)
+    -- KEYS IN A ROW: one chip a key, filled = on - the fill of a picked row in
+    -- a radio list, read at a glance. A tap turns that key on or off.
+    local function chips(view, label, keys, get, set)
+        local W, G = 34, 6
+        local width = #keys * W + (#keys - 1) * G
+        local f = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1,
+            LayoutOrder = nextOrder(), Parent = view,
+        })
+        mk("TextLabel", {
+            Size = UDim2.new(1, -(width + 50), 1, 0), Position = UDim2.fromOffset(20, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextColor3 = C.text, Text = label, Parent = f,
+        })
+        local row = mk("Frame", {
+            Size = UDim2.fromOffset(width, 30), AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -20, 0.5, 0), BackgroundTransparency = 1, Parent = f,
+        })
+        mk("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, G),
+            SortOrder = Enum.SortOrder.LayoutOrder, Parent = row,
+        })
+        local btns = {}
+        local function redraw()
+            for i, k in ipairs(keys) do
+                local ok, v = pcall(get, k)
+                local on = ok and v and true or false
+                btns[i].BackgroundColor3 = on and C.ivory or C.raised
+                btns[i].TextColor3 = on and C.base or C.second
+            end
         end
+        for i, k in ipairs(keys) do
+            local b = mk("TextButton", {
+                Size = UDim2.fromOffset(W, 30), BackgroundColor3 = C.raised,
+                BorderSizePixel = 0, AutoButtonColor = false, Font = Enum.Font.GothamBold,
+                TextSize = F.small, TextColor3 = C.second, Text = k,
+                LayoutOrder = i, Parent = row,
+            })
+            corner(b, 8)
+            btns[i] = b
+            b.Activated:Connect(function()
+                pcall(function() set(k, not get(k)) end)
+                redraw()
+            end)
+        end
+        addLive(redraw)
+        redraw()
+        return f
+    end
+
+    -- A LIST YOU PICK SEVERAL FROM: each row on or off by itself, filled
+    -- ivory = picked - the look of a radio list's chosen row.
+    -- items: { { label, tag, get, set }, ... }
+    local function ticks(view, items)
+        local box = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
+        })
+        mk("UIListLayout", {
+            Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, Parent = box,
+        })
+        mk("UIPadding", {
+            PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = box,
+        })
+        local rows = {}
+        local function redraw()
+            for i, it in ipairs(items) do
+                local ok, v = pcall(it[3])
+                local on = ok and v and true or false
+                local r = rows[i]
+                r.b.BackgroundColor3 = on and C.ivory or C.row
+                r.name.Font = on and Enum.Font.GothamBold or Enum.Font.Gotham
+                r.name.TextColor3 = on and C.base or C.text
+                r.name.Text = (on and "  > " or "      ") .. it[1]
+                if r.tag then r.tag.TextColor3 = on and C.base or C.third end
+            end
+        end
+        for i, it in ipairs(items) do
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.row,
+                BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+                LayoutOrder = i, Parent = box,
+            })
+            corner(b, 9)
+            -- The name stops short of the tag ("..."), never runs under it.
+            local hasTag = it[2] and it[2] ~= ""
+            local name = mk("TextLabel", {
+                Size = UDim2.new(1, hasTag and -142 or -10, 1, 0), BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham, TextSize = F.body, TextColor3 = C.text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
+            })
+            local tag = nil
+            if it[2] and it[2] ~= "" then
+                tag = mk("TextLabel", {
+                    Size = UDim2.fromOffset(128, 38), Position = UDim2.new(1, -138, 0, 0),
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+                    TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
+                    TextColor3 = C.third, Text = it[2], Parent = b,
+                })
+            end
+            rows[i] = { b = b, name = name, tag = tag }
+            b.Activated:Connect(function()
+                pcall(function() it[4](not it[3]()) end)
+                redraw()
+            end)
+        end
+        addLive(redraw)
+        redraw()
+        gap(view, 10)
+        return box
+    end
+
+    -- CLOSED UNTIL TAPPED: "How it works" (the long text) and "Details"
+    -- (learned tables, lists, probe lines) at the bottom of a page. build(v)
+    -- fills it with the usual pieces; its live lines run only while it is open.
+    local function fold(view, title, build)
+        local holder = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
+        })
+        local b = mk("TextButton", {
+            Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+            LayoutOrder = 1, Parent = holder,
+        })
+        mk("TextLabel", {
+            Size = UDim2.new(1, -100, 1, 0), Position = UDim2.fromOffset(20, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left,
+            TextColor3 = C.second, Text = title, Parent = b,
+        })
+        local word = mk("TextLabel", {
+            Size = UDim2.fromOffset(60, 44), Position = UDim2.new(1, -80, 0, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
+            TextColor3 = C.third, Text = "Show", Parent = b,
+        })
+        pressable(b)
+        local box = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Visible = false, LayoutOrder = 2, Parent = holder,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
+        })
+        local outer = buildingFold
+        buildingFold = box
+        build(box)
+        buildingFold = outer
+        b.Activated:Connect(function()
+            box.Visible = not box.Visible
+            word.Text = box.Visible and "Hide" or "Show"
+            if box.Visible then
+                for _, e in ipairs(live) do
+                    if e.w == box then pcall(e.f) end
+                end
+            end
+        end)
+        return holder
     end
 
     local dragTarget = nil
@@ -12896,26 +13150,48 @@ local function buildUI()
     end)
 
     local function sliderRow(view, label, minV, maxV, stepV, get, set, unit)
+        -- The label wraps (a long one makes the row taller, never runs into
+        -- the number); the whole row is the drag target, not the 4 px track.
         local f = mk("TextButton", {
-            Size = UDim2.new(1, 0, 0, 62), BackgroundTransparency = 1,
-            Text = "", AutoButtonColor = false,
+            Size = UDim2.new(1, 0, 0, 62), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
             LayoutOrder = nextOrder(), Parent = view,
         })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = f })
+        mk("UIPadding", {
+            PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 12), Parent = f,
+        })
+        -- The label and the number side by side, in a layout (it sizes the row).
+        local head = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = 1, Parent = f,
+        })
+        mk("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            SortOrder = Enum.SortOrder.LayoutOrder, Parent = head,
+        })
+        mk("UIPadding", {
+            PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = head,
+        })
         mk("TextLabel", {
-            Size = UDim2.new(1, -130, 0, 20), Position = UDim2.fromOffset(20, 10),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            Size = UDim2.new(1, -110, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
+            TextWrapped = true, BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = C.text, Text = label, Parent = f,
+            TextColor3 = C.text, Text = label, LayoutOrder = 1, Parent = head,
         })
         local val = mk("TextLabel", {
-            Size = UDim2.fromOffset(110, 20), Position = UDim2.new(1, -130, 0, 10),
+            Size = UDim2.fromOffset(110, 20),
             BackgroundTransparency = 1, Font = Enum.Font.Code,
             TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Right,
-            TextColor3 = C.second, Text = "", Parent = f,
+            TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = head,
+        })
+        local bar = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
+            LayoutOrder = 2, Parent = f,
         })
         local track = mk("Frame", {
-            Size = UDim2.new(1, -40, 0, 4), Position = UDim2.fromOffset(20, 42),
-            BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = f,
+            Size = UDim2.new(1, -40, 0, 4), Position = UDim2.fromOffset(20, 10),
+            BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = bar,
         })
         corner(track, 2)
         local fill = mk("Frame", {
@@ -13020,6 +13296,8 @@ local function buildUI()
     end
 
     local function chooserRow(box, i, label, tag, chosen, cb)
+        local hasTag = tag and tag ~= ""
+        local text = (chosen and "  > " or "      ") .. label
         local b = mk("TextButton", {
             Size = UDim2.new(1, 0, 0, 38),
             BackgroundColor3 = chosen and C.ivory or C.row,
@@ -13027,11 +13305,21 @@ local function buildUI()
             Font = chosen and Enum.Font.GothamBold or Enum.Font.Gotham,
             TextSize = F.body, TextColor3 = chosen and C.base or C.text,
             TextXAlignment = Enum.TextXAlignment.Left,
-            Text = (chosen and "  > " or "      ") .. label,
+            Text = hasTag and "" or text,
             AutoButtonColor = false, LayoutOrder = i, Parent = box,
         })
         corner(b, 9)
-        if tag and tag ~= "" then
+        if hasTag then
+            -- With a tag on the right the name stops short of it ("..."); it
+            -- never runs under it (2026-10-11: "After the loot: the next
+            -- server" was drawn under "the hunt goes on there").
+            mk("TextLabel", {
+                Size = UDim2.new(1, -118, 1, 0), BackgroundTransparency = 1,
+                Font = chosen and Enum.Font.GothamBold or Enum.Font.Gotham,
+                TextSize = F.body, TextColor3 = chosen and C.base or C.text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd, Text = text, Parent = b,
+            })
             mk("TextLabel", {
                 Size = UDim2.fromOffset(104, 38), Position = UDim2.new(1, -114, 0, 0),
                 TextTruncate = Enum.TextTruncate.AtEnd,
@@ -13077,15 +13365,142 @@ local function buildUI()
 
     local editW = nil        -- the weapon the Weapon page is showing
 
+
     -- =====================================================
-    -- HOME
+    -- MODES
+    -- =====================================================
+    -- One mode at a time, and the panel shows which: the one the main loop
+    -- runs, in the main loop's own order - PvP (the farm stopped), the
+    -- Leviathan, a hunt, random, raid, else the circuit. PvP and the
+    -- Leviathan sit ON TOP of the others: switching one of them off shows the
+    -- mode underneath again (user, 2026-10-11: one at a time; PvP or the
+    -- Leviathan off = back to the mode you had).
+    local MIRAGE = { mirage = true, dealer = true, mchest = true, gear = true }
+    local function modeUnder()
+        if CFG.Hunt then
+            local k = CFG.HuntKind
+            return MIRAGE[k] and "mirage" or tostring(k)
+        end
+        if CFG.RandomMode then return "random" end
+        if CFG.RaidMode then return "raid" end
+        return "circuit"
+    end
+    local function modeNow()
+        if CFG.Pvp then return "pvp" end
+        if CFG.LeviFight then return "levi" end
+        return modeUnder()
+    end
+    local function modeName(id)
+        id = id or modeNow()
+        return TITLES[id] or tostring(id)
+    end
+
+    -- Raid, random and the Leviathan exactly as their Home switches did it.
+    local function raidSet(x)
+        if x and CFG.Hunt then P.setHunt(false) end
+        CFG.RaidMode = x
+        if x then CFG.RandomMode = false end
+        releasePile()
+        say(x and "raid mode on" or "raid mode off - back to the circuit")
+    end
+    local function randomSet(x)
+        if x and CFG.Hunt then P.setHunt(false) end
+        CFG.RandomMode = x
+        if x then CFG.RaidMode = false end
+        releasePile()
+        say(x and "random mode on" or "random mode off - back to the circuit")
+    end
+    local function leviSet(x)
+        CFG.LeviFight = x
+        if x and not P.running then P.start() end
+        say(x and "Leviathan fight on - only the Leviathan now" or "Leviathan fight off")
+    end
+
+    local function setMode(id, on)
+        if not on then
+            -- Only the one that is on goes off. The circuit is what runs when
+            -- nothing else does: it has no off of its own.
+            if modeNow() ~= id then return end
+            if id == "pvp" then P.pvpSet(false)
+            elseif id == "levi" then leviSet(false)
+            elseif id == "raid" then raidSet(false)
+            elseif id == "random" then randomSet(false)
+            elseif id ~= "circuit" then P.setHunt(false) end
+            return
+        end
+        -- On: what sits on top goes first.
+        if id ~= "pvp" and CFG.Pvp then P.pvpSet(false) end
+        if id ~= "levi" and CFG.LeviFight then leviSet(false) end
+        if id == "pvp" then P.pvpSet(true)
+        elseif id == "levi" then leviSet(true)
+        elseif id == "raid" then raidSet(true)
+        elseif id == "random" then randomSet(true)
+        elseif id == "circuit" then
+            if CFG.Hunt then P.setHunt(false) end
+            if CFG.RaidMode then raidSet(false) end
+            if CFG.RandomMode then randomSet(false) end
+        elseif id == "mirage" then P.setHunt(true, CFG.MirageJob or "mirage")
+        else P.setHunt(true, id) end
+    end
+
+    -- What On will turn off, for the line under a mode's switch.
+    local function offList(id)
+        local now, under = modeNow(), modeUnder()
+        local t = {}
+        if now ~= id then table.insert(t, modeName(now)) end
+        local overlay = (now == "pvp" or now == "levi")
+        if overlay and id ~= "pvp" and id ~= "levi" and under ~= id and under ~= "circuit" then
+            table.insert(t, modeName(under))
+        end
+        return table.concat(t, " and ")
+    end
+
+    -- THE MODE'S OWN SWITCH, the first row of its page. The line under it
+    -- says what On will turn off - before you tap, not after.
+    local function modeSwitch(view, id)
+        switchRow(view, TITLES[id], function()
+            if modeNow() == id then
+                if id == "circuit" then return "On - it runs whenever no other mode is on" end
+                if id == "pvp" or id == "levi" then
+                    return "On, over " .. modeName(modeUnder()) .. " - Off brings it back"
+                end
+                return "On - one mode at a time"
+            end
+            if id == "pvp" then
+                return "The farm stops while you fight - Off brings " .. modeName(modeUnder()) .. " back"
+            end
+            if id == "levi" then
+                return "Only the Leviathan, over " .. modeName(modeUnder()) .. " - it starts the run"
+            end
+            return "One mode at a time - On turns " .. offList(id) .. " off"
+        end, function() return modeNow() == id end, function(x) setMode(id, x) end)
+    end
+
+    -- The Mode row on Home: the mode, green while it runs.
+    local function modeValue()
+        if P.elite and P.elite.chalice then return "CHALICE - stopped", false end
+        local id = modeNow()
+        local s = modeName(id)
+        if CFG.Volcano and id ~= "prehistoric" then s = s .. " + Volcano" end
+        return s, P.running or CFG.Pvp
+    end
+
+    -- A link to a page shared with others (Travel & boat, Servers & team,
+    -- Fighting at sea): what is set there, and Back comes here again.
+    local function link(view, label, valueFn, target)
+        hairline(view)
+        navRow(view, label, valueFn, target)
+    end
+
+
+    -- =====================================================
+    -- HOME: what it is doing, Start, the mode, how it fights, the rest
     -- =====================================================
     do
         local v = makeView("home")
         v.Visible = true
         v.Position = UDim2.fromScale(0, 0)
         gap(v, 4)
-
         local subject = mk("TextLabel", {
             Size = UDim2.new(1, -40, 0, 26), BackgroundTransparency = 1,
             Font = Enum.Font.GothamBold, TextSize = F.subject,
@@ -13094,7 +13509,6 @@ local function buildUI()
             LayoutOrder = nextOrder(), Parent = v,
         })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = subject })
-
         local detail = mk("TextLabel", {
             Size = UDim2.new(1, -40, 0, 18), BackgroundTransparency = 1,
             Font = Enum.Font.Gotham, TextSize = F.small,
@@ -13103,7 +13517,6 @@ local function buildUI()
             LayoutOrder = nextOrder(), Parent = v,
         })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = detail })
-
         addLive(function()
             if P.running then
                 subject.Text = tostring(activeName or "Fast farm")
@@ -13115,9 +13528,7 @@ local function buildUI()
                 detail.Text = statusLine
             end
         end)
-
-        gap(v, 14)
-
+        gap(v, 12)
         local hero = mk("TextButton", {
             Size = UDim2.new(1, -40, 0, 52), BackgroundColor3 = C.ivory,
             BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 16,
@@ -13125,8 +13536,10 @@ local function buildUI()
             LayoutOrder = nextOrder(), Parent = v,
         })
         corner(hero, 14)
+        -- PvP on: this is its Stop (the farm is stopped already).
         hero.Activated:Connect(function()
-            if P.running then P.stop() else P.start() end
+            if CFG.Pvp then P.pvpSet(false)
+            elseif P.running then P.stop() else P.start() end
         end)
         hero.MouseButton1Down:Connect(function()
             tween(hero, { Size = UDim2.new(1, -46, 0, 50) }, QUICK)
@@ -13134,61 +13547,69 @@ local function buildUI()
         local function heroUp() tween(hero, { Size = UDim2.new(1, -40, 0, 52) }, QUICK) end
         hero.MouseButton1Up:Connect(heroUp)
         hero.MouseLeave:Connect(heroUp)
+        -- It says what it starts: "Start  ·  Haki berries".
         addLive(function()
-            hero.Text = P.running and "Stop" or "Start"
-            hero.BackgroundColor3 = P.running and C.stop or C.ivory
-            hero.TextColor3 = P.running and C.text or C.base
+            local busy = P.running or CFG.Pvp
+            hero.Text = (busy and "Stop" or "Start") .. "  ·  " .. modeName()
+            hero.BackgroundColor3 = busy and C.stop or C.ivory
+            hero.TextColor3 = busy and C.text or C.base
         end)
+        gap(v, 12)
 
-        gap(v, 16)
+        heading2(v, "mode")
+        navRow(v, "Mode", modeValue, "modes")
 
-        switchRow(v, "PvP mode",
-            "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm)",
-            function() return CFG.Pvp end,
-            function(x) P.pvpSet(x) end)
-        switchRow(v, "Raid mode",
-            "Every enemy on the raid's island, any kind - outside a raid you stay where you are",
-            function() return CFG.RaidMode end,
-            function(x)
-                if x and CFG.Hunt then P.setHunt(false) end
-                CFG.RaidMode = x
-                if x then CFG.RandomMode = false end
-                releasePile()
-                say(x and "raid mode on" or "raid mode off - back to the circuit")
-            end)
-        switchRow(v, "Raid loop",
-            "Raid over: a chip for your cheapest stored fruit, the button, again - else you stay",
-            function() return CFG.RaidLoop end,
-            function(x)
-                CFG.RaidLoop = x
-                if x and P.raid then P.raid.loop.nextAt = 0 end
-            end)
-        switchRow(v, "Random mode",
-            "Any enemy near you, every one damaged - Castle on the Sea raid",
-            function() return CFG.RandomMode end,
-            function(x)
-                if x and CFG.Hunt then P.setHunt(false) end
-                CFG.RandomMode = x
-                if x then CFG.RaidMode = false end
-                releasePile()
-                say(x and "random mode on" or "random mode off - back to the circuit")
-            end)
-        huntSwitches(v)
-        switchRow(v, "Volcano event",
-            "Prehistoric Island up: start it, vents + Lava Golems, bones + egg",
-            function() return CFG.Volcano end,
-            function(x)
-                CFG.Volcano = x
-                say(x and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
-            end)
-        switchRow(v, "Leviathan fight",
-            "On = only the Leviathan: segments, then the head; its attacks dodged; starts the run",
-            function() return CFG.LeviFight end,
-            function(x)
-                CFG.LeviFight = x
-                if x and not P.running then P.start() end
-                say(x and "Leviathan fight on - only the Leviathan now" or "Leviathan fight off")
-            end)
+        heading2(v, "fight  ·  every mode")
+        navRow(v, "Attack", function()
+            local s = setupKey()
+            for _, n in ipairs(CFG.WeaponOrder) do
+                local w = CFG.Weapons[n]
+                if w and w.use then
+                    for _, k in ipairs(KEYS) do if w[k] then return s end end
+                end
+            end
+            return s .. "  ·  no skills on"
+        end, "attack")
+        hairline(v)
+        navRow(v, "Magnet", function()
+            if not CFG.Magnet then return "Off" end
+            return P.running and (P.pileHeld .. " held") or "On"
+        end, "magnet")
+        hairline(v)
+        navRow(v, "Position", function()
+            if CFG.HeightMode == "fixed" then return math.floor(CFG.HeightFixed) .. " up, fixed" end
+            return "auto  ·  " .. math.floor(CFG.HeightSafe) .. " up" .. (CFG.StayHigh and ", always" or "")
+        end, "position")
+        hairline(v)
+        navRow(v, "Safety & haki", function()
+            return "out under " .. math.floor(CFG.EscapeBelow * 100) .. "%"
+        end, "safety")
+
+        heading2(v, "more")
+        navRow(v, "Travel & boat", function()
+            return math.floor(CFG.TravelSpeed) .. " studs/s"
+        end, "travel")
+        hairline(v)
+        navRow(v, "Servers & team", function()
+            return (CFG.HuntHop and "hop on" or "no hop") .. "  ·  "
+                .. (CFG.AutoTeam and tostring(CFG.Team) or "team: yours")
+        end, "servers")
+        hairline(v)
+        navRow(v, "Stats & debug", function()
+            local m = meas
+            if m and m.fight > 5 then
+                return string.format("%.1f kills/min", m.kills / (m.fight / 60))
+            end
+            return stats.kills .. " killed"
+        end, "stats")
+    end
+
+    -- =====================================================
+    -- MODES: everything it can do, one list, fixed order
+    -- =====================================================
+    do
+        local v = makeView("modes")
+        gap(v, 6)
         readout(v, function()
             local lv = P.seaev and P.seaev.levi
             if CFG.LeviFight and lv then
@@ -13230,91 +13651,63 @@ local function buildUI()
             end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
-            return "raid mode off  ·  random mode off  ·  hunt off"
+            return "circuit farm  ·  your targets, in order"  -- nothing else on (was: raid off · random off · hunt off)
         end)
-
-        gap(v, 8)
-
-        navRow(v, "PvP", function()
-            if not CFG.Pvp then return "Off" end
-            local t = P.pvp and P.pvp.target
-            return t and ("on  ·  " .. tostring(t.plr.DisplayName or t.plr.Name)) or "on  ·  no player near"
-        end, "pvp")
-        hairline(v)
-        navRow(v, "Targets", function()
-            local list = circuit()
-            if #list == 0 then return "none" end
-            if #CFG.Targets == 0 then return list[1].name .. "  by level" end
-            return #list .. " on the circuit"
-        end, "target")
-        hairline(v)
-        navRow(v, "Attack", function()
-            local s = setupKey()
-            for _, n in ipairs(CFG.WeaponOrder) do
-                local w = CFG.Weapons[n]
-                if w and w.use then
-                    for _, k in ipairs(KEYS) do if w[k] then return s end end
-                end
+        local function on(id)
+            return function()
+                if modeNow() == id then return "On", true end
+                return ""
             end
-            return s .. "  ·  no skills on"
-        end, "attack")
+        end
+        heading2(v, "farm  ·  fights enemies")
+        modeRow(v, "Circuit farm", "your targets, by level", on("circuit"), "circuit")
         hairline(v)
-        navRow(v, "Magnet", function()
-            if not CFG.Magnet then return "Off" end
-            return P.running and (P.pileHeld .. " held") or "On"
-        end, "magnet")
+        modeRow(v, "Random", "anything near you", on("random"), "random")
         hairline(v)
-        navRow(v, "Position", function()
-            if CFG.HeightMode == "fixed" then return math.floor(CFG.HeightFixed) .. " up, fixed" end
-            return "auto  ·  " .. math.floor(CFG.HeightSafe) .. " up" .. (CFG.StayHigh and ", always" or "")
-        end, "position")
-        hairline(v)
-        navRow(v, "Travel", function()
-            return math.floor(CFG.TravelSpeed) .. " studs/s"
-        end, "travel")
-        hairline(v)
-        navRow(v, "Safety", function()
-            return "out under " .. math.floor(CFG.EscapeBelow * 100) .. "%"
-        end, "safety")
-        hairline(v)
-        navRow(v, "Hunt", function()
-            if P.elite.chalice then return "CHALICE - stopped" end
-            if not CFG.Hunt then return "Off" end
-            return tostring(CFG.HuntKind) .. (CFG.HuntHop and ", hopping" or ", this server")
-        end, "elite")
-        hairline(v)
-        navRow(v, "Sea", function()
-            local s = P.sea
-            if CFG.Hunt and CFG.HuntKind == "seaevents" then
-                return string.format("sea events  ·  %d of %d", P.seaev.count.total,
-                    math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)))
-            end
-            if s.driving and s.meters then return string.format("sailing  ·  %d m", math.floor(s.meters)) end
-            return math.floor(CFG.SeaSpeed) .. " studs/s  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m"
-                .. (CFG.Volcano and "  ·  volcano on" or "")
-        end, "sea")
-        hairline(v)
-        navRow(v, "Stats", function()
-            local m = meas
-            if m and m.fight > 5 then
-                return string.format("%.1f kills/min", m.kills / (m.fight / 60))
-            end
-            return stats.kills .. " killed"
-        end, "stats")
+        modeRow(v, "Raid", "the raid's island", on("raid"), "raid")
 
-        gap(v, 10)
+        heading2(v, "hunt  ·  next server when not here")
+        modeRow(v, "Elite pirates", "Diablo · Deandre · Urban", on("elite"), "elite")
+        hairline(v)
+        modeRow(v, "Fruits", "on the ground, stored", on("fruit"), "fruit")
+        hairline(v)
+        modeRow(v, "Haki berries", "Legendary Aura colors", on("berry"), "berry")
+        hairline(v)
+        modeRow(v, "Aura recipe", "the Barista Cousin", on("recipe"), "recipe")
+        hairline(v)
+        modeRow(v, "Legendary swords", "Shizu · Saishi · Oroshi", on("sword"), "sword")
+        hairline(v)
+        modeRow(v, "Fire Flower", "Draco V2  ·  Third Sea", on("flower"), "flower")
+        hairline(v)
+        modeRow(v, "Blaze Ember", "Hydra Island quests", on("ember"), "ember")
+
+        heading2(v, "sea  ·  from a boat")
+        modeRow(v, "Sea travel", "your boat - you steer", on("sail"), "sail")
+        hairline(v)
+        modeRow(v, "Sea events", "beasts, sharks - counted", on("seaevents"), "seaevents")
+        hairline(v)
+        modeRow(v, "Prehistoric", "the island + volcano loop", on("prehistoric"), "prehistoric")
+        hairline(v)
+        modeRow(v, "Mirage", "onto it · dealer · chests · gear", on("mirage"), "mirage")
+        hairline(v)
+        modeRow(v, "Leviathan", "Frozen Dimension, a group", on("levi"), "levi")
+
+        heading2(v, "you fight")
+        modeRow(v, "PvP", "aim, Ken, speed - farm stops", on("pvp"), "pvp")
+
+        heading2(v, "alongside any mode")
+        modeRow(v, "Volcano event", "when Prehistoric is up", function()
+            if CFG.Volcano then return "On", true end
+            return "Off"
+        end, "volcano")
     end
 
     -- =====================================================
-    -- TARGETS
+    -- CIRCUIT FARM (the Targets page)
     -- =====================================================
     do
-        local v = makeView("target")
+        local v = makeView("circuit")
         gap(v, 6)
-        heading2(v, "the circuit, in order")
-        caption(v, "Tap to put a species on the circuit, tap again to take it "
-            .. "off. The number is the order it runs in. Nothing picked = the "
-            .. "species for your level, alone.")
         readout(v, function()
             local list = circuit()
             if #list == 0 then return P.circuitNote end
@@ -13330,7 +13723,8 @@ local function buildUI()
             end
             return s
         end)
-
+        modeSwitch(v, "circuit")
+        heading2(v, "the circuit  ·  tap to add, # = order")
         local box = chooser(v, 230)
         local signature = nil
         local function refresh()
@@ -13423,7 +13817,6 @@ local function buildUI()
         end
         refresh()
         addLive(refresh)
-
         actionRow(v, "Clear the circuit", nil, function()
             P.clearTargets()
             signature = nil
@@ -13434,7 +13827,6 @@ local function buildUI()
             P.toggleTarget(val)
             signature = nil
         end)
-
         heading2(v, "bosses and respawns")
         switchRow(v, "Bosses first",
             "A boss on the circuit that is up goes before the rest",
@@ -13447,9 +13839,1064 @@ local function buildUI()
         sliderRow(v, "One species alone: wait for it", 10, 120, 5,
             function() return CFG.RespawnMax end,
             function(x) CFG.RespawnMax = x end, " s")
-        caption(v, "A boss is found near you, or parked by the game far away. "
-            .. "Not up: the rest of the circuit, or, if it is alone, a wait over "
-            .. "its spawn for as long as it takes.")
+        fold(v, "How it works", function(v)
+            caption(v, "Tap to put a species on the circuit, tap again to take it "
+                .. "off. The number is the order it runs in. Nothing picked = the "
+                .. "species for your level, alone.")
+            caption(v, "A boss is found near you, or parked by the game far away. "
+                .. "Not up: the rest of the circuit, or, if it is alone, a wait over "
+                .. "its spawn for as long as it takes.")
+        end)
+    end
+
+    -- =====================================================
+    -- RANDOM
+    -- =====================================================
+    do
+        local v = makeView("random")
+        gap(v, 6)
+        readout(v, function() return tostring(P.randomNote) end)
+        modeSwitch(v, "random")
+        heading2(v, "the area")
+        sliderRow(v, "Reaches", 200, 2000, 50,
+            function() return CFG.RandomRadius end,
+            function(x) CFG.RandomRadius = x end, " studs")
+        fold(v, "How it works", function(v)
+            caption(v, "Any enemy near you, every one damaged - Castle on the Sea raid.")
+            caption(v, "Round you; at the Castle on the Sea, round the pirate raid's "
+                .. "area (at least 800). Only ones within their pull limit go in a "
+                .. "pile - a far one gets its own. One that takes no damage when "
+                .. "pulled is fought where it stands, from close if high does not "
+                .. "hurt it.")
+        end)
+    end
+
+    -- =====================================================
+    -- RAID
+    -- =====================================================
+    do
+        local v = makeView("raid")
+        gap(v, 6)
+        readout(v, function()
+            local rd = P.raid
+            if not rd then return "-" end
+            local rl = rd.loop
+            return table.concat({
+                "raid      " .. tostring(P.raidNote),
+                string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
+                    rd.note and ("  ·  last: " .. rd.note) or ""),
+                string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
+                    rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
+            }, "\n")
+        end)
+        modeSwitch(v, "raid")
+        heading2(v, "the raid")
+        sliderRow(v, "Pulls within", 100, 1500, 50,
+            function() return CFG.RaidRadius end,
+            function(x) CFG.RaidRadius = x end, " studs")
+        sliderRow(v, "A raid island counts within", 500, 5000, 100,
+            function() return CFG.RaidReach end,
+            function(x) CFG.RaidReach = x end, " studs of you")
+        sliderRow(v, "Stuck: relocate after", 5, 60, 1,
+            function() return CFG.RaidStuckSecs end,
+            function(x) CFG.RaidStuckSecs = x end, " s with no HP off")
+        heading2(v, "raid loop")
+        switchRow(v, "Raid loop",
+            "Raid over: a chip for your cheapest stored fruit, the button, again - else you stay",
+            function() return CFG.RaidLoop end,
+            function(x)
+                CFG.RaidLoop = x
+                if x and P.raid then P.raid.loop.nextAt = 0 end
+            end)
+        heading2(v, "the chip")
+        radio(v, 164, {
+            { "Flame", "Flame", "" }, { "Ice", "Ice", "" }, { "Quake", "Quake", "" },
+            { "Light", "Light", "" }, { "Dark", "Dark", "" }, { "Spider", "Spider", "" },
+            { "Magma", "Magma", "" }, { "Buddha", "Buddha", "" }, { "Sand", "Sand", "" },
+        }, function() return CFG.RaidChip end, function(x) CFG.RaidChip = x end)
+        sliderRow(v, "Trade a stored fruit worth at most", 0, 1000000, 10000,
+            function() return CFG.RaidFruitMax end,
+            function(x) CFG.RaidFruitMax = x end, " Beli")
+        fold(v, "How it works", function(v)
+            caption(v, "Every enemy on the raid's island, any kind - outside a raid you stay where you are.")
+            caption(v, "Of the newest raid island (Island 1 to 5). Every kind of "
+                .. "enemy in that circle goes in the pile. Outside a raid nothing "
+                .. "is fought and you stay where you are.")
+            caption(v, "Raid loop: raid over, a chip for your cheapest stored fruit, the button, again - else you stay.")
+            caption(v, "The Mysterious Scientist takes a physical fruit for a chip (or "
+                .. "$100,000 every 2 hours): your cheapest stored one under this is "
+                .. "loaded into the backpack - never your hand - and traded. A "
+                .. "dearer fruit already in your backpack = nothing traded (he "
+                .. "could take it). Anything fails: you stay, tried again later.")
+        end)
+    end
+
+    -- =====================================================
+    -- ELITE PIRATES
+    -- =====================================================
+    do
+        local v = makeView("elite")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            local t = el.tally
+            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
+            return table.concat({
+                "Elite Hunter  " .. tostring(el.reply or "not asked")
+                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
+                string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
+                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
+                "last      " .. tostring(el.lastKill or "-"),
+            }, "\n")
+        end)
+        modeSwitch(v, "elite")
+        heading2(v, "the quest")
+        switchRow(v, "Take the Elite Hunter's quest",
+            "Progress toward Yama - the chalice does not need it",
+            function() return CFG.EliteQuest end,
+            function(x) CFG.EliteQuest = x end)
+        heading2(v, "after a join")
+        sliderRow(v, "Look for an elite", 3, 30, 1,
+            function() return CFG.EliteLook end,
+            function(x) CFG.EliteLook = x end, " s")
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Diablo, Deandre, Urban - last hit, God's Chalice.")
+            caption(v, "The God's Chalice ends the hunt in the server it came in: "
+                .. "no hop there, ever - leaving or dying with it loses it. You are "
+                .. "held 300 up; Stop gives the character back.")
+            caption(v, "After a join: this long for an elite to show before leaving. "
+                .. "When the Elite Hunter says none is up, 3 s is enough.")
+            caption(v, "Asked from where you stand. If that gets no answer, once per "
+                .. "server from in front of the Elite Hunter. A different quest "
+                .. "running is dropped for it.")
+        end)
+    end
+
+    -- =====================================================
+    -- FRUITS
+    -- =====================================================
+    do
+        local v = makeView("fruit")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.fruitNote),
+                string.format("stored    %d", el.tally.fruits or 0) }
+            local ok, list = pcall(P.fruitsLying)
+            if ok and type(list) == "table" and #list > 0 then
+                for _, f in ipairs(list) do
+                    table.insert(lines, string.format("   %s  %s  %s", f.name,
+                        f.price and ("$" .. tostring(f.price)) or "$?",
+                        f.dropper and ("dropped by " .. tostring(f.dropper) .. (f.dropperNear and ", still by it" or ""))
+                            or "server spawn"))
+                end
+            else
+                table.insert(lines, "lying in this server: none")
+            end
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "fruit")
+        heading2(v, "which fruits")
+        sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
+            function() return CFG.FruitMinPrice end,
+            function(x) CFG.FruitMinPrice = x end, " Beli")
+        switchRow(v, "Include fruits players dropped",
+            "Off: server spawns only - drops are mostly trades",
+            function() return CFG.FruitPlayerDrops end,
+            function(x) CFG.FruitPlayerDrops = x end)
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Fruits on the ground - grabbed and STORED, never eaten.")
+            caption(v, "The game's own price. 0 = any fruit. 1000000 and up = "
+                .. "Legendary and Mythical. The dearest one lying here goes first.")
+            caption(v, "The whole server's fruits are seen from anywhere. A player "
+                .. "standing by their drop is trading it: never taken, even with "
+                .. "player drops on.")
+        end)
+    end
+
+    -- =====================================================
+    -- HAKI BERRIES
+    -- =====================================================
+    do
+        local v = makeView("berry")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.berryNote),
+                string.format("picked    %d", el.tally.berries or 0) }
+            if el.have.read then
+                local bits = {}
+                for _, n in ipairs(P.BERRIES) do
+                    table.insert(bits, string.format("%s %d", (string.gsub(n, " Berry$", "")), el.have[n] or 0))
+                end
+                table.insert(lines, "you have  " .. table.concat(bits, " · "))
+            end
+            local _, r = parts()
+            local ok, list = pcall(P.berriesLying)
+            if ok and type(list) == "table" and #list > 0 then
+                for _, b in ipairs(list) do
+                    table.insert(lines, string.format("   %s   %s", table.concat(b.names, " + "),
+                        r and string.format("%.0f studs", (b.pos - r.Position).Magnitude) or ""))
+                end
+            else
+                table.insert(lines, "on the bushes here: none")
+            end
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "berry")
+        heading2(v, "which berries")
+        -- What each one makes at the Barista (recipes from the Barista Cousin).
+        local BERRY_USE = {
+            ["Pink Pig Berry"]     = "Winter Sky: 15  (Legendary)",
+            ["White Cloud Berry"]  = "Snow White: 10  (Legendary)",
+            ["Red Cherry Berry"]   = "Pure Red: 15  (Legendary)",
+            ["Blue Icicle Berry"]  = "Absolute Zero 5, Blue Jeans 3",
+            ["Green Toad Berry"]   = "Slimy Green 1, Green Lizard 1",
+            ["Orange Berry"]       = "Orange Soda 1, Heat Wave 2",
+            ["Purple Jelly Berry"] = "Plump Purple 3",
+            ["Yellow Star Berry"]  = "Bright Yellow 1, Yellow Sunshine 1",
+        }
+        -- Next to each berry its first color (the whole list is in How it
+        -- works): "Winter Sky: 15", not a cut-off "Winter Sky: 15  (Le...".
+        local items, uses = {}, {}
+        for _, n in ipairs(P.BERRIES) do
+            local use = BERRY_USE[n] or ""
+            table.insert(uses, n .. " - " .. use)
+            table.insert(items, { n, string.match((string.gsub(use, "%s*%b()", "")), "^[^,]*"),
+                function() return CFG.BerryWant[n] == true end,
+                function(x) CFG.BerryWant[n] = x and true or false end })
+        end
+        ticks(v, items)
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Haki colors - Legendary Aura berries. What each makes at the Barista: "
+                .. table.concat(uses, ";  ") .. ".")
+            caption(v, "At most 4 in a server, a new one every 15 min, gone after an "
+                .. "hour - anyone can take one. The Barista makes the colors "
+                .. "(+ 7,500 fragments for a Legendary).")
+        end)
+    end
+
+    -- =====================================================
+    -- AURA RECIPE
+    -- =====================================================
+    do
+        local v = makeView("recipe")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            return table.concat({
+                "here      " .. tostring(el.offer or "not asked yet"),
+                "last      " .. tostring(el.recipeNote),
+                string.format("learned   %d", el.tally.recipes or 0),
+            }, "\n")
+        end)
+        modeSwitch(v, "recipe")
+        heading2(v, "which recipes")
+        local items = {}
+        for i, n in ipairs(P.RECIPES) do
+            table.insert(items, { n, (i <= 3) and "Legendary" or "Rare",
+                function() return CFG.RecipeWant[n] == true end,
+                function(x) CFG.RecipeWant[n] = x and true or false end })
+        end
+        ticks(v, items)
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Barista Cousin - the recipe you pick, else the next server. The three Legendary: rip_indra's buttons need all three.")
+            caption(v, "He teaches ONE recipe per server, asked from anywhere - no "
+                .. "flight to find out. He comes 20 min after a server starts, "
+                .. "stays 20, is gone 2. Switch off the ones you already have. A "
+                .. "recipe learned goes off by itself; not learned (fragments, Aura "
+                .. "stage 5) stops the hunt and says why.")
+        end)
+    end
+
+    -- =====================================================
+    -- LEGENDARY SWORDS
+    -- =====================================================
+    do
+        local v = makeView("sword")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            return table.concat({
+                "here      " .. tostring(el.swordOffer or "not asked yet"),
+                "last      " .. tostring(el.swordNote or "-"),
+                string.format("bought    %d", el.tally.swords or 0),
+            }, "\n")
+        end)
+        modeSwitch(v, "sword")
+        heading2(v, "which swords  ·  Second Sea")
+        local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
+        local items = {}
+        for _, n in ipairs(P.SWORDS) do
+            table.insert(items, { n, "was " .. OLD[n] .. "  ·  $2M",
+                function() return CFG.SwordWant[n] == true end,
+                function(x) CFG.SwordWant[n] = x and true or false end })
+        end
+        ticks(v, items)
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Shizu / Saishi / Oroshi for True Triple Katana, $2,000,000 each - asked the moment you join, else the next server.")
+            caption(v, "The Legendary Sword Dealer sells ONE of the three per visit. "
+                .. "He is asked the moment you join - from anywhere, no Cafe Manager, "
+                .. "no 10 minutes - and bought from; not here, or not one you need = "
+                .. "the next server. Swords you own are switched off by themselves. "
+                .. "True Triple Katana: all three at 300 mastery, then the Mysterious Man.")
+        end)
+    end
+
+    -- =====================================================
+    -- FIRE FLOWER
+    -- =====================================================
+    do
+        local v = makeView("flower")
+        gap(v, 6)
+        readout(v, function()
+            local el = P.elite
+            local lines = { "last      " .. tostring(el.flowerNote),
+                string.format("picked    %d   ·   you have %s", el.tally.flowers or 0,
+                    el.flowerHave and tostring(el.flowerHave) or "not read yet") }
+            if CFG.Hunt and CFG.HuntKind == "flower" then
+                if el.flowerFirstKill then
+                    local s = math.floor(os.clock() - el.flowerFirstKill)
+                    table.insert(lines, string.format("here      %d:%02d since the first kill  ·  no flower = next server at %g min",
+                        s // 60, s % 60, CFG.FlowerGiveUp or 2.5))
+                else
+                    table.insert(lines, "here      the clock starts at the first kill")
+                end
+            end
+            local ok, list = pcall(P.flowersLying)
+            table.insert(lines, (ok and type(list) == "table" and #list > 0)
+                and ("lying now " .. #list) or "lying now none")
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "flower")
+        heading2(v, "leaving")
+        sliderRow(v, "No flower after the first kill: leave at", 1, 5, 0.5,
+            function() return CFG.FlowerGiveUp end,
+            function(x) CFG.FlowerGiveUp = x end, " min")
+        link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
+        fold(v, "How it works", function(v)
+            caption(v, "Draco V2 - pirates one at a time, the flower, next server.")
+            caption(v, "Needs the Dragon Wizard's V2 quest taken - flowers spawn only "
+                .. "then. Forest + Mythological Pirates, one at a time where they "
+                .. "stand (no magnet: the flower comes up where one dies). Picked "
+                .. "the moment it lies there, then the next server - that one gives "
+                .. "none for 5-15 min. Nothing dies for 3 min: the next server too.")
+        end)
+    end
+
+    -- =====================================================
+    -- BLAZE EMBER
+    -- =====================================================
+    do
+        local v = makeView("ember")
+        gap(v, 6)
+        readout(v, function()
+            local m = P.ember
+            local lines = {
+                "now       " .. tostring(m.note),
+                "quest     " .. tostring(m.quest or "none yet") .. (m.how and ("  (" .. m.how .. ")") or ""),
+                string.format("embers    %d taken   ·   you have %s", m.tally.embers, m.have and tostring(m.have) or "not read yet"),
+                string.format("quests    %d   ·   trees broken %d%s", m.tally.quests, m.tally.trees,
+                    m.mustVisit and "   ·   asked AT the Dragon Hunter" or ""),
+            }
+            local best, bn = nil, -1
+            for key, L in pairs(m.learn) do
+                if L.closed > bn then best, bn = key, L.closed end
+            end
+            if best then table.insert(lines, string.format("trees     best key %s (%d of %d)", best, m.learn[best].closed, m.learn[best].casts)) end
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "ember")
+        heading2(v, "the embers")
+        sliderRow(v, "Stop when you have", 15, 99, 1,
+            function() return CFG.EmberStopAt end,
+            function(x) CFG.EmberStopAt = x end, " embers")
+        sliderRow(v, "Skip trees taller than", 30, 300, 10,
+            function() return CFG.EmberTreeMax end,
+            function(x) CFG.EmberTreeMax = x end, " studs")
+        fold(v, "How it works", function(v)
+            caption(v, "Dragon Hunter quests on Hydra Island, over and over - the embers picked.")
+            caption(v, "Needs Dragon Talon at 500 mastery and the Dojo's Yellow Belt. "
+                .. "The quest is asked for from where you are; if that does not take, "
+                .. "at the Dragon Hunter. Enforcers / Assailants are pulled and killed "
+                .. "(M1 as the Attack page picks). Trees: blasts only - the Skull Guitar / "
+                .. "Bazooka M1 first, else Z/X/C of every weapon, aimed; never a plain M1 "
+                .. "(the medium ground trees first, bamboo last, the giants never). Each quest drops 3 "
+                .. "embers - run through. The tree list goes to "
+                .. "workspace/bff_ember_trees.txt.")
+        end)
+    end
+
+    -- =====================================================
+    -- SEA TRAVEL
+    -- =====================================================
+    do
+        local v = makeView("sail")
+        gap(v, 6)
+        readout(v, function()
+            local s = P.sea
+            return (s.driving and s.meters) and string.format("%d m from Tiki  ·  danger %s",
+                math.floor(s.meters), tostring(s.danger or "?")) or "not sailing"
+        end)
+        modeSwitch(v, "sail")
+        link(v, "Travel & boat", function() return math.floor(CFG.SeaSpeed) .. " studs/s" end, "travel")
+        fold(v, "How it works", function(v)
+            caption(v, "Your boat at sea speed, you steer (A/D turn, W go, S stop) - no island, never the next server.")
+        end)
+    end
+
+    -- =====================================================
+    -- SEA EVENTS
+    -- =====================================================
+    do
+        local v = makeView("seaevents")
+        gap(v, 6)
+        readout(v, function()
+            local s, e = P.sea, P.seaev
+            local c = e.count
+            local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
+            local kinds = {}
+            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark", "Leviathan" }) do
+                if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
+            end
+            local spy = e.spy
+            return table.concat({
+                "now       " .. tostring(e.note),
+                string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
+                "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
+                "spy       " .. (spy and string.format("%s  ·  asked %d min ago%s", tostring(spy.text),
+                    math.floor((os.clock() - spy.at) / 60),
+                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "") or "not asked yet"),
+                "last      " .. tostring(e.last),
+                string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
+                    s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
+            }, "\n")
+        end)
+        modeSwitch(v, "seaevents")
+        heading2(v, "patrol")
+        sliderRow(v, "Patrol at Sea Danger", 1, 6, 1,
+            function() return CFG.SeaEvDanger end,
+            function(x) CFG.SeaEvDanger = x end, "")
+        heading2(v, "fight these  ·  the rest sailed away from")
+        local items = {}
+        for _, row in ipairs({
+            { "Sea Beast", "every key, aimed" },
+            { "Rumbling Waters", "three at once" },
+            { "Terrorshark", "round it, dodging" },
+            { "Piranha", "one per school" },
+            { "Shark", "off: sailed away" },
+        }) do
+            local k = row[1]
+            table.insert(items, { k, row[2],
+                function() return (CFG.SeaEvFight or {})[k] == true end,
+                function(x)
+                    CFG.SeaEvFight = CFG.SeaEvFight or {}
+                    CFG.SeaEvFight[k] = x
+                end })
+        end
+        ticks(v, items)
+        sliderRow(v, "Ship raid: sail away to", 500, 4000, 100,
+            function() return CFG.FleeTo end,
+            function(x) CFG.FleeTo = x end, " studs off")
+        heading2(v, "the count")
+        sliderRow(v, "Count goal (the Spy: 20 or more)", 1, 60, 1,
+            function() return CFG.SeaEvGoal end,
+            function(x) CFG.SeaEvGoal = x end, " events")
+        switchRow(v, "Stop at the goal", "The hunt and the farm stop the moment the count reaches it",
+            function() return CFG.SeaEvStopAtGoal end,
+            function(x) CFG.SeaEvStopAtGoal = x end)
+        actionRow(v, "Ask the Spy now", nil, function() P.seaev.spyAsk() end)
+        actionRow(v, "Reset the count to 0", "danger", function() P.seaev.reset() end)
+        link(v, "Fighting at sea", function() return tostring(CFG.SeaEvForm) end, "seafight")
+        link(v, "Travel & boat", function() return math.floor(CFG.SeaSpeed) .. " studs/s" end, "travel")
+        fold(v, "How it works", function(v)
+            caption(v, "Beasts, Rumbling Waters, Terrorshark, Piranha fought - ship raids fled - counted.")
+            caption(v, "Sea Beast: hovered over, every key aimed at it (M1 only in Kitsune form). "
+                .. "Rumbling Waters: three beasts at once - one at a time, the nearest first. "
+                .. "Terrorshark: round it, dodging - every key (M1 only in Kitsune form). "
+                .. "Piranha: a school of them = one sea event. Shark: off = sailed away from.")
+            caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
+                .. "Boat and its crew, the haunted ships) are always sailed away from - "
+                .. "slow, and they break the boat - then the boat waits, stopped, until "
+                .. "the ship is twice that far or gone. The Leviathan: its own mode. The "
+                .. "boat patrols a slow circle at the danger you set (sea events come to a "
+                .. "boat that is near); a fight takes you off the seat and holds the boat "
+                .. "up out of the waves; then back to the wheel. Never the next server.")
+            caption(v, "One sea event = one group of the same kind (five piranhas count "
+                .. "once - the wiki; three beasts = Rumbling Waters = once), counted when "
+                .. "every one of it is gone and at least one was KILLED. Escaped or "
+                .. "despawned = not counted. Kept across joins - reset it after each Frozen "
+                .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
+                .. "5 min and after each count) is the truth; the count is the guide.")
+        end)
+    end
+
+    -- =====================================================
+    -- LEVIATHAN
+    -- =====================================================
+    do
+        local v = makeView("levi")
+        gap(v, 6)
+        readout(v, function()
+            local lv = P.seaev.levi
+            local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills),
+                string.format("dodged    %d (last: %s)  ·  out of now: %s", P.seaev.dodges or 0,
+                    tostring(P.seaev.lastDodge or "-"), (#lv.now > 0) and table.concat(lv.now, ", ") or "nothing") }
+            local ok, list = pcall(P.seaev._t.leviParts)
+            for _, x in ipairs((ok and list) or {}) do
+                local m = x.max or x.maxSeen
+                table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
+                    x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
+                    x.enabled and "takes damage" or "not now",
+                    m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
+            end
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "levi")
+        heading2(v, "the fight")
+        sliderRow(v, "Over the part being hit", 30, 300, 5,
+            function() return CFG.LeviHeight end,
+            function(x) CFG.LeviHeight = x end, " studs")
+        sliderRow(v, "Your share of each segment", 8, 50, 1,
+            function() return CFG.LeviShare end,
+            function(x) CFG.LeviShare = x end, " %")
+        link(v, "Fighting at sea", function() return tostring(CFG.SeaEvForm) end, "seafight")
+        fold(v, "How it works", function(v)
+            caption(v, "On = only the Leviathan: segments, then the head; its attacks dodged; starts the run.")
+            caption(v, "On = ONLY the Leviathan: switch it on inside the Frozen Dimension (it "
+                .. "starts the run); nothing else runs, and until it shows the character is "
+                .. "yours. Its segments first, the head LAST (segments respawn: back to them). "
+                .. "Fought like a Sea Beast - every ready key aimed at the part, no M1 out of "
+                .. "Kitsune form, round it, the water a floor, dives waited out. ITS ATTACKS, "
+                .. "read off the game's own effects: the tail's red area - out of it sideways "
+                .. "(up does not save you); the mouth beam's charge and the beam - off its "
+                .. "line; the tornadoes - away; the roar's ice spears - up the moment one "
+                .. "flies; any other attack animation - up. The reward needs 8% of the damage "
+                .. "on EACH segment: yours is read off its HP while your keys land (others' "
+                .. "hits in that moment count too), so the next one at your share. Its HEART: "
+                .. "the character is yours - the Beast Hunter's harpoon, tow it to Tiki. "
+                .. "Killed: the sea event count back to 0 (the Spy's cooldown starts). No "
+                .. "boat is touched. The first one writes its parts and each attack's size "
+                .. "to workspace/bff_beast_probe.txt.")
+        end)
+    end
+
+    -- =====================================================
+    -- PREHISTORIC
+    -- =====================================================
+    do
+        local v = makeView("prehistoric")
+        gap(v, 6)
+        readout(v, function()
+            local s = P.sea
+            local t = s.tally
+            return table.concat({
+                "now       " .. tostring(s.note),
+                "boat      " .. tostring(s.boatNote)
+                    .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
+                string.format("where     %s  ·  danger %s",
+                    s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
+                        math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
+                    tostring(s.danger or "-")),
+                string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
+            }, "\n")
+        end)
+        modeSwitch(v, "prehistoric")
+        heading2(v, "the trip")
+        switchRow(v, "Volcanic Magnet first",
+            "Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
+            function() return CFG.SeaMagnet end,
+            function(x) CFG.SeaMagnet = x end)
+        readout(v, function()
+            local g = P.magnet
+            if not g then return "-" end
+            local c = g.inv
+            return string.format("magnet     %s\nhave       %s", tostring(g.note),
+                c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
+                    or "not read yet")
+        end)
+        sliderRow(v, "Safety cap: no island this long (0 = off)", 0, 60, 1,
+            function() return CFG.SeaSearchMinutes end,
+            function(x) CFG.SeaSearchMinutes = x end, " min")
+        link(v, "Travel & boat", function()
+            return CFG.SeaSteer == "manual" and "you steer" or ("auto  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m")
+        end, "travel")
+        link(v, "Volcano event", function() return CFG.Volcano and "On" or "runs on the island" end, "volcano")
+        fold(v, "How it works", function(v)
+            caption(v, "Sail to the island, run the volcano event, loot, next server - the loop.")
+            caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
+                .. "dealer, puts you at the wheel and drives west through the sea "
+                .. "events. Island up: off the boat, onto the island, and it never "
+                .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
+                .. "or nothing by the far edge: the next server.")
+        end)
+    end
+
+    -- =====================================================
+    -- MIRAGE: four jobs, one mode
+    -- =====================================================
+    do
+        local v = makeView("mirage")
+        gap(v, 6)
+        readout(v, function()
+            local s = P.sea
+            local m = s.mirage
+            local lines = {
+                string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
+                    s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
+            }
+            if m then
+                table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
+                    m.fits and "" or "  - sailed past"))
+                if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
+                if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
+            end
+            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours") end
+            return table.concat(lines, "\n")
+        end)
+        modeSwitch(v, "mirage")
+        heading2(v, "the job")
+        -- Which of the four Mirage hunts. Kept in CFG.MirageJob while the
+        -- Mirage is off; picked while it runs = that job from now on.
+        radio(v, 164, {
+            { "mirage", "Onto it - nothing else" },
+            { "dealer", "Advanced Fruit Dealer", "his shop open" },
+            { "mchest", "Every chest on it" },
+            { "gear", "Blue Gear", "you at the moon" },
+        }, function()
+            if CFG.Hunt and MIRAGE[CFG.HuntKind] then return CFG.HuntKind end
+            return CFG.MirageJob
+        end, function(x)
+            CFG.MirageJob = x
+            if CFG.Hunt and MIRAGE[CFG.HuntKind] then P.setHunt(true, x) end
+        end)
+        heading2(v, "blue gear: which mirage")
+        radio(v, 122, {
+            { "night", "One that sees night", "gear needs it" },
+            { "full",  "A full-moon night only", "" },
+            { "any",   "Every Mirage", "" },
+        }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
+        link(v, "Travel & boat", function()
+            return CFG.SeaSteer == "manual" and "you steer" or ("auto  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m")
+        end, "travel")
+        fold(v, "How it works", function(v)
+            caption(v, "Four jobs, each only its job: onto it puts you on the Mirage; the dealer "
+                .. "job puts you in front of the Advanced Fruit Dealer with his shop open (he "
+                .. "stands at a random spot - not read = the island searched until he is); the "
+                .. "chest job takes every chest; the Blue Gear job gives you the moon (a high "
+                .. "point, face it, T) and runs over the gear the moment it shows. A Mirage "
+                .. "already up = straight to the job, else the boat sails for one. Done = the "
+                .. "farm stops and leaves you on it. A Mirage lives 15 min; dying or leaving "
+                .. "makes it go.")
+            caption(v, "Only the Blue Gear hunt asks this (the gear needs night, 2 min "
+                .. "to climb); the other Mirage hunts take every one.")
+        end)
+    end
+
+    -- =====================================================
+    -- PVP
+    -- =====================================================
+    do
+        local v = makeView("pvp")
+        local S = P.pvp
+        gap(v, 6)
+        readout(v, function()
+            if not CFG.Pvp then return "off" end
+            return "PLAYER  " .. S.targetText()
+        end)
+        modeSwitch(v, "pvp")
+        heading2(v, "vision")
+        switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
+            function() return CFG.PvpVision end,
+            function(x) CFG.PvpVision = x end)
+        switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
+            function() return CFG.PvpClean end,
+            function(x) CFG.PvpClean = x end)
+        switchRow(v, "No camera shake", nil,
+            function() return CFG.PvpNoShake end,
+            function(x) CFG.PvpNoShake = x end)
+        switchRow(v, "Ken back by itself", "The dodges: 2 s after, every 0.5 s, the moment the game allows",
+            function() return CFG.PvpKenBack end,
+            function(x) CFG.PvpKenBack = x end)
+        readout(v, function()
+            if not CFG.Pvp then return "PvP mode is off" end
+            return "view    " .. tostring(S.view.note)
+                .. "\nken     " .. tostring(S.ken.note)
+                .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
+                .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
+        end)
+        heading2(v, "aim")
+        switchRow(v, "Aim at the player", "Skills, fruit M1, gun - land on him",
+            function() return CFG.PvpAim end,
+            function(x) CFG.PvpAim = x end)
+        sliderRow(v, "Pick players within", 50, 1000, 25,
+            function() return CFG.PvpRange end,
+            function(x) CFG.PvpRange = x end, " studs")
+        switchRow(v, "Melee / sword: face him", "Your swing turns your body to him - the game's hitbox does the rest",
+            function() return CFG.PvpFace end,
+            function(x) CFG.PvpFace = x end)
+        sliderRow(v, "Face him within", 8, 40, 1,
+            function() return CFG.PvpFaceRange end,
+            function(x) CFG.PvpFaceRange = x end, " studs")
+        switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
+            function() return CFG.PvpLead end,
+            function(x) CFG.PvpLead = x end)
+        actionRow(v, "Next player", nil, function() S.next() end)
+        readout(v, function()
+            if not CFG.Pvp then return "" end
+            return S.targetText() .. string.format("\nswings turned to him: %d", S.faced)
+        end)
+        heading2(v, "movement")
+        switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
+            function() return CFG.PvpDash end,
+            function(x) CFG.PvpDash = x end)
+        sliderRow(v, "Dash", 1, 2.5, 0.1,
+            function() return CFG.PvpDashX end,
+            function(x) CFG.PvpDashX = x end, "x")
+        readout(v, function() return "dash   " .. S.dashNote() end)
+        switchRow(v, "Faster run", "The game's own speed number - Mink V3 + Kitsune 3 tails + Pilot Helmet = 112",
+            function() return CFG.PvpSpeed end,
+            function(x) CFG.PvpSpeed = x end)
+        sliderRow(v, "Run speed", 40, 185, 1,
+            function() return CFG.PvpSpeedTo end,
+            function(x) CFG.PvpSpeedTo = x end)
+        readout(v, function() return "speed  " .. tostring(S.speed.note) end)
+        fold(v, "How it works", function(v)
+            caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")
+            caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
+                .. "ends your Ken; your screen kept clear of other players' effects.")
+            caption(v, "AIM - you press every key; what you fire goes to the player.")
+        end)
+    end
+
+    -- =====================================================
+    -- VOLCANO EVENT: alongside any mode
+    -- =====================================================
+    do
+        local v = makeView("volcano")
+        gap(v, 6)
+        readout(v, function()
+            local ev = P.sea.ev
+            local t = P.sea.tally
+            local lines = {}
+            if ev then
+                table.insert(lines, "now       " .. tostring(ev.note))
+                table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
+                    tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
+                    ev.counted and "COUNTED" or "not counted (not there at the start)"))
+                table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                    ev.vents, ev.golems, ev.bones, ev.eggs))
+                table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
+                    ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
+                    ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
+                    ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
+                table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
+                table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
+                    tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
+                table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
+            else
+                table.insert(lines, "no Prehistoric Island in this server")
+            end
+            table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
+                t.events, t.vents, t.golems, t.bones, t.eggs))
+            return table.concat(lines, "\n")
+        end)
+        switchRow(v, "Volcano event",
+            "Alongside any mode, whenever a Prehistoric Island is up (the Prehistoric hunt runs it anyway)",
+            function() return CFG.Volcano end,
+            function(x)
+                CFG.Volcano = x
+                say(x and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
+            end)
+        heading2(v, "after the win")
+        switchRow(v, "Bones and the egg after a win", nil,
+            function() return CFG.VolcanoLoot end,
+            function(x) CFG.VolcanoLoot = x end)
+        radio(v, 82, {
+            { "hop",   "The next server", "the loop" },
+            { "again", "Again, on this island", "no cooldown" },
+        }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
+        sliderRow(v, "Stay after the loot, then the next server", 0, 300, 5,
+            function() return CFG.LootStay end,
+            function(x) CFG.LootStay = x end, " s")
+        switchRow(v, "Home by respawn after the loot",
+            "The stay over: reset - back at your spawn (Tiki), then the next server. Never with the chalice",
+            function() return CFG.RespawnHome end,
+            function(x) CFG.RespawnHome = x end)
+        sliderRow(v, "Egg: stand still after E", 0, 10, 0.5,
+            function() return CFG.EggStay end,
+            function(x) CFG.EggStay = x end, " s")
+        sliderRow(v, "Each bone, at least", 0, 2, 0.1,
+            function() return CFG.BoneMin end,
+            function(x)
+                CFG.BoneMin = x
+                CFG.BoneMax = math.max(tonumber(CFG.BoneMax) or 1, x)
+            end, " s")
+        sliderRow(v, "Each bone, at most", 0, 3, 0.1,
+            function() return CFG.BoneMax end,
+            function(x)
+                CFG.BoneMax = x
+                CFG.BoneMin = math.min(tonumber(CFG.BoneMin) or 0.5, x)
+            end, " s")
+        readout(v, function()
+            local s = P.sea
+            local ev = s.ev
+            local lines = {}
+            local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
+            table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
+                b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
+            if ev and ev.base then
+                table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
+                    ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
+                    ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
+            end
+            if s.lootCheck then table.insert(lines, "last hop  " .. tostring(s.lootCheck)) end
+            return table.concat(lines, "\n")
+        end)
+        heading2(v, "vents")
+        switchRow(v, "Skull Guitar M1 on the vents",
+            "Loaded if in your inventory, fired at the vent stood still - before any skill",
+            function() return CFG.VentGuitar end,
+            function(x) CFG.VentGuitar = x end)
+        sliderRow(v, "Seconds between shots", 0.1, 1, 0.05,
+            function() return CFG.VentM1Every end,
+            function(x) CFG.VentM1Every = x end, " s")
+        chips(v, "Keys", { "Z", "X", "C", "V" },
+            function(k) return (CFG.VentKeys or {})[k] end,
+            function(k, x)
+                CFG.VentKeys = CFG.VentKeys or {}
+                CFG.VentKeys[k] = x
+            end)
+        sliderRow(v, "Stand off a vent", 4, 30, 1,
+            function() return CFG.VentDistance end,
+            function(x) CFG.VentDistance = x end, " studs")
+        readout(v, function()
+            local S = P.sea
+            local g = S.ventGun and S.ventGun()
+            if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
+            local L = S.learn[g .. " M1"]
+            return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
+                tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
+        end)
+        heading2(v, "lava golems")
+        local gbox = chooser(v, 130)
+        local gsig = nil
+        local function grefresh()
+            local names = {}
+            for _, t in ipairs(toolNames()) do
+                local ty = toolType(t)
+                if ty == "Sword" or ty == "Melee" then table.insert(names, t.Name) end
+            end
+            table.sort(names)
+            local cur = CFG.GolemWeapon or ""
+            if cur ~= "" and not table.find(names, cur) then table.insert(names, 1, cur) end
+            local sig = cur .. "|" .. table.concat(names, ",")
+            if sig == gsig then return end
+            gsig = sig
+            for _, c in ipairs(gbox:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            chooserRow(gbox, 1, "The Attack page's M1 pick", "", cur == "", function()
+                CFG.GolemWeapon = ""
+                gsig = nil
+                grefresh()
+            end)
+            for i, n in ipairs(names) do
+                local t = findTool(n)
+                chooserRow(gbox, i + 1, n, t and toolType(t) or "inventory", cur == n, function()
+                    CFG.GolemWeapon = n
+                    gsig = nil
+                    grefresh()
+                end)
+            end
+        end
+        grefresh()
+        addLive(grefresh)
+        readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
+        sliderRow(v, "Held off the relic", 30, 150, 5,
+            function() return CFG.GolemCage end,
+            function(x) CFG.GolemCage = x end, " studs")
+        sliderRow(v, "Held up in the air", 0, 150, 5,
+            function() return CFG.GolemLift end,
+            function(x) CFG.GolemLift = x end, " studs")
+        heading2(v, "priority")
+        sliderRow(v, "Keep the relic over", 50, 100, 1,
+            function() return CFG.RelicMin end,
+            function(x) CFG.RelicMin = x end, " %")
+        sliderRow(v, "Pressure that comes first", 20, 100, 5,
+            function() return CFG.PressureMax end,
+            function(x) CFG.PressureMax = x end, " %")
+        fold(v, "How it works", function(v)
+            caption(v, "Prehistoric Island up: start it, vents + Lava Golems, bones + egg.")
+            caption(v, "After the loot: the next server = the hunt goes on there - the loop. "
+                .. "Again, on this island = the wiki: the event has no cooldown.")
+            caption(v, "The egg needs the Dragon Tether, a hit on a golem or vent, and "
+                .. "the relic over 90% at the end.")
+            caption(v, "The wiki: Skull Guitar's M1 breaks things (Destructible Physics) "
+                .. "and cools fast - made for the vents; Bazooka and Cannon too. Its M1 "
+                .. "costs 20 energy: under that, the skills below until it is back. Six "
+                .. "turns closing nothing = the skills instead.")
+            caption(v, "No vent gun (or its energy low): every weapon you carry fires "
+                .. "these, guns first, aimed AT the vent. Only moves that break things "
+                .. "close one; a key whose skill does not fire is left out for 30 s. "
+                .. "Everything cooling: a sword / gun from your inventory, then an aimed M1.")
+            caption(v, "Its M1 swings on the Lava Golems (the strongest swing: Cursed Dual "
+                .. "Katana 4100+, Hallow Scythe 3755). Not carried: loaded from your "
+                .. "inventory when the event starts, and kept. Not found: the Attack page's pick.")
+            caption(v, "Magnet on: every golem is lifted there the moment it lands and "
+                .. "held the whole event - held, it cannot touch the relic - and "
+                .. "never put back. One that cannot be held (not ours to move) is "
+                .. "fought first where it stands. Held ones die when no vent is open "
+                .. "(your Attack page weapons). Magnet off: golems first, always.")
+            caption(v, "A golem not held goes first. Only when the pressure is over "
+                .. "its limit AND the relic is still over yours does a vent go first "
+                .. "instead. The meters are read off the game; the first seconds of "
+                .. "each event write what was found to workspace/bff_volcano_probe.txt.")
+        end)
+        fold(v, "Details", function(v)
+            heading2(v, "which keys close vents (learned)")
+            readout(v, function()
+                local rows = {}
+                for key, L in pairs(P.sea.learn or {}) do table.insert(rows, { key = key, L = L }) end
+                table.sort(rows, function(a, b)
+                    local sa, sb = P.sea.keyScore(a.key), P.sea.keyScore(b.key)
+                    if sa ~= sb then return sa > sb end
+                    return a.key < b.key
+                end)
+                if #rows == 0 then return "nothing fired at a vent yet" end
+                local out = {}
+                for i, r in ipairs(rows) do
+                    if i > 10 then break end
+                    table.insert(out, string.format("%-24s closed %d of %d%s", r.key, r.L.closed, r.L.casts,
+                        (r.L.closed == 0 and r.L.casts >= 4) and "  - does not close them" or ""))
+                end
+                return table.concat(out, "\n")
+            end)
+        end)
+    end
+
+    -- =====================================================
+    -- FIGHTING AT SEA: shared by Sea events and the Leviathan
+    -- =====================================================
+    do
+        local v = makeView("seafight")
+        gap(v, 6)
+        readout(v, function()
+            local e = P.seaev
+            local lines = {}
+            for _, cls in ipairs({ "beast", "fish" }) do
+                local f = e.form[cls]
+                local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
+                local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
+                    or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
+                    or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
+                table.insert(lines, string.format("%-17s %s", name, what))
+            end
+            table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
+                .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
+            return table.concat(lines, "\n")
+        end)
+        heading2(v, "the loadout")
+        radio(v, 122, {
+            { "auto", "Kitsune form first, its M1 tested", "" },
+            { "form", "Kitsune form, always", "" },
+            { "base", "Never transformed", "" },
+        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
+        sliderRow(v, "Test the form's M1 for at most", 10, 60, 5,
+            function() return CFG.SeaEvTrial end,
+            function(x) CFG.SeaEvTrial = x end, " s")
+        heading2(v, "weapons out of form")
+        local items = {}
+        for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
+            table.insert(items, { ty, nil,
+                function() return (CFG.SeaEvWeapons or {})[ty] == true end,
+                function(x)
+                    CFG.SeaEvWeapons = CFG.SeaEvWeapons or {}
+                    CFG.SeaEvWeapons[ty] = x
+                end })
+        end
+        ticks(v, items)
+        heading2(v, "keys fired at a sea event")
+        chips(v, "Keys", { "Z", "X", "C", "V", "F" },
+            function(k) return (CFG.SeaEvKeys or {})[k] end,
+            function(k, x)
+                CFG.SeaEvKeys = CFG.SeaEvKeys or {}
+                CFG.SeaEvKeys[k] = x
+            end)
+        heading2(v, "dodging  ·  Terrorshark / Piranha / Shark")
+        switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
+            function() return CFG.SeaDodge end,
+            function(x) CFG.SeaDodge = x end)
+        sliderRow(v, "Round it at", 10, 80, 5,
+            function() return CFG.DodgeRadius end,
+            function(x) CFG.DodgeRadius = x end, " studs")
+        sliderRow(v, "Moving at", 10, 150, 5,
+            function() return CFG.DodgeSpeed end,
+            function(x) CFG.DodgeSpeed = x end, " studs/s")
+        sliderRow(v, "Up when it attacks", 10, 120, 5,
+            function() return CFG.DodgeUp end,
+            function(x) CFG.DodgeUp = x end, " studs")
+        sliderRow(v, "Stay up for", 0.3, 3, 0.1,
+            function() return CFG.DodgeTime end,
+            function(x) CFG.DodgeTime = x end, " s")
+        readout(v, function()
+            local e = P.seaev
+            return string.format("dodged    %d times  ·  last: %s\nwater     %s", e.dodges or 0, tostring(e.lastDodge or "-"),
+                P.floorY and string.format("a floor at Y %.0f - you never go under it (swimming off, knockback refused)", P.floorY)
+                    or "a floor during every sea fight")
+        end)
+        heading2(v, "heights")
+        sliderRow(v, "Over a Sea Beast", 30, 250, 5,
+            function() return CFG.BeastHeight end,
+            function(x) CFG.BeastHeight = x end, " studs")
+        sliderRow(v, "Over a Terrorshark / Piranha / Shark", 10, 100, 5,
+            function() return CFG.FishHeight end,
+            function(x) CFG.FishHeight = x end, " studs")
+        sliderRow(v, "Boat held up while you fight", 0, 300, 10,
+            function() return CFG.BoatLift end,
+            function(x) CFG.BoatLift = x end, " studs")
+        fold(v, "How it works", function(v)
+            caption(v, "Kitsune form first, its M1 tested: hurts them = form; else Kitsune + fighting style. "
+                .. "Never transformed: Kitsune + fighting style (the weapons below).")
+            caption(v, "Out of form, only these weapons fight at sea (your points: fruit + melee). "
+                .. "In form, the game takes only the fruit's moves anyway.")
+            caption(v, "V: never on a transformation fruit (Kitsune's V transforms) - on for the rest. "
+                .. "Boat held up: 0 = left on the water.")
+            caption(v, "Every key the INSTANT it is ready (the moment the game takes it - not "
+                .. "during another move - and the next one the frame it fires) - your "
+                .. "Attack page is left for the normal farm. NO M1 at a sea event (an "
+                .. "untransformed M1 does nothing to one): only Kitsune's, in Kitsune form. "
+                .. "Which key hurts it is learned from its HP.")
+            caption(v, "It starts an attack (a new animation), charges at you or leaps: up "
+                .. "for a moment, then back. The water is a floor in every sea fight: you "
+                .. "are never under it, whatever the target does, and a knockback or a "
+                .. "pull is undone the next frame.")
+        end)
+        fold(v, "Details", function(v)
+            heading2(v, "what hurts a sea beast (learned)")
+            readout(v, function()
+                local rows = {}
+                for key, L in pairs(P.seaev.learn or {}) do table.insert(rows, { key = key, L = L }) end
+                table.sort(rows, function(a, b)
+                    local sa, sb = P.sea.keyScore(a.key, P.seaev.learn), P.sea.keyScore(b.key, P.seaev.learn)
+                    if sa ~= sb then return sa > sb end
+                    return a.key < b.key
+                end)
+                if #rows == 0 then return "nothing fired at a sea beast yet" end
+                local out = {}
+                for i, r in ipairs(rows) do
+                    if i > 10 then break end
+                    table.insert(out, string.format("%-24s hurt it %d of %d%s", r.key, r.L.closed, r.L.casts,
+                        (r.L.closed == 0 and r.L.casts >= 4) and "  - does not" or ""))
+                end
+                return table.concat(out, "\n")
+            end)
+        end)
     end
 
     -- =====================================================
@@ -13464,6 +14911,9 @@ local function buildUI()
     do
         local v = makeView("attack")
         gap(v, 6)
+        readout(v, function()
+            return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
+        end)
         heading2(v, "M1 with")
         local m1box = chooser(v, 130)
         local m1sig = nil
@@ -13497,9 +14947,86 @@ local function buildUI()
         end
         m1refresh()
         addLive(m1refresh)
-        caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
-            .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
-
+        heading2(v, "skills")
+        switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
+            function() return CFG.AutoAttack end,
+            function(x) CFG.AutoAttack = x end)
+        chips(v, "Keys", { "Z", "X", "C", "V" },
+            function(k) return CFG.AutoKeys[k] == true end,
+            function(k, x) CFG.AutoKeys[k] = x end)
+        switchRow(v, "Swords and guns from your inventory",
+            "Every skill cooling: the next one is put in your hands, no menu",
+            function() return CFG.InvSwap end,
+            function(x) CFG.InvSwap = x end)
+        heading2(v, "weapons  ·  when that is off")
+        local box = chooser(v, 170)
+        local signature = nil
+        local function refresh()
+            pcall(syncWeapons)
+            local sig = ""
+            for _, n in ipairs(CFG.WeaponOrder) do
+                sig = sig .. n .. "=" .. wSummary(n) .. (findTool(n) and "" or "?") .. ","
+            end
+            if sig == signature then return end
+            signature = sig
+            for _, c in ipairs(box:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            for i, n in ipairs(CFG.WeaponOrder) do
+                local carried = findTool(n) ~= nil
+                local s = wSummary(n)
+                local lit = carried and s ~= "off" and CFG.Weapons[n].use
+                chooserRow(box, i, n, carried and s or "not carried", lit, function()
+                    openWeapon(n)
+                end)
+            end
+        end
+        refresh()
+        addLive(refresh)
+        heading2(v, "rhythm  ·  M1 and skills both on")
+        radio(v, 82, {
+            { "Skills", "Skills first" },
+            { "M1", "M1 first" },
+        }, function() return CFG.StartWith end, function(x) CFG.StartWith = x end)
+        sliderRow(v, "M1 swings between skills", 0, 10, 1,
+            function() return CFG.M1Between end,
+            function(x) CFG.M1Between = x end)
+        sliderRow(v, "Wait after a skill", 0.1, 1.5, 0.05,
+            function() return CFG.CastWait end,
+            function(x) CFG.CastWait = x end, " s")
+        sliderRow(v, "Wait after a swap", 0.02, 0.5, 0.02,
+            function() return CFG.EquipWait end,
+            function(x) CFG.EquipWait = x end, " s")
+        heading2(v, "aim")
+        switchRow(v, "Lock the aim on the pile",
+            "Skills land on the pile wherever your cursor is",
+            function() return CFG.AimSkills end,
+            function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
+        switchRow(v, "Keep my camera free",
+            "Your view and cursor are never moved",
+            function() return CFG.AimHidden end,
+            function(x) CFG.AimHidden = x if x then releaseCamera() end end)
+        switchRow(v, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
+            function() return CFG.SilentAim end,
+            function(x) CFG.SilentAim = x end)
+        readout(v, function()
+            return "silent aim  " .. tostring(P.silentNote or "-") .. "  (guns)"
+                .. "\nskill aim   " .. tostring(P.gameAimText and P.gameAimText() or "-") .. "  (skills, a fruit's M1)"
+        end)
+        heading2(v, "a gun's M1")
+        switchRow(v, "Hold the button", "Dragonstorm: the game's own fire loop, every shot at one enemy",
+            function() return CFG.GunHold end,
+            function(x) CFG.GunHold = x P.reprobe() end)
+        switchRow(v, "Past the heat", "The game's own shot on the script's clock - no lockout. Loud",
+            function() return CFG.GunFast end,
+            function(x) CFG.GunFast = x P.reprobe() end)
+        sliderRow(v, "Past the heat: a shot every", 0.02, 0.2, 0.01,
+            function() return CFG.GunFastEvery end,
+            function(x) CFG.GunFastEvery = x end, " s")
+        readout(v, function()
+            return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
+                .. "\nsilent aim  " .. tostring(P.silentNote or "-")
+        end)
         heading2(v, "mastery farm")
         local mbox = chooser(v, 130)
         local msig = nil
@@ -13540,124 +15067,6 @@ local function buildUI()
             function() return CFG.MasteryStop end,
             function(x) CFG.MasteryStop = x end, " mastery")
         readout(v, function() return tostring(P.masteryNote) end)
-        caption(v, "The picked weapon alone hurts anything: its M1 and the keys under "
-            .. "\"Every weapon you carry\" (a key not unlocked yet is left alone). No "
-            .. "other weapon shares its kills. Stop at 0 = never.")
-
-        heading2(v, "a gun's M1")
-        switchRow(v, "Hold the button", "Dragonstorm: the game's own fire loop, every shot at one enemy",
-            function() return CFG.GunHold end,
-            function(x) CFG.GunHold = x P.reprobe() end)
-        switchRow(v, "Past the heat", "The game's own shot on the script's clock - no lockout. Loud",
-            function() return CFG.GunFast end,
-            function(x) CFG.GunFast = x P.reprobe() end)
-        sliderRow(v, "Past the heat: a shot every", 0.02, 0.2, 0.01,
-            function() return CFG.GunFastEvery end,
-            function(x) CFG.GunFastEvery = x end, " s")
-        readout(v, function()
-            return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
-                .. "\nsilent aim  " .. tostring(P.silentNote or "-")
-        end)
-        caption(v, "Held: 12.5 shots/s for 3 s of heat, then 1 s locked - its skills go "
-            .. "in while it cools. Past the heat: no lockout; the wiki says long gun M1 "
-            .. "streams get kills marked suspicious. Stats page, \"which setup is "
-            .. "better\": kills per minute of each.")
-
-        heading2(v, "every weapon you carry")
-        switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
-            function() return CFG.AutoAttack end,
-            function(x) CFG.AutoAttack = x end)
-        for _, k in ipairs({ "Z", "X", "C", "V" }) do
-            switchRow(v, "    " .. k, (k == "V") and "Often a transformation or a long hold - off by default" or "",
-                function() return CFG.AutoKeys[k] == true end,
-                function(x) CFG.AutoKeys[k] = x end)
-        end
-        switchRow(v, "Swords and guns from your inventory",
-            "Every skill cooling: the next one is put in your hands, no menu",
-            function() return CFG.InvSwap end,
-            function(x) CFG.InvSwap = x end)
-        readout(v, function()
-            local R = (P :: any).rot
-            if not R then return "-" end
-            local inv = R.inv and #R.inv or 0
-            return string.format("inventory  %s\nloaded     %d   ·   %s\nback at stop  %s",
-                R.inv and (inv .. " swords / guns") or "not read yet",
-                R.loads, tostring(R.note), R.original and tostring(R.originalText) or "-")
-        end)
-        caption(v, "A key whose skill never fires (not this weapon's, not unlocked) "
-            .. "is left alone for a minute. Off: only what you switch on below.")
-
-        heading2(v, "weapons")
-        caption(v, "Tap a weapon to choose what it fires (used when \"Every weapon "
-            .. "you carry\" is off). The lit ones fire.")
-
-        local box = chooser(v, 170)
-        local signature = nil
-        local function refresh()
-            pcall(syncWeapons)
-            local sig = ""
-            for _, n in ipairs(CFG.WeaponOrder) do
-                sig = sig .. n .. "=" .. wSummary(n) .. (findTool(n) and "" or "?") .. ","
-            end
-            if sig == signature then return end
-            signature = sig
-            for _, c in ipairs(box:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            for i, n in ipairs(CFG.WeaponOrder) do
-                local carried = findTool(n) ~= nil
-                local s = wSummary(n)
-                local lit = carried and s ~= "off" and CFG.Weapons[n].use
-                chooserRow(box, i, n, carried and s or "not carried", lit, function()
-                    openWeapon(n)
-                end)
-            end
-        end
-        refresh()
-        addLive(refresh)
-
-        heading2(v, "rhythm, when M1 and skills are both on")
-        radio(v, 82, {
-            { "Skills", "Skills first" },
-            { "M1", "M1 first" },
-        }, function() return CFG.StartWith end, function(x) CFG.StartWith = x end)
-        sliderRow(v, "M1 swings between skills", 0, 10, 1,
-            function() return CFG.M1Between end,
-            function(x) CFG.M1Between = x end)
-        caption(v, "4: a ready skill, then 4 M1, then the next ready skill, "
-            .. "and so on. 0: a skill whenever one is ready, M1 only while "
-            .. "every skill cools.")
-        sliderRow(v, "Wait after a skill", 0.1, 1.5, 0.05,
-            function() return CFG.CastWait end,
-            function(x) CFG.CastWait = x end, " s")
-        sliderRow(v, "Wait after a swap", 0.02, 0.5, 0.02,
-            function() return CFG.EquipWait end,
-            function(x) CFG.EquipWait = x end, " s")
-        switchRow(v, "Lock the aim on the pile",
-            "Skills land on the pile wherever your cursor is",
-            function() return CFG.AimSkills end,
-            function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
-        switchRow(v, "Keep my camera free",
-            "Your view and cursor are never moved",
-            function() return CFG.AimHidden end,
-            function(x) CFG.AimHidden = x if x then releaseCamera() end end)
-        caption(v, "Camera free: at the instant a key is read, the camera is put "
-            .. "on the pile and back before the frame is drawn - you never see "
-            .. "it. If the list below keeps saying MISSED for a skill, switch "
-            .. "this off: then the view turns so the pile is under your cursor.")
-        readout(v, function()
-            local lines = { "now  " .. tostring(P.nextNote), "last skill  " .. tostring(P.lastCast) }
-            local keys = {}
-            for key in pairs(P.skillTally) do table.insert(keys, key) end
-            table.sort(keys)
-            for _, key in ipairs(keys) do
-                local t = P.skillTally[key]
-                table.insert(lines, string.format("%s   hit %d of %d  (fired %d)", tostring(key), t.hit, t.cast, t.fired))
-            end
-            return table.concat(lines, "\n")
-        end)
-        actionRow(v, "Clear the hit counts", nil, function() table.clear(P.skillTally) end)
-
         heading2(v, "how M1 lands")
         radio(v, 164, {
             { "auto", "Auto - keep what hurts" },
@@ -13665,19 +15074,6 @@ local function buildUI()
             { "click", "Fruit click" },
             { "keys", "Key press" },
         }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
-        readout(v, function()
-            local lines = {}
-            for _, n in ipairs(CFG.WeaponOrder) do
-                local w = CFG.Weapons[n]
-                if w and w.M1 then
-                    table.insert(lines, n .. ":  " .. tostring(P.m1Notes[n] or "not tried yet"))
-                end
-            end
-            if #lines == 0 then table.insert(lines, "no weapon has M1 on") end
-            table.insert(lines, "hits sent by  " .. tostring(P.hitSender))
-            table.insert(lines, "this server's COMBAT_REMOTE_THREAD  " .. tostring(P.combatFlag))
-            return table.concat(lines, "\n")
-        end)
         actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)
         sliderRow(v, "M1 every", 0.03, 1, 0.01,
             function() return CFG.M1Every end,
@@ -13685,13 +15081,74 @@ local function buildUI()
         sliderRow(v, "Remote hit reaches", 20, 100, 5,
             function() return CFG.HitRange end,
             function(x) CFG.HitRange = x end, " studs")
-        caption(v, "Auto fires each way at the pile for a moment and keeps the "
-            .. "first that takes HP off, per weapon. The remote hit names every "
-            .. "enemy in the pile, so one swing hits all of them.")
+        fold(v, "How it works", function(v)
+            caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
+                .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
+            caption(v, "A key whose skill never fires (not this weapon's, not unlocked) "
+                .. "is left alone for a minute. Off: only what each weapon's own page fires.")
+            caption(v, "V is often a transformation or a long hold - off by default.")
+            caption(v, "Tap a weapon to choose what it fires (used when \"Every weapon "
+                .. "you carry\" is off). The lit ones fire.")
+            caption(v, "4: a ready skill, then 4 M1, then the next ready skill, "
+                .. "and so on. 0: a skill whenever one is ready, M1 only while "
+                .. "every skill cools.")
+            caption(v, "Camera free: at the instant a key is read, the camera is put "
+                .. "on the pile and back before the frame is drawn - you never see "
+                .. "it. If the hit counts (Details) keep saying MISSED for a skill, switch "
+                .. "this off: then the view turns so the pile is under your cursor.")
+            caption(v, "Held: 12.5 shots/s for 3 s of heat, then 1 s locked - its skills go "
+                .. "in while it cools. Past the heat: no lockout; the wiki says long gun M1 "
+                .. "streams get kills marked suspicious. Stats page, \"which setup is "
+                .. "better\": kills per minute of each.")
+            caption(v, "The picked weapon alone hurts anything: its M1 and the keys under "
+                .. "\"Every weapon you carry\" (a key not unlocked yet is left alone). No "
+                .. "other weapon shares its kills. Stop at 0 = never.")
+            caption(v, "Auto fires each way at the pile for a moment and keeps the "
+                .. "first that takes HP off, per weapon. The remote hit names every "
+                .. "enemy in the pile, so one swing hits all of them.")
+        end)
+        fold(v, "Details", function(v)
+            heading2(v, "skills: hit counts")
+            readout(v, function()
+                local lines = { "now  " .. tostring(P.nextNote), "last skill  " .. tostring(P.lastCast) }
+                local keys = {}
+                for key in pairs(P.skillTally) do table.insert(keys, key) end
+                table.sort(keys)
+                for _, key in ipairs(keys) do
+                    local t = P.skillTally[key]
+                    table.insert(lines, string.format("%s   hit %d of %d  (fired %d)", tostring(key), t.hit, t.cast, t.fired))
+                end
+                return table.concat(lines, "\n")
+            end)
+            actionRow(v, "Clear the hit counts", nil, function() table.clear(P.skillTally) end)
+            heading2(v, "M1: what landed")
+            readout(v, function()
+                local lines = {}
+                for _, n in ipairs(CFG.WeaponOrder) do
+                    local w = CFG.Weapons[n]
+                    if w and w.M1 then
+                        table.insert(lines, n .. ":  " .. tostring(P.m1Notes[n] or "not tried yet"))
+                    end
+                end
+                if #lines == 0 then table.insert(lines, "no weapon has M1 on") end
+                table.insert(lines, "hits sent by  " .. tostring(P.hitSender))
+                table.insert(lines, "this server's COMBAT_REMOTE_THREAD  " .. tostring(P.combatFlag))
+                return table.concat(lines, "\n")
+            end)
+            heading2(v, "swords and guns from your inventory")
+            readout(v, function()
+                local R = (P :: any).rot
+                if not R then return "-" end
+                local inv = R.inv and #R.inv or 0
+                return string.format("inventory  %s\nloaded     %d   ·   %s\nback at stop  %s",
+                    R.inv and (inv .. " swords / guns") or "not read yet",
+                    R.loads, tostring(R.note), R.original and tostring(R.originalText) or "-")
+            end)
+        end)
     end
 
     -- =====================================================
-    -- ONE WEAPON
+    -- ONE WEAPON (from Attack)
     -- =====================================================
     do
         local v = makeView("weapon")
@@ -13710,26 +15167,15 @@ local function buildUI()
             function() local w = W() return w and w.use or false end,
             function(x) if editW then wcfg(editW).use = x end end)
         hairline(v)
-        switchRow(v, "M1", "How it lands is on the Attack page",
-            function() local w = W() return w and w.M1 or false end,
-            function(x)
+        chips(v, "Fires", { "M1", "Z", "X", "C", "V", "F" },
+            function(k) local w = W() return w and w[k] or false end,
+            function(k, x)
                 if not editW then return end
                 local w = wcfg(editW)
-                w.M1 = x
+                w[k] = x
                 if x then w.use = true end
             end)
-        for _, k in ipairs(KEYS) do
-            switchRow(v, k, nil,
-                function() local w = W() return w and w[k] or false end,
-                function(x)
-                    if not editW then return end
-                    local w = wcfg(editW)
-                    w[k] = x
-                    if x then w.use = true end
-                end)
-        end
         readout(v, function() return editW and P.skillState(editW) or "" end)
-
         heading2(v, "hold each key")
         caption(v, "Some skills fire on release after a hold. 0.05 is a tap.")
         for _, k in ipairs(KEYS) do
@@ -13748,8 +15194,11 @@ local function buildUI()
         actionRow(v, "Move up in the order", nil, function()
             if editW and P.moveWeaponUp(editW) then say(editW .. " moved up") end
         end)
-        caption(v, "Skills are tried weapon by weapon in this order, Z X C V F "
-            .. "inside each. M1 uses the first weapon whose M1 is on.")
+        fold(v, "How it works", function(v)
+            caption(v, "M1: how it lands is on the Attack page.")
+            caption(v, "Skills are tried weapon by weapon in this order, Z X C V F "
+                .. "inside each. M1 uses the first weapon whose M1 is on.")
+        end)
     end
 
     -- =====================================================
@@ -13758,24 +15207,13 @@ local function buildUI()
     do
         local v = makeView("magnet")
         gap(v, 6)
-        switchRow(v, "Magnet", "Pull the quest species into one pile and hold it",
-            function() return CFG.Magnet end,
-            function(x) CFG.Magnet = x end)
         readout(v, function()
             return string.format("held %d   ·   staying put %d   ·   put back %d\n%s",
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
-        heading2(v, "why no damage - the last ones")
-        readout(v, function()
-            if #P.noDamage == 0 then return "every one hit so far took damage" end
-            return table.concat(P.noDamage, "\n")
-        end)
-        caption(v, "Written the moment one stops taking damage. NOT OURS = the "
-            .. "magnet moves it only on your screen, the server has it where the "
-            .. "gap says. OUT OF REACH = the hit does not name it. SHIELDED = spawn "
-            .. "protection. Ours, in reach, no shield = the server refused the hit; "
-            .. "\"pile N of M\" shows whether it is always the last ones (a cap).")
-        actionRow(v, "Clear the list", nil, function() table.clear(P.noDamage) end)
+        switchRow(v, "Magnet", "Pull the quest species into one pile and hold it",
+            function() return CFG.Magnet end,
+            function(x) CFG.Magnet = x end)
         heading2(v, "the pile")
         switchRow(v, "Pull every one loaded",
             "Any distance - a new spawn joins the pile at once",
@@ -13789,32 +15227,6 @@ local function buildUI()
         sliderRow(v, "Pull at most, from their spawn", 50, 1000, 10,
             function() return CFG.MaxPull end,
             function(x) CFG.MaxPull = x end, " studs")
-        switchRow(v, "Learn how far each kind can go",
-            "Off by default: it only ever lowers the limit, and split camps",
-            function() return CFG.LearnLeash end,
-            function(x) CFG.LearnLeash = x end)
-        readout(v, function()
-            local lines = {}
-            if P.pileSplit then table.insert(lines, P.pileSplit) end
-            local names = {}
-            for n in pairs(P.leash) do table.insert(names, n) end
-            table.sort(names)
-            for _, n in ipairs(names) do
-                local l = P.leash[n]
-                table.insert(lines, string.format("%s: hit up to %s from spawn%s  ->  at most %.0f", n,
-                    l.ok and string.format("%.0f", l.ok) or "-",
-                    l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
-            end
-            if #lines == 0 then return "one pile per camp  ·  nothing measured yet" end
-            return table.concat(lines, "\n")
-        end)
-        actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
-        caption(v, "A camp wider than the limit is piled one side at a time: "
-            .. "the side nearest you, then the other when it is empty. A pile "
-            .. "holds: it does not move and lets nobody go while one of it is "
-            .. "alive. Learning on: pulled ones that stop taking damage while "
-            .. "nearer ones still do lower the limit for their kind (never one "
-            .. "that is NOT OURS).")
         sliderRow(v, "When that is off: within", 50, 600, 10,
             function() return CFG.GrabRadius end,
             function(x) CFG.GrabRadius = x end, " studs")
@@ -13824,6 +15236,7 @@ local function buildUI()
         sliderRow(v, "Pile width", 0, 10, 0.5,
             function() return CFG.PileSpread end,
             function(x) CFG.PileSpread = x end, " studs")
+        heading2(v, "other species")
         switchRow(v, "Pull other picked species too",
             "Only ones that spawn in this camp",
             function() return CFG.PullOthers end,
@@ -13831,65 +15244,59 @@ local function buildUI()
         sliderRow(v, "This camp means within", 20, 300, 10,
             function() return CFG.OthersRadius end,
             function(x) CFG.OthersRadius = x end, " studs")
-        heading2(v, "random mode")
-        sliderRow(v, "Random mode reaches", 200, 2000, 50,
-            function() return CFG.RandomRadius end,
-            function(x) CFG.RandomRadius = x end, " studs")
-        caption(v, "Round you; at the Castle on the Sea, round the pirate raid's "
-            .. "area (at least 800). Only ones within their pull limit go in a "
-            .. "pile - a far one gets its own. One that takes no damage when "
-            .. "pulled is fought where it stands, from close if high does not "
-            .. "hurt it.")
-        heading2(v, "raid mode")
-        sliderRow(v, "Raid mode pulls within", 100, 1500, 50,
-            function() return CFG.RaidRadius end,
-            function(x) CFG.RaidRadius = x end, " studs")
-        caption(v, "Of the newest raid island (Island 1 to 5). Every kind of "
-            .. "enemy in that circle goes in the pile. Outside a raid nothing "
-            .. "is fought and you stay where you are.")
-        sliderRow(v, "A raid island counts within", 500, 5000, 100,
-            function() return CFG.RaidReach end,
-            function(x) CFG.RaidReach = x end, " studs of you")
-        sliderRow(v, "Stuck: relocate after", 5, 60, 1,
-            function() return CFG.RaidStuckSecs end,
-            function(x) CFG.RaidStuckSecs = x end, " s with no HP off")
-        readout(v, function()
-            local rd = P.raid
-            if not rd then return "-" end
-            local rl = rd.loop
-            return table.concat({
-                "raid      " .. tostring(P.raidNote),
-                string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
-                    rd.note and ("  ·  last: " .. rd.note) or ""),
-                string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
-                    rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
-            }, "\n")
-        end)
-        heading2(v, "raid loop: the chip")
-        radio(v, 164, {
-            { "Flame", "Flame", "" }, { "Ice", "Ice", "" }, { "Quake", "Quake", "" },
-            { "Light", "Light", "" }, { "Dark", "Dark", "" }, { "Spider", "Spider", "" },
-            { "Magma", "Magma", "" }, { "Buddha", "Buddha", "" }, { "Sand", "Sand", "" },
-        }, function() return CFG.RaidChip end, function(x) CFG.RaidChip = x end)
-        sliderRow(v, "Trade a stored fruit worth at most", 0, 1000000, 10000,
-            function() return CFG.RaidFruitMax end,
-            function(x) CFG.RaidFruitMax = x end, " Beli")
-        caption(v, "The Mysterious Scientist takes a physical fruit for a chip (or "
-            .. "$100,000 every 2 hours): your cheapest stored one under this is "
-            .. "loaded into the backpack - never your hand - and traded. A "
-            .. "dearer fruit already in your backpack = nothing traded (he "
-            .. "could take it). Anything fails: you stay, tried again later.")
         heading2(v, "keeping them hittable")
-        caption(v, "The pile sits at the middle of the camp's spawn points - the "
-            .. "spot where the farthest pull is shortest, so every one stays "
-            .. "inside its own area (an enemy dragged out of it takes no damage). Each "
-            .. "one held is frozen (cannot walk) and keeps its own spot. One that is "
-            .. "held and hit with no HP change goes back where it came from and is "
-            .. "left alone for 30 s. 'Staying put' is how many are really yours to "
-            .. "move - fewer than 'held' = another player is nearer those.")
         sliderRow(v, "Put back after no damage for", 1, 10, 0.5,
             function() return CFG.PutBackAfter end,
             function(x) CFG.PutBackAfter = x end, " s")
+        switchRow(v, "Learn how far each kind can go",
+            "Off by default: it only ever lowers the limit, and split camps",
+            function() return CFG.LearnLeash end,
+            function(x) CFG.LearnLeash = x end)
+        fold(v, "How it works", function(v)
+            caption(v, "A camp wider than the limit is piled one side at a time: "
+                .. "the side nearest you, then the other when it is empty. A pile "
+                .. "holds: it does not move and lets nobody go while one of it is "
+                .. "alive. Learning on: pulled ones that stop taking damage while "
+                .. "nearer ones still do lower the limit for their kind (never one "
+                .. "that is NOT OURS).")
+            caption(v, "The pile sits at the middle of the camp's spawn points - the "
+                .. "spot where the farthest pull is shortest, so every one stays "
+                .. "inside its own area (an enemy dragged out of it takes no damage). Each "
+                .. "one held is frozen (cannot walk) and keeps its own spot. One that is "
+                .. "held and hit with no HP change goes back where it came from and is "
+                .. "left alone for 30 s. 'Staying put' is how many are really yours to "
+                .. "move - fewer than 'held' = another player is nearer those.")
+            caption(v, "Written the moment one stops taking damage. NOT OURS = the "
+                .. "magnet moves it only on your screen, the server has it where the "
+                .. "gap says. OUT OF REACH = the hit does not name it. SHIELDED = spawn "
+                .. "protection. Ours, in reach, no shield = the server refused the hit; "
+                .. "\"pile N of M\" shows whether it is always the last ones (a cap).")
+        end)
+        fold(v, "Details", function(v)
+            heading2(v, "why no damage - the last ones")
+            readout(v, function()
+                if #P.noDamage == 0 then return "every one hit so far took damage" end
+                return table.concat(P.noDamage, "\n")
+            end)
+            actionRow(v, "Clear the list", nil, function() table.clear(P.noDamage) end)
+            heading2(v, "measured limits")
+            readout(v, function()
+                local lines = {}
+                if P.pileSplit then table.insert(lines, P.pileSplit) end
+                local names = {}
+                for n in pairs(P.leash) do table.insert(names, n) end
+                table.sort(names)
+                for _, n in ipairs(names) do
+                    local l = P.leash[n]
+                    table.insert(lines, string.format("%s: hit up to %s from spawn%s  ->  at most %.0f", n,
+                        l.ok and string.format("%.0f", l.ok) or "-",
+                        l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
+                end
+                if #lines == 0 then return "one pile per camp  ·  nothing measured yet" end
+                return table.concat(lines, "\n")
+            end)
+            actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
+        end)
     end
 
     -- =====================================================
@@ -13912,10 +15319,6 @@ local function buildUI()
             { "auto", "Auto - high or close" },
             { "fixed", "One fixed spot" },
         }, function() return CFG.HeightMode end, function(x) CFG.HeightMode = x end)
-        caption(v, "Auto: high over the pile whenever the hit reaches from "
-            .. "there (remote hit, fruit click, fruit skills) - out of their "
-            .. "reach. Close beside it when it does not (key presses, "
-            .. "fighting-style and sword skills).")
         switchRow(v, "Always stay above them",
             "Never comes down close - every attack from this height",
             function() return CFG.StayHigh end,
@@ -13924,10 +15327,6 @@ local function buildUI()
                 if x then setPose("safe") end
                 P.reprobe()             -- the M1 ways were found at the old height
             end)
-        caption(v, "The height is counted from the highest enemy in the pile. "
-            .. "Staying above: what cannot reach from up there (a sword swing, "
-            .. "a short melee skill) shows as MISSED or 'nothing landed' - "
-            .. "lower the height, or switch this off for that weapon.")
         heading2(v, "auto")
         sliderRow(v, "High, over the pile", 5, 150, 1,
             function() return CFG.HeightSafe end,
@@ -13945,66 +15344,24 @@ local function buildUI()
         sliderRow(v, "Out to the side", 0, 20, 1,
             function() return CFG.SideFixed end,
             function(x) CFG.SideFixed = x end, " studs")
-    end
-
-    -- =====================================================
-    -- TRAVEL
-    -- =====================================================
-    do
-        local v = makeView("travel")
-        gap(v, 6)
-        sliderRow(v, "Fly speed", 100, 1000, 10,
-            function() return CFG.TravelSpeed end,
-            function(x) CFG.TravelSpeed = x end, " studs/s")
-        caption(v, "The public hubs fly at 330. Faster and the server may "
-            .. "pull you back - the line below counts it.")
-        sliderRow(v, "Instant under", 0, 400, 10,
-            function() return CFG.InstantHop end,
-            function(x) CFG.InstantHop = x end, " studs")
-        caption(v, "Closer than this is one jump, not a flight.")
-        readout(v, function()
-            return "last flight  " .. tostring(P.lastFlight)
-                .. string.format("\nflights %d   ·   instant hops %d   ·   pulled back %d",
-                    stats.flights, stats.hops, stats.pulledBack)
+        fold(v, "How it works", function(v)
+            caption(v, "Auto: high over the pile whenever the hit reaches from "
+                .. "there (remote hit, fruit click, fruit skills) - out of their "
+                .. "reach. Close beside it when it does not (key presses, "
+                .. "fighting-style and sword skills).")
+            caption(v, "The height is counted from the highest enemy in the pile. "
+                .. "Staying above: what cannot reach from up there (a sword swing, "
+                .. "a short melee skill) shows as MISSED or 'nothing landed' - "
+                .. "lower the height, or switch this off for that weapon.")
         end)
-        caption(v, "Noclip is on for the whole run: no collisions, nothing to "
-            .. "get stuck on, and the body is held so it never falls.")
     end
 
     -- =====================================================
-    -- SAFETY
+    -- SAFETY & HAKI
     -- =====================================================
     do
         local v = makeView("safety")
         gap(v, 6)
-        heading2(v, "getting out")
-        sliderRow(v, "Escape below", 10, 80, 5,
-            function() return CFG.EscapeBelow * 100 end,
-            function(x) CFG.EscapeBelow = x / 100 end, "%")
-        sliderRow(v, "Come back at", 30, 100, 5,
-            function() return CFG.ReturnAt * 100 end,
-            function(x) CFG.ReturnAt = x / 100 end, "%")
-        readout(v, function() return "escapes this run  " .. stats.escapes end)
-        caption(v, "There is no real god mode: health lives on the server. "
-            .. "What keeps you alive is hanging high over the pile, the pile "
-            .. "being pinned so nothing can walk to you, Observation, and "
-            .. "this: under the first number you fly 250 up and wait for the second.")
-
-        heading2(v, "haki")
-        switchRow(v, "Enhancement (J) - keep it on",
-            "Checked every pass; J when the character lacks it",
-            function() return CFG.AutoBuso end,
-            function(x) CFG.AutoBuso = x end)
-        switchRow(v, "Observation (E) - keep it on",
-            "After a death and on a timer; E only when it is off",
-            function() return CFG.AutoKen end,
-            function(x) CFG.AutoKen = x end)
-        sliderRow(v, "Check Observation every", 1, 15, 1,
-            function() return (CFG.KenEvery or 300) / 60 end,
-            function(x)
-                CFG.KenEvery = x * 60
-                kenNextAt = math.min(kenNextAt, os.clock() + CFG.KenEvery)
-            end, " min")
         readout(v, function()
             local lines = {}
             table.insert(lines, CFG.AutoBuso
@@ -14021,15 +15378,106 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
+        heading2(v, "getting out")
+        sliderRow(v, "Escape below", 10, 80, 5,
+            function() return CFG.EscapeBelow * 100 end,
+            function(x) CFG.EscapeBelow = x / 100 end, "%")
+        sliderRow(v, "Come back at", 30, 100, 5,
+            function() return CFG.ReturnAt * 100 end,
+            function(x) CFG.ReturnAt = x / 100 end, "%")
+        readout(v, function() return "escapes this run  " .. stats.escapes end)
+        heading2(v, "haki")
+        switchRow(v, "Enhancement (J) - keep it on",
+            "Checked every pass; J when the character lacks it",
+            function() return CFG.AutoBuso end,
+            function(x) CFG.AutoBuso = x end)
+        switchRow(v, "Observation (E) - keep it on",
+            "After a death and on a timer; E only when it is off",
+            function() return CFG.AutoKen end,
+            function(x) CFG.AutoKen = x end)
+        sliderRow(v, "Check Observation every", 1, 15, 1,
+            function() return (CFG.KenEvery or 300) / 60 end,
+            function(x)
+                CFG.KenEvery = x * 60
+                kenNextAt = math.min(kenNextAt, os.clock() + CFG.KenEvery)
+            end, " min")
+        fold(v, "How it works", function(v)
+            caption(v, "There is no real god mode: health lives on the server. "
+                .. "What keeps you alive is hanging high over the pile, the pile "
+                .. "being pinned so nothing can walk to you, Observation, and "
+                .. "this: under the first number you fly 250 up and wait for the second.")
+        end)
     end
 
     -- =====================================================
-    -- ELITE HUNT
+    -- TRAVEL & BOAT: flying, the boat, searching the sea
     -- =====================================================
     do
-        local v = makeView("elite")
+        local v = makeView("travel")
         gap(v, 6)
-        huntSwitches(v)
+        readout(v, function()
+            return "last flight  " .. tostring(P.lastFlight)
+                .. string.format("\nflights %d   ·   instant hops %d   ·   pulled back %d",
+                    stats.flights, stats.hops, stats.pulledBack)
+        end)
+        heading2(v, "flying")
+        sliderRow(v, "Fly speed", 100, 1000, 10,
+            function() return CFG.TravelSpeed end,
+            function(x) CFG.TravelSpeed = x end, " studs/s")
+        sliderRow(v, "Instant under", 0, 400, 10,
+            function() return CFG.InstantHop end,
+            function(x) CFG.InstantHop = x end, " studs")
+        heading2(v, "the boat")
+        sliderRow(v, "Boat speed", 250, 350, 5,
+            function() return CFG.SeaSpeed end,
+            function(x) CFG.SeaSpeed = x end, " studs/s")
+        sliderRow(v, "Turn speed (A / D)", 20, 120, 5,
+            function() return CFG.SeaTurnRate end,
+            function(x) CFG.SeaTurnRate = x end, " deg/s")
+        sliderRow(v, "One compass meter", 5, 15, 0.5,
+            function() return CFG.SeaStudsPerM end,
+            function(x) CFG.SeaStudsPerM = x end, " studs")
+        heading2(v, "searching the sea  ·  Prehistoric, Mirage")
+        radio(v, 82, {
+            { "manual", "I steer (A/D, W go, S stop)", "" },
+            { "auto",   "Auto: west, next server at the edge", "" },
+        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
+        sliderRow(v, "Auto: out to", 3000, 30000, 500,
+            function() return CFG.SeaSearchTo end,
+            function(x) CFG.SeaSearchTo = x end, " m")
+        sliderRow(v, "Auto: then turn left", 0, 180, 5,
+            function() return CFG.SeaTurnBack end,
+            function(x) CFG.SeaTurnBack = x end, " deg")
+        sliderRow(v, "Auto: and sail on", 0, 20000, 500,
+            function() return CFG.SeaLeg2 end,
+            function(x) CFG.SeaLeg2 = x end, " m")
+        sliderRow(v, "Auto: a turn every", 20, 180, 5,
+            function() return CFG.SeaTurnEvery end,
+            function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
+        sliderRow(v, "Auto: a turn up to", 0, 45, 1,
+            function() return CFG.SeaTurnMax end,
+            function(x) CFG.SeaTurnMax = x end, " deg")
+        fold(v, "How it works", function(v)
+            caption(v, "The public hubs fly at 330. Faster and the server may "
+                .. "pull you back - the line at the top counts it.")
+            caption(v, "Closer than this is one jump, not a flight.")
+            caption(v, "Noclip is on for the whole run: no collisions, nothing to "
+                .. "get stuck on, and the body is held so it never falls.")
+            caption(v, "Sail on 0 = the next server at the turn. I steer = no hop by distance.")
+            caption(v, "Meters are counted from the Tiki back boat dealer. Danger 6 "
+                .. "starts about 2,600 m out. Check the Prehistoric page's \"where\" line against your "
+                .. "compass once; if it drifts, move \"One compass meter\".")
+            caption(v, "Auto steering: at each turn, at random, left, right or straight "
+                .. "on - never more than 45 deg off west, so it still goes out to sea.")
+        end)
+    end
+
+    -- =====================================================
+    -- SERVERS & TEAM
+    -- =====================================================
+    do
+        local v = makeView("servers")
+        gap(v, 6)
         readout(v, function()
             local el = P.elite
             local t = el.tally
@@ -14042,201 +15490,6 @@ local function buildUI()
                 "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
             }, "\n")
         end)
-        caption(v, "The God's Chalice ends the hunt in the server it came in: "
-            .. "no hop there, ever - leaving or dying with it loses it. You are "
-            .. "held 300 up; Stop gives the character back.")
-
-        heading2(v, "fruit hunt")
-        sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
-            function() return CFG.FruitMinPrice end,
-            function(x) CFG.FruitMinPrice = x end, " Beli")
-        caption(v, "The game's own price. 0 = any fruit. 1000000 and up = "
-            .. "Legendary and Mythical. The dearest one lying here goes first.")
-        switchRow(v, "Include fruits players dropped",
-            "Off: server spawns only - drops are mostly trades",
-            function() return CFG.FruitPlayerDrops end,
-            function(x) CFG.FruitPlayerDrops = x end)
-        readout(v, function()
-            local el = P.elite
-            local lines = { "last      " .. tostring(el.fruitNote),
-                string.format("stored    %d", el.tally.fruits or 0) }
-            local ok, list = pcall(P.fruitsLying)
-            if ok and type(list) == "table" and #list > 0 then
-                for _, f in ipairs(list) do
-                    table.insert(lines, string.format("   %s  %s  %s", f.name,
-                        f.price and ("$" .. tostring(f.price)) or "$?",
-                        f.dropper and ("dropped by " .. tostring(f.dropper) .. (f.dropperNear and ", still by it" or ""))
-                            or "server spawn"))
-                end
-            else
-                table.insert(lines, "lying in this server: none")
-            end
-            return table.concat(lines, "\n")
-        end)
-        caption(v, "The whole server's fruits are seen from anywhere. A player "
-            .. "standing by their drop is trading it: never taken, even with "
-            .. "player drops on.")
-
-        heading2(v, "berry hunt  -  which berries")
-        -- What each one makes at the Barista (recipes from the Barista Cousin).
-        local BERRY_USE = {
-            ["Pink Pig Berry"]     = "Winter Sky: 15  (Legendary)",
-            ["White Cloud Berry"]  = "Snow White: 10  (Legendary)",
-            ["Red Cherry Berry"]   = "Pure Red: 15  (Legendary)",
-            ["Blue Icicle Berry"]  = "Absolute Zero 5, Blue Jeans 3",
-            ["Green Toad Berry"]   = "Slimy Green 1, Green Lizard 1",
-            ["Orange Berry"]       = "Orange Soda 1, Heat Wave 2",
-            ["Purple Jelly Berry"] = "Plump Purple 3",
-            ["Yellow Star Berry"]  = "Bright Yellow 1, Yellow Sunshine 1",
-        }
-        for _, n in ipairs(P.BERRIES) do
-            switchRow(v, n, BERRY_USE[n],
-                function() return CFG.BerryWant[n] == true end,
-                function(x) CFG.BerryWant[n] = x and true or false end)
-        end
-        readout(v, function()
-            local el = P.elite
-            local lines = { "last      " .. tostring(el.berryNote),
-                string.format("picked    %d", el.tally.berries or 0) }
-            if el.have.read then
-                local bits = {}
-                for _, n in ipairs(P.BERRIES) do
-                    table.insert(bits, string.format("%s %d", (string.gsub(n, " Berry$", "")), el.have[n] or 0))
-                end
-                table.insert(lines, "you have  " .. table.concat(bits, " · "))
-            end
-            local _, r = parts()
-            local ok, list = pcall(P.berriesLying)
-            if ok and type(list) == "table" and #list > 0 then
-                for _, b in ipairs(list) do
-                    table.insert(lines, string.format("   %s   %s", table.concat(b.names, " + "),
-                        r and string.format("%.0f studs", (b.pos - r.Position).Magnitude) or ""))
-                end
-            else
-                table.insert(lines, "on the bushes here: none")
-            end
-            return table.concat(lines, "\n")
-        end)
-        caption(v, "At most 4 in a server, a new one every 15 min, gone after an "
-            .. "hour - anyone can take one. The Barista makes the colors "
-            .. "(+ 7,500 fragments for a Legendary).")
-
-        heading2(v, "aura recipe hunt  -  which recipes")
-        for i, n in ipairs(P.RECIPES) do
-            switchRow(v, n, (i <= 3) and "Legendary - rip_indra's buttons need all three" or "Rare",
-                function() return CFG.RecipeWant[n] == true end,
-                function(x) CFG.RecipeWant[n] = x and true or false end)
-        end
-        readout(v, function()
-            local el = P.elite
-            return table.concat({
-                "here      " .. tostring(el.offer or "not asked yet"),
-                "last      " .. tostring(el.recipeNote),
-                string.format("learned   %d", el.tally.recipes or 0),
-            }, "\n")
-        end)
-        caption(v, "He teaches ONE recipe per server, asked from anywhere - no "
-            .. "flight to find out. He comes 20 min after a server starts, "
-            .. "stays 20, is gone 2. Switch off the ones you already have. A "
-            .. "recipe learned goes off by itself; not learned (fragments, Aura "
-            .. "stage 5) stops the hunt and says why.")
-
-        heading2(v, "legendary sword hunt  (Second Sea)  -  which swords")
-        local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
-        for _, n in ipairs(P.SWORDS) do
-            switchRow(v, n, "was " .. OLD[n] .. "  ·  $2,000,000",
-                function() return CFG.SwordWant[n] == true end,
-                function(x) CFG.SwordWant[n] = x and true or false end)
-        end
-        readout(v, function()
-            local el = P.elite
-            return table.concat({
-                "here      " .. tostring(el.swordOffer or "not asked yet"),
-                "last      " .. tostring(el.swordNote or "-"),
-                string.format("bought    %d", el.tally.swords or 0),
-            }, "\n")
-        end)
-        caption(v, "The Legendary Sword Dealer sells ONE of the three per visit. "
-            .. "He is asked the moment you join - from anywhere, no Cafe Manager, "
-            .. "no 10 minutes - and bought from; not here, or not one you need = "
-            .. "the next server. Swords you own are switched off by themselves. "
-            .. "True Triple Katana: all three at 300 mastery, then the Mysterious Man.")
-
-        heading2(v, "fire flower hunt  (Draco V2, Third Sea)")
-        readout(v, function()
-            local el = P.elite
-            local lines = { "last      " .. tostring(el.flowerNote),
-                string.format("picked    %d   ·   you have %s", el.tally.flowers or 0,
-                    el.flowerHave and tostring(el.flowerHave) or "not read yet") }
-            if CFG.Hunt and CFG.HuntKind == "flower" then
-                if el.flowerFirstKill then
-                    local s = math.floor(os.clock() - el.flowerFirstKill)
-                    table.insert(lines, string.format("here      %d:%02d since the first kill  ·  no flower = next server at %g min",
-                        s // 60, s % 60, CFG.FlowerGiveUp or 2.5))
-                else
-                    table.insert(lines, "here      the clock starts at the first kill")
-                end
-            end
-            local ok, list = pcall(P.flowersLying)
-            table.insert(lines, (ok and type(list) == "table" and #list > 0)
-                and ("lying now " .. #list) or "lying now none")
-            return table.concat(lines, "\n")
-        end)
-        sliderRow(v, "No flower this long after the first kill: leave", 1, 5, 0.5,
-            function() return CFG.FlowerGiveUp end,
-            function(x) CFG.FlowerGiveUp = x end, " min")
-        caption(v, "Needs the Dragon Wizard's V2 quest taken - flowers spawn only "
-            .. "then. Forest + Mythological Pirates, one at a time where they "
-            .. "stand (no magnet: the flower comes up where one dies). Picked "
-            .. "the moment it lies there, then the next server - that one gives "
-            .. "none for 5-15 min. Nothing dies for 3 min: the next server too.")
-
-        heading2(v, "blaze ember hunt  (Third Sea)")
-        readout(v, function()
-            local m = P.ember
-            local lines = {
-                "now       " .. tostring(m.note),
-                "quest     " .. tostring(m.quest or "none yet") .. (m.how and ("  (" .. m.how .. ")") or ""),
-                string.format("embers    %d taken   ·   you have %s", m.tally.embers, m.have and tostring(m.have) or "not read yet"),
-                string.format("quests    %d   ·   trees broken %d%s", m.tally.quests, m.tally.trees,
-                    m.mustVisit and "   ·   asked AT the Dragon Hunter" or ""),
-            }
-            local best, bn = nil, -1
-            for key, L in pairs(m.learn) do
-                if L.closed > bn then best, bn = key, L.closed end
-            end
-            if best then table.insert(lines, string.format("trees     best key %s (%d of %d)", best, m.learn[best].closed, m.learn[best].casts)) end
-            return table.concat(lines, "\n")
-        end)
-        sliderRow(v, "Stop when you have", 15, 99, 1,
-            function() return CFG.EmberStopAt end,
-            function(x) CFG.EmberStopAt = x end, " embers")
-        sliderRow(v, "Trees taller than this are skipped", 30, 300, 10,
-            function() return CFG.EmberTreeMax end,
-            function(x) CFG.EmberTreeMax = x end, " studs")
-        caption(v, "Needs Dragon Talon at 500 mastery and the Dojo's Yellow Belt. "
-            .. "The quest is asked for from where you are; if that does not take, "
-            .. "at the Dragon Hunter. Enforcers / Assailants are pulled and killed "
-            .. "(M1 as the Attack page picks). Trees: blasts only - the Skull Guitar / "
-            .. "Bazooka M1 first, else Z/X/C of every weapon, aimed; never a plain M1 "
-            .. "(the medium ground trees first, bamboo last, the giants never). Each quest drops 3 "
-            .. "embers - run through. The tree list goes to "
-            .. "workspace/bff_ember_trees.txt.")
-
-        heading2(v, "elite pirate hunt  (Third Sea)")
-        readout(v, function()
-            local el = P.elite
-            local t = el.tally
-            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
-            return table.concat({
-                "Elite Hunter  " .. tostring(el.reply or "not asked")
-                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
-                string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
-                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
-                "last      " .. tostring(el.lastKill or "-"),
-            }, "\n")
-        end)
-
         heading2(v, "when nothing here is worth it")
         switchRow(v, "Hop to the next server",
             "Off: wait in this one",
@@ -14246,26 +15499,10 @@ local function buildUI()
             { "fewest", "Fewest players first", "fewer hunters" },
             { "random", "Any order",            "" },
         }, function() return CFG.HopOrder end, function(x) CFG.HopOrder = x end)
-        sliderRow(v, "Look for", 3, 30, 1,
-            function() return CFG.EliteLook end,
-            function(x) CFG.EliteLook = x end, " s")
-        caption(v, "After a join: this long for an elite to show before leaving. "
-            .. "When the Elite Hunter says none is up, 3 s is enough.")
         sliderRow(v, "Try a server again after", 5, 60, 1,
             function() return CFG.HopRevisit end,
             function(x) CFG.HopRevisit = x end, " min")
-        caption(v, "One killed there is back 8 min 45 s later.")
-
-        heading2(v, "the quest")
-        switchRow(v, "Take the Elite Hunter's quest",
-            "Progress toward Yama - the chalice does not need it",
-            function() return CFG.EliteQuest end,
-            function(x) CFG.EliteQuest = x end)
-        caption(v, "Asked from where you stand. If that gets no answer, once per "
-            .. "server from in front of the Elite Hunter. A different quest "
-            .. "running is dropped for it.")
-
-        heading2(v, "after a hop")
+        heading2(v, "your team")
         switchRow(v, "Pick my team on join",
             "The Pirates / Marines screen every new server shows",
             function() return CFG.AutoTeam end,
@@ -14276,10 +15513,6 @@ local function buildUI()
         }, function() return CFG.Team end, function(x) CFG.Team = x end)
         readout(v, function() return "team      " .. tostring(P.teamNote) end)
         readout(v, function() return P.reloadWay() end)
-        caption(v, "Your settings, the servers already looked at and these "
-            .. "counts go with you. Without queue_on_teleport, the README's "
-            .. "three-line loader in the executor's autoexec folder does the same.")
-
         heading2(v, "by hand")
         actionRow(v, "Hop now", nil, function() P.hopNow() end)
         actionRow(v, "Forget the servers looked at", nil, function()
@@ -14292,613 +15525,16 @@ local function buildUI()
             t.since = os.time()
             P.elite.note = "hunt counts reset"
         end)
+        fold(v, "How it works", function(v)
+            caption(v, "One killed there is back 8 min 45 s later.")
+            caption(v, "Your settings, the servers already looked at and these "
+                .. "counts go with you. Without queue_on_teleport, the README's "
+                .. "three-line loader in the executor's autoexec folder does the same.")
+        end)
     end
 
     -- =====================================================
-    -- SEA: THE PREHISTORIC HUNT AND THE VOLCANO EVENT
-    -- =====================================================
-    do
-        local v = makeView("sea")
-        gap(v, 6)
-        heading2(v, "sea events hunt  (Third Sea)")
-        readout(v, function()
-            local s, e = P.sea, P.seaev
-            local c = e.count
-            local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
-            local kinds = {}
-            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark", "Leviathan" }) do
-                if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
-            end
-            local spy = e.spy
-            return table.concat({
-                "now       " .. tostring(e.note),
-                string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
-                "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
-                "spy       " .. (spy and string.format("%s  ·  asked %d min ago%s", tostring(spy.text),
-                    math.floor((os.clock() - spy.at) / 60),
-                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "") or "not asked yet"),
-                "last      " .. tostring(e.last),
-                string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
-                    s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
-            }, "\n")
-        end)
-        sliderRow(v, "Patrol at Sea Danger", 1, 6, 1,
-            function() return CFG.SeaEvDanger end,
-            function(x) CFG.SeaEvDanger = x end, "")
-        for _, row in ipairs({
-            { "Sea Beast", "Hovered over, every key aimed at it (M1 only in Kitsune form)" },
-            { "Rumbling Waters", "Three beasts at once - one at a time, the nearest first" },
-            { "Terrorshark", "Round it, dodging - every key (M1 only in Kitsune form)" },
-            { "Piranha", "A school of them = one sea event" },
-            { "Shark", "Off: sailed away from" },
-        }) do
-            local k = row[1]
-            switchRow(v, "Fight: " .. k, row[2],
-                function() return (CFG.SeaEvFight or {})[k] == true end,
-                function(x)
-                    CFG.SeaEvFight = CFG.SeaEvFight or {}
-                    CFG.SeaEvFight[k] = x
-                end)
-        end
-        caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
-            .. "Boat and its crew, the haunted ships) are always sailed away from - "
-            .. "slow, and they break the boat - then the boat waits, stopped, until "
-            .. "the ship is twice that far or gone. The Leviathan: its own switch below. The "
-            .. "boat patrols a slow circle at the danger you set (sea events come to a "
-            .. "boat that is near); a fight takes you off the seat and holds the boat "
-            .. "up out of the waves; then back to the wheel. Never the next server.")
-        sliderRow(v, "Count goal (the Spy: 20 or more)", 1, 60, 1,
-            function() return CFG.SeaEvGoal end,
-            function(x) CFG.SeaEvGoal = x end, " events")
-        switchRow(v, "Stop at the goal", "The hunt and the farm stop the moment the count reaches it",
-            function() return CFG.SeaEvStopAtGoal end,
-            function(x) CFG.SeaEvStopAtGoal = x end)
-        actionRow(v, "Ask the Spy now", nil, function() P.seaev.spyAsk() end)
-        actionRow(v, "Reset the count to 0", "danger", function() P.seaev.reset() end)
-        caption(v, "One sea event = one group of the same kind (five piranhas count "
-            .. "once - the wiki; three beasts = Rumbling Waters = once), counted when "
-            .. "every one of it is gone and at least one was KILLED. Escaped or "
-            .. "despawned = not counted. Kept across joins - reset it after each Frozen "
-            .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
-            .. "5 min and after each count) is the truth; the count is the guide.")
-        heading2(v, "the leviathan")
-        switchRow(v, "Leviathan fight", "On = only the Leviathan (inside the Frozen Dimension); starts the run",
-            function() return CFG.LeviFight end,
-            function(x)
-                CFG.LeviFight = x
-                if x and not P.running then P.start() end
-            end)
-        sliderRow(v, "Over the part being hit", 30, 300, 5,
-            function() return CFG.LeviHeight end,
-            function(x) CFG.LeviHeight = x end, " studs")
-        sliderRow(v, "Your share of each segment before the next", 8, 50, 1,
-            function() return CFG.LeviShare end,
-            function(x) CFG.LeviShare = x end, " %")
-        readout(v, function()
-            local lv = P.seaev.levi
-            local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills),
-                string.format("dodged    %d (last: %s)  ·  out of now: %s", P.seaev.dodges or 0,
-                    tostring(P.seaev.lastDodge or "-"), (#lv.now > 0) and table.concat(lv.now, ", ") or "nothing") }
-            local ok, list = pcall(P.seaev._t.leviParts)
-            for _, x in ipairs((ok and list) or {}) do
-                local m = x.max or x.maxSeen
-                table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
-                    x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
-                    x.enabled and "takes damage" or "not now",
-                    m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
-            end
-            return table.concat(lines, "\n")
-        end)
-        caption(v, "On = ONLY the Leviathan: switch it on inside the Frozen Dimension (it "
-            .. "starts the run); nothing else runs, and until it shows the character is "
-            .. "yours. Its segments first, the head LAST (segments respawn: back to them). "
-            .. "Fought like a Sea Beast - every ready key aimed at the part, no M1 out of "
-            .. "Kitsune form, round it, the water a floor, dives waited out. ITS ATTACKS, "
-            .. "read off the game's own effects: the tail's red area - out of it sideways "
-            .. "(up does not save you); the mouth beam's charge and the beam - off its "
-            .. "line; the tornadoes - away; the roar's ice spears - up the moment one "
-            .. "flies; any other attack animation - up. The reward needs 8% of the damage "
-            .. "on EACH segment: yours is read off its HP while your keys land (others' "
-            .. "hits in that moment count too), so the next one at your share. Its HEART: "
-            .. "the character is yours - the Beast Hunter's harpoon, tow it to Tiki. "
-            .. "Killed: the sea event count back to 0 (the Spy's cooldown starts). No "
-            .. "boat is touched. The first one writes its parts and each attack's size "
-            .. "to workspace/bff_beast_probe.txt.")
-        heading2(v, "the loadout at sea")
-        radio(v, 122, {
-            { "auto", "Kitsune form first, its M1 tested", "hurts them = form; else Kitsune + fighting style" },
-            { "form", "Kitsune form, always", "" },
-            { "base", "Never transformed", "Kitsune + fighting style (the weapons below)" },
-        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
-        sliderRow(v, "Test the form's M1 for at most", 10, 60, 5,
-            function() return CFG.SeaEvTrial end,
-            function(x) CFG.SeaEvTrial = x end, " s")
-        readout(v, function()
-            local e = P.seaev
-            local lines = {}
-            for _, cls in ipairs({ "beast", "fish" }) do
-                local f = e.form[cls]
-                local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
-                local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
-                    or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
-                    or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
-                table.insert(lines, string.format("%-17s %s", name, what))
-            end
-            table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
-                .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
-            return table.concat(lines, "\n")
-        end)
-        caption(v, "Out of form, only these weapons fight at sea (your points: fruit + melee). "
-            .. "In form, the game takes only the fruit's moves anyway.")
-        for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
-            switchRow(v, ty, nil,
-                function() return (CFG.SeaEvWeapons or {})[ty] == true end,
-                function(x)
-                    CFG.SeaEvWeapons = CFG.SeaEvWeapons or {}
-                    CFG.SeaEvWeapons[ty] = x
-                end)
-        end
-        heading2(v, "dodging (Terrorshark / Piranha / Shark)")
-        switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
-            function() return CFG.SeaDodge end,
-            function(x) CFG.SeaDodge = x end)
-        sliderRow(v, "Round it at", 10, 80, 5,
-            function() return CFG.DodgeRadius end,
-            function(x) CFG.DodgeRadius = x end, " studs")
-        sliderRow(v, "Moving at", 10, 150, 5,
-            function() return CFG.DodgeSpeed end,
-            function(x) CFG.DodgeSpeed = x end, " studs/s")
-        sliderRow(v, "Up when it attacks", 10, 120, 5,
-            function() return CFG.DodgeUp end,
-            function(x) CFG.DodgeUp = x end, " studs")
-        sliderRow(v, "Stay up for", 0.3, 3, 0.1,
-            function() return CFG.DodgeTime end,
-            function(x) CFG.DodgeTime = x end, " s")
-        readout(v, function()
-            local e = P.seaev
-            return string.format("dodged    %d times  ·  last: %s\nwater     %s", e.dodges or 0, tostring(e.lastDodge or "-"),
-                P.floorY and string.format("a floor at Y %.0f - you never go under it (swimming off, knockback refused)", P.floorY)
-                    or "a floor during every sea fight")
-        end)
-        caption(v, "It starts an attack (a new animation), charges at you or leaps: up "
-            .. "for a moment, then back. The water is a floor in every sea fight: you "
-            .. "are never under it, whatever the target does, and a knockback or a "
-            .. "pull is undone the next frame.")
-        heading2(v, "fighting at sea")
-        sliderRow(v, "Over a Sea Beast", 30, 250, 5,
-            function() return CFG.BeastHeight end,
-            function(x) CFG.BeastHeight = x end, " studs")
-        sliderRow(v, "Over a Terrorshark / Piranha / Shark", 10, 100, 5,
-            function() return CFG.FishHeight end,
-            function(x) CFG.FishHeight = x end, " studs")
-        sliderRow(v, "Boat held up while you fight (0 = left)", 0, 300, 10,
-            function() return CFG.BoatLift end,
-            function(x) CFG.BoatLift = x end, " studs")
-        sliderRow(v, "Ship raid: sail away until it is", 500, 4000, 100,
-            function() return CFG.FleeTo end,
-            function(x) CFG.FleeTo = x end, " studs off")
-        heading2(v, "keys fired at a sea event")
-        for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do
-            switchRow(v, k, (k == "V") and "Never on a transformation fruit (Kitsune's V transforms) - on for the rest" or nil,
-                function() return (CFG.SeaEvKeys or {})[k] end,
-                function(x)
-                    CFG.SeaEvKeys = CFG.SeaEvKeys or {}
-                    CFG.SeaEvKeys[k] = x
-                end)
-        end
-        caption(v, "Every key the INSTANT it is ready (the moment the game takes it - not "
-            .. "during another move - and the next one the frame it fires) - your "
-            .. "Attack page is left for the normal farm. NO M1 at a sea event (an "
-            .. "untransformed M1 does nothing to one): only Kitsune's, in Kitsune form. "
-            .. "Which key hurts it is learned from its HP.")
-        heading2(v, "what hurts a sea beast (learned)")
-        readout(v, function()
-            local rows = {}
-            for key, L in pairs(P.seaev.learn or {}) do table.insert(rows, { key = key, L = L }) end
-            table.sort(rows, function(a, b)
-                local sa, sb = P.sea.keyScore(a.key, P.seaev.learn), P.sea.keyScore(b.key, P.seaev.learn)
-                if sa ~= sb then return sa > sb end
-                return a.key < b.key
-            end)
-            if #rows == 0 then return "nothing fired at a sea beast yet" end
-            local out = {}
-            for i, r in ipairs(rows) do
-                if i > 10 then break end
-                table.insert(out, string.format("%-24s hurt it %d of %d%s", r.key, r.L.closed, r.L.casts,
-                    (r.L.closed == 0 and r.L.casts >= 4) and "  - does not" or ""))
-            end
-            return table.concat(out, "\n")
-        end)
-
-        heading2(v, "prehistoric hunt  (Third Sea)")
-        readout(v, function()
-            local s = P.sea
-            local t = s.tally
-            return table.concat({
-                "now       " .. tostring(s.note),
-                "boat      " .. tostring(s.boatNote)
-                    .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
-                string.format("where     %s  ·  danger %s",
-                    s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
-                        math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
-                    tostring(s.danger or "-")),
-                string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
-            }, "\n")
-        end)
-        radio(v, 122, {
-            { "manual", "I steer (A/D, W go, S stop)", "no hop by distance" },
-            { "auto",   "Auto: west, next server at the edge", "" },
-        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
-        sliderRow(v, "Turn speed (A / D)", 20, 120, 5,
-            function() return CFG.SeaTurnRate end,
-            function(x) CFG.SeaTurnRate = x end, " deg/s")
-        sliderRow(v, "Boat speed", 250, 350, 5,
-            function() return CFG.SeaSpeed end,
-            function(x) CFG.SeaSpeed = x end, " studs/s")
-        sliderRow(v, "Auto: out to", 3000, 30000, 500,
-            function() return CFG.SeaSearchTo end,
-            function(x) CFG.SeaSearchTo = x end, " m")
-        sliderRow(v, "Auto: then turn left", 0, 180, 5,
-            function() return CFG.SeaTurnBack end,
-            function(x) CFG.SeaTurnBack = x end, " deg")
-        sliderRow(v, "Auto: and sail on (0 = next server)", 0, 20000, 500,
-            function() return CFG.SeaLeg2 end,
-            function(x) CFG.SeaLeg2 = x end, " m")
-        switchRow(v, "Volcanic Magnet first",
-            "Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
-            function() return CFG.SeaMagnet end,
-            function(x) CFG.SeaMagnet = x end)
-        readout(v, function()
-            local g = P.magnet
-            if not g then return "-" end
-            local c = g.inv
-            return string.format("magnet     %s\nhave       %s", tostring(g.note),
-                c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
-                    or "not read yet")
-        end)
-        sliderRow(v, "Safety cap: no island this long in a server (0 = off)", 0, 60, 1,
-            function() return CFG.SeaSearchMinutes end,
-            function(x) CFG.SeaSearchMinutes = x end, " min")
-        sliderRow(v, "One compass meter", 5, 15, 0.5,
-            function() return CFG.SeaStudsPerM end,
-            function(x) CFG.SeaStudsPerM = x end, " studs")
-        caption(v, "Meters are counted from the Tiki back boat dealer. Danger 6 "
-            .. "starts about 2,600 m out. Check the \"where\" line against your "
-            .. "compass once; if it drifts, move \"One compass meter\".")
-        sliderRow(v, "Auto: a turn every", 20, 180, 5,
-            function() return CFG.SeaTurnEvery end,
-            function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
-        sliderRow(v, "Auto: a turn up to", 0, 45, 1,
-            function() return CFG.SeaTurnMax end,
-            function(x) CFG.SeaTurnMax = x end, " deg")
-        caption(v, "Auto steering: at each turn, at random, left, right or straight "
-            .. "on - never more than 45 deg off west, so it still goes out to sea.")
-        caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
-            .. "dealer, puts you at the wheel and drives west through the sea "
-            .. "events. Island up: off the boat, onto the island, and it never "
-            .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
-            .. "or nothing by the far edge: the next server.")
-
-        heading2(v, "the mirage hunts")
-        readout(v, function()
-            local s = P.sea
-            local m = s.mirage
-            local lines = {
-                string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
-                    s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
-            }
-            if m then
-                table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
-                    m.fits and "" or "  - sailed past"))
-                if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
-                if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
-            end
-            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours") end
-            return table.concat(lines, "\n")
-        end)
-        caption(v, "Four hunts on the Hunt page, each only its job: the Mirage "
-            .. "hunt puts you on it; the Advanced Fruit Dealer hunt puts you in "
-            .. "front of him with his shop open (he stands at a random spot - "
-            .. "not read = the island searched until he is); the chest hunt takes "
-            .. "every chest; the Blue Gear hunt gives you the moon (a high point, "
-            .. "face it, T) and runs over the gear the moment it shows. A Mirage "
-            .. "already up = straight to the job, else the boat sails for one. "
-            .. "Done = the farm stops and leaves you on it. A Mirage lives 15 min; "
-            .. "dying or leaving makes it go.")
-        heading2(v, "blue gear hunt: which mirage")
-        radio(v, 122, {
-            { "night", "One that sees night", "the gear needs it" },
-            { "full",  "A full-moon night only", "" },
-            { "any",   "Every Mirage", "" },
-        }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
-        caption(v, "Only the Blue Gear hunt asks this (the gear needs night, 2 min "
-            .. "to climb); the other Mirage hunts take every one.")
-
-        heading2(v, "volcano event")
-        switchRow(v, "Volcano event",
-            "Whenever a Prehistoric Island is up (the Prehistoric hunt runs it anyway)",
-            function() return CFG.Volcano end,
-            function(x) CFG.Volcano = x end)
-        radio(v, 82, {
-            { "hop",   "After the loot: the next server", "the hunt goes on there - the loop" },
-            { "again", "After the loot: again on this island", "the wiki: the event has no cooldown" },
-        }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
-        sliderRow(v, "Stay after the loot (the game saves it) before the next server", 0, 300, 5,
-            function() return CFG.LootStay end,
-            function(x) CFG.LootStay = x end, " s")
-        switchRow(v, "Home by respawn after the loot",
-            "The stay over: reset - back at your spawn (Tiki), then the next server. Never with the chalice",
-            function() return CFG.RespawnHome end,
-            function(x) CFG.RespawnHome = x end)
-        sliderRow(v, "The egg: stand still after E (its animation)", 0, 10, 0.5,
-            function() return CFG.EggStay end,
-            function(x) CFG.EggStay = x end, " s")
-        sliderRow(v, "Each bone, at least", 0, 2, 0.1,
-            function() return CFG.BoneMin end,
-            function(x)
-                CFG.BoneMin = x
-                CFG.BoneMax = math.max(tonumber(CFG.BoneMax) or 1, x)
-            end, " s")
-        sliderRow(v, "Each bone, at most", 0, 3, 0.1,
-            function() return CFG.BoneMax end,
-            function(x)
-                CFG.BoneMax = x
-                CFG.BoneMin = math.min(tonumber(CFG.BoneMin) or 0.5, x)
-            end, " s")
-        readout(v, function()
-            local s = P.sea
-            local ev = s.ev
-            local lines = {}
-            local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
-            table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
-                b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
-            if ev and ev.base then
-                table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
-                    ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
-                    ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
-            end
-            if s.lootCheck then table.insert(lines, "last hop  " .. tostring(s.lootCheck)) end
-            return table.concat(lines, "\n")
-        end)
-        readout(v, function()
-            local ev = P.sea.ev
-            local t = P.sea.tally
-            local lines = {}
-            if ev then
-                table.insert(lines, "now       " .. tostring(ev.note))
-                table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
-                    tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
-                    ev.counted and "COUNTED" or "not counted (not there at the start)"))
-                table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
-                    ev.vents, ev.golems, ev.bones, ev.eggs))
-                table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
-                    ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
-                    ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
-                    ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
-                table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
-                table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
-                    tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
-                table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
-            else
-                table.insert(lines, "no Prehistoric Island in this server")
-            end
-            table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
-                t.events, t.vents, t.golems, t.bones, t.eggs))
-            return table.concat(lines, "\n")
-        end)
-        heading2(v, "which keys close vents (learned)")
-        readout(v, function()
-            local rows = {}
-            for key, L in pairs(P.sea.learn or {}) do table.insert(rows, { key = key, L = L }) end
-            table.sort(rows, function(a, b)
-                local sa, sb = P.sea.keyScore(a.key), P.sea.keyScore(b.key)
-                if sa ~= sb then return sa > sb end
-                return a.key < b.key
-            end)
-            if #rows == 0 then return "nothing fired at a vent yet" end
-            local out = {}
-            for i, r in ipairs(rows) do
-                if i > 10 then break end
-                table.insert(out, string.format("%-24s closed %d of %d%s", r.key, r.L.closed, r.L.casts,
-                    (r.L.closed == 0 and r.L.casts >= 4) and "  - does not close them" or ""))
-            end
-            return table.concat(out, "\n")
-        end)
-        switchRow(v, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
-            function() return CFG.SilentAim end,
-            function(x) CFG.SilentAim = x end)
-        readout(v, function()
-            return "silent aim  " .. tostring(P.silentNote or "-") .. "  (guns)"
-                .. "\nskill aim   " .. tostring(P.gameAimText and P.gameAimText() or "-") .. "  (skills, a fruit's M1)"
-        end)
-        heading2(v, "the gun M1 at a vent")
-        switchRow(v, "Skull Guitar M1 on the vents",
-            "Loaded if in your inventory, fired at the vent stood still - before any skill",
-            function() return CFG.VentGuitar end,
-            function(x) CFG.VentGuitar = x end)
-        readout(v, function()
-            local S = P.sea
-            local g = S.ventGun and S.ventGun()
-            if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
-            local L = S.learn[g .. " M1"]
-            return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
-                tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
-        end)
-        sliderRow(v, "Seconds between shots", 0.1, 1, 0.05,
-            function() return CFG.VentM1Every end,
-            function(x) CFG.VentM1Every = x end, " s")
-        caption(v, "The wiki: Skull Guitar's M1 breaks things (Destructible Physics) "
-            .. "and cools fast - made for the vents; Bazooka and Cannon too. Its M1 "
-            .. "costs 20 energy: under that, the skills below until it is back. Six "
-            .. "turns closing nothing = the skills instead.")
-
-        heading2(v, "golem weapon")
-        local gbox = chooser(v, 130)
-        local gsig = nil
-        local function grefresh()
-            local names = {}
-            for _, t in ipairs(toolNames()) do
-                local ty = toolType(t)
-                if ty == "Sword" or ty == "Melee" then table.insert(names, t.Name) end
-            end
-            table.sort(names)
-            local cur = CFG.GolemWeapon or ""
-            if cur ~= "" and not table.find(names, cur) then table.insert(names, 1, cur) end
-            local sig = cur .. "|" .. table.concat(names, ",")
-            if sig == gsig then return end
-            gsig = sig
-            for _, c in ipairs(gbox:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            chooserRow(gbox, 1, "The Attack page's M1 pick", "", cur == "", function()
-                CFG.GolemWeapon = ""
-                gsig = nil
-                grefresh()
-            end)
-            for i, n in ipairs(names) do
-                local t = findTool(n)
-                chooserRow(gbox, i + 1, n, t and toolType(t) or "inventory", cur == n, function()
-                    CFG.GolemWeapon = n
-                    gsig = nil
-                    grefresh()
-                end)
-            end
-        end
-        grefresh()
-        addLive(grefresh)
-        readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
-        caption(v, "Its M1 swings on the Lava Golems (the strongest swing: Cursed Dual "
-            .. "Katana 4100+, Hallow Scythe 3755). Not carried: loaded from your "
-            .. "inventory when the event starts, and kept. Not found: the Attack page's pick.")
-
-        heading2(v, "keys fired at a vent")
-        for _, k in ipairs({ "Z", "X", "C", "V" }) do
-            switchRow(v, k, nil,
-                function() return (CFG.VentKeys or {})[k] end,
-                function(x)
-                    CFG.VentKeys = CFG.VentKeys or {}
-                    CFG.VentKeys[k] = x
-                end)
-        end
-        caption(v, "No vent gun (or its energy low): every weapon you carry fires "
-            .. "these, guns first, aimed AT the vent. Only moves that break things "
-            .. "close one; a key whose skill does not fire is left out for 30 s. "
-            .. "Everything cooling: a sword / gun from your inventory, then an aimed M1.")
-        sliderRow(v, "Stand off a vent", 4, 30, 1,
-            function() return CFG.VentDistance end,
-            function(x) CFG.VentDistance = x end, " studs")
-        heading2(v, "lava golems")
-        sliderRow(v, "Held off the relic", 30, 150, 5,
-            function() return CFG.GolemCage end,
-            function(x) CFG.GolemCage = x end, " studs")
-        sliderRow(v, "Held up in the air", 0, 150, 5,
-            function() return CFG.GolemLift end,
-            function(x) CFG.GolemLift = x end, " studs")
-        caption(v, "Magnet on: every golem is lifted there the moment it lands and "
-            .. "held the whole event - held, it cannot touch the relic - and "
-            .. "never put back. One that cannot be held (not ours to move) is "
-            .. "fought first where it stands. Held ones die when no vent is open "
-            .. "(your Attack page weapons). Magnet off: golems first, always.")
-        heading2(v, "priority")
-        sliderRow(v, "Keep the relic over", 50, 100, 1,
-            function() return CFG.RelicMin end,
-            function(x) CFG.RelicMin = x end, " %")
-        sliderRow(v, "Pressure that comes first", 20, 100, 5,
-            function() return CFG.PressureMax end,
-            function(x) CFG.PressureMax = x end, " %")
-        caption(v, "A golem not held goes first. Only when the pressure is over "
-            .. "its limit AND the relic is still over yours does a vent go first "
-            .. "instead. The meters are read off the game; the first seconds of "
-            .. "each event write what was found to workspace/bff_volcano_probe.txt.")
-        switchRow(v, "Bones and the egg after a win", nil,
-            function() return CFG.VolcanoLoot end,
-            function(x) CFG.VolcanoLoot = x end)
-        caption(v, "The egg needs the Dragon Tether, a hit on a golem or vent, and "
-            .. "the relic over 90% at the end.")
-    end
-
-    -- =====================================================
-    -- PVP
-    -- =====================================================
-    do
-        local v = makeView("pvp")
-        local S = P.pvp
-        gap(v, 8)
-        switchRow(v, "PvP mode", "You fight with your own hands - the farm stops",
-            function() return CFG.Pvp end,
-            function(x) P.pvpSet(x) end)
-        readout(v, function()
-            if not CFG.Pvp then return "off" end
-            return "PLAYER  " .. S.targetText()
-        end)
-        hairline(v)
-
-        caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
-            .. "ends your Ken; your screen kept clear of other players' effects.")
-        switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
-            function() return CFG.PvpVision end,
-            function(x) CFG.PvpVision = x end)
-        switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
-            function() return CFG.PvpClean end,
-            function(x) CFG.PvpClean = x end)
-        switchRow(v, "No camera shake", nil,
-            function() return CFG.PvpNoShake end,
-            function(x) CFG.PvpNoShake = x end)
-        switchRow(v, "Ken back by itself", "The dodges: 2 s after, every 0.5 s, the moment the game allows",
-            function() return CFG.PvpKenBack end,
-            function(x) CFG.PvpKenBack = x end)
-        readout(v, function()
-            if not CFG.Pvp then return "PvP mode is off" end
-            return "view    " .. tostring(S.view.note)
-                .. "\nken     " .. tostring(S.ken.note)
-                .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
-                .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
-        end)
-        hairline(v)
-
-        caption(v, "AIM - you press every key; what you fire goes to the player.")
-        switchRow(v, "Aim at the player", "Skills, fruit M1, gun - land on him",
-            function() return CFG.PvpAim end,
-            function(x) CFG.PvpAim = x end)
-        sliderRow(v, "Pick players within", 50, 1000, 25,
-            function() return CFG.PvpRange end,
-            function(x) CFG.PvpRange = x end, " studs")
-        switchRow(v, "Melee / sword: face him", "Your swing turns your body to him - the game's hitbox does the rest",
-            function() return CFG.PvpFace end,
-            function(x) CFG.PvpFace = x end)
-        sliderRow(v, "Face him within", 8, 40, 1,
-            function() return CFG.PvpFaceRange end,
-            function(x) CFG.PvpFaceRange = x end, " studs")
-        switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
-            function() return CFG.PvpLead end,
-            function(x) CFG.PvpLead = x end)
-        actionRow(v, "Next player", nil, function() S.next() end)
-        readout(v, function()
-            if not CFG.Pvp then return "" end
-            return S.targetText() .. string.format("\nswings turned to him: %d", S.faced)
-        end)
-        hairline(v)
-
-        caption(v, "MOVEMENT")
-        switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
-            function() return CFG.PvpDash end,
-            function(x) CFG.PvpDash = x end)
-        sliderRow(v, "Dash", 1, 2.5, 0.1,
-            function() return CFG.PvpDashX end,
-            function(x) CFG.PvpDashX = x end, "x")
-        readout(v, function() return "dash   " .. S.dashNote() end)
-        switchRow(v, "Faster run", "The game's own speed number - Mink V3 + Kitsune 3 tails + Pilot Helmet = 112",
-            function() return CFG.PvpSpeed end,
-            function(x) CFG.PvpSpeed = x end)
-        sliderRow(v, "Run speed", 40, 185, 1,
-            function() return CFG.PvpSpeedTo end,
-            function(x) CFG.PvpSpeedTo = x end)
-        readout(v, function() return "speed  " .. tostring(S.speed.note) end)
-        gap(v, 10)
-    end
-
-    -- =====================================================
-    -- STATS
+    -- STATS & DEBUG
     -- =====================================================
     do
         local v = makeView("stats")
@@ -14931,7 +15567,6 @@ local function buildUI()
             .. "flights do not punish a setup. Run each a few minutes on the "
             .. "same camp.")
         actionRow(v, "Clear the tried list", nil, function() table.clear(tried) end)
-
         heading2(v, "counters")
         readout(v, function()
             local mins = math.max((os.clock() - stats.startedAt) / 60, 1 / 60)
@@ -14976,7 +15611,7 @@ local function buildUI()
         while gui and gui.Parent do
             dot.BackgroundColor3 = P.running and C.live or C.third
             for _, e in ipairs(live) do
-                if not e.v or e.v.Visible then pcall(e.f) end
+                if (not e.v or e.v.Visible) and (not e.w or e.w.Visible) then pcall(e.f) end
             end
             task.wait(0.3)
         end
