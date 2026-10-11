@@ -155,7 +155,7 @@ local function parts() return {}, ROOT, HUM end
 -- ---------------------------------------------------------------- the farm
 local CFG = {
     Hunt = true, HuntKind = "seaevents", SeaSpeed = 300, InstantHop = 150,
-    SeaEvDanger = 5,
+    SeaSteer = "auto", SeaStudsPerM = 10, SeaSearchTo = 17000, SeaTurnBack = 120, SeaLeg2 = 7000,
     SeaEvFight = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true, Piranha = true, Shark = false },
     SeaEvKeys = { Z = true, X = true, C = true, V = true, F = true },
     SeaDodge = true, DodgeRadius = 30, DodgeSpeed = 50, DodgeUp = 40, DodgeTime = 1.0,

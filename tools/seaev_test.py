@@ -2,7 +2,8 @@
 Shark / every ship raid), the groups (five piranhas = one event, three beasts =
 Rumbling Waters = one), the kill verdict (HP 0, gone at 10% or less; despawned
 = not counted), the count kept across sessions, the Spy only ever asked, the
-goal, the patrol circle and the compass nudge, sailing away from a ship raid,
+goal, the boat always travelling (the Prehistoric search's legs, never a hop),
+sailing away from a ship raid and going on clear of it,
 the beast fight (off the seat, the boat held up, 90 over it, the aim on its
 body, in close after 6 s of nothing, waiting over a dive), the fish fight (the
 farm's own, M1 + every skill, in place), whose M1 hurts a beast, a lost boat.
@@ -36,9 +37,12 @@ def cut(start, end):
 
 
 sec = cut("-- SEA EVENTS\n", "-- SERVER NEWS\n")
+# The Prehistoric search's legs, as they are (SEA HUNT): what the travel's legs build on.
+legs = cut("        local function searchLeg(", "        -- Where the golems are held")
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
-    f.write(read("seaev_stubs.lua") + "local function SECTION()\n" + sec + "\nend\n" + read("seaev_cases.lua"))
+    f.write(read("seaev_stubs.lua") + "S.searchLeg = (function()\n" + legs + "return searchLeg end)()\n"
+            + "local function SECTION()\n" + sec + "\nend\n" + read("seaev_cases.lua"))
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)

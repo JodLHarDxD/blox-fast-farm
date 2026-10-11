@@ -341,12 +341,14 @@ local CFG = {
     -- 2026-10-11: one Mirage mode, its page picks the job) - kept while the
     -- Mirage is off: "mirage" / "dealer" / "mchest" / "gear".
     MirageJob          = "mirage",
-    -- SEA EVENTS HUNT (user, 2026-10-09; Third Sea): the same boat patrols a
-    -- slow circle at Sea Danger SeaEvDanger and what comes is FOUGHT or FLED,
-    -- each its own switch. Ship raids (the pirate brigades, the Fish Boat and
-    -- its crew, the haunted ships) are ALWAYS fled - slow, and they break the
-    -- boat. The Leviathan: its own switch (LeviFight, below). Never the next server.
-    SeaEvDanger        = 5,          -- 1-6: where the boat patrols
+    -- SEA EVENTS HUNT (user, 2026-10-09; Third Sea): the same boat ALWAYS
+    -- travelling, steered as the Prehistoric and Mirage hunts steer it
+    -- (SeaSteer: your keys, or auto - which never ends; user, 2026-10-12: "it
+    -- should always travel ... no staying in one place"), and what comes is
+    -- FOUGHT or FLED, each its own switch. Ship raids (the pirate brigades,
+    -- the Fish Boat and its crew, the haunted ships) are ALWAYS fled - slow,
+    -- and they break the boat. The Leviathan: its own switch (LeviFight,
+    -- below). Never the next server.
     SeaEvFight         = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true,
         Piranha = true, Shark = false },
     -- Every carried weapon fires these at a sea event (the Attack page is for
@@ -517,7 +519,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-11.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -7014,8 +7016,8 @@ do
             local pv = b:GetPivot()
             local look = flat(seat.CFrame.LookVector)
             local turn, dir = 0, nil
-            -- Steered by another hunt (SEA EVENTS: the patrol, away from a
-            -- ship raid): { dir, speed } every frame; nil = the steering below.
+            -- Steered by another hunt (SEA EVENTS: away from a ship raid, or
+            -- clear of it): { dir, speed } every frame; nil = the steering below.
             local own = S.steerFn and S.steerFn(pv.Position, look)
             if own then
                 dir, speed = own.dir, own.speed
@@ -7137,8 +7139,8 @@ do
             return nil
         end
         -- The boat's parts, for the sea events hunt (SEA EVENTS, after the main loop).
-        S.seatOf, S.sit, S.buyBoat, S.boatHP, S.dangerNow, S.notify, S.drive, S.TIKI =
-            seatOf, sit, buyBoat, boatHP, dangerNow, notify, drive, TIKI_DEALER
+        S.seatOf, S.sit, S.buyBoat, S.boatHP, S.dangerNow, S.notify, S.drive, S.TIKI, S.searchLeg =
+            seatOf, sit, buyBoat, boatHP, dangerNow, notify, drive, TIKI_DEALER, searchLeg
 
         -- ---------- the Mirage ----------
         local MIRAGE_LIFE, GEAR_MARGIN = 900, 120
@@ -9992,9 +9994,13 @@ end
 -- =========================================================
 -- THE SEA EVENTS HUNT (HuntKind "seaevents", Third Sea; user, 2026-10-09).
 -- The Prehistoric hunt's boat (bought at Tiki's back dealer, you at the
--- wheel, driven by its pivot) patrols a slow circle at Sea Danger
--- SeaEvDanger: sea events come to a boat that is near, moving or not (the
--- wiki). What comes:
+-- wheel, driven by its pivot) ALWAYS TRAVELS (user, 2026-10-12: "no staying
+-- in one place circling ... keep travelling the way Prehistoric or Mirage
+-- travel"): the same wheel, the same steering (Travel & boat: your keys, or
+-- auto - west, the heading wandering, out to SeaSearchTo, SeaTurnBack left,
+-- SeaLeg2 more), only where the Prehistoric hunt would hop it turns again
+-- and sails on - round a triangle far out, every side of it Danger 6. Sea
+-- events come to a boat that is near, moving or not (the wiki). What comes:
 --   FOUGHT, each its own switch   Sea Beast, Rumbling Waters (three beasts),
 --                                 Terrorshark, Piranha (Shark off by default)
 --   FLED, always                  ship raids: the pirate brigades, the Fish
@@ -10066,18 +10072,11 @@ do
         local FILE, PROBE = "bff_sea_events.json", "bff_beast_probe.txt"
         local HS = game:GetService("HttpService")
         local UP = Vector3.new(0, 1, 0)
-        -- Sea Danger 1-6: a public hub's points (BFX, 2026-09), checked against
-        -- the user's compass (Danger 6 ~2,630 m = 26.3k studs from the Tiki
-        -- dealer; zone 6 here is 26.5k).
-        local ZONES = {
-            Vector3.new(-22814, 0, 448), Vector3.new(-28500, 0, 1099), Vector3.new(-30724, 0, 1704),
-            Vector3.new(-34336, 0, 2569), Vector3.new(-38460, 0, 4007), Vector3.new(-42865, 0, 5736),
-        }
         local FISH = { Terrorshark = true, Piranha = true, Shark = true }
         local SHIP_WORDS = { "brigade", "fishboat", "fish boat", "fish crew", "ghost", "haunted" }
         local KEYS5 = { "Z", "X", "C", "V", "F" }
         local GROUP_GAP, DONE_WAIT = 20, 5     -- s: a group's members; quiet this long = over
-        local RANGE, RADIUS, PATROL = 1500, 400, 60   -- studs: events near the boat; the circle; its speed
+        local RANGE = 1500                     -- studs: events near the boat
 
         -- ---------- the arithmetic (pure: tools/seaev_test.py) ----------
         local function flat(v) return Vector3.new(v.X, 0, v.Z) end
@@ -10139,47 +10138,51 @@ do
             return (g.killed > 0) and "count" or "lost"
         end
 
-        -- The circle: far off it = straight at its middle at `fast`; on it =
-        -- round it at `slow`, pulled back onto its edge.
-        local function patrolDir(pos, centre, radius, slow, fast)
-            local d = flat(pos - centre)
-            local r = d.Magnitude
-            if r < 1 then return Vector3.new(0, 0, 1), slow end
-            if r > radius * 2 then return flat(centre - pos).Unit, fast end
-            local out = d.Unit
-            local round = Vector3.new(-out.Z, 0, out.X)
-            local pull = math.clamp((radius - r) / radius, -1, 1) * 1.5
-            return (round + out * pull).Unit, slow
-        end
-
         local function fleeDir(pos, threat)
             local d = flat(pos - threat)
             if d.Magnitude < 1 then return Vector3.new(1, 0, 0) end
             return d.Unit
         end
 
-        -- The wheel with the nearest threat `d` studs off: "flee" inside
-        -- fleeTo (fleeTo + 300 once fleeing, so it does not flicker); a ship
-        -- still within twice that = "hold" (stopped, out of its way - the
-        -- circle may lead back into it); else "patrol".
-        local function wheelMode(d, kind, fleeing, fleeTo)
-            if d == nil then return "patrol" end
-            if d < fleeTo or (fleeing and d < fleeTo + 300) then return "flee" end
-            if kind == "ship" and d < fleeTo * 2 then return "hold" end
-            return "patrol"
+        -- Clear of a ship raid (inside twice fleeTo, not fleeing): the boat
+        -- goes on, never toward it. nil = the way it faces does not close on
+        -- the ship (the wheel's own steering, untouched); one that does loses
+        -- the part that closes - along the ship's side; straight at it =
+        -- square to it.
+        local function clearDir(look, pos, threat)
+            local away, f = flat(pos - threat), flat(look)
+            if away.Magnitude < 1 or f.Magnitude < 0.1 then return nil end
+            away, f = away.Unit, f.Unit
+            local closing = -f:Dot(away)
+            if closing <= 0 then return nil end
+            local side = f + away * closing
+            if side.Magnitude < 0.05 then return Vector3.new(-away.Z, 0, away.X) end
+            return side.Unit
         end
 
-        -- The compass says another level twice running: the circle one step
-        -- (1,500 studs) out from Tiki when too low, in when too high; 4 at most.
-        local function nudge(shift, danger, want)
-            if not danger then return shift end
-            if danger < want then return math.min(shift + 1, 4) end
-            if danger > want then return math.max(shift - 1, -4) end
-            return shift
+        -- The wheel with the nearest threat `d` studs off: "flee" inside
+        -- fleeTo (fleeTo + 300 once fleeing, so it does not flicker); a ship
+        -- still within twice that = "clear" (going on, never toward it);
+        -- else "travel". Never stopped (user, 2026-10-12).
+        local function wheelMode(d, kind, fleeing, fleeTo)
+            if d == nil then return "travel" end
+            if d < fleeTo or (fleeing and d < fleeTo + 300) then return "flee" end
+            if kind == "ship" and d < fleeTo * 2 then return "clear" end
+            return "travel"
         end
-        local function centreOf(want, shift)
-            local z = ZONES[math.clamp(want, 1, #ZONES)]
-            return z + flat(z - S.TIKI).Unit * (shift * 1500)
+
+        -- THE TRAVEL'S LEGS (auto steering): the Prehistoric search's own legs
+        -- (P.sea's searchLeg - out to `to` m, `back` deg left, `leg2` m more),
+        -- but never the next server: where it would hop, `back` deg left again
+        -- and `leg2` m more, again and again (1,000 m a side at least - sail
+        -- on 0 is the Prehistoric hunt's "hop at the turn"). With 120 deg the
+        -- sides close into a triangle far out.
+        local function travelLeg(st, meters, odoM, to, back, leg2)
+            local side = math.max(tonumber(leg2) or 0, 1000)
+            local l = S.searchLeg(st, meters, odoM, to, back, side)
+            if l ~= "hop" then return l end
+            st.odo0, st.base = odoM, (st.base or 0) + back       -- (a hop is only ever on leg 2)
+            return "turn"
         end
 
         -- The Spy's answer (read as one public hub reads it, 2026).
@@ -10600,27 +10603,63 @@ do
             if not S.driving then
                 SE.parkBoat, SE.parkSeat, SE.parkAt = nil, nil, nil     -- the wheel puts it back on the water
                 S.drive.waterY = S.drive.waterY or waterLine(b)
+                -- As the Prehistoric hunt starts its wheel: the boat goes (your
+                -- W / S still start and stop it), a fresh heading picked.
+                S.drive.wobbleAt, S.drive.cruise = 0, true
                 flying = true
                 S.driving, S.everDriven = true, true
             end
             return true
         end
 
-        -- The wheel asks every frame (P.sea's driveTick): the patrol, or away.
+        -- The wheel asks every frame (P.sea's driveTick): away from a ship
+        -- raid, or clear of it; nil = the Travel & boat steering as it is
+        -- (your keys, or auto) - the Prehistoric and Mirage hunts' own wheel.
         function SE.steer(pos, look)
             if not (P.running and huntOn()) then return nil end
             local fast = math.clamp(tonumber(CFG.SeaSpeed) or 300, 100, 350)
             if SE.mode == "flee" and SE.threatPos then
                 return { dir = fleeDir(pos, SE.threatPos), speed = fast }
             end
-            if SE.mode == "hold" then
-                return { dir = (look.Magnitude > 0.1) and look.Unit or Vector3.new(0, 0, 1), speed = 0 }
+            if SE.mode == "clear" and SE.threatPos then
+                local dir = clearDir(look, pos, SE.threatPos)
+                if dir then return { dir = dir, speed = fast } end
             end
-            if not SE.centre then return nil end
-            local dir, spd = patrolDir(pos, SE.centre, RADIUS, PATROL, fast)
-            return { dir = dir, speed = spd }
+            return nil
         end
         S.steerFn = SE.steer
+
+        -- THE TRAVEL, one step (every 0.25 s at the wheel): the meters, the
+        -- auto legs (never ending), the line for the panel.
+        local function travel(bp)
+            local d = S.drive
+            local spm = math.max(tonumber(CFG.SeaStudsPerM) or 10, 1)
+            local meters = flat(bp - S.TIKI).Magnitude / spm
+            local manual = CFG.SeaSteer == "manual"
+            SE.danger = S.dangerNow()
+            -- Near Tiki again (a new boat): a fresh run, as the Prehistoric hunt.
+            if meters < 2000 then d.leg, d.base, d.odo0, d.turns = 1, 0, nil, 0 end
+            local where = ""
+            if not manual then
+                local to = tonumber(CFG.SeaSearchTo) or 17000
+                local back, leg2 = tonumber(CFG.SeaTurnBack) or 120, tonumber(CFG.SeaLeg2) or 7000
+                local side = math.max(leg2, 1000)
+                if travelLeg(d, meters, (d.odo or 0) / spm, to, back, leg2) == "turn" then
+                    d.turns = (d.turns or 0) + 1
+                    d.want, d.wobbleAt = 0, os.clock() + 20
+                    print(string.format("[BFF] seaev: %d m from Tiki - %d deg left, %d m more (turn %d)",
+                        math.floor(meters), back, side, d.turns))
+                end
+                where = (d.leg == 2)
+                    and string.format("  ·  turn %d: %d of %d m", d.turns or 1,
+                        math.floor((d.odo or 0) / spm - (d.odo0 or 0)), side)
+                    or string.format(" (of %d)", to)
+            end
+            return string.format("%s  ·  %d m from Tiki%s  ·  danger %s",
+                manual and ("YOU STEER: A/D turn, W go, S stop" .. ((d.cruise == false) and "  (stopped)" or ""))
+                    or "travelling",
+                math.floor(meters), where, tostring(SE.danger or "?"))
+        end
 
         -- Every frame: the boat held up while you fight; the aim on the
         -- target's body while a move is fired.
@@ -11446,31 +11485,14 @@ do
                 end
                 SE.mode, SE.threatPos = "flee", threat.pos
                 SE.note = string.format("AWAY from %s  ·  %d of %d studs", tostring(threat.label), math.floor(td), fleeTo)
-            elseif wm == "hold" then
-                SE.mode, SE.threatPos = "hold", nil
-                SE.note = string.format("stopped out of %s's way  ·  %d studs  ·  the patrol when it is %d off or gone",
-                    tostring(threat.label), math.floor(td), fleeTo * 2)
             else
-                SE.mode, SE.threatPos = "patrol", nil
-                local want = math.clamp(math.floor(tonumber(CFG.SeaEvDanger) or 5), 1, 6)
-                if SE.want ~= want then SE.want, SE.shift, SE.wrong = want, 0, 0 end
-                SE.centre = centreOf(want, SE.shift)
-                SE.danger = S.dangerNow()
-                if flat(bp - SE.centre).Magnitude <= RADIUS * 2 and now - (SE.checkAt or 0) > 10 then
-                    SE.checkAt = now
-                    SE.wrong = (SE.danger and SE.danger ~= want) and SE.wrong + 1 or 0
-                    if SE.wrong >= 2 then
-                        SE.wrong = 0
-                        SE.shift = nudge(SE.shift, SE.danger, want)
-                        SE.centre = centreOf(want, SE.shift)
-                        print(string.format("[BFF] seaev: the compass says danger %s, not %d - the circle moves %s",
-                            tostring(SE.danger), want, (SE.danger < want) and "out" or "in"))
-                    end
+                -- Travelling (a ship within twice FleeTo: going on, never toward it).
+                SE.mode, SE.threatPos = wm, (wm == "clear") and threat.pos or nil
+                SE.note = travel(bp)
+                if wm == "clear" then
+                    SE.note = string.format("clear of %s  ·  %d studs  ·  never toward it  ·  %s",
+                        tostring(threat.label), math.floor(td), SE.note)
                 end
-                local dist = flat(bp - SE.centre).Magnitude
-                SE.note = string.format("%s danger %d  ·  compass %s%s",
-                    (dist > RADIUS * 2) and "sailing to" or "patrolling", want, tostring(SE.danger or "?"),
-                    (dist > RADIUS * 2) and string.format("  ·  %d studs to go", math.floor(dist)) or "")
             end
             S.hp, S.maxHp = S.boatHP(b)
             E.note = SE.note
@@ -11963,10 +11985,10 @@ do
         -- For the tests.
         SE._t = {
             parseHP = parseHP, kindOf = kindOf, beastKind = beastKind, groupLabel = groupLabel,
-            joinGroup = joinGroup, verdict = verdict, groupOver = groupOver, patrolDir = patrolDir,
-            fleeDir = fleeDir, wheelMode = wheelMode, nudge = nudge, centreOf = centreOf, spyText = spyText, beastHP = beastHP,
+            joinGroup = joinGroup, verdict = verdict, groupOver = groupOver, clearDir = clearDir,
+            fleeDir = fleeDir, wheelMode = wheelMode, travelLeg = travelLeg, travel = travel, spyText = spyText, beastHP = beastHP,
             scan = scan, pick = pick, bestM1 = bestM1, hangSpot = hangSpot, fightBeast = fightBeast,
-            board = board, leaveBoat = leaveBoat, ZONES = ZONES, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
+            board = board, leaveBoat = leaveBoat, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
             seaOk = seaOk, typeOk = typeOk, verdictOf = verdictOf, formWanted = formWanted, setForm = setForm,
             newTarget = newTarget, fightFish = fightFish, evadeSpot = evadeSpot, attackWatch = attackWatch,
             keyOk = keyOk, transformFruit = transformFruit, unlocked = unlocked, seaCast = seaCast,
@@ -14337,10 +14359,6 @@ local function buildUI()
             }, "\n")
         end)
         modeSwitch(v, "seaevents")
-        heading2(v, "patrol")
-        sliderRow(v, "Patrol at Sea Danger", 1, 6, 1,
-            function() return CFG.SeaEvDanger end,
-            function(x) CFG.SeaEvDanger = x end, "")
         heading2(v, "fight these  ·  the rest sailed away from")
         local items = {}
         for _, row in ipairs({
@@ -14381,11 +14399,14 @@ local function buildUI()
                 .. "Piranha: a school of them = one sea event. Shark: off = sailed away from.")
             caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
                 .. "Boat and its crew, the haunted ships) are always sailed away from - "
-                .. "slow, and they break the boat - then the boat waits, stopped, until "
-                .. "the ship is twice that far or gone. The Leviathan: its own mode. The "
-                .. "boat patrols a slow circle at the danger you set (sea events come to a "
-                .. "boat that is near); a fight takes you off the seat and holds the boat "
-                .. "up out of the waves; then back to the wheel. Never the next server.")
+                .. "slow, and they break the boat - then, until the ship is twice that "
+                .. "far or gone, the boat goes on but never toward it. The Leviathan: its "
+                .. "own mode. The boat ALWAYS travels, steered as the Prehistoric and "
+                .. "Mirage hunts steer it (Travel & boat: you steer, or auto - which here "
+                .. "never ends: at each leg's end it turns left again and sails on, round "
+                .. "a big triangle far out, all Danger 6). Sea events come to a boat that "
+                .. "is near; a fight takes you off the seat and holds the boat up out of "
+                .. "the waves; then back to the wheel and on. Never the next server.")
             caption(v, "One sea event = one group of the same kind (five piranhas count "
                 .. "once - the wiki; three beasts = Rumbling Waters = once), counted when "
                 .. "every one of it is gone and at least one was KILLED. Escaped or "
@@ -15496,7 +15517,7 @@ local function buildUI()
         sliderRow(v, "One compass meter", 5, 15, 0.5,
             function() return CFG.SeaStudsPerM end,
             function(x) CFG.SeaStudsPerM = x end, " studs")
-        heading2(v, "searching the sea  ·  Prehistoric, Mirage")
+        heading2(v, "searching the sea  ·  Prehistoric, Mirage, Sea events")
         radio(v, 82, {
             { "manual", "I steer (A/D, W go, S stop)", "" },
             { "auto",   "Auto: west, next server at the edge", "" },
@@ -15522,7 +15543,9 @@ local function buildUI()
             caption(v, "Closer than this is one jump, not a flight.")
             caption(v, "Noclip is on for the whole run: no collisions, nothing to "
                 .. "get stuck on, and the body is held so it never falls.")
-            caption(v, "Sail on 0 = the next server at the turn. I steer = no hop by distance.")
+            caption(v, "Sail on 0 = the next server at the turn. I steer = no hop by distance. "
+                .. "Sea events never hop: at the end it turns left again and sails on, "
+                .. "\"sail on\" each time (1,000 m at least).")
             caption(v, "Meters are counted from the Tiki back boat dealer. Danger 6 "
                 .. "starts about 2,600 m out. Check the Prehistoric page's \"where\" line against your "
                 .. "compass once; if it drifts, move \"One compass meter\".")

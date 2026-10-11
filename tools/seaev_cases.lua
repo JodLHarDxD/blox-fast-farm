@@ -64,34 +64,66 @@ do
     g.killed = 1
     check("a group empty 5 s, one killed: counted", T.groupOver(g, 0, 136) == "count")
 end
-do
-    local c = vec(0, 0, 0)
-    local d, s = T.patrolDir(vec(3000, 5, 0), c, 400, 60, 300)
-    check("patrol: far off the circle - straight at it, full speed", vnear(d, vec(-1, 0, 0)) and s == 300, vs(d))
-    d, s = T.patrolDir(vec(400, 5, 0), c, 400, 60, 300)
-    check("patrol: on the circle - round it, slow", near(d:Dot(vec(1, 0, 0)), 0, 1e-6) and near(d.Magnitude, 1) and s == 60, vs(d))
-    d = T.patrolDir(vec(100, 5, 0), c, 400, 60, 300)
-    check("patrol: inside - out toward the edge as it goes round", d.X > 0, vs(d))
-    d = T.patrolDir(vec(700, 5, 0), c, 400, 60, 300)
-    check("patrol: outside - in toward the edge", d.X < 0, vs(d))
-end
 check("away: straight away from the ship, flat", vnear(T.fleeDir(vec(0, 5, 0), vec(0, 40, 100)), vec(0, 0, -1)))
-check("the wheel: a threat inside 1,500 = away; 1,700 while away = still away; a ship at 2,000 = stopped",
+do
+    -- A ship 2,000 studs east (+X) of the boat.
+    local pos, ship = vec(0, 5, 0), vec(2000, 40, 0)
+    check("clear: facing away from the ship - the wheel's own steering (nil)", T.clearDir(vec(-1, 0, 0), pos, ship) == nil)
+    check("clear: square to it already - the wheel's own steering (nil)", T.clearDir(vec(0, 0, 1), pos, ship) == nil)
+    local d = T.clearDir(vec(1, 0, 1), pos, ship)
+    check("clear: half toward it - the part closing on it taken out, along its side", d and vnear(d, vec(0, 0, 1)), vs(d))
+    d = T.clearDir(vec(1, 0, 0), pos, ship)
+    check("clear: straight at it - square to it, never toward it, never stopped",
+        d and near(d:Dot(vec(1, 0, 0)), 0, 1e-6) and near(d.Magnitude, 1), vs(d))
+    d = T.clearDir(vec(1, 0, -0.2), pos, ship)
+    check("clear: nearly at it - still never toward it", d and d:Dot(vec(1, 0, 0)) <= 1e-6 and near(d.Magnitude, 1), vs(d))
+end
+check("the wheel: a threat inside 1,500 = away; 1,700 while away = still away; a ship at 1,700 / 2,000 = clear of it",
     T.wheelMode(1000, "ship", false, 1500) == "flee" and T.wheelMode(1700, "ship", true, 1500) == "flee"
-    and T.wheelMode(1700, "ship", false, 1500) == "hold" and T.wheelMode(2000, "ship", true, 1500) == "hold")
-check("the wheel: a switched-off Terrorshark past 1,500 = the patrol; nothing = the patrol",
-    T.wheelMode(1700, "Terrorshark", false, 1500) == "patrol" and T.wheelMode(nil, nil, false, 1500) == "patrol")
-check("compass: too low = out, too high = in, right = stays, unread = stays",
-    T.nudge(0, 4, 5) == 1 and T.nudge(0, 6, 5) == -1 and T.nudge(2, 5, 5) == 2 and T.nudge(1, nil, 5) == 1)
-check("compass: never more than 4 steps", T.nudge(4, 1, 5) == 4 and T.nudge(-4, 6, 5) == -4)
-check("the circle for danger 6 = the zone point", vnear(T.centreOf(6, 0), T.ZONES[6]))
-check("one step out = 1,500 studs farther from Tiki", near(horiz(T.centreOf(5, 1), TIKI) - horiz(T.ZONES[5], TIKI), 1500, 0.01))
+    and T.wheelMode(1700, "ship", false, 1500) == "clear" and T.wheelMode(2000, "ship", true, 1500) == "clear")
+check("the wheel: a switched-off Terrorshark past 1,500, a ship past 3,000, nothing = travelling",
+    T.wheelMode(1700, "Terrorshark", false, 1500) == "travel" and T.wheelMode(3100, "ship", false, 1500) == "travel"
+    and T.wheelMode(nil, nil, false, 1500) == "travel")
+do
+    -- THE TRAVEL'S LEGS: the Prehistoric search's, never a hop.
+    local st = { leg = 1, base = 0 }
+    check("legs: short of 17,000 m - out", T.travelLeg(st, 16000, 16000, 17000, 120, 7000) == "out" and st.leg == 1)
+    check("legs: 17,000 m - 120 deg left (the Prehistoric search's own turn)",
+        T.travelLeg(st, 17000, 17000, 17000, 120, 7000) == "turn" and st.leg == 2 and st.base == 120 and st.odo0 == 17000)
+    check("legs: 6,000 m after - on", T.travelLeg(st, 15000, 23000, 17000, 120, 7000) == "back" and st.base == 120)
+    check("legs: 7,000 m after (where the Prehistoric hunt hops) - 120 left again, never the next server",
+        T.travelLeg(st, 12000, 24000, 17000, 120, 7000) == "turn" and st.leg == 2 and st.base == 240 and st.odo0 == 24000)
+    check("legs: and again, 7,000 m later", T.travelLeg(st, 10000, 31000, 17000, 120, 7000) == "turn" and st.base == 360)
+    local z = { leg = 1, base = 0 }
+    check("legs: sail on 0 - no hop, no turn every step: 1,000 m sides",
+        T.travelLeg(z, 17000, 17000, 17000, 120, 0) == "turn" and z.leg == 2
+        and T.travelLeg(z, 17000, 17500, 17000, 120, 0) == "back" and T.travelLeg(z, 17000, 18000, 17000, 120, 0) == "turn"
+        and z.base == 240)
+    -- Sailed for real (no wobble): out from Tiki, then round and round.
+    local function heading(deg)
+        local a = math.rad(deg)
+        return vec(-math.cos(a), 0, math.sin(a))
+    end
+    local w = { leg = 1, base = 0 }
+    local pos, odo, turns, nearest, farthest = vec(0, 0, 0), 0, 0, math.huge, 0
+    for _ = 1, 3000 do
+        local m = vec(pos.X, 0, pos.Z).Magnitude
+        if T.travelLeg(w, m, odo, 17000, 120, 7000) == "turn" then turns += 1 end
+        if turns > 0 then nearest, farthest = math.min(nearest, m), math.max(farthest, m) end
+        pos += heading(w.base) * 100
+        odo += 100
+    end
+    check("legs sailed 300,000 m: turning all the way (no end), never nearer Tiki than 9,500 m (Danger 6 = 2,630)",
+        turns >= 40 and nearest >= 9500 and farthest <= 17200,
+        string.format("turns %d  nearest %d  farthest %d", turns, nearest, farthest))
+end
 check("the Spy: 1 = cooldown, 2-4 = takes fragments, 5 = out there",
     string.find(T.spyText(1), "cooldown", 1, true) ~= nil and string.find(T.spyText(3), "fragments", 1, true) ~= nil
     and string.find(T.spyText(5), "out there", 1, true) ~= nil)
 
 -- ---------------------------------------------------------------- THE WORLD
-local Z5 = T.ZONES[5]
+-- A spot at sea, Danger 5 (where the old patrol circle was).
+local Z5 = vec(-38460, 0, 4007)
 local function reset()
     FLIGHTS, LOCKS, SAYS, STATES, CASTS, FIGHTS, CALLS, SET_HUNT, PRINTED = {}, {}, {}, {}, {}, {}, {}, {}, {}
     STOPPED = 0
@@ -277,14 +309,45 @@ BOAT.pivot = cf(Z5 + vec(-3000, 5, 0), math.pi / 2)
 BOAT.seat.Position = Z5 + vec(-3000, 5, 0)
 ROOT.Position = Z5 + vec(-3000, 20, 0)
 P.running = true
+S.drive.cruise, S.drive.wobbleAt = false, 999      -- stopped (an S at the wheel before)
 SE.step(epoch)
-check("nothing near: at the wheel (sat, driving), patrolling danger 5", SITS >= 1 and S.driving == true and SE.mode == "patrol"
-    and vnear(SE.centre, Z5), SE.mode .. " " .. vs(SE.centre))
+check("nothing near: at the wheel (sat, driving), TRAVELLING - the boat going, a fresh heading",
+    SITS >= 1 and S.driving == true and SE.mode == "travel" and S.drive.cruise == true and S.drive.wobbleAt == 0, SE.mode)
 local st = SE.steer(BOAT.pivot.Position, vec(-1, 0, 0))
-check("3,000 studs off the circle: the wheel goes straight at it, at SeaSpeed",
-    st and vnear(st.dir, vec(1, 0, 0)) and st.speed == 300, st and vs(st.dir))
-st = SE.steer(Z5 + vec(400, 5, 0), vec(-1, 0, 0))
-check("on the circle: round it at 60", st and st.speed == 60 and near(st.dir.X, 0, 1e-6), st and vs(st.dir))
+check("travelling: the hook gives nil - the wheel's own steering, as the Prehistoric / Mirage hunts", st == nil)
+check("travelling, auto: the line - meters from Tiki, of 17,000, the compass",
+    string.find(SE.note, "travelling", 1, true) ~= nil and string.find(SE.note, "m from Tiki (of 17000)", 1, true) ~= nil
+    and string.find(SE.note, "danger 5", 1, true) ~= nil, SE.note)
+-- Out at the leg's end: turned, never the next server; the next side's end: turned again.
+local spot = BOAT.pivot
+BOAT.pivot = cf(TIKI + vec(-171000, -2.8, 0), math.pi / 2)
+S.drive.odo = 0
+SE.step(epoch)
+check("17,100 m out: 120 deg left, said - the hunt still on (no hop)", S.drive.leg == 2 and S.drive.base == 120
+    and S.drive.turns == 1 and printed("120 deg left") and #SET_HUNT == 0 and CFG.Hunt == true,
+    tostring(S.drive.leg) .. " " .. tostring(S.drive.base))
+check("... the line: turn 1, how far along it", string.find(SE.note, "turn 1: 0 of 7000 m", 1, true) ~= nil, SE.note)
+S.drive.odo = 7000 * 10
+SE.step(epoch)
+check("7,000 m along (where the Prehistoric hunt would hop): 120 left again - turn 2, still on",
+    S.drive.base == 240 and S.drive.turns == 2 and #SET_HUNT == 0 and SE.mode == "travel", tostring(S.drive.base))
+-- You steer: your keys at the wheel, as on the Prehistoric hunt.
+CFG.SeaSteer = "manual"
+S.drive.cruise = false
+S.drive.odo = 14000 * 10                       -- past the next side's end: auto would turn
+SE.step(epoch)
+check("manual: YOU STEER on the line, (stopped) after your S; the hook still nil",
+    string.find(SE.note, "YOU STEER", 1, true) ~= nil and string.find(SE.note, "(stopped)", 1, true) ~= nil
+    and SE.steer(BOAT.pivot.Position, vec(-1, 0, 0)) == nil, SE.note)
+check("manual: no legs - your keys only (no turn taken, none on the line)", S.drive.base == 240 and S.drive.turns == 2
+    and string.find(SE.note, "of 7000 m", 1, true) == nil, tostring(S.drive.base) .. " " .. SE.note)
+CFG.SeaSteer = "auto"
+S.drive.cruise = true
+-- Back near Tiki (a new boat): a fresh run.
+BOAT.pivot = cf(TIKI + vec(-5000, -2.8, 0), math.pi / 2)
+SE.step(epoch)
+check("near Tiki again: a fresh run (leg 1, no turns)", S.drive.leg == 1 and S.drive.base == 0 and S.drive.turns == 0)
+BOAT.pivot = spot
 CFG.Hunt = false
 check("the hunt off: the hook gives the wheel back (nil)", SE.steer(Z5, vec(-1, 0, 0)) == nil)
 CFG.Hunt = true
@@ -302,24 +365,18 @@ SE.step(epoch)
 check("1,700 studs off (past 1,500, inside the margin): still away", SE.mode == "flee" and SE.flees == 1)
 BOAT.pivot = cf(Z5 + vec(-900, 5, 0), math.pi / 2)        -- 2,100 off
 SE.step(epoch)
+check("2,100 studs off: clear of it - going on, said", SE.mode == "clear"
+    and string.find(SE.note, "clear of", 1, true) ~= nil and string.find(SE.note, "never toward it", 1, true) ~= nil, SE.mode)
 st = SE.steer(BOAT.pivot.Position, vec(-1, 0, 0))
-check("2,100 studs off: stopped out of its way (the circle would lead back into it)", SE.mode == "hold"
-    and st and st.speed == 0, SE.mode)
+check("... facing away from it: the wheel's own steering (nil) - never stopped", st == nil)
+st = SE.steer(BOAT.pivot.Position, vec(1, 0, 0))
+check("... facing straight at it: square to it at SeaSpeed, never toward it",
+    st and near(st.dir:Dot(vec(1, 0, 0)), 0, 1e-6) and st.speed == 300, st and vs(st.dir))
 BOAT.pivot = cf(Z5 + vec(-2000, 5, 0), math.pi / 2)       -- 3,200 off
 SE.step(epoch)
-check("3,200 studs off (past twice 1,500): back to the patrol", SE.mode == "patrol", SE.mode)
+check("3,200 studs off (past twice 1,500): travelling, the wheel's own", SE.mode == "travel"
+    and SE.steer(BOAT.pivot.Position, vec(1, 0, 0)) == nil, SE.mode)
 ENEMIES.kids = {}
--- The compass disagrees (danger 4 at the zone point): the circle moves out.
-reset()
-BOAT.pivot = cf(Z5 + vec(400, 5, 0), math.pi / 2)
-DANGER = 4
-SE.checkAt, SE.wrong, SE.shift = 0, 0, 0
-SE.step(epoch)
-CLOCK += 11
-SE.step(epoch)
-check("compass says 4, twice: the circle moves 1,500 studs OUT", SE.shift == 1
-    and near(horiz(SE.centre, TIKI) - horiz(Z5, TIKI), 1500, 0.01), SE.shift)
-DANGER, SE.shift = 5, 0
 
 -- ---------------------------------------------------------------- THE STEP: A BEAST FOUGHT
 reset()

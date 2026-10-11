@@ -155,7 +155,6 @@ RespawnHome
 RespawnMax
 ReturnAt
 SeaDodge
-SeaEvDanger
 SeaEvFight.Piranha
 SeaEvFight.Rumbling Waters
 SeaEvFight.Sea Beast
@@ -213,6 +212,8 @@ Weapons.*.Z
 Weapons.*.hold
 Weapons.*.use
 """.splitlines() if k.strip()]
+# Gone on purpose since: SeaEvDanger (2026-10-12 - the sea events boat always
+# travels, no patrol circle; user: "it doesn't matter 6 or 7").
 
 
 def read(name):
