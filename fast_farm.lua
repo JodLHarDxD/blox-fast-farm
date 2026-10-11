@@ -363,10 +363,22 @@ local CFG = {
     -- changing, the aim locked on it; up DodgeUp the moment it starts an
     -- attack, charges at you or leaps, back down after DodgeTime.
     SeaDodge           = true,
-    DodgeRadius        = 30,         -- studs round it
-    DodgeSpeed         = 50,         -- studs/s along the circle
+    DodgeRadius        = 30,         -- studs round a Piranha / Shark (and the Leviathan's part)
+    DodgeSpeed         = 50,         -- studs/s along that circle
     DodgeUp            = 40,         -- studs up when it attacks
     DodgeTime          = 1.0,        -- seconds up
+    -- DODGING PER ATTACKER (user, 2026-10-12: "the dodge should work according
+    -- to the attacker - sea beasts are big, dodge more aggressively"): a Sea
+    -- Beast (each of Rumbling Waters' three too) and a Terrorshark are circled
+    -- at their own speed, the distance kept between their Min and Max (a new
+    -- one at random each time the direction flips). Rumbling Waters: the other
+    -- two beasts are kept out of the circle.
+    BeastDodgeSpeed    = 350,        -- studs/s round a Sea Beast
+    BeastDodgeMin      = 40,         -- studs off it (flat), at least
+    BeastDodgeMax      = 60,         -- ... at most
+    SharkDodgeSpeed    = 350,        -- studs/s round a Terrorshark
+    SharkDodgeMin      = 40,
+    SharkDodgeMax      = 60,
     BeastHeight        = 90,         -- over the sea while a Sea Beast is fought
     FishHeight         = 30,         -- over a Terrorshark / Piranha / Shark
     BoatLift           = 150,        -- the boat held this high while you fight (0 = left on the water)
@@ -519,7 +531,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -10789,25 +10801,51 @@ do
         -- under it - noclip lets you through the slab, and a fish's own height
         -- once took you under with it when it dived. P.keepLock: a knockback /
         -- a pull (under 500 studs) is not adopted - back to the lock. The
-        -- Humanoid's Swimming state off. Round a fish (SeaDodge): a circle of
-        -- DodgeRadius at DodgeSpeed, the direction flipping every 1.2-3 s, the
-        -- aim held on it; DodgeUp for DodgeTime the moment it starts an attack
-        -- (a new animation that does not loop - its wind-up), charges at you
-        -- (over 60 studs/s toward you) or leaps (its root over the sea + 10,
-        -- rising).
-        local function dodgeOpts(h)
-            return { r = tonumber(CFG.DodgeRadius) or 30, speed = tonumber(CFG.DodgeSpeed) or 50,
-                h = h or tonumber(CFG.FishHeight) or 30, up = tonumber(CFG.DodgeUp) or 40, top = seaTop() }
+        -- Humanoid's Swimming state off. Round every sea target (SeaDodge): a
+        -- circle at the ATTACKER'S OWN speed and distance (user, 2026-10-12 -
+        -- a Sea Beast / a Terrorshark: BeastDodge* / SharkDodge*, 350 studs/s,
+        -- 40-60 off; a Piranha / Shark and the Leviathan: DodgeRadius at
+        -- DodgeSpeed), the direction flipping every 1.2-3 s, the aim held on
+        -- it; DodgeUp for DodgeTime the moment it starts an attack (a new
+        -- animation that does not loop - its wind-up), charges at you (over 60
+        -- studs/s toward you) or leaps (its root over the sea + 10, rising).
+        local function dodgeOpts(e)
+            local o = { r = tonumber(CFG.DodgeRadius) or 30, speed = tonumber(CFG.DodgeSpeed) or 50,
+                h = e.h or tonumber(CFG.FishHeight) or 30, up = tonumber(CFG.DodgeUp) or 40, top = seaTop() }
+            if e.prof == "beast" then
+                o.speed, o.r, o.rMax = tonumber(CFG.BeastDodgeSpeed) or 350, tonumber(CFG.BeastDodgeMin) or 40,
+                    tonumber(CFG.BeastDodgeMax) or 60
+            elseif e.prof == "shark" then
+                o.speed, o.r, o.rMax = tonumber(CFG.SharkDodgeSpeed) or 350, tonumber(CFG.SharkDodgeMin) or 40,
+                    tonumber(CFG.SharkDodgeMax) or 60
+            end
+            return o
         end
-        -- Pure (tools/seaev_test.py): the spot this frame. e = the circle's state.
+        -- Whose circle (fightOn): the Leviathan keeps its own; a Sea Beast; a
+        -- Terrorshark; the other fish.
+        local function dodgeProf(cls, kind, levi)
+            if levi then return "levi" end
+            if cls == "beast" then return "beast" end
+            return (kind == "Terrorshark") and "shark" or "fish"
+        end
+        -- Pure (tools/seaev_test.py): the spot this frame. e = the circle's
+        -- state. o.r .. o.rMax: the band its distance is kept in - a new one
+        -- at random at each flip, gone to at half the speed (no jump).
         local function evadeSpot(e, tp, now, rnd, o)
             local dt = math.clamp(now - (e.lastT or now), 0, 0.1)
             e.lastT = now
+            local lo = math.max(math.min(o.r, o.rMax or o.r), 5)
+            local hi = math.max(o.r, o.rMax or o.r, lo)
             if now >= (e.flipAt or 0) then
                 e.dir = -(e.dir or -1)
                 e.flipAt = now + 1.2 + rnd() * 1.8
+                if hi > lo then e.rWant = lo + rnd() * (hi - lo) end
             end
-            local r = math.max(o.r, 5)
+            local want = math.clamp(e.rWant or lo, lo, hi)
+            local rNow = math.clamp(e.rNow or want, lo, hi)
+            local step = o.speed * 0.5 * dt
+            e.rNow = rNow + math.clamp(want - rNow, -step, step)
+            local r = e.rNow
             e.angle = (e.angle or 0) + e.dir * (o.speed / r) * dt
             local up = (now < (e.dodgeUntil or 0)) and o.up or 0
             local y = math.max(tp.Y, o.top) + o.h + up
@@ -10846,6 +10884,14 @@ do
                 end
             end
             return spot
+        end
+        -- Pure (tools/seaev_test.py): the spot no nearer than `lo` (flat) to
+        -- tp - pushed straight out from it, its height kept.
+        local function keepOff(spot, tp, lo)
+            local off = Vector3.new(spot.X - tp.X, 0, spot.Z - tp.Z)
+            if off.Magnitude >= lo then return spot end
+            local u = (off.Magnitude > 0.5) and off.Unit or Vector3.new(1, 0, 0)
+            return Vector3.new(tp.X + u.X * lo, spot.Y, tp.Z + u.Z * lo)
         end
         local function tracksOf(model)
             local anim = model:FindFirstChildWhichIsA("Animator", true)
@@ -10894,6 +10940,32 @@ do
             return why
         end
 
+        -- The circle, as the "now" line says it: "  ·  round it 40-60 studs at 350/s".
+        local function circleText(e)
+            if not e then return "" end
+            local o = dodgeOpts(e)
+            local lo, hi = math.min(o.r, o.rMax or o.r), math.max(o.r, o.rMax or o.r)
+            return string.format("  ·  round it %s studs at %d/s",
+                (hi > lo) and (math.floor(lo) .. "-" .. math.floor(hi)) or tostring(math.floor(lo)), math.floor(o.speed))
+        end
+
+        -- RUMBLING WATERS (three beasts at once; user, 2026-10-12): the circle
+        -- round one is pushed out of the others' reach (a ball of
+        -- BeastDodgeMin round each) - never round one beast through another.
+        -- Pure (tools/seaev_test.py); lists = scan's fights and threats.
+        local function beastBalls(x, lists)
+            local out, r = {}, tonumber(CFG.BeastDodgeMin) or 40
+            for _, list in ipairs(lists) do
+                for _, y in ipairs(list) do
+                    local root = y.root
+                    if y.kind == "beast" and y.model ~= x.model and root and root.Parent then
+                        table.insert(out, { kind = "ball", c = root.Position, r = r })
+                    end
+                end
+            end
+            return out
+        end
+
         local function fightOff()
             shrink()
             SE.lockPart, SE.ev = nil, nil
@@ -10906,7 +10978,9 @@ do
         end
         SE.fightOff = fightOff
         -- A sea fight on target x: its hitbox, the camera off it, the water a
-        -- floor, knockback refused, no swimming, the aim on it; a fish = the circle.
+        -- floor, knockback refused, no swimming, the aim on it; the circle -
+        -- round a fish, and round a Sea Beast too (user, 2026-10-12: it used
+        -- to hover still, 90 over it, and take its hits).
         local function fightOn(x, cls, opts)
             grow(x.root)
             P.camDistance = 90
@@ -10917,12 +10991,13 @@ do
             if h and SE.swimHum ~= h then
                 if pcall(function() h:SetStateEnabled(Enum.HumanoidStateType.Swimming, false) end) then SE.swimHum = h end
             end
-            if (cls == "fish" or (opts and opts.dodge)) and CFG.SeaDodge then
+            if (cls == "fish" or cls == "beast" or (opts and opts.dodge)) and CFG.SeaDodge then
                 if not (SE.ev and SE.ev.root == x.root) then
+                    local prof = dodgeProf(cls, x.kind, opts and opts.dodge)
                     SE.ev = { root = x.root, model = x.model, name = x.label or x.kind, angle = math.random() * 2 * math.pi,
-                        dir = 1, flipAt = 0, dodgeUntil = 0, seen = setmetatable({}, { __mode = "k" }),
-                        h = opts and opts.height or nil, watch = opts and opts.watch or nil,
-                        dangers = opts and opts.dangers or nil }
+                        dir = 1, flipAt = 0, dodgeUntil = 0, seen = setmetatable({}, { __mode = "k" }), prof = prof,
+                        h = opts and opts.height or ((prof == "beast") and (tonumber(CFG.BeastHeight) or 90)) or nil,
+                        watch = opts and opts.watch or nil, dangers = opts and opts.dangers or nil }
                     markPlaying(SE.ev)       -- what plays already is not an attack starting now
                 elseif opts then
                     SE.ev.watch, SE.ev.dangers = opts.watch, opts.dangers     -- a respawned segment watched too
@@ -10951,8 +11026,10 @@ do
                     SE.lastDodge = why
                 end
             end
-            local spot = evadeSpot(e, e.root.Position, now, math.random, dodgeOpts(e.h))
-            -- Out of the reach of what is coming (the Leviathan's red area, its beam...).
+            local o = dodgeOpts(e)
+            local spot = evadeSpot(e, e.root.Position, now, math.random, o)
+            -- Out of the reach of what is coming (the Leviathan's red area, its
+            -- beam...; Rumbling Waters' other beasts).
             if e.dangers then
                 local ok, list = pcall(e.dangers)
                 if ok and type(list) == "table" and #list > 0 then
@@ -10961,6 +11038,9 @@ do
                     spot = s2
                 end
             end
+            -- A Sea Beast's band first (the user's 40-60): a push out of another
+            -- beast's reach never takes you nearer the one you fight than its Min.
+            if e.prof == "beast" then spot = keepOff(spot, e.root.Position, math.min(o.r, o.rMax or o.r)) end
             lockAt(spot, e.root.Position)
         end
 
@@ -11238,6 +11318,7 @@ do
                 SE.lockPart = nil
                 SE.lastHurt = os.clock()
                 local over = Vector3.new(rp.X, sea + 200, rp.Z)
+                if SE.ev then SE.ev.h = 200 end       -- the circle goes on, 200 over the water
                 SE.note = x.label .. " under the water - waiting over it"
                 say(SE.note)
                 if (r.Position - over).Magnitude > (CFG.InstantHop or 150) then flyTo(over) else lockAt(over, rp) end
@@ -11251,8 +11332,11 @@ do
             end
             local close = SE.closeOn
             local hOwn = opts and opts.height or nil
-            -- Round it at its own height (the Leviathan); nothing landed for 6 s = 25 over it.
-            if SE.ev and hOwn then SE.ev.h = close and 25 or hOwn end
+            -- Round it at its own height (the Leviathan's, BeastHeight over a
+            -- Sea Beast); nothing landed for 6 s = 25 over it.
+            if SE.ev and (hOwn or cls == "beast") then
+                SE.ev.h = close and 25 or (hOwn or tonumber(CFG.BeastHeight) or 90)
+            end
             local spot = hangSpot(rp, r.Position, close, sea, cls, hOwn)
             if (r.Position - spot).Magnitude > (CFG.InstantHop or 150) then
                 flyTo(spot, { face = rp })
@@ -11319,11 +11403,11 @@ do
             end
             local hp = hpNow()
             local _, rig = formOf()
-            SE.note = string.format("%s  ·  HP %s%s  ·  %s  ·  last: %s%s", x.label,
+            SE.note = string.format("%s  ·  HP %s%s  ·  %s%s  ·  last: %s%s", x.label,
                 hp and tostring(math.floor(hp)) or "?", (x.max and x.max > 0) and (" / " .. math.floor(x.max)) or "",
                 close and "IN CLOSE (nothing landed for 6 s)"
                     or (math.floor(tonumber((cls == "fish") and CFG.FishHeight or CFG.BeastHeight) or 90) .. " up"),
-                tostring(SE.lastKey or "-"),
+                circleText(SE.ev), tostring(SE.lastKey or "-"),
                 rig and ("  ·  " .. rig .. " FORM" .. (testing and string.format(" (testing its M1: %d of %d)", f.hits, f.casts) or ""))
                     or "")
             say(SE.note)
@@ -11345,7 +11429,7 @@ do
             pose = function()
                 local e = SE.ev
                 if not (e and CFG.SeaDodge and e.root and e.root.Parent) then return nil end
-                return evadeSpot(e, e.root.Position, os.clock(), math.random, dodgeOpts(e.h))
+                return evadeSpot(e, e.root.Position, os.clock(), math.random, dodgeOpts(e))
             end,
             -- The M1: your fighting style first, then the fruit, a sword, a gun
             -- - of the weapons the sea fight takes.
@@ -11398,7 +11482,7 @@ do
             end
             activeName = x.label
             SE.note = x.label .. "  ·  every skill, no M1, " .. math.floor(tonumber(CFG.FishHeight) or 30) .. " up"
-                .. (CFG.SeaDodge and ", round it, dodging" or "")
+                .. circleText(SE.ev)
             say(SE.note)
             local why = fight(FISH_CUR, FISH)
             if why == "empty" then releasePile() end
@@ -11453,7 +11537,8 @@ do
                 local want = formWanted(cls)
                 if want ~= inForm() then setForm(want, myEpoch) end
                 local formNow = inForm()
-                if cls == "beast" or formNow then fightBeast(x, myEpoch, cls, formNow) else fightFish(x, myEpoch) end
+                local opts = (cls == "beast") and { dangers = function() return beastBalls(x, { fights, threats }) end } or nil
+                if cls == "beast" or formNow then fightBeast(x, myEpoch, cls, formNow, opts) else fightFish(x, myEpoch) end
                 E.note = SE.note
                 return true
             end
@@ -11991,6 +12076,7 @@ do
             board = board, leaveBoat = leaveBoat, grow = grow, shrink = shrink, toolOk = toolOk, formOf = formOf,
             seaOk = seaOk, typeOk = typeOk, verdictOf = verdictOf, formWanted = formWanted, setForm = setForm,
             newTarget = newTarget, fightFish = fightFish, evadeSpot = evadeSpot, attackWatch = attackWatch,
+            dodgeOpts = dodgeOpts, dodgeProf = dodgeProf, beastBalls = beastBalls, circleText = circleText, keepOff = keepOff,
             keyOk = keyOk, transformFruit = transformFruit, unlocked = unlocked, seaCast = seaCast,
             fightOn = fightOn, fightOff = fightOff, seaTop = seaTop,
             leviParts = leviParts, leviPick = leviPick, leviTrack = leviTrack,
@@ -14908,14 +14994,32 @@ local function buildUI()
                 CFG.SeaEvKeys = CFG.SeaEvKeys or {}
                 CFG.SeaEvKeys[k] = x
             end)
-        heading2(v, "dodging  ·  Terrorshark / Piranha / Shark")
+        heading2(v, "dodging  ·  each attacker its own circle")
         switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
             function() return CFG.SeaDodge end,
             function(x) CFG.SeaDodge = x end)
-        sliderRow(v, "Round it at", 10, 80, 5,
+        sliderRow(v, "Sea Beast: moving at", 50, 500, 10,
+            function() return CFG.BeastDodgeSpeed end,
+            function(x) CFG.BeastDodgeSpeed = x end, " studs/s")
+        sliderRow(v, "Sea Beast: never nearer than", 20, 150, 5,
+            function() return CFG.BeastDodgeMin end,
+            function(x) CFG.BeastDodgeMin = x end, " studs")
+        sliderRow(v, "Sea Beast: never farther than", 20, 150, 5,
+            function() return CFG.BeastDodgeMax end,
+            function(x) CFG.BeastDodgeMax = x end, " studs")
+        sliderRow(v, "Terrorshark: moving at", 50, 500, 10,
+            function() return CFG.SharkDodgeSpeed end,
+            function(x) CFG.SharkDodgeSpeed = x end, " studs/s")
+        sliderRow(v, "Terrorshark: never nearer than", 10, 150, 5,
+            function() return CFG.SharkDodgeMin end,
+            function(x) CFG.SharkDodgeMin = x end, " studs")
+        sliderRow(v, "Terrorshark: never farther than", 10, 150, 5,
+            function() return CFG.SharkDodgeMax end,
+            function(x) CFG.SharkDodgeMax = x end, " studs")
+        sliderRow(v, "Piranha / Shark: round it at", 10, 80, 5,
             function() return CFG.DodgeRadius end,
             function(x) CFG.DodgeRadius = x end, " studs")
-        sliderRow(v, "Moving at", 10, 150, 5,
+        sliderRow(v, "Piranha / Shark: moving at", 10, 150, 5,
             function() return CFG.DodgeSpeed end,
             function(x) CFG.DodgeSpeed = x end, " studs/s")
         sliderRow(v, "Up when it attacks", 10, 120, 5,
@@ -14952,6 +15056,13 @@ local function buildUI()
                 .. "Attack page is left for the normal farm. NO M1 at a sea event (an "
                 .. "untransformed M1 does nothing to one): only Kitsune's, in Kitsune form. "
                 .. "Which key hurts it is learned from its HP.")
+            caption(v, "Dodging per attacker: a Sea Beast (each of Rumbling Waters' three) "
+                .. "and a Terrorshark are big - circled fast, the distance kept between "
+                .. "the two sliders (a new one at random each time the direction flips). "
+                .. "Rumbling Waters: the circle round one beast is kept out of the other "
+                .. "two's reach, but never nearer the one you fight than its \"never "
+                .. "nearer\". A dived beast: circled 200 over the water until it is back. "
+                .. "Piranha / Shark: the small circle. The Leviathan keeps its own.")
             caption(v, "It starts an attack (a new animation), charges at you or leaps: up "
                 .. "for a moment, then back. The water is a floor in every sea fight: you "
                 .. "are never under it, whatever the target does, and a knockback or a "

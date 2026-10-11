@@ -13,7 +13,8 @@ then pressed (panel_cases.lua):
 - CENSUS: every control fired once. Every CFG key the OLD panel (build
   2026-10-11.2, before the reorganization) could change is still changed
   (OLD_KEYS below, frozen with --census), each from ONE page (the mode keys
-  excepted - one at a time is that rule), and nothing new but MirageJob;
+  excepted - one at a time is that rule), and nothing new but MirageJob
+  and the per-attacker dodge sliders (2026-10-12);
 - every page within 3 taps of Home.
 
 usage: python tools/panel_test.py [path-to-luau.exe]

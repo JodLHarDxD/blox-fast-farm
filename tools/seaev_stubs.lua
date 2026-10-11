@@ -159,6 +159,7 @@ local CFG = {
     SeaEvFight = { ["Sea Beast"] = true, ["Rumbling Waters"] = true, Terrorshark = true, Piranha = true, Shark = false },
     SeaEvKeys = { Z = true, X = true, C = true, V = true, F = true },
     SeaDodge = true, DodgeRadius = 30, DodgeSpeed = 50, DodgeUp = 40, DodgeTime = 1.0,
+    BeastDodgeSpeed = 350, BeastDodgeMin = 40, BeastDodgeMax = 60, SharkDodgeSpeed = 350, SharkDodgeMin = 40, SharkDodgeMax = 60,
     BeastHeight = 90, FishHeight = 30, BoatLift = 150, FleeTo = 1500,
     SeaEvGoal = 20, SeaEvStopAtGoal = false,
     SeaEvForm = "auto", SeaEvTrial = 20,

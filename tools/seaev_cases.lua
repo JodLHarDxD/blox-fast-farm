@@ -395,8 +395,19 @@ check("... the boat held 150 up where it was", vnear(SE.parkAt, vec(Z5.X, 155, Z
 beat()
 check("... every frame: the boat written there", vnear(BOAT.pivot.Position, vec(Z5.X, 155, Z5.Z)), vs(BOAT.pivot.Position))
 local last = LOCKS[#LOCKS]
-check("... you hang 90 over the water (the boat's water line, 5), 50 to your side of it", last and near(last.Y, 5 + 90, 0.01)
-    and near(horiz(last, fb.kids.HumanoidRootPart.Position), 50, 0.01), vs(last))
+check("... ROUND it now (it used to hang still): the Sea Beast's circle, 40-60 off, 90 over the water",
+    SE.ev and SE.ev.prof == "beast" and SE.ev.root == fb.kids.HumanoidRootPart and last and near(last.Y, math.max(fb.kids.HumanoidRootPart.Position.Y, T.seaTop()) + 90, 0.01)
+    and horiz(last, fb.kids.HumanoidRootPart.Position) >= 40 - 0.01 and horiz(last, fb.kids.HumanoidRootPart.Position) <= 60 + 0.01, vs(last))
+do
+    local a0, r0 = SE.ev.angle, SE.ev.rNow
+    CLOCK += 0.05
+    beat()
+    check("... at 350 studs/s along it (17.5 studs in 0.05 s)", near(math.abs(SE.ev.angle - a0) * SE.ev.rNow, 17.5, 0.3),
+        math.abs(SE.ev.angle - a0) * SE.ev.rNow)
+    check("... the \"now\" line says the circle", string.find(SE.note, "round it 40-60 studs at 350/s", 1, true) ~= nil, SE.note)
+    check("... the Rumbling Waters watch handed to it - one beast alone: nothing to keep out of",
+        type(SE.ev.dangers) == "function" and #SE.ev.dangers() == 0, r0)
+end
 local v = CASTS[1]
 check("... every key Z-F of its switches, credited by its HP, the M1 by the learned weapon",
     v and v.keys and #v.keys == 5 and v.keys[5] == "F" and v.keyOn == CFG.SeaEvKeys and v.learn == SE.learn
@@ -416,8 +427,12 @@ SE.lastHurt = CLOCK - 7
 reset()
 SE.step(epoch)
 last = LOCKS[#LOCKS]
-check("nothing hurt it for 6 s from 90 up: in close (25 over, 20 off)", SE.closeOn == true and last and near(last.Y, 5 + 25, 0.01)
+check("nothing hurt it for 6 s from 90 up: in close (25 over, 20 off) on the way", SE.closeOn == true and last and near(last.Y, 5 + 25, 0.01)
     and near(horiz(last, fb.kids.HumanoidRootPart.Position), 20, 0.01), vs(last))
+beat()
+last = LOCKS[#LOCKS]
+check("... then round it at 25 over the water, still 40-60 off", SE.ev.h == 25 and near(last.Y, T.seaTop() + 25, 0.01)
+    and horiz(last, fb.kids.HumanoidRootPart.Position) >= 40 - 0.01 and horiz(last, fb.kids.HumanoidRootPart.Position) <= 60 + 0.01, vs(last))
 -- Under the water: wait over it, nothing fired.
 reset()
 fb.kids.HumanoidRootPart.Position = Z5 + vec(320, -500, 10)
@@ -425,6 +440,10 @@ SE.step(epoch)
 local over = LOCKS[#LOCKS] or FLIGHTS[#FLIGHTS]
 check("it dived: no move fired, waiting 200 over the water above it", #CASTS == 0 and over and near(over.Y, 205, 0.01)
     and SE.lockPart == nil, vs(over))
+beat()
+over = LOCKS[#LOCKS]
+check("... still circling while it waits - 200 over the water, never parked", SE.ev and SE.ev.h == 200
+    and near(over.Y, T.seaTop() + 200, 0.01) and horiz(over, fb.kids.HumanoidRootPart.Position) >= 40 - 0.01, vs(over))
 fb.kids.HumanoidRootPart.Position = Z5 + vec(320, 0, 10)
 -- Killed in the fight: back at the wheel, the boat down on the water.
 fb.kids.Health.Value = 0
@@ -791,6 +810,83 @@ do
     check("...the direction flips (1.2-3 s, at random)", e.dir == -before and near(e.flipAt, 107 + 1.2 + 0.9, 1e-6), e.flipAt)
 end
 
+-- DODGING PER ATTACKER (user, 2026-10-12): the band, the speed, whose circle.
+check("whose circle: a Sea Beast, a Terrorshark, the other fish, the Leviathan its own",
+    T.dodgeProf("beast", "beast", nil) == "beast" and T.dodgeProf("fish", "Terrorshark", nil) == "shark"
+    and T.dodgeProf("fish", "Piranha", nil) == "fish" and T.dodgeProf("fish", "Shark", nil) == "fish"
+    and T.dodgeProf("beast", nil, true) == "levi")
+do
+    local ob = T.dodgeOpts({ prof = "beast" })
+    local os_ = T.dodgeOpts({ prof = "shark" })
+    local ol = T.dodgeOpts({ prof = "levi", h = 75 })
+    check("a Sea Beast: 350 studs/s, 40-60 off; a Terrorshark the same", ob.speed == 350 and ob.r == 40 and ob.rMax == 60
+        and os_.speed == 350 and os_.r == 40 and os_.rMax == 60)
+    check("the Leviathan: untouched - DodgeRadius at DodgeSpeed, its own height", ol.r == 30 and ol.speed == 50 and ol.rMax == nil
+        and ol.h == 75)
+    CFG.BeastDodgeSpeed, CFG.SharkDodgeMax = 200, 80
+    check("the sliders move them", T.dodgeOpts({ prof = "beast" }).speed == 200 and T.dodgeOpts({ prof = "shark" }).rMax == 80)
+    CFG.BeastDodgeSpeed, CFG.SharkDodgeMax = 350, 60
+    check("the circle line: \"round it 40-60 studs at 350/s\"; a single distance: \"30 studs\"",
+        string.find(T.circleText({ prof = "beast" }), "round it 40-60 studs at 350/s", 1, true) ~= nil
+        and string.find(T.circleText({ prof = "fish" }), "round it 30 studs at 50/s", 1, true) ~= nil and T.circleText(nil) == "")
+end
+do
+    -- The band: 40-60 at 350, sailed for 20 s of frames.
+    local o = { r = 40, rMax = 60, speed = 350, h = 90, up = 40, top = 5 }
+    local e = { angle = 0, dir = 1, flipAt = 0, dodgeUntil = 0, lastT = 100 }
+    local tp = vec(0, 0, 0)
+    local seq, i = { 0.0, 1.0, 0.5, 0.25, 0.9, 0.1, 0.7, 0.3 }, 0
+    local function rnd() i = i % #seq + 1 return seq[i] end
+    local lo, hi, wants, maxJump, prev = math.huge, 0, {}, 0, nil
+    local t = 100
+    for _ = 1, 1200 do
+        t += 1 / 60
+        local before = e.rWant
+        local p = T.evadeSpot(e, tp, t, rnd, o)
+        if e.rWant ~= before then wants[#wants + 1] = e.rWant end
+        local d = horiz(p, tp)
+        lo, hi = math.min(lo, d), math.max(hi, d)
+        if prev then maxJump = math.max(maxJump, (vec(p.X, 0, p.Z) - vec(prev.X, 0, prev.Z)).Magnitude) end
+        prev = p
+    end
+    check("the band: never nearer than 40, never farther than 60", lo >= 40 - 1e-6 and hi <= 60 + 1e-6,
+        string.format("%.2f .. %.2f", lo, hi))
+    check("...a new distance at each flip, the band's whole width used", #wants >= 6 and hi - lo >= 15, #wants .. " " .. (hi - lo))
+    check("...no jump: at most 350 studs/s round + 175 out per frame", maxJump <= (350 + 175) / 60 + 1e-6, maxJump)
+    local a0 = e.angle
+    e.rNow, e.rWant, e.flipAt = 50, 50, 1e9
+    T.evadeSpot(e, tp, t + 0.05, rnd, o)
+    check("...along it at 350 studs/s (7 rad/s at 50 off)", near(math.abs(e.angle - a0), 0.35, 1e-6), math.abs(e.angle - a0))
+    local e2 = { angle = 0, dir = 1, flipAt = 0, lastT = 100 }
+    T.evadeSpot(e2, tp, 100, function() return 0 end, { r = 60, rMax = 40, speed = 350, h = 0, up = 0, top = 0 })
+    check("...Min over Max: read as the band all the same (its low end is 40)", near(e2.rNow, 40, 1e-6), e2.rNow)
+    -- The sliders moved mid-fight: the circle back inside the new band at once.
+    local e3 = { angle = 0, dir = 1, flipAt = 1e9, lastT = 100, rNow = 100, rWant = 100 }
+    local p3 = T.evadeSpot(e3, tp, 100.01, rnd, o)
+    check("...a distance from an old band (100): inside 40-60 the very next frame", horiz(p3, tp) <= 60 + 1e-6, horiz(p3, tp))
+    e3.rNow, e3.rWant = 10, 10
+    p3 = T.evadeSpot(e3, tp, 100.02, rnd, o)
+    check("...and from 10: out to 40 the very next frame", horiz(p3, tp) >= 40 - 1e-6, horiz(p3, tp))
+end
+do
+    -- RUMBLING WATERS: the other two beasts are balls the circle keeps out of.
+    local function b(name, pos) return { kind = "beast", model = { Name = name }, root = { Position = pos, Parent = true } } end
+    local A, B, C = b("SeaBeast1", vec(0, 0, 0)), b("SeaBeast2", vec(70, 0, 0)), b("SeaBeast3", vec(0, 0, 90))
+    local dead = b("SeaBeast4", vec(30, 0, 0))
+    dead.root.Parent = nil
+    local fishy = { kind = "Terrorshark", model = {}, root = { Position = vec(10, 0, 0), Parent = true } }
+    local balls = T.beastBalls(A, { { A, B, fishy }, { C, dead } })
+    check("Rumbling Waters: the OTHER two beasts (fought or not), each a ball of 40; not itself, not a fish, not a gone one",
+        #balls == 2 and balls[1].kind == "ball" and balls[1].r == 40 and vnear(balls[1].c, vec(70, 0, 0))
+        and vnear(balls[2].c, vec(0, 0, 90)), #balls)
+    local spot = T.clearOf(vec(50, 90, 0), balls, 15)
+    check("...a spot on A's circle 20 from B: pushed out to 55 off B, sideways (height kept)",
+        horiz(spot, vec(70, 0, 0)) >= 55 - 0.01 and near(spot.Y, 90, 1e-6), vs(spot))
+    check("...but never nearer A (the one fought) than its 40: the band first",
+        vnear(T.keepOff(spot, vec(0, 0, 0), 40), vec(40, 90, 0)), vs(T.keepOff(spot, vec(0, 0, 0), 40)))
+    check("...a spot already 40+ off: left as it is", vnear(T.keepOff(vec(0, 7, 50), vec(0, 0, 0), 40), vec(0, 7, 50)))
+end
+
 -- The attack watch: a fish with an Animator.
 local function animFish(name, pos)
     local m = fish(name, pos, 150000)
@@ -840,7 +936,8 @@ LOCKS = {}
 aimUntil = 0
 beat()
 local l1 = LOCKS[#LOCKS]
-check("every frame: on the circle round it, 30 over the water", l1 and near(horiz(l1, tsk2.root.Position), 30, 0.01)
+check("every frame: on the TERRORSHARK's circle (40-60 off), 30 over the water", SE.ev.prof == "shark" and l1
+    and horiz(l1, tsk2.root.Position) >= 40 - 0.01 and horiz(l1, tsk2.root.Position) <= 60 + 0.01
     and near(l1.Y, math.max(tsk2.root.Position.Y, T.seaTop()) + 30, 0.01), vs(l1))
 check("...the aim held on it the whole fight", aimUntil > CLOCK and P.aimAt and vnear(P.aimAt, tsk2.root.Position))
 animr.tracks = { swim, { Looped = false, Animation = { AnimationId = "rbxassetid://tail" } } }
@@ -853,16 +950,28 @@ CLOCK += 1.1
 beat()
 check("...a second later: back down to 30 over the water", near(LOCKS[#LOCKS].Y, l1.Y, 0.01), vs(LOCKS[#LOCKS]))
 check("the farm's fight stands you on the same circle (its pose)", SE.FISH_CUR.pose() and
-    near(horiz(SE.FISH_CUR.pose(), tsk2.root.Position), 30, 0.01))
+    horiz(SE.FISH_CUR.pose(), tsk2.root.Position) >= 40 - 0.01 and horiz(SE.FISH_CUR.pose(), tsk2.root.Position) <= 60 + 0.01)
 check("...and presses every key the instant it can (fastCast)", SE.FISH_CUR.fastCast == true)
 CFG.SeaDodge = false
 local spotsBefore = #LOCKS
 beat()
 check("Dodge off: no circle (the fight's own spot instead)", #LOCKS == spotsBefore and SE.FISH_CUR.pose() == nil)
 CFG.SeaDodge = true
--- A beast: the floor and the rest, no circle.
-T.fightOn({ root = tsk2.root, model = tsk2, label = "Sea Beast", kind = "beast" }, "beast")
-check("a beast: the floor, no circle (it hovers high)", P.floorY ~= nil and SE.ev == nil)
+-- A beast: the floor and the rest, AND the circle now (user, 2026-10-12).
+T.fightOn({ root = fb.kids.HumanoidRootPart, model = fb, label = "Sea Beast", kind = "beast" }, "beast")
+check("a beast: the floor, and its own circle at BeastHeight (it used to hover still)", P.floorY ~= nil and SE.ev ~= nil
+    and SE.ev.prof == "beast" and SE.ev.h == 90 and SE.ev.root == fb.kids.HumanoidRootPart)
+CFG.SeaDodge = false
+T.fightOn({ root = fb.kids.HumanoidRootPart, model = fb, label = "Sea Beast", kind = "beast" }, "beast")
+check("...Dodge off: no circle round a beast either", SE.ev == nil)
+CFG.SeaDodge = true
+-- A Piranha: the small fish keep the old circle.
+T.fightOn({ root = tsk2.root, model = tsk, label = "Piranha", kind = "Piranha" }, "fish")
+do
+    local o = T.dodgeOpts(SE.ev)
+    check("a Piranha: DodgeRadius at DodgeSpeed, as before (30 at 50)", SE.ev.prof == "fish" and o.r == 30 and o.rMax == nil
+        and o.speed == 50)
+end
 -- The hunt off mid-fight: all of it undone.
 T.fightOn({ root = tsk2.root, model = tsk2, label = "Terrorshark", kind = "Terrorshark" }, "fish")
 CFG.Hunt = false
