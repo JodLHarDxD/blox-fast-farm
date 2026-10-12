@@ -549,9 +549,12 @@ local CFG = {
     PvpNoShake         = true,   -- no camera shake
     PvpKenBack         = true,   -- Ken itself (the dodges) back: 2 s after, every 0.5 s
     PvpAim             = true,   -- your skills, fruit M1 and gun land on the player
-    PvpRange           = 300,    -- a player farther than this is not picked
-    PvpFace            = true,   -- melee / sword M1: your body turned to him for the swing
-    PvpFaceRange       = 25,
+    PvpRange           = 300,    -- the one locked is kept until he is past this (+10%)
+    -- (user, 2026-10-12) EVERY attack - M1 of any weapon, Z X C V F, the fox
+    -- form too: your body turned to him from the press, while the key is
+    -- held and the move plays, and 0.4 s after. Your mouse is never read.
+    PvpFace            = true,
+    PvpFaceRange       = 100,    -- pick (at your first attack) and face within this
     PvpLead            = false,  -- aim where a moving player will be
     PvpDash            = true,
     PvpDashX           = 1.5,    -- your Q dash this many times as far
@@ -563,7 +566,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.6" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.7" }
 _G.BFF = P
 
 -- =========================================================
@@ -14957,22 +14960,22 @@ local function buildUI()
         switchRow(v, "Aim at the player", "Skills, fruit M1, gun - land on him",
             function() return CFG.PvpAim end,
             function(x) CFG.PvpAim = x end)
-        sliderRow(v, "Pick players within", 50, 1000, 25,
-            function() return CFG.PvpRange end,
-            function(x) CFG.PvpRange = x end, " studs")
-        switchRow(v, "Melee / sword: face him", "Your swing turns your body to him - the game's hitbox does the rest",
+        switchRow(v, "Face him on every attack", "Any weapon, the fox too - your body turns to him",
             function() return CFG.PvpFace end,
             function(x) CFG.PvpFace = x end)
-        sliderRow(v, "Face him within", 8, 40, 1,
+        sliderRow(v, "Pick (your first attack) and face within", 25, 150, 5,
             function() return CFG.PvpFaceRange end,
             function(x) CFG.PvpFaceRange = x end, " studs")
+        sliderRow(v, "Keep him locked within", 50, 1000, 25,
+            function() return CFG.PvpRange end,
+            function(x) CFG.PvpRange = x end, " studs")
         switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
         actionRow(v, "Next player", nil, function() S.next() end)
         readout(v, function()
             if not CFG.Pvp then return "" end
-            return S.targetText() .. string.format("\nswings turned to him: %d", S.faced)
+            return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
         end)
         heading2(v, "movement")
         switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
@@ -16528,8 +16531,10 @@ end
 -- table override, in while a player is picked; a gun reads your mouse ->
 -- the __index hook, only with a gun in your hand. A melee / sword M1 has no
 -- aim at all: a box ~8 studs in front of your body (CombatUtil
--- RunHitDetection). So while you swing at a player in reach, your body is
--- turned to him and the game's own hitbox and hit sender do the rest.
+-- RunHitDetection), and for every other move the game turns your body to
+-- your MOUSE. So (user, 2026-10-12) ONE player is locked at your first
+-- attack - the nearest within PvpFaceRange - and kept till he is done, and
+-- for every attack (any weapon, the fox form) your body is turned to him.
 --
 -- SPEED: the game writes WalkSpeed itself every frame, 36 x (race +
 -- bonuses), and the character attribute SpeedMultiplier (Pilot Helmet 1.3)
@@ -16555,18 +16560,33 @@ do
             return true
         end
 
-        -- WHO. cands = { {id, dist, ok} }. The one you fight is kept while he
-        -- can be hit and is near (10% over the range, so a step out and back
-        -- does not flick to someone else); otherwise the nearest one.
-        function L.pick(cands, cur, range)
+        -- WHO (user, 2026-10-12: "one opponent - the first I attack, until he
+        -- is done; never the one beside me or behind me"). cands = { {id, dist,
+        -- ok} }. Not locked yet: the nearest one inside pickRange is aimed at
+        -- (so your first press already lands on him); your first attack LOCKS
+        -- him (the input watch). Locked: kept while he can be hit and is within
+        -- keepRange + 10%, whoever comes nearer; lost (dead, PvP off, gone) =
+        -- unlocked, the nearest again. -> the pick, locked?
+        function L.pick(cands, cur, locked, pickRange, keepRange)
             local best = nil
             for _, c in ipairs(cands) do
                 if c.ok then
-                    if cur ~= nil and c.id == cur and c.dist <= range * 1.1 then return c end
-                    if c.dist <= range and (best == nil or c.dist < best.dist) then best = c end
+                    if locked and cur ~= nil and c.id == cur and c.dist <= keepRange * 1.1 then return c, true end
+                    if c.dist <= pickRange and (best == nil or c.dist < best.dist) then best = c end
                 end
             end
-            return best
+            return best, false
+        end
+        -- FACING (user, 2026-10-12: every attack, any weapon, "the character is
+        -- the script's job"): turned to him while an attack key / M1 is held,
+        -- while the move plays (the game busy, within 3 s of an attack press),
+        -- and 0.4 s after - only while he is within range. -> face until.
+        function L.faceUntil(untilNow, now, held, busy, lastAttack, dist, range, on)
+            if not on or dist == nil or dist > range then return untilNow end
+            if held or (busy and now - (lastAttack or -1e9) < 3) then
+                return math.max(untilNow, now + 0.4)
+            end
+            return untilNow
         end
         -- The panel's "Next player": the next one out by distance.
         function L.nextOf(cands, cur, range)
@@ -16685,7 +16705,7 @@ do
             shake = { saved = {}, done = false, note = "-" },
             speed = { note = "-", st = {} },
             dash  = { note = "-", st = {}, tries = 0 },
-            faceUntil = 0, faced = 0, m1Held = false,
+            faceUntil = 0, faced = 0, held = {}, locked = false, lastAttack = -1e9,
         }
         P.pvp = S
         local function hold(c) table.insert(S.conns, c) return c end
@@ -17067,9 +17087,14 @@ do
         local function targetTick(forceNext)
             local cands = candidates()
             local cur = S.target and S.target.plr
-            local c = forceNext and L.nextOf(cands, cur, CFG.PvpRange) or L.pick(cands, cur, CFG.PvpRange)
-            S.target = c
-            P.aimPart = c and c.root or nil
+            if forceNext then
+                -- "Next player": you chose him - locked.
+                S.target = L.nextOf(cands, cur, CFG.PvpRange)
+                S.locked = S.target ~= nil
+            else
+                S.target, S.locked = L.pick(cands, cur, S.locked, CFG.PvpFaceRange, CFG.PvpRange)
+            end
+            P.aimPart = S.target and S.target.root or nil
         end
         function S.next() pcall(targetTick, true) end
         function S.aimPoint()
@@ -17082,17 +17107,32 @@ do
             if not CFG.PvpAim then return "aim off" end
             local t = S.target
             if not t then return "no player in " .. math.floor(CFG.PvpRange) .. " studs (alive, PvP on, not your side)" end
-            return string.format("%s  ·  %.0f studs%s", t.plr.DisplayName or t.plr.Name, t.dist,
+            return string.format("%s  ·  %.0f studs  ·  %s%s", t.plr.DisplayName or t.plr.Name, t.dist,
+                S.locked and "LOCKED" or "nearest - your first attack locks him",
                 (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "")
         end
 
-        -- Melee / sword: the swing is a box in front of your body, so the
-        -- body is turned to him for as long as you swing.
+        -- Every attack, any weapon (user, 2026-10-12): a melee / sword swing is
+        -- a box in front of your body, and for everything else the game turns
+        -- your body to your MOUSE while the aim sends the move to him - so the
+        -- body is turned to him whenever you attack him in range.
         local function faceWanted()
             local t = S.target
-            if not (CFG.PvpFace and t and t.dist <= CFG.PvpFaceRange) then return false end
-            local tt = toolType(heldTool())
-            return tt == "Melee" or tt == "Sword"
+            return CFG.PvpFace and t ~= nil and t.dist <= CFG.PvpFaceRange
+        end
+        -- The attack keys (not Q / jump / moving): M1, Z X C V F.
+        local ATTACK_KEYS = { [Enum.KeyCode.Z] = "Z", [Enum.KeyCode.X] = "X", [Enum.KeyCode.C] = "C",
+            [Enum.KeyCode.V] = "V", [Enum.KeyCode.F] = "F" }
+        -- Your attack: the one aimed at is locked (your first press), the body turned.
+        local function attackPressed(what)
+            local now = os.clock()
+            S.lastAttack = now
+            S.held[what] = true
+            if S.target and not S.locked then S.locked = true end
+            if faceWanted() then
+                S.faceUntil = math.max(S.faceUntil, now + 0.4)
+                S.faced += 1
+            end
         end
         local function faceNow()
             if os.clock() > S.faceUntil then return end
@@ -17130,7 +17170,8 @@ do
                 if P.running then P.stop() end
                 S.on = true
                 S.epoch += 1
-                S.faceUntil, S.m1Held = 0, false
+                S.faceUntil, S.locked, S.lastAttack = 0, false, -1e9
+                table.clear(S.held)
                 -- The life you are in has settled long ago: on at once (only
                 -- a NEW life waits a moment before its view is switched on).
                 V.char, V.charAt = player.Character, -1e9
@@ -17153,7 +17194,10 @@ do
                     end
                     local want = CFG.PvpAim and S.target ~= nil
                     pcall(P.pvpAimTick, want, want and toolType(heldTool()) == "Gun", now)
-                    if S.m1Held and faceWanted() then S.faceUntil = math.max(S.faceUntil, now + 0.3) end
+                    local t = S.target
+                    local busy = (P :: any).canCast ~= nil and not (P :: any).canCast()
+                    S.faceUntil = L.faceUntil(S.faceUntil, now, next(S.held) ~= nil, busy, S.lastAttack,
+                        t and t.dist, CFG.PvpFaceRange, CFG.PvpFace and t ~= nil)
                     pcall(faceNow)
                 end))
                 hold(RunService.Stepped:Connect(function() if S.on then pcall(faceNow) end end))
@@ -17163,19 +17207,20 @@ do
                     end)
                 end)
                 hold(UIS.InputBegan:Connect(function(i, gp)
-                    if gp or not S.on then return end
+                    if not S.on then return end
                     if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                        S.m1Held = true
-                        if faceWanted() then
-                            S.faceUntil = os.clock() + 0.5
-                            S.faced += 1
-                        end
-                    elseif i.KeyCode == Enum.KeyCode.Q and CFG.PvpDash then
+                        if not gp then attackPressed("M1") end          -- a click on a panel is not an attack
+                    elseif ATTACK_KEYS[i.KeyCode] then
+                        -- the game's own skill keys may come marked as processed:
+                        -- only typing (a focused text box) is left out
+                        if not UIS:GetFocusedTextBox() then attackPressed(ATTACK_KEYS[i.KeyCode]) end
+                    elseif not gp and i.KeyCode == Enum.KeyCode.Q and CFG.PvpDash then
                         task.spawn(function() pcall(dashMeasure) end)
                     end
                 end))
                 hold(UIS.InputEnded:Connect(function(i)
-                    if i.UserInputType == Enum.UserInputType.MouseButton1 then S.m1Held = false end
+                    if i.UserInputType == Enum.UserInputType.MouseButton1 then S.held.M1 = nil
+                    elseif ATTACK_KEYS[i.KeyCode] then S.held[ATTACK_KEYS[i.KeyCode]] = nil end
                 end))
                 task.spawn(loop, S.epoch)
                 say("PvP mode on - the farm is stopped")

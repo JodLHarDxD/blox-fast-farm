@@ -7,21 +7,40 @@ check("pirate vs pirate is a fight", L.attackable(true, false, "Pirates", "Pirat
 check("marine vs pirate is a fight", L.attackable(true, false, "Marines", "Pirates") == true)
 check("no teams known = can be hit", L.attackable(true, false, nil, nil) == true)
 
--- ===== who is picked =====
+-- ===== who is picked (2026-10-12: one opponent, locked at your first attack) =====
 local A = { id = "A", dist = 50, ok = true }
 local B = { id = "B", dist = 120, ok = true }
 local Cdead = { id = "C", dist = 10, ok = false }
-check("nearest that can be hit", L.pick({ B, A, Cdead }, nil, 300) == A)
-check("the dead one is never picked, however near", L.pick({ Cdead }, nil, 300) == nil)
-check("the one you fight is kept though another is nearer", L.pick({ A, B }, "B", 300) == B)
+local function pick(...) local c, l = L.pick(...) return c, l end
+local c, locked = pick({ B, A, Cdead }, nil, false, 300, 300)
+check("not locked: the nearest that can be hit, not locked yet", c == A and locked == false)
+check("the dead one is never picked, however near", pick({ Cdead }, nil, false, 300, 300) == nil)
+c, locked = pick({ A, B }, "B", true, 300, 300)
+check("LOCKED: kept though another is nearer (beside / behind you)", c == B and locked == true)
+check("not locked yet: the nearer one is aimed instead (no lock = no hold)", pick({ A, B }, "B", false, 300, 300) == A)
 local Bfar = { id = "B", dist = 320, ok = true }
-check("kept a little past the range (no flicking)", L.pick({ A, Bfar }, "B", 300) == Bfar)
+check("locked: kept a little past the keep range (no flicking)", pick({ A, Bfar }, "B", true, 100, 300) == Bfar)
 local Bgone = { id = "B", dist = 340, ok = true }
-check("let go well past the range -> nearest", L.pick({ A, Bgone }, "B", 300) == A)
+c, locked = pick({ A, Bgone }, "B", true, 100, 300)
+check("locked one gone well past the range -> unlocked, the nearest", c == A and locked == false)
 local Bdead = { id = "B", dist = 100, ok = false }
-check("let go when he dies -> nearest", L.pick({ A, Bdead }, "B", 300) == A)
-check("nobody in range -> nobody", L.pick({ { id = "X", dist = 500, ok = true } }, nil, 300) == nil)
-check("empty server -> nobody", L.pick({}, nil, 300) == nil)
+c, locked = pick({ A, Bdead }, "B", true, 100, 300)
+check("locked one dead -> unlocked, the nearest", c == A and locked == false)
+local B250 = { id = "B", dist = 250, ok = true }
+check("locked at 250 studs: kept (the keep range, not the pick range)", pick({ B250 }, "B", true, 100, 300) == B250)
+check("not locked: nobody inside the pick range (100) -> nobody", pick({ B250 }, nil, false, 100, 300) == nil)
+check("nobody in range -> nobody", pick({ { id = "X", dist = 500, ok = true } }, nil, false, 300, 300) == nil)
+check("empty server -> nobody", pick({}, nil, false, 300, 300) == nil)
+
+-- ===== the face window (2026-10-12: every attack, any weapon) =====
+check("an attack key held, he in range: faced 0.4 s on", near(L.faceUntil(0, 10, true, false, 9, 50, 100, true), 10.4))
+check("the move still playing (busy) right after an attack: kept facing", near(L.faceUntil(0, 10, false, true, 8, 50, 100, true), 10.4))
+check("busy long after any attack (a dash, a stun): not turned", L.faceUntil(0, 10, false, true, 5, 50, 100, true) == 0)
+check("nothing held, not busy: the window just runs out", L.faceUntil(10.2, 10, false, false, 9, 50, 100, true) == 10.2)
+check("he is out of the face range: not turned", L.faceUntil(0, 10, true, true, 9, 120, 100, true) == 0)
+check("facing switched off / nobody aimed: not turned", L.faceUntil(0, 10, true, true, 9, 50, 100, false) == 0
+    and L.faceUntil(0, 10, true, true, 9, nil, 100, true) == 0)
+check("a window already longer is never shortened", L.faceUntil(11, 10, true, false, 9, 50, 100, true) == 11)
 
 -- ===== next player =====
 local N1 = { id = 1, dist = 10, ok = true }
