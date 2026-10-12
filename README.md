@@ -282,21 +282,26 @@ Third Sea, Dragonstorm carried (or in your inventory), your usual Random mode sp
 6. **Skills:** Z unlocks at 125, X at 250. "last skill  Dragonstorm Z: fired, hit the pile" every ~9 s, X every ~15 s; a locked one says "did NOT fire - left 1 min" (expected below its mastery).
 7. **Past the heat** (off by default): switch on for a few minutes, then Stats page "which setup is better": `mastery: Dragonstorm, gun held` vs `gun past the heat 0.08 s` kills/min. The readout's `the game's shot` line says whether the game's shot function was found (`this executor has no getupvalues` = Velocity lacks it; held is all there is). Watch the mastery bar too - if kills "past the heat" give no mastery (the wiki's "suspicious kills"), switch it back off.
 
-## PvP: one opponent, always faced - first test (2026-10-12, build 2026-10-12.7)
+## PvP: your mouse picks the player, he is highlighted - first test (2026-10-12, build 2026-10-12.8)
 
-Your job: pick the weapon and press the attacks. The script turns your body and aims; your
-mouse is never read. (Moving you is not built - you walk.)
+Your job: aim with your mouse, pick the weapon, press the attacks. The player nearest your
+mouse gets every attack (the cursor need not be exactly on him) and is highlighted red; the
+script turns your body to him. (Build .7 took the nearest to YOU and locked him - in a crowd
+your attacks went to the one behind you. Moving you is not built - you walk.)
 
-1. **Lock.** PvP on, two players near. The PvP page line says `<name> · N studs · nearest -
-   your first attack locks him`. Press any attack: it says `LOCKED`. Walk so the other one is
-   nearer: the line keeps the locked one, your attacks keep going to him. He dies / leaves
-   PvP / goes past 330 studs = unlocked, the nearest again. **Next player** locks the next.
-2. **Facing.** Any attack (M1 of any weapon, Z X C V F, the fox form): your body turns to
-   him from the press, while you hold the key and the move plays, and 0.4 s after - only
-   inside **Pick and face within** (100 studs). `attacks turned to him` counts. Q dash and
-   jump do not turn you.
-3. **Tell me** if a dash / charge move flies off oddly when turned, or if the fox does not
-   turn with you.
+1. **The pick.** PvP on, two or three players. Move your mouse near one: the PvP page line
+   says `<name> · N studs · your mouse is on him`, and he turns red (a red fill, a white
+   outline, a red diamond over his head). Move the mouse to another: the red jumps to him.
+   Nobody within **Mouse catch area** (200 px) of the cursor = `nobody near your mouse` and
+   your attacks go where your mouse points, as normal.
+2. **Through the blasts.** Fight in fire / explosion effects: the red body and the diamond
+   should stay visible. Tell me if the red body vanishes in some effects (the diamond is a
+   screen layer and should not).
+3. **The hits.** A long-range move fired with the mouse a bit off him should land on him;
+   behind you / beside you never get it unless your mouse is near them.
+4. **Facing** (as before): any attack turns your body to him from the press, while you hold
+   the key and the move plays, and 0.4 s after - only within **Face him within** (100 studs).
+   `attacks turned to him` counts.
 
 ## Race V4 / V3: first test (2026-10-12, build 2026-10-12.5)
 
@@ -506,8 +511,8 @@ python tools/vmagnet_test.py                     # the Volcanic Magnet before th
 python tools/fruitguard_test.py                  # the fruit guard, real code: never a weapon, never equipped, no click with one in hand
 python tools/elite_test.py                       # the hunt, real code, 95 checks: Elite Hunter words, server pick, pickFruit (price, drops, traders), berries (names, nearest wanted), the Barista Cousin's recipe (not here / not picked / learned / cannot pay), the Legendary Sword Dealer (29 checks: asked from here, old names, owned from the item list / legacy list / backpack, a count of 0 is not owning, flown to him only when loaded, money first, already yours, Second Sea only, waits for your character), hop() refusing on the chalice, the join (always the game's; a token refusal remembered; why in words), carry-over, the director (the chalice in every hunt; ONLY the hunt switched on)
 python tools/news_test.py                        # the server news, real code, 96 checks: MoonPhase attribute / decal / blue, day+night number round the clock (the noon turn, midnight), the full moon tonight / now / in N nights in real minutes, the measured speed (jumps, stops, gaps ignored), the turn learned + bff_sky.json, islands (up at the join / spawned / gone / lasted), elites + raid bosses, Cake Prince asked only on screen, fruit, order + BREAKING, the chip
-python tools/pvp_test.py                         # PvP mode, real code, 105 checks: who is picked (the nearest within the face range until your first attack LOCKS him; locked = kept whoever comes nearer, let go dead / past the keep range, two Marines never, Next player locks the next), the face window (every attack key / M1 held, the move playing within 3 s of an attack, 0.4 s after, only in range, never shortened), lead, the speed attribute (the game's own 36 x formula hits the goal in one write and stays; helmet = the base; already faster = the base back; transformed = the base; capped), the dash (measured base, slope learned, gear change = measured again, a new life keeps it), the Ken clock (2 s, every 0.5 s, cooldown waits, 3 s after 20 refusals), blinding effects; the Ken view switch on a fake game object (the game's OFF dropped in PvP, through for a dead life / PvP off / view off, unwrap gives the class method back and syncs to your real Ken, a new life's old object gets no OFF, a frozen object refused)
-python tools/panel_test.py                       # the panel, real code, 690 checks: builds, 28 pages, Home fits its body, one mode at a time (PvP / Leviathan on top, off = the mode underneath, the circuit has its own Off - nothing on = No mode), the line under a mode's switch, the Mirage job kept while off, Start names the mode, Back walks the pages you came through, each mode page's own switch first / folds last; CENSUS - every control fired: each of the 172 CFG keys the old panel changed is still changed, from ONE page, nothing new but MirageJob; every page within 3 taps of Home
+python tools/pvp_test.py                         # PvP mode, real code, 101 checks: who is picked (the one nearest your MOUSE on the screen within the catch area - the cursor beats distance to you, both screen axes, never behind the camera / dead / past the range / with no screen place, two Marines never), the face window (every attack key / M1 held, the move playing within 3 s of an attack, 0.4 s after, only in range, never shortened), lead, the speed attribute (the game's own 36 x formula hits the goal in one write and stays; helmet = the base; already faster = the base back; transformed = the base; capped), the dash (measured base, slope learned, gear change = measured again, a new life keeps it), the Ken clock (2 s, every 0.5 s, cooldown waits, 3 s after 20 refusals), blinding effects; the Ken view switch on a fake game object (the game's OFF dropped in PvP, through for a dead life / PvP off / view off, unwrap gives the class method back and syncs to your real Ken, a new life's old object gets no OFF, a frozen object refused)
+python tools/panel_test.py                       # the panel, real code, 694 checks: builds, 28 pages, Home fits its body, one mode at a time (PvP / Leviathan on top, off = the mode underneath, the circuit has its own Off - nothing on = No mode), the line under a mode's switch, the Mirage job kept while off, Start names the mode, Back walks the pages you came through, each mode page's own switch first / folds last; CENSUS - every control fired: each of the 172 CFG keys the old panel changed is still changed, from ONE page, nothing new but MirageJob; every page within 3 taps of Home
 python tools/panel_preview.py                    # not a test: draws every page as HTML (tools/panel_preview.html) - spacing, overlap, cut-off words at a glance
 python tools/water_test.py                       # water is rock in EVERY mode, real code (BODY + TRAVEL): the line (slab top + 4, only over the slab, not in the deep sea, right before the raise too), the lock never under it in any mode (a sea fight's own floor when higher), thrown under = lifted, a flight to a point under the water never written under it and arriving ON it, a flight starting under it, an instant hop, off the slab and at Submerged Island untouched
 python tools/race_test.py                        # race V4 / V3 (2026-10-12), real code, 117 checks: nothing fires while the script is idle (no mode running, PvP off); Start with no mode starts nothing; the V4 gate; the user's V3 clock (28 s from a SEEN activation, then every 0.5 s; no signal = a 3 s burst, the next wait from its end) simulated against a fake cooldown of 29 / 29.5 / 30 s - never missed, lateness bounded; whose roar (yours / streamed / a stand-in, never an ally's that buffed you); V4's weapons (no Awakening / ability tool, sword first, a transformation fruit's V never, a fruit's form only it); M1s in turn; the live ticker on a fake game (the game's Y, the Awakening call as the fallback and kept, both refused = 3 s, your own Y, no tool / dead / off, V3 on the roar / the ability child, not an ability TOOL, the moon turn, the probe file, the panel lines, unhook). rhythm / rotate / seaev / sea suites check the V4 wiring (M1 turns, fast keys, no loads, the attack list, the sea's types, the moon stamp)

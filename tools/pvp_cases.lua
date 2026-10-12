@@ -7,30 +7,38 @@ check("pirate vs pirate is a fight", L.attackable(true, false, "Pirates", "Pirat
 check("marine vs pirate is a fight", L.attackable(true, false, "Marines", "Pirates") == true)
 check("no teams known = can be hit", L.attackable(true, false, nil, nil) == true)
 
--- ===== who is picked (2026-10-12: one opponent, locked at your first attack) =====
-local A = { id = "A", dist = 50, ok = true }
-local B = { id = "B", dist = 120, ok = true }
-local Cdead = { id = "C", dist = 10, ok = false }
-local function pick(...) local c, l = L.pick(...) return c, l end
-local c, locked = pick({ B, A, Cdead }, nil, false, 300, 300)
-check("not locked: the nearest that can be hit, not locked yet", c == A and locked == false)
-check("the dead one is never picked, however near", pick({ Cdead }, nil, false, 300, 300) == nil)
-c, locked = pick({ A, B }, "B", true, 300, 300)
-check("LOCKED: kept though another is nearer (beside / behind you)", c == B and locked == true)
-check("not locked yet: the nearer one is aimed instead (no lock = no hold)", pick({ A, B }, "B", false, 300, 300) == A)
-local Bfar = { id = "B", dist = 320, ok = true }
-check("locked: kept a little past the keep range (no flicking)", pick({ A, Bfar }, "B", true, 100, 300) == Bfar)
-local Bgone = { id = "B", dist = 340, ok = true }
-c, locked = pick({ A, Bgone }, "B", true, 100, 300)
-check("locked one gone well past the range -> unlocked, the nearest", c == A and locked == false)
-local Bdead = { id = "B", dist = 100, ok = false }
-c, locked = pick({ A, Bdead }, "B", true, 100, 300)
-check("locked one dead -> unlocked, the nearest", c == A and locked == false)
-local B250 = { id = "B", dist = 250, ok = true }
-check("locked at 250 studs: kept (the keep range, not the pick range)", pick({ B250 }, "B", true, 100, 300) == B250)
-check("not locked: nobody inside the pick range (100) -> nobody", pick({ B250 }, nil, false, 100, 300) == nil)
-check("nobody in range -> nobody", pick({ { id = "X", dist = 500, ok = true } }, nil, false, 300, 300) == nil)
-check("empty server -> nobody", pick({}, nil, false, 300, 300) == nil)
+-- ===== who is picked (2026-10-12, build .8: the one nearest your MOUSE) =====
+-- cands: dist = studs from you, sx / sy = his place on the screen, front = before the camera.
+local function P_(id, dist, sx, sy, ok, front)
+    return { id = id, dist = dist, sx = sx, sy = sy, ok = ok ~= false, front = front ~= false }
+end
+local near1 = P_("near-you", 10, 900, 500)          -- next to you, far from the cursor
+local onMouse = P_("on-mouse", 120, 410, 300)       -- far from you, right by the cursor
+check("cursor beats distance: the one by the mouse, not the one next to you",
+    L.cursorPick({ near1, onMouse }, 400, 300, 200, 300) == onMouse)
+check("the cursor need not be ON him: 150 px off, inside 200 = his",
+    L.cursorPick({ P_("A", 50, 550, 300) }, 400, 300, 200, 300) ~= nil)
+check("outside the catch area = nobody (your plain aim)",
+    L.cursorPick({ P_("A", 50, 650, 300) }, 400, 300, 200, 300) == nil)
+local a1, a2 = P_("A", 200, 430, 300), P_("B", 20, 470, 300)
+check("two near the cursor: the one nearer the CURSOR (not the one nearer you)",
+    L.cursorPick({ a2, a1 }, 400, 300, 200, 300) == a1)
+check("behind the camera: never, even at the cursor's pixel",
+    L.cursorPick({ P_("A", 30, 400, 300, true, false) }, 400, 300, 200, 300) == nil)
+check("dead / PvP off / your side: never",
+    L.cursorPick({ P_("A", 30, 400, 300, false) }, 400, 300, 200, 300) == nil)
+check("past 'players count within': never",
+    L.cursorPick({ P_("A", 301, 400, 300) }, 400, 300, 200, 300) == nil)
+check("at the range edge: still",
+    L.cursorPick({ P_("A", 300, 400, 300) }, 400, 300, 200, 300) ~= nil)
+check("no screen place known: never", L.cursorPick({ { id = "A", dist = 10, ok = true, front = true } }, 400, 300, 200, 300) == nil)
+check("a bigger catch area reaches him", L.cursorPick({ P_("A", 50, 650, 300) }, 400, 300, 300, 300) ~= nil)
+check("empty server -> nobody", L.cursorPick({}, 400, 300, 200, 300) == nil)
+check("straight above / below the cursor counts too: 250 px down = outside",
+    L.cursorPick({ P_("A", 50, 400, 550) }, 400, 300, 200, 300) == nil)
+local up, side = P_("A", 50, 400, 450), P_("B", 50, 480, 300)
+check("screen distance both ways: 80 px across beats 150 px down",
+    L.cursorPick({ up, side }, 400, 300, 200, 300) == side)
 
 -- ===== the face window (2026-10-12: every attack, any weapon) =====
 check("an attack key held, he in range: faced 0.4 s on", near(L.faceUntil(0, 10, true, false, 9, 50, 100, true), 10.4))
@@ -41,17 +49,6 @@ check("he is out of the face range: not turned", L.faceUntil(0, 10, true, true, 
 check("facing switched off / nobody aimed: not turned", L.faceUntil(0, 10, true, true, 9, 50, 100, false) == 0
     and L.faceUntil(0, 10, true, true, 9, nil, 100, true) == 0)
 check("a window already longer is never shortened", L.faceUntil(11, 10, true, false, 9, 50, 100, true) == 11)
-
--- ===== next player =====
-local N1 = { id = 1, dist = 10, ok = true }
-local N2 = { id = 2, dist = 20, ok = true }
-local N3 = { id = 3, dist = 30, ok = true }
-check("next after the nearest", L.nextOf({ N3, N1, N2 }, 1, 300) == N2)
-check("next after the last wraps to the nearest", L.nextOf({ N3, N1, N2 }, 3, 300) == N1)
-check("next with none picked = the nearest", L.nextOf({ N3, N2 }, nil, 300) == N2)
-check("next skips the dead", L.nextOf({ N1, { id = 9, dist = 15, ok = false }, N2 }, 1, 300) == N2)
-check("next with nobody = nobody", L.nextOf({}, 1, 300) == nil)
-check("next alone = himself", L.nextOf({ N1 }, 1, 300) == N1)
 
 -- ===== lead =====
 local p0 = Vector3.new(0, 0, 0)

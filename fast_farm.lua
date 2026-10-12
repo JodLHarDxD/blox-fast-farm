@@ -549,12 +549,17 @@ local CFG = {
     PvpNoShake         = true,   -- no camera shake
     PvpKenBack         = true,   -- Ken itself (the dodges) back: 2 s after, every 0.5 s
     PvpAim             = true,   -- your skills, fruit M1 and gun land on the player
-    PvpRange           = 300,    -- the one locked is kept until he is past this (+10%)
+    PvpRange           = 300,    -- a player farther than this is never picked
+    -- (user, 2026-10-12, build .8) WHO: the player nearest your MOUSE on the
+    -- screen, within this many pixels of the cursor - the aim assist (the
+    -- cursor need not be ON him). Nobody that near: your plain aim.
+    PvpCatchPx         = 200,
+    PvpMark            = true,   -- him highlighted: red over every effect + a marker over his head
     -- (user, 2026-10-12) EVERY attack - M1 of any weapon, Z X C V F, the fox
     -- form too: your body turned to him from the press, while the key is
-    -- held and the move plays, and 0.4 s after. Your mouse is never read.
+    -- held and the move plays, and 0.4 s after.
     PvpFace            = true,
-    PvpFaceRange       = 100,    -- pick (at your first attack) and face within this
+    PvpFaceRange       = 100,    -- face him within this
     PvpLead            = false,  -- aim where a moving player will be
     PvpDash            = true,
     PvpDashX           = 1.5,    -- your Q dash this many times as far
@@ -566,7 +571,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.7" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.8" }
 _G.BFF = P
 
 -- =========================================================
@@ -14957,22 +14962,27 @@ local function buildUI()
                 .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
         end)
         heading2(v, "aim")
-        switchRow(v, "Aim at the player", "Skills, fruit M1, gun - land on him",
+        switchRow(v, "Aim at the player", "The one nearest your mouse - skills, fruit M1, gun land on him",
             function() return CFG.PvpAim end,
             function(x) CFG.PvpAim = x end)
+        sliderRow(v, "Mouse catch area", 50, 500, 10,
+            function() return CFG.PvpCatchPx end,
+            function(x) CFG.PvpCatchPx = x end, " px")
+        switchRow(v, "Highlight him", "Red over every attack effect, a marker over his head - only your screen",
+            function() return CFG.PvpMark end,
+            function(x) CFG.PvpMark = x end)
         switchRow(v, "Face him on every attack", "Any weapon, the fox too - your body turns to him",
             function() return CFG.PvpFace end,
             function(x) CFG.PvpFace = x end)
-        sliderRow(v, "Pick (your first attack) and face within", 25, 150, 5,
+        sliderRow(v, "Face him within", 25, 150, 5,
             function() return CFG.PvpFaceRange end,
             function(x) CFG.PvpFaceRange = x end, " studs")
-        sliderRow(v, "Keep him locked within", 50, 1000, 25,
+        sliderRow(v, "Players count within", 50, 1000, 25,
             function() return CFG.PvpRange end,
             function(x) CFG.PvpRange = x end, " studs")
         switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
-        actionRow(v, "Next player", nil, function() S.next() end)
         readout(v, function()
             if not CFG.Pvp then return "" end
             return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
@@ -14996,7 +15006,8 @@ local function buildUI()
             caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")
             caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
                 .. "ends your Ken; your screen kept clear of other players' effects.")
-            caption(v, "AIM - you press every key; what you fire goes to the player.")
+            caption(v, "AIM - you aim with your mouse: the player nearest it (within the catch area) "
+                .. "gets what you fire, and is highlighted red.")
         end)
     end
 
@@ -16532,9 +16543,12 @@ end
 -- the __index hook, only with a gun in your hand. A melee / sword M1 has no
 -- aim at all: a box ~8 studs in front of your body (CombatUtil
 -- RunHitDetection), and for every other move the game turns your body to
--- your MOUSE. So (user, 2026-10-12) ONE player is locked at your first
--- attack - the nearest within PvpFaceRange - and kept till he is done, and
--- for every attack (any weapon, the fox form) your body is turned to him.
+-- your MOUSE. So (user, 2026-10-12, build .8) the player is the one nearest
+-- your MOUSE on the screen (within PvpCatchPx of the cursor - the aim
+-- assist), picked again every frame and highlighted red, and for every
+-- attack (any weapon, the fox form) your body is turned to him. (Build .7
+-- took the nearest to YOU and locked him: in a crowd your mouse was on one
+-- and the hits went to the one behind you.)
 --
 -- SPEED: the game writes WalkSpeed itself every frame, 36 x (race +
 -- bonuses), and the character attribute SpeedMultiplier (Pilot Helmet 1.3)
@@ -16560,22 +16574,23 @@ do
             return true
         end
 
-        -- WHO (user, 2026-10-12: "one opponent - the first I attack, until he
-        -- is done; never the one beside me or behind me"). cands = { {id, dist,
-        -- ok} }. Not locked yet: the nearest one inside pickRange is aimed at
-        -- (so your first press already lands on him); your first attack LOCKS
-        -- him (the input watch). Locked: kept while he can be hit and is within
-        -- keepRange + 10%, whoever comes nearer; lost (dead, PvP off, gone) =
-        -- unlocked, the nearest again. -> the pick, locked?
-        function L.pick(cands, cur, locked, pickRange, keepRange)
-            local best = nil
+        -- WHO (user, 2026-10-12, build .8: "whoever my mouse is aiming at gets
+        -- the highlight and takes the attack"). The player nearest your CURSOR
+        -- on the screen, within radius pixels of it - the cursor need not be ON
+        -- him (the aim assist); two near it: the one nearer the cursor, not the
+        -- one nearer you. Only one that can be hit, in front of the camera,
+        -- within range studs. cands = { {id, dist, ok, sx, sy, front} }, mx / my
+        -- = the cursor (the same pixels). Nobody that near = nil: your attack
+        -- goes where your mouse points.
+        function L.cursorPick(cands, mx, my, radius, range)
+            local best, bestD = nil, nil
             for _, c in ipairs(cands) do
-                if c.ok then
-                    if locked and cur ~= nil and c.id == cur and c.dist <= keepRange * 1.1 then return c, true end
-                    if c.dist <= pickRange and (best == nil or c.dist < best.dist) then best = c end
+                if c.ok and c.front and c.sx and c.sy and c.dist <= range then
+                    local d = math.sqrt((c.sx - mx) ^ 2 + (c.sy - my) ^ 2)
+                    if d <= radius and (bestD == nil or d < bestD) then best, bestD = c, d end
                 end
             end
-            return best, false
+            return best
         end
         -- FACING (user, 2026-10-12: every attack, any weapon, "the character is
         -- the script's job"): turned to him while an attack key / M1 is held,
@@ -16588,20 +16603,6 @@ do
             end
             return untilNow
         end
-        -- The panel's "Next player": the next one out by distance.
-        function L.nextOf(cands, cur, range)
-            local list = {}
-            for _, c in ipairs(cands) do
-                if c.ok and c.dist <= range then table.insert(list, c) end
-            end
-            if #list == 0 then return nil end
-            table.sort(list, function(a, b) return a.dist < b.dist end)
-            for i, c in ipairs(list) do
-                if c.id == cur then return list[i % #list + 1] end
-            end
-            return list[1]
-        end
-
         -- Where to aim: him, or where he will be (PvpLead).
         function L.lead(pos, vel, dist, on)
             if not on or vel == nil then return pos end
@@ -16705,7 +16706,8 @@ do
             shake = { saved = {}, done = false, note = "-" },
             speed = { note = "-", st = {} },
             dash  = { note = "-", st = {}, tries = 0 },
-            faceUntil = 0, faced = 0, held = {}, locked = false, lastAttack = -1e9,
+            faceUntil = 0, faced = 0, held = {}, lastAttack = -1e9,
+            mark  = { hl = nil, bb = nil, char = nil },
         }
         P.pvp = S
         local function hold(c) table.insert(S.conns, c) return c end
@@ -17067,36 +17069,37 @@ do
             if not root then return {} end
             local out = {}
             local mine = player.Team and player.Team.Name or nil
+            local cam = workspace.CurrentCamera
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then
                     local ch = p.Character
                     local r = ch and ch:FindFirstChild("HumanoidRootPart")
                     local h = ch and ch:FindFirstChildOfClass("Humanoid")
                     if r and h then
+                        -- Where he is on your screen: the same pixels as
+                        -- GetMouseLocation (both count from the very top).
+                        local sx, sy, front = nil, nil, false
+                        if cam then
+                            local sp = cam:WorldToViewportPoint(r.Position)
+                            sx, sy, front = sp.X, sp.Y, sp.Z > 0
+                        end
                         table.insert(out, {
                             id = p, plr = p, char = ch, root = r,
                             dist = (r.Position - root.Position).Magnitude,
                             ok = L.attackable(h.Health > 0, p:GetAttribute("PvpDisabled") == true,
                                 mine, p.Team and p.Team.Name or nil),
+                            sx = sx, sy = sy, front = front,
                         })
                     end
                 end
             end
             return out
         end
-        local function targetTick(forceNext)
-            local cands = candidates()
-            local cur = S.target and S.target.plr
-            if forceNext then
-                -- "Next player": you chose him - locked.
-                S.target = L.nextOf(cands, cur, CFG.PvpRange)
-                S.locked = S.target ~= nil
-            else
-                S.target, S.locked = L.pick(cands, cur, S.locked, CFG.PvpFaceRange, CFG.PvpRange)
-            end
+        local function targetTick()
+            local m = UIS:GetMouseLocation()
+            S.target = L.cursorPick(candidates(), m.X, m.Y, CFG.PvpCatchPx, CFG.PvpRange)
             P.aimPart = S.target and S.target.root or nil
         end
-        function S.next() pcall(targetTick, true) end
         function S.aimPoint()
             local t = S.target
             if not (t and t.root and t.root.Parent) then return nil end
@@ -17106,9 +17109,8 @@ do
         function S.targetText()
             if not CFG.PvpAim then return "aim off" end
             local t = S.target
-            if not t then return "no player in " .. math.floor(CFG.PvpRange) .. " studs (alive, PvP on, not your side)" end
-            return string.format("%s  ·  %.0f studs  ·  %s%s", t.plr.DisplayName or t.plr.Name, t.dist,
-                S.locked and "LOCKED" or "nearest - your first attack locks him",
+            if not t then return "nobody near your mouse - your attacks go where it points" end
+            return string.format("%s  ·  %.0f studs  ·  your mouse is on him%s", t.plr.DisplayName or t.plr.Name, t.dist,
                 (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "")
         end
 
@@ -17123,12 +17125,11 @@ do
         -- The attack keys (not Q / jump / moving): M1, Z X C V F.
         local ATTACK_KEYS = { [Enum.KeyCode.Z] = "Z", [Enum.KeyCode.X] = "X", [Enum.KeyCode.C] = "C",
             [Enum.KeyCode.V] = "V", [Enum.KeyCode.F] = "F" }
-        -- Your attack: the one aimed at is locked (your first press), the body turned.
+        -- Your attack: the body turned to the one your mouse is on.
         local function attackPressed(what)
             local now = os.clock()
             S.lastAttack = now
             S.held[what] = true
-            if S.target and not S.locked then S.locked = true end
             if faceWanted() then
                 S.faceUntil = math.max(S.faceUntil, now + 0.4)
                 S.faced += 1
@@ -17143,6 +17144,69 @@ do
             local flat = Vector3.new(q.X, p.Y, q.Z)
             if (flat - p).Magnitude < 1 then return end
             root.CFrame = CFrame.lookAt(p, flat)
+        end
+
+        -- ---------- THE MARK (user, 2026-10-12: "the player I'm attacking
+        -- highlighted - even in a fiery, blasty animation I see him") ----------
+        -- A Highlight drawn on top of everything (kept in your camera: made
+        -- on your client, nobody else has it) + a red diamond over his head (a
+        -- screen layer, always on top: a blast covering his whole body cannot
+        -- hide where he is). Moved the frame your mouse picks another.
+        local MK = S.mark
+        local function markOff()
+            if MK.hl then MK.hl.Enabled = false MK.hl.Adornee = nil end
+            if MK.bb then MK.bb.Enabled = false MK.bb.Adornee = nil end
+            MK.char = nil
+        end
+        local function markDestroy()
+            if MK.hl then pcall(function() MK.hl:Destroy() end) end
+            if MK.bb then pcall(function() MK.bb:Destroy() end) end
+            MK.hl, MK.bb, MK.char = nil, nil, nil
+        end
+        local function markTick()
+            local t = S.target
+            local cam = workspace.CurrentCamera
+            if not (CFG.PvpMark and t and t.char and t.char.Parent and cam) then markOff() return end
+            if not (MK.hl and MK.hl.Parent) then
+                local hl = Instance.new("Highlight")
+                hl.Name = "BFFMark"
+                hl.FillColor = Color3.fromRGB(255, 30, 30)
+                hl.FillTransparency = 0.35
+                hl.OutlineColor = Color3.new(1, 1, 1)
+                hl.OutlineTransparency = 0
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.Parent = cam
+                MK.hl, MK.char = hl, nil
+            end
+            if not (MK.bb and MK.bb.Parent) then
+                local bb = Instance.new("BillboardGui")
+                bb.Name = "BFFMark"
+                bb.AlwaysOnTop = true
+                bb.ResetOnSpawn = false
+                bb.Size = UDim2.fromOffset(24, 24)
+                bb.StudsOffset = Vector3.new(0, 3.5, 0)
+                local d = Instance.new("Frame")
+                d.AnchorPoint = Vector2.new(0.5, 0.5)
+                d.Position = UDim2.fromScale(0.5, 0.5)
+                d.Size = UDim2.fromOffset(14, 14)
+                d.Rotation = 45
+                d.BackgroundColor3 = Color3.fromRGB(255, 30, 30)
+                d.BorderSizePixel = 0
+                d.Parent = bb
+                local st = Instance.new("UIStroke")
+                st.Color = Color3.new(1, 1, 1)
+                st.Thickness = 2
+                st.Parent = d
+                bb.Parent = player:FindFirstChildOfClass("PlayerGui")
+                MK.bb, MK.char = bb, nil
+            end
+            if MK.hl.Parent ~= cam then MK.hl.Parent = cam end
+            if MK.char ~= t.char then
+                MK.hl.Adornee = t.char
+                MK.bb.Adornee = t.char:FindFirstChild("Head") or t.root
+                MK.char = t.char
+            end
+            MK.hl.Enabled, MK.bb.Enabled = true, true
         end
 
         local function loop(myEpoch)
@@ -17170,21 +17234,19 @@ do
                 if P.running then P.stop() end
                 S.on = true
                 S.epoch += 1
-                S.faceUntil, S.locked, S.lastAttack = 0, false, -1e9
+                S.faceUntil, S.lastAttack = 0, -1e9
                 table.clear(S.held)
                 -- The life you are in has settled long ago: on at once (only
                 -- a NEW life waits a moment before its view is switched on).
                 V.char, V.charAt = player.Character, -1e9
                 SP.char, SP.charAt = player.Character, -1e9
                 pcall(cleanBaseline)
-                local nextPick = 0
                 hold(RunService.Heartbeat:Connect(function()
                     if not S.on then return end
                     local now = os.clock()
-                    if now >= nextPick then
-                        nextPick = now + 0.1
-                        pcall(targetTick)
-                    end
+                    -- Every frame: your mouse moves fast.
+                    pcall(targetTick)
+                    pcall(markTick)
                     -- The game sets the view's radius to 0 when Ken ends; it
                     -- is put back before its next refresh can empty the view.
                     local om = V.om
@@ -17233,6 +17295,7 @@ do
                 pcall(function() RunService:UnbindFromRenderStep("BFFPvpFace") end)
                 pcall(unwrap, true)
                 if V.own then pcall(V.own.destroy, V.own) V.own = nil end
+                pcall(markDestroy)
                 pcall(cleanRestore)
                 pcall(shakeOn)
                 pcall(speedRestore)
