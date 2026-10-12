@@ -14,7 +14,8 @@ local E, HOLD, AFTER_JOIN, ROWS, log
 local function reset()
     E = { visited = {}, tally = { fails = 0 }, hopping = false, chalice = false }
     HOLD, AFTER_JOIN, ROWS = false, nil, {}
-    log = { joins = {}, chaliceStops = 0, carries = 0 }
+    log = { joins = {}, chaliceStops = 0, carries = 0, stores = 0 }
+    P.storeBeforeHop = function() log.stores += 1 log.storedBeforeJoin = (#log.joins == 0) end
     epoch = 0
 end
 reset()

@@ -252,6 +252,15 @@ local CFG = {
     -- A spawn whose fruit cannot be read on the ground ("Fruit "): gone for
     -- whatever the minimum price (it might be anything; 2026-10-12).
     FruitUnknownSpawn  = true,
+    -- WHERE A PICKED FRUIT GOES (user, 2026-10-12: "collect the fruits in the
+    -- backpack, don't store them - the fruit hunt is for raid chips"). Off =
+    -- kept in your backpack (the raid loop spends a carried fruit first); on
+    -- = stored at once.
+    FruitStore         = false,
+    -- A fruit in the backpack, not stored, is lost when you leave the server:
+    -- on = every one is stored just before a hop (the raid loop can still
+    -- load it back for a chip). Off = it is left behind.
+    FruitStoreOnHop    = true,
     -- BERRY HUNT: the Haki colors. The Barista turns berries into Aura
     -- colors: Snow White 10 White Cloud, Winter Sky 15 Pink Pig, Pure Red 15
     -- Red Cherry (Legendary, + 7,500 fragments each). At most 4 in a server,
@@ -534,7 +543,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.4" }
 _G.BFF = P
 
 -- =========================================================
@@ -5453,6 +5462,8 @@ do
             local myEpoch = epoch
             releasePile()
             setState("HOP")
+            -- A fruit in the backpack is lost on a hop: stored first (P.storeBeforeHop).
+            if P.storeBeforeHop then pcall(P.storeBeforeHop) end
             local now = os.time()
             E.visited[game.JobId] = now + (tonumber(keepAway) or 0)
             pruneVisited(E.visited, now, 3600)
@@ -5630,9 +5641,43 @@ do
         end
         P.fruitWanted = fruitWanted
 
-        -- Fly onto it, touch it, and put it away at once: never left in your
-        -- hand (a click with it held EATS it), then StoreFruit with the name
-        -- the game gave it. Not stored = said so; it stays in your backpack.
+        -- StoreFruit for a physical fruit you carry, by the name the game gave
+        -- it. -> true + its name, or false + its name + why.
+        local function storeTool(got, origHint)
+            local bp = player:FindFirstChild("Backpack")
+            local orig = got:GetAttribute("OriginalName")
+            orig = (type(orig) == "string" and orig) or origHint or P.fruitOrig(got.Name) or got.Name
+            local cf = commF()
+            local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
+            task.wait(0.6)
+            if not (got.Parent == player.Character or got.Parent == bp) then return true, orig end
+            return false, orig, tostring(ok and res or "error")
+        end
+
+        -- BEFORE A HOP (user, 2026-10-12): a fruit carried in your backpack,
+        -- not stored, is lost when you leave the server - every one is stored
+        -- first (CFG.FruitStoreOnHop). Stored, the raid loop still trades
+        -- them: it loads the cheapest one for a chip.
+        function P.storeBeforeHop()
+            if not CFG.FruitStoreOnHop then return end
+            local _, _, hum = parts()
+            if hum then pcall(function() hum:UnequipTools() end) end
+            local bp = player:FindFirstChild("Backpack")
+            for _, t in ipairs(bp and bp:GetChildren() or {}) do
+                if P.isPhysicalFruit(t) then
+                    local ok, orig, why = storeTool(t, nil)
+                    print(string.format("[BFF] hop: %s %s%s", ok and "stored" or "could NOT store", tostring(orig),
+                        ok and " before leaving (a fruit in the backpack is lost on a hop)" or (" (" .. tostring(why) .. ") - it goes with this server")))
+                end
+            end
+        end
+
+        -- Fly onto it, touch it, never left in your hand (a click with it
+        -- held EATS it). Then (user, 2026-10-12: "collect the fruits in the
+        -- backpack, don't store them - for raid chips") it STAYS IN YOUR
+        -- BACKPACK, where the raid loop spends a carried fruit first; with
+        -- CFG.FruitStore on it is stored instead (StoreFruit, the name the game
+        -- gave it). Before a hop the backpack is stored (P.storeBeforeHop).
         local function grabFruit(f, myEpoch)
             local h = f.handle or f.tool:FindFirstChild("Handle")
             if not (h and h.Parent) then E.fruitSkip[f.tool] = os.clock() + 30 return end
@@ -5679,17 +5724,21 @@ do
                 local orig = got:GetAttribute("OriginalName")
                 orig = (type(orig) == "string" and orig) or f.orig or P.fruitOrig(got.Name) or got.Name
                 if not f.orig then print("[BFF] fruit: the unknown spawn was " .. tostring(orig) .. " (" .. got.Name .. ")") end
-                local cf = commF()
-                local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
-                task.wait(0.6)
-                if not (got.Parent == player.Character or got.Parent == bp) then
+                local price = f.price or priceOf(orig)
+                local priced = price and ("  ($" .. tostring(price) .. ")") or ""
+                if not CFG.FruitStore then
                     E.tally.fruits += 1
-                    local price = f.price or priceOf(orig)
-                    E.fruitNote = "STORED " .. orig .. (price and ("  ($" .. tostring(price) .. ")") or "")
-                    notify("Fruit stored: " .. orig)
+                    E.fruitNote = "IN YOUR BACKPACK " .. orig .. priced .. " - not stored (for raid chips)"
+                    notify("Fruit picked up: " .. orig)
                 else
-                    E.fruitNote = orig .. " picked up but NOT stored (" .. tostring(ok and res or "error")
-                        .. ") - it is in your backpack"
+                    local ok, _, why = storeTool(got, orig)
+                    if ok then
+                        E.tally.fruits += 1
+                        E.fruitNote = "STORED " .. orig .. priced
+                        notify("Fruit stored: " .. orig)
+                    else
+                        E.fruitNote = orig .. " picked up but NOT stored (" .. tostring(why) .. ") - it is in your backpack"
+                    end
                 end
             end
             E.note = E.fruitNote
@@ -14266,9 +14315,22 @@ local function buildUI()
             "The game's fruit, its name not readable on the ground - any price",
             function() return CFG.FruitUnknownSpawn end,
             function(x) CFG.FruitUnknownSpawn = x end)
+        heading2(v, "where it goes")
+        switchRow(v, "Store it at once",
+            "Off: kept in your backpack - the raid loop trades a carried fruit for a chip first",
+            function() return CFG.FruitStore end,
+            function(x) CFG.FruitStore = x end)
+        switchRow(v, "Store the backpack before a hop",
+            "A fruit in the backpack is lost when you leave the server",
+            function() return CFG.FruitStoreOnHop end,
+            function(x) CFG.FruitStoreOnHop = x end)
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
         fold(v, "How it works", function(v)
-            caption(v, "Fruits on the ground - grabbed and STORED, never eaten.")
+            caption(v, "Fruits on the ground - grabbed, never eaten, and kept in your "
+                .. "backpack (or stored, with \"Store it at once\"). The raid loop trades a "
+                .. "fruit you carry for a chip before it loads a stored one - a carried "
+                .. "fruit worth more than the raid page's cap blocks the chip (the "
+                .. "scientist picks which one he takes).")
             caption(v, "The game's own spawns are seen too (a Tool or a Model named a "
                 .. "fruit - before 2026-10-12 only players' drops were). The first "
                 .. "time a fruit of a new shape is seen, the console and "

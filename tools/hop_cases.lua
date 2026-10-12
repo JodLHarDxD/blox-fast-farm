@@ -19,6 +19,7 @@ ROWS, HOLD = servers(), true
 local r = hop("test")
 check("chalice held: refused, no join, chalice stop", r == false and #log.joins == 0
     and log.chaliceStops == 1 and log.carries == 0, #log.joins)
+check("...and nothing stored: no hop, so nothing to lose", log.stores == 0, log.stores)
 
 -- 2. chalice already seen in this server (used since): still refused
 reset()
@@ -36,6 +37,8 @@ check("this server and every tried one marked looked-at",
     E.visited.here == NOW and E.visited.b == NOW and E.visited.g == NOW)
 check("all failed: false, not left hopping, fails counted", r == false and not E.hopping
     and E.tally.fails == 6, E.tally.fails)
+check("the backpack stored ONCE, before the first join (a carried fruit is lost on a hop)",
+    log.stores == 1 and log.storedBeforeJoin == true, log.stores)
 
 -- 4. THE CHALICE ARRIVES MID-HOP (drop lands while the list is read): the
 -- next teleport never happens

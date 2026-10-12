@@ -329,7 +329,8 @@ local NEW_OK = { MirageJob = true,
     -- 2026-10-12: dodging per attacker (a Sea Beast / a Terrorshark its own circle).
     BeastDodgeSpeed = true, BeastDodgeMin = true, BeastDodgeMax = true,
     SharkDodgeSpeed = true, SharkDodgeMin = true, SharkDodgeMax = true,
-    FruitUnknownSpawn = true }   -- 2026-10-12: the game's own spawns seen
+    FruitUnknownSpawn = true,   -- 2026-10-12: the game's own spawns seen
+    FruitStore = true, FruitStoreOnHop = true }   -- 2026-10-12: picked fruits kept in the backpack
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end
