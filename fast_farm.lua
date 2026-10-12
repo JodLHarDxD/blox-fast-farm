@@ -195,6 +195,21 @@ local CFG = {
     GunFast            = false,
     GunFastEvery       = 0.08,       -- seconds a shot (0.08 = the gun's own speed)
 
+    -- ---------- RACE V3 / V4 (user, 2026-10-12) ----------
+    -- Both ON by default, in EVERY situation: any mode, the farm stopped, PvP.
+    -- V4 (Y) the moment its meter (Character.RaceEnergy) is full. V3 (T) by
+    -- the user's clock - it cools about 29-30 s: from the moment it is SEEN
+    -- going on, nothing for RaceV3Wait s, then a T every RaceV3Every s until
+    -- it is seen going on again. While V4 is on (RaceTransformed) the farm's
+    -- fights use EVERY weapon you carry (the V4 gear: "MAX STATS"), not the
+    -- Attack page's setup - that is for when you are not transformed.
+    RaceV4             = true,
+    RaceAll            = true,   -- every weapon while V4 is on
+    RaceM1Burst        = 4,      -- in V4: M1s of one weapon before the next one's turn
+    RaceV3             = true,
+    RaceV3Wait         = 28,     -- seconds of nothing after V3 went on
+    RaceV3Every        = 0.5,    -- then a T this often until it goes on again
+
     -- ---------- TRAVEL ----------
     TravelSpeed        = 330,    -- studs/s. The public hubs all settled on 330.
     InstantHop         = 150,    -- shorter than this: one write, no flight
@@ -543,7 +558,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.5" }
 _G.BFF = P
 
 -- =========================================================
@@ -2577,6 +2592,13 @@ local function usedWeapons()
         end
         return list
     end
+    -- RACE V4 (user, 2026-10-12): transformed = every weapon you carry, every
+    -- key - the V4 gear's MAX STATS make a weapon with 0 points hit like a
+    -- maxed one (P.race.weapons: never a transformation fruit's V, nor a key
+    -- not unlocked; in a fruit's form only that fruit). The mastery farm and
+    -- a sea fight keep their own rule (above).
+    local race = (P :: any).race
+    if race and race.allNow() then return race.weapons() end
     if CFG.AutoAttack and (P :: any).autoWeapons then return (P :: any).autoWeapons() end
     local out = {}
     for _, name in ipairs(CFG.WeaponOrder) do
@@ -2647,9 +2669,11 @@ end
 -- Ten times a second: learn how long each switched-on skill cools.
 local function cdTick()
     local now = os.clock()
+    local race = (P :: any).race
+    local raceAll = race ~= nil and race.allNow()
     for name, w in pairs(CFG.Weapons) do
         for _, k in ipairs(KEYS) do
-            if w[k] or CFG.AutoAttack or (pileCur and pileCur.allKeys) then
+            if w[k] or CFG.AutoAttack or (pileCur and pileCur.allKeys) or raceAll then
                 local b = barReady(name, k)
                 if b ~= nil then
                     local c = cdOf(name, k)
@@ -2860,6 +2884,9 @@ do
         -- swapped in over it.
         function P.rotate(vents)
             if not CFG.InvSwap then return false end
+            -- RACE V4: every weapon you CARRY - nothing is loaded (user, 2026-10-12).
+            local race = (P :: any).race
+            if not vents and race and race.allNow() then return false end
             if not vents and not CFG.AutoAttack and not (pileCur and pileCur.allKeys) then return false end
             -- A fight that takes no sword / gun (SEA EVENTS: fruit + melee): none loaded.
             if not vents and pileCur and pileCur.noRotate and pileCur.noRotate() then return false end
@@ -3306,7 +3333,9 @@ local function castSkill(u, k)
     -- A sea event's fight (pileCur.fastCast, user 2026-10-09: "the moment it
     -- is out of cooldown it is pressed"): the key the moment the game takes
     -- it, the next one the frame this one's bar starts - no fixed wait.
-    local fast = pileCur and pileCur.fastCast
+    -- ...and while V4 is on (RACE: every weapon's keys, user 2026-10-12).
+    local race = (P :: any).race
+    local fast = (pileCur and pileCur.fastCast) or (race ~= nil and race.allNow()) or false
     if fast then
         -- The move before still playing: wait for it (up to 3 s), never press into it.
         local tw = os.clock()
@@ -3374,7 +3403,7 @@ end
 local function attackTick()
     local used = usedWeapons()
     if #used == 0 then
-        say("nothing switched on - Attack page")
+        say((used :: any).race and "V4: no weapon to use" or "nothing switched on - Attack page")
         task.wait(0.3)
         return
     end
@@ -3387,6 +3416,14 @@ local function attackTick()
     -- that swings M1 is never swapped out by the rotation (P.keepSword).
     local m1Of = (P :: any).m1Of
     if m1Of then m1u = m1Of(used) end
+    -- RACE V4 (user, 2026-10-12): every weapon's M1 in turn, RaceM1Burst
+    -- swings each (one whose M1 lands nowhere is passed over) - your M1 pick
+    -- does not count while transformed; a fight that names its own M1 weapon
+    -- (the volcano's golems) keeps it.
+    local race = (used :: any).race and (P :: any).race or nil
+    if race and not (pileCur and pileCur.m1Weapon and pileCur.m1Weapon()) then
+        m1u = race.m1Turn(used, function(u) return m1Plan[u.name] == false and not m1Due(u.name) end)
+    end
     -- A fight that swings no M1 at all (SEA EVENTS out of Kitsune form, user
     -- 2026-10-09) - whatever the Attack page, your M1 pick or the mastery say.
     if pileCur and pileCur.noM1 and pileCur.noM1() then m1u = nil end
@@ -3402,6 +3439,8 @@ local function attackTick()
     if gi and ((gi.gatling and CFG.GunHold) or CFG.GunFast) then between = 0 end
     -- A sea event: every skill the moment it is ready, M1 in the gaps.
     if pileCur and pileCur.allKeys then between = 0 end
+    -- V4: every weapon's skill the moment it is ready, the M1s in the gaps.
+    if race then between = 0 end
 
     if anySkill and (not m1u or m1Count >= between) then
         for _, u in ipairs(used) do
@@ -3426,7 +3465,11 @@ local function attackTick()
     end
 
     if m1u then
-        if not equip(m1u.name) then task.wait(0.1) return end
+        if not equip(m1u.name) then
+            if race then race.m1Skip() end
+            task.wait(0.1)
+            return
+        end
         local way = m1Plan[m1u.name]
         if m1Due(m1u.name) then
             way = probeM1(m1u.name, m1u.tool)
@@ -3440,11 +3483,13 @@ local function attackTick()
                 or (m1u.name .. " M1")
             fireM1(way, m1u.tool)
             m1Count += 1
+            if race then race.m1Swung() end
             task.wait(math.max(CFG.M1Every or 0.06, 0.03))
         else
             -- No way of landing this weapon's M1: let the skills carry it.
             m1Count = CFG.M1Between or 0
             P.nextNote = "no M1 lands with " .. m1u.name
+            if race then race.m1Skip() end
             task.wait(0.1)
         end
     end
@@ -7656,7 +7701,9 @@ do
                 mirageDone(m, "Blue Gear collected")
                 return true
             end
-            -- Your turn at the moon; the gear is watched.
+            -- Your turn at the moon; the gear is watched. P.moonTurn: the
+            -- script sends no T meanwhile (RACE) - yours has to find V3 ready.
+            P.moonTurn = os.clock()
             handsOff()
             local left = MIRAGE_LIFE - (os.clock() - m.seenAt)
             local news = (P :: any).news
@@ -10848,11 +10895,20 @@ do
             Kitsune = "Kitsune", Dragon = "%-Dragon", GasRig = "Gas%-Gas", HydraRig = "Venom",
             TigerRig = "Tiger", YetiRig = "Yeti", Mammoth = "Mammoth%-Mammoth", TRex = "T%-Rex", Phoenix = "Phoenix",
         }
+        -- A rig whose fruit you do not carry is not that fruit's form
+        -- (2026-10-12, auto V4: a race's own model named like a rig must not
+        -- lock every weapon out).
+        local function carriesFruit(pat)
+            for _, t in ipairs(toolNames()) do
+                if string.find(t.Name, pat) then return true end
+            end
+            return false
+        end
         local function formOf()
             local ch = player.Character
             if not ch then return nil end
             for rig, pat in pairs(RIGS) do
-                if ch:FindFirstChild(rig) then return pat, rig end
+                if ch:FindFirstChild(rig) and carriesFruit(pat) then return pat, rig end
             end
             return nil
         end
@@ -10926,6 +10982,8 @@ do
             if k == "V" and transformFruit(name) then return false end
             return unlocked(name, k)
         end
+        -- RACE V4 uses the same rules on land (P.race.weapons).
+        SE.formOf, SE.transformFruit, SE.unlocked = formOf, transformFruit, unlocked
 
         -- ---------- THE WATER AS ROCK, AND DODGING (user, 2026-10-09) ----------
         -- A sea fight sets P.floorY (the sea's top + 4): the lock never goes
@@ -11295,6 +11353,11 @@ do
         local function typeOk(name)
             local t = findTool(name)
             local ty = t and toolType(t)
+            -- RACE V4 (user, 2026-10-12): every weapon while transformed.
+            local race = (P :: any).race
+            if ty ~= nil and race and race.allNow() then
+                return ty == "Melee" or ty == "Blox Fruit" or ty == "Sword" or ty == "Gun"
+            end
             return ty ~= nil and (CFG.SeaEvWeapons or {})[ty] == true
         end
         local function seaOk(name)
@@ -13833,6 +13896,9 @@ local function buildUI()
                 subject.Text = "Idle"
                 detail.Text = statusLine
             end
+            -- RACE: V4 on = every weapon (user, 2026-10-12).
+            local race = (P :: any).race
+            if race and race.allNow() then detail.Text = "V4 - every weapon  ·  " .. detail.Text end
         end)
         gap(v, 12)
         local hero = mk("TextButton", {
@@ -13867,6 +13933,8 @@ local function buildUI()
 
         heading2(v, "fight  ·  every mode")
         navRow(v, "Attack", function()
+            local race = (P :: any).race
+            if race and race.allNow() then return "V4 - every weapon you carry" end
             local s = setupKey()
             for _, n in ipairs(CFG.WeaponOrder) do
                 local w = CFG.Weapons[n]
@@ -15265,6 +15333,28 @@ local function buildUI()
         readout(v, function()
             return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
         end)
+        -- RACE V3 / V4 (user, 2026-10-12): on by default - any mode, the farm
+        -- stopped, PvP too.
+        heading2(v, "race  ·  V4 and V3")
+        readout(v, function() return (P :: any).race and (P :: any).race.text() or "" end)
+        switchRow(v, "V4 when the meter is full", "Y the moment it is full - every mode, PvP too",
+            function() return CFG.RaceV4 end,
+            function(x) CFG.RaceV4 = x end)
+        switchRow(v, "Every weapon while V4", "Max stats: every key, every M1 of all you carry",
+            function() return CFG.RaceAll end,
+            function(x) CFG.RaceAll = x end)
+        sliderRow(v, "In V4: M1s of one weapon, then the next", 1, 10, 1,
+            function() return CFG.RaceM1Burst end,
+            function(x) CFG.RaceM1Burst = x end)
+        switchRow(v, "V3 when ready", "T after its cooldown, counted from when it went on",
+            function() return CFG.RaceV3 end,
+            function(x) CFG.RaceV3 = x end)
+        sliderRow(v, "V3: nothing for", 15, 40, 1,
+            function() return CFG.RaceV3Wait end,
+            function(x) CFG.RaceV3Wait = x end, " s")
+        sliderRow(v, "V3: then a T every", 0.2, 2, 0.1,
+            function() return CFG.RaceV3Every end,
+            function(x) CFG.RaceV3Every = x end, " s")
         heading2(v, "M1 with")
         local m1box = chooser(v, 130)
         local m1sig = nil
@@ -15433,6 +15523,15 @@ local function buildUI()
             function() return CFG.HitRange end,
             function(x) CFG.HitRange = x end, " studs")
         fold(v, "How it works", function(v)
+            caption(v, "Race: V4 the moment its meter is full. V3 by your clock - from the "
+                .. "moment it went on (yours or the script's T), nothing for 28 s, then a T "
+                .. "every 0.5 s until it goes on again. Any mode, the farm stopped, PvP too; "
+                .. "no T while the Mirage gives you the moon.")
+            caption(v, "While V4 is on (max stats on every weapon) the farm fights with every "
+                .. "weapon you carry: every key the moment it is ready (never a transformation "
+                .. "fruit's V), every M1 in turn. What is set below is for when you are not "
+                .. "transformed. Sea fights still swing no M1 out of Kitsune form, a fruit's "
+                .. "form fires only its moves, the mastery farm keeps its one weapon.")
             caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
                 .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
             caption(v, "A key whose skill never fires (not this weapon's, not unlocked) "
@@ -17068,6 +17167,475 @@ do
 end
 -- (end of pvp)
 
+-- =========================================================
+-- RACE V3 / V4
+-- =========================================================
+-- User, 2026-10-12 (voice): both ON by default and in EVERY situation - the
+-- farm, raids, sea events, the Leviathan, PvP, the farm stopped. Read in the
+-- game's own client (decompiled v4623):
+--   V4 (Y)  Controllers/UI/RaceV4Button: not Character.RaceTransformed and
+--           Character.RaceEnergy >= 1 -> RS.Events.ActivateRaceV4:Fire()
+--           (the Awakening tool listens and asks the server). Both values
+--           are the SERVER's - a fake-full meter is refused (2026-10-10).
+--           Three public hubs call the tool's own server function instead,
+--           Awakening.RemoteFunction:InvokeServer(true): the second way.
+--   V3 (T)  StarterCharacterScripts/RaceAbility: with one of the seven
+--           ability tools carried, T -> Remotes.CommE:FireServer(
+--           "ActivateAbility"). No cooldown on the client: the server
+--           decides, and nothing comes back.
+-- V3 BY THE USER'S CLOCK: it cools about 29-30 s, so from the moment it is
+-- SEEN going on, nothing for RaceV3Wait (28) s, then a T every RaceV3Every
+-- (0.5) s until it is seen going on again - no blind spamming. Seen = the
+-- game's effect "DracoRace.Roar" on Remotes.FX cast by you (Draco: a roar
+-- that buffs allies and debuffs enemies for 10 s - most likely its V3,
+-- Primordial Reign), or a child named after the ability put on your
+-- character / HumanoidRootPart (the game's own run speed reads "Agility"
+-- and "Heightened Senses" there). Your own T counts the same. Never seen
+-- (another race, or the game changed): a 3 s burst after the wait, the next
+-- wait counted from its end - never more than ~1 s late, never drifting.
+-- While the Mirage gives you the moon (P.moonTurn), no T: yours has to find
+-- V3 ready.
+-- WHILE V4 IS ON the farm's fights use every weapon you carry (usedWeapons,
+-- attackTick): the V4 gear "Ancient Powers" - "Upon transforming, receive
+-- MAX STATS" - makes a weapon with 0 points hit like a maxed one.
+-- workspace/bff_race_probe.txt: what the game put on you after the first
+-- T's of a wait and when V4 went on (the first 3 of each).
+-- Only P.race leaves the block.
+do
+    local function build()
+        local R: { [string]: any } = {
+            v3 = { anchor = nil, lastPress = nil, ever = false, burstStart = nil,
+                seenAt = nil, seenBy = nil, presses = 0, ons = 0, note = "-", probed = false },
+            v4 = { way = nil, try = nil, waitUntil = 0, fired = 0, ons = 0, refused = 0,
+                on = false, onAt = nil, note = "-" },
+            m1 = { name = nil, count = 0 },
+            ability = nil,
+            probes = {}, probeLog = {}, fxProbes = {},
+            fxConn = nil, hooked = nil, hookedRoot = nil, hookConns = {},
+        }
+        P.race = R
+        local PROBE = "bff_race_probe.txt"
+        local WAYS = { event = "the game's Y", call = "the Awakening call" }
+
+        -- RACE LOGIC (pure: tools/race_test.py runs it)
+        -- The seven race-ability tools (RaceAbility's own list): T exists
+        -- only while one of them is carried.
+        local ABILITIES = { "Last Resort", "Agility", "Water Body", "Heavenly Blood",
+            "Heightened Senses", "Energy Core", "Primordial Reign" }
+        local ABILITY = {}
+        for _, n in ipairs(ABILITIES) do ABILITY[n] = true end
+        -- Effects (Remotes.FX) that are a V3 going on, when you cast them.
+        local V3_FX = { ["DracoRace.Roar"] = true }
+        local BURST = 3          -- no V3 signal ever seen: seconds of T after the wait
+        -- V4's weapons, in the order their M1s take turns.
+        local RANK = { Sword = 1, Melee = 2, ["Blox Fruit"] = 3, Gun = 4 }
+
+        -- V4 now? The game's own gate (RaceV4Button), the tool that listens,
+        -- alive, and a few seconds after a refusal.
+        local function v4Due(alive, energy, transformed, awakening, now, waitUntil)
+            return alive == true and awakening == true and transformed ~= true
+                and type(energy) == "number" and energy >= 1 and now >= (waitUntil or 0)
+        end
+
+        -- THE V3 CLOCK. c.anchor = when V3 last went on (seen, or assumed at
+        -- a burst's end). -> press a T now?, what it is doing.
+        local function v3Step(c, now, wait, every, paused)
+            if paused then return false, paused end
+            if c.anchor and now < c.anchor + wait then
+                return false, string.format("next T in %d s", math.ceil(c.anchor + wait - now))
+            end
+            if not c.ever then
+                c.burstStart = c.burstStart or now
+                if now - c.burstStart >= BURST then
+                    c.anchor, c.burstStart = now, nil
+                    return false, string.format("no V3 signal seen - on the clock, next T in %d s", math.ceil(wait))
+                end
+            end
+            local doing = string.format("pressing T every %.1f s", every)
+            if c.lastPress and now - c.lastPress < every - 1e-6 then return false, doing end
+            c.lastPress = now
+            return true, doing
+        end
+        -- V3 seen going on: the clock starts here.
+        local function v3Seen(c, now, by)
+            c.anchor, c.seenAt, c.seenBy, c.ever, c.burstStart = now, now, by, true, nil
+        end
+
+        -- An effect's caster is YOU? Your Player, your character, a streamed
+        -- object holding one of them at [5] (Effect/Payload + EncodeObj), or a
+        -- stand-in { Name, Character } (the game's fake effect player).
+        local function isYou(v, me, myChar, myName)
+            if v == nil then return false end
+            if v == me or (myChar ~= nil and v == myChar) then return true end
+            if type(v) ~= "table" then return false end
+            local inner = rawget(v, 5)
+            if inner ~= nil and (inner == me or (myChar ~= nil and inner == myChar)) then return true end
+            local ch = rawget(v, "Character")
+            if ch ~= nil and myChar ~= nil and ch == myChar then return true end
+            local n = rawget(v, "Name")
+            return n ~= nil and n == myName
+        end
+        -- Only the caster's own fields - an ally your roar buffed is in its
+        -- Characters list, and so are you in an ally's.
+        local CASTER = { "player", "Player", "Sender", "Caster", "Character", "Owner" }
+        local function castBy(t, me, myChar, myName)
+            if type(t) ~= "table" then return false end
+            for i = 1, #CASTER do
+                if isYou(rawget(t, CASTER[i]), me, myChar, myName) then return true end
+            end
+            return false
+        end
+        -- Remotes.FX(effectTime, meta, payload): a V3 going on, yours?
+        local function fxV3(meta, payload, me, myChar, myName)
+            local name = type(meta) == "table" and rawget(meta, "Name") or nil
+            if type(name) ~= "string" or not V3_FX[name] then return false end
+            return castBy(payload, me, myChar, myName) or castBy(meta, me, myChar, myName)
+        end
+
+        -- THE WEAPONS IN V4: every tool the game labels Sword / Melee / Blox
+        -- Fruit / Gun (not the Awakening, not an ability), sword first, then
+        -- the fighting style, the fruit, the gun; M1 on all; the keys keyOk
+        -- allows. formPat: in a fruit's form, only that fruit (the game's rule).
+        local function pickWeapons(tools, typeOf, formPat, keyOk, holdOf)
+            local out = {}
+            for _, t in ipairs(tools) do
+                local rk = RANK[typeOf(t)]
+                if rk and (formPat == nil or string.find(t.Name, formPat) ~= nil) then
+                    local cfg: { [string]: any } = { use = true, M1 = true, hold = holdOf and holdOf(t.Name) or nil }
+                    for _, k in ipairs(KEYS) do cfg[k] = keyOk(t.Name, k) == true end
+                    table.insert(out, { name = t.Name, cfg = cfg, tool = t, rank = rk })
+                end
+            end
+            table.sort(out, function(a, b)
+                if a.rank ~= b.rank then return a.rank < b.rank end
+                return a.name < b.name
+            end)
+            local list: any = out
+            list.race = true
+            return list
+        end
+
+        -- M1 IN TURN: each weapon with M1 on swings `burst` times, then the
+        -- next; skip(u) = passed over (its M1 lands nowhere just now).
+        local function m1Turn(T, used, burst, skip)
+            local cands = {}
+            for _, u in ipairs(used) do
+                if u.cfg.M1 and not (skip and skip(u)) then table.insert(cands, u) end
+            end
+            if #cands == 0 then return nil end
+            local i = nil
+            for j, u in ipairs(cands) do
+                if u.name == T.name then i = j break end
+            end
+            if not i then
+                i, T.count = 1, 0
+            elseif T.count >= math.max(1, math.floor(burst or 1)) then
+                i, T.count = (i % #cands) + 1, 0
+            end
+            T.name = cands[i].name
+            return cands[i]
+        end
+        R._t = { v4Due = v4Due, v3Step = v3Step, v3Seen = v3Seen, isYou = isYou, castBy = castBy,
+            fxV3 = fxV3, pickWeapons = pickWeapons, m1Turn = m1Turn, ABILITY = ABILITY, BURST = BURST }
+        -- (end of race logic)
+
+        -- ---------- the game's values ----------
+        local function raceVal(name)
+            local ch = player.Character
+            local v = ch and ch:FindFirstChild(name)
+            return v and v.Value
+        end
+        function R.transformed() return raceVal("RaceTransformed") == true end
+        function R.energy()
+            local e = raceVal("RaceEnergy")
+            return type(e) == "number" and e or nil
+        end
+        -- Every weapon now? V4 on and the switch on.
+        function R.allNow() return CFG.RaceAll ~= false and R.transformed() end
+        local function carried(name)
+            local bp, ch = player:FindFirstChild("Backpack"), player.Character
+            return (ch and ch:FindFirstChild(name)) or (bp and bp:FindFirstChild(name)) or nil
+        end
+
+        -- ---------- V4's weapons (usedWeapons) and M1s in turn (attackTick) ----------
+        function R.weapons()
+            local se = (P :: any).seaev
+            local formPat = se and se.formOf and se.formOf() or nil
+            local function keyOk(name, k)
+                if k == "V" and se and se.transformFruit and se.transformFruit(name) then return false end
+                if se and se.unlocked then return se.unlocked(name, k) end
+                return true
+            end
+            local function holdOf(name)
+                local w = CFG.Weapons[name]
+                return w and w.hold or nil
+            end
+            return pickWeapons(toolNames(), toolType, formPat, keyOk, holdOf)
+        end
+        function R.m1Turn(used, skip) return m1Turn(R.m1, used, CFG.RaceM1Burst or 4, skip) end
+        function R.m1Swung() R.m1.count += 1 end
+        function R.m1Skip() R.m1.count = math.max(1, math.floor(CFG.RaceM1Burst or 4)) end
+
+        -- ---------- the probe ----------
+        local function probeLine(s)
+            table.insert(R.probeLog, os.date("%Y-%m-%d %H:%M:%S  ") .. s)
+            while #R.probeLog > 200 do table.remove(R.probeLog, 1) end
+            if writefile then pcall(writefile, PROBE, table.concat(R.probeLog, "\n")) end
+        end
+        -- What the game puts on you for `secs`: children and attributes of the
+        -- character and its HumanoidRootPart, and the effects that arrive
+        -- (yours marked). The first 3 of each kind.
+        local function probe(kind, secs, why)
+            local n = (R.probes[kind] or 0) + 1
+            R.probes[kind] = n
+            if n > 3 then return end
+            local ch = player.Character
+            if not ch then return end
+            local root = ch:FindFirstChild("HumanoidRootPart")
+            local list, seen, conns = {}, {}, {}
+            local function add(s)
+                if seen[s] or #list >= 40 then return end
+                seen[s] = true
+                table.insert(list, s)
+            end
+            local function watch(obj, label)
+                if not obj then return end
+                table.insert(conns, obj.ChildAdded:Connect(function(x)
+                    add(string.format("%s + %s (%s)", label, x.Name, x.ClassName))
+                end))
+                table.insert(conns, obj.AttributeChanged:Connect(function(a)
+                    add(string.format("%s attribute %s = %s", label, tostring(a), tostring(obj:GetAttribute(a))))
+                end))
+            end
+            watch(ch, "character")
+            watch(root, "root")
+            local function onFx(name, mine) add("effect " .. tostring(name) .. (mine and " (YOURS)" or "")) end
+            R.fxProbes[onFx] = true
+            task.delay(secs, function()
+                for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+                R.fxProbes[onFx] = nil
+                local line = string.format("[%s #%d] %s: %s", kind, n, why,
+                    (#list > 0) and table.concat(list, "  ;  ") or "nothing new")
+                probeLine(line)
+                print("[BFF] race probe " .. line)
+            end)
+        end
+
+        -- ---------- V3 going on, seen ----------
+        local function seenV3(by)
+            local c, now = R.v3, os.clock()
+            -- one going-on can show twice (its effect and its child)
+            if c.seenAt and now - c.seenAt < 5 then return end
+            v3Seen(c, now, by)
+            c.ons += 1
+            if c.ons <= 3 then print("[BFF] race: V3 on (" .. tostring(by) .. ")") end
+        end
+        local function unhookChar()
+            for _, c in ipairs(R.hookConns) do pcall(function() c:Disconnect() end) end
+            table.clear(R.hookConns)
+            R.hooked, R.hookedRoot = nil, nil
+        end
+        local function hookChar(ch, root)
+            unhookChar()
+            R.hooked, R.hookedRoot = ch, root
+            local function watch(obj)
+                if not obj then return end
+                table.insert(R.hookConns, obj.ChildAdded:Connect(function(x)
+                    if _G.BFF ~= P then return end
+                    -- an ability TOOL put in your hand is not the ability on
+                    if ABILITY[x.Name] and not x:IsA("Tool") then seenV3(x.Name) end
+                end))
+            end
+            watch(ch)
+            watch(root)
+        end
+        -- One more listener on the game's effect remote (no hook): a V3
+        -- going on, and what a probe wants to see.
+        local function hookFX()
+            if R.fxConn then return end
+            local rem = RS:FindFirstChild("Remotes")
+            local fx = rem and rem:FindFirstChild("FX")
+            if not (fx and fx:IsA("RemoteEvent")) then return end
+            R.fxConn = fx.OnClientEvent:Connect(function(_, meta, payload)
+                if _G.BFF ~= P then return end
+                local name = type(meta) == "table" and rawget(meta, "Name") or nil
+                if type(name) ~= "string" then return end
+                local v3 = V3_FX[name] == true
+                if not v3 and next(R.fxProbes) == nil then return end
+                local ch = player.Character
+                local mine = castBy(payload, player, ch, player.Name) or castBy(meta, player, ch, player.Name)
+                for fn in pairs(R.fxProbes) do pcall(fn, name, mine) end
+                if v3 and mine then seenV3(name) end
+            end)
+        end
+
+        -- ---------- V4 ----------
+        local function fireV4(way, aw, now, tried)
+            tried = tried or {}
+            tried[way] = true
+            local sent = false
+            if way == "event" then
+                local evs = RS:FindFirstChild("Events")
+                local ev = evs and evs:FindFirstChild("ActivateRaceV4")
+                if ev and ev:IsA("BindableEvent") then
+                    sent = pcall(function() ev:Fire() end)
+                end
+            else
+                local rf = aw and aw:FindFirstChild("RemoteFunction")
+                if rf and rf:IsA("RemoteFunction") then
+                    sent = true
+                    task.spawn(function() pcall(function() rf:InvokeServer(true) end) end)
+                end
+            end
+            local s = R.v4
+            -- not found = the other way at once, no 1.5 s wait for nothing
+            s.try = { way = way, at = sent and now or (now - 1.5), tried = tried }
+            s.fired += 1
+            s.note = "meter full - " .. WAYS[way] .. (sent and "" or " (not found)")
+        end
+        local function v4Tick(now, alive)
+            local s = R.v4
+            local tr = R.transformed()
+            if tr and not s.on then
+                s.on, s.onAt, s.ons = true, now, s.ons + 1
+                local how = s.try and WAYS[s.try.way] or "your own Y"
+                if s.try then s.way = s.try.way end
+                s.try = nil
+                s.note = "on - " .. how
+                print("[BFF] race: V4 on - " .. how)
+                probe("v4", 2, "V4 went on (" .. how .. ")")
+            elseif s.on and not tr then
+                s.on = false
+                print(string.format("[BFF] race: V4 over after %d s", math.floor(now - (s.onAt or now))))
+            end
+            if tr then return end
+            if CFG.RaceV4 == false then
+                s.try, s.note = nil, "off"
+                return
+            end
+            local aw = carried("Awakening")
+            if s.try then
+                if now - s.try.at < 1.5 then return end
+                local other = (s.try.way == "event") and "call" or "event"
+                if alive and aw and not s.try.tried[other] then
+                    fireV4(other, aw, now, s.try.tried)
+                    return
+                end
+                s.try = nil
+                s.refused += 1
+                s.waitUntil = now + 3
+                s.note = "meter full but no transform (both ways tried) - again in 3 s"
+                if s.refused <= 3 then print("[BFF] race: V4 refused - " .. s.note) end
+                return
+            end
+            local e = R.energy()
+            if v4Due(alive, e, tr, aw ~= nil, now, s.waitUntil) then
+                fireV4(s.way or "event", aw, now, nil)
+            elseif not aw then
+                s.note = "no Awakening tool - V4 not unlocked"
+            elseif e == nil then
+                s.note = "no meter on your character"
+            elseif e < 1 then
+                s.note = "fires when it is full"
+            end
+        end
+
+        -- ---------- V3 ----------
+        local function v3Tick(now, alive)
+            local c = R.v3
+            if CFG.RaceV3 == false then
+                c.note = "off"
+                return
+            end
+            R.ability = nil
+            for _, n in ipairs(ABILITIES) do
+                local t = carried(n)
+                if t and t:IsA("Tool") then R.ability = n break end
+            end
+            if not R.ability then
+                c.note = "no race ability tool - V3 not unlocked"
+                return
+            end
+            local paused = nil
+            if not alive then
+                paused = "waiting for your character"
+            elseif P.handsOff and P.moonTurn and now - P.moonTurn < 2 then
+                paused = "your turn at the moon - your own T"
+            end
+            local anchorWas = c.anchor
+            local go, why = v3Step(c, now, tonumber(CFG.RaceV3Wait) or 28, tonumber(CFG.RaceV3Every) or 0.5, paused)
+            c.note = why
+            if not go then return end
+            local rem = RS:FindFirstChild("Remotes")
+            local ce = rem and rem:FindFirstChild("CommE")
+            if not ce then
+                c.note = "no CommE remote"
+                return
+            end
+            pcall(function() ce:FireServer("ActivateAbility") end)
+            c.presses += 1
+            -- the first T after a wait: what does the game put on you?
+            if c.probed ~= (anchorWas or -1) then
+                c.probed = anchorWas or -1
+                probe("v3", 3.5, "the T's after a wait")
+            end
+        end
+
+        -- ---------- every 0.1 s, from load ----------
+        function R.tick()
+            local now = os.clock()
+            local ch = player.Character
+            local root = ch and ch:FindFirstChild("HumanoidRootPart")
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+            local alive = root ~= nil and hum ~= nil and hum.Health > 0
+            if ch ~= R.hooked or root ~= R.hookedRoot then hookChar(ch, root) end
+            hookFX()
+            local ok, err = pcall(v4Tick, now, alive)
+            if not ok then R.v4.note = "error: " .. tostring(err) end
+            ok, err = pcall(v3Tick, now, alive)
+            if not ok then R.v3.note = "error: " .. tostring(err) end
+        end
+        function R.unhook()
+            unhookChar()
+            if R.fxConn then pcall(function() R.fxConn:Disconnect() end) end
+            R.fxConn = nil
+        end
+
+        -- ---------- the panel's lines ----------
+        function R.text()
+            local s, c, now = R.v4, R.v3, os.clock()
+            local e = R.energy()
+            local pct = e and string.format("meter %d %%", math.floor(e * 100 + 0.5)) or "no meter"
+            local v4
+            if R.transformed() then
+                local names = {}
+                if CFG.RaceAll ~= false then
+                    for _, u in ipairs(R.weapons()) do table.insert(names, u.name) end
+                end
+                v4 = string.format("V4 ON %d s  ·  %s%s", math.floor(now - (s.onAt or now)), pct,
+                    (#names > 0) and ("\n   every weapon: " .. table.concat(names, ", ")) or "")
+            elseif CFG.RaceV4 == false then
+                v4 = "V4 off"
+            else
+                v4 = "V4  " .. pct .. "  ·  " .. tostring(s.note)
+            end
+            local v3
+            if CFG.RaceV3 == false then
+                v3 = "V3 off"
+            elseif not R.ability then
+                v3 = "V3  " .. tostring(c.note)
+            elseif c.ever and c.seenAt then
+                v3 = string.format("V3 on %d s ago (%s)  ·  %s", math.floor(now - c.seenAt), tostring(c.seenBy), tostring(c.note))
+            else
+                v3 = string.format("V3  %s  ·  %d T sent  ·  no V3 signal seen yet", tostring(c.note), c.presses)
+            end
+            return v4 .. "\n" .. v3
+        end
+    end
+    build()
+end
+-- (end of race)
+
 -- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
 do
     local resumed = false
@@ -17094,6 +17662,14 @@ task.spawn(function()
         pcall(P.news.tick)
         task.wait(1)
     end
+end)
+-- Race V3 / V4 from load, farm running or not, PvP too (RACE).
+task.spawn(function()
+    while _G.BFF == P do
+        pcall(P.race.tick)
+        task.wait(0.1)
+    end
+    pcall(P.race.unhook)
 end)
 do
     local deepConn

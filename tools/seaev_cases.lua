@@ -608,10 +608,19 @@ player.Character.kids.Kitsune = nil
 CFG.SeaEvWeapons.Gun = true
 check("...back in base (guns on): the learned best again", T.bestM1() == "Skull Guitar")
 CFG.SeaEvWeapons.Gun = false
+-- (A form is a fruit you carry: the Dragon form with the Dragon fruit on you.)
+local toolsWas = TOOLS
+TOOLS = { { Name = "Dragon-Dragon", ToolTip = "Blox Fruit" }, { Name = "Dragon Talon", ToolTip = "Melee" } }
 player.Character:add(inst("Dragon", "Model"))
 check("Dragon form: Dragon-Dragon's moves, never Dragon Talon's (a different weapon)", T.toolOk("Dragon-Dragon")
     and not T.toolOk("Dragon Talon"))
+-- 2026-10-12 (auto V4): a child named like a rig while you carry NOT that
+-- fruit (a race's own model, Draco V4?) is no form - nothing is locked out.
+TOOLS = { { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" }, { Name = "Dragon Talon", ToolTip = "Melee" } }
+check("a 'Dragon' child but no Dragon fruit carried: not a form - every weapon's moves",
+    T.toolOk("Kitsune-Kitsune") and T.toolOk("Dragon Talon") and T.formOf() == nil)
 player.Character.kids.Dragon = nil
+TOOLS = toolsWas
 reset()
 clearWorld()
 local hb3 = beast("SeaBeast3", Z5 + vec(300, 0, 0), 100000, 100000)
@@ -764,6 +773,14 @@ check("melee switched off: the fruit swings M1", fc.m1Weapon() == "Kitsune-Kitsu
 CFG.SeaEvWeapons.Melee, CFG.SeaEvWeapons.Sword = true, true
 check("a sword switched on: inventory loads allowed again", fc.noRotate() == false and fc.toolOk("Hallow Scythe"))
 CFG.SeaEvWeapons.Sword = false
+-- RACE V4 (user, 2026-10-12): while transformed, every weapon - the sword
+-- and the gun too, whatever the sea's own setting; still never a non-weapon.
+P.race = { allNow = function() return true end }
+check("V4 on: the sword and the gun in too (fruit + melee setting)", fc.toolOk("Hallow Scythe") and fc.toolOk("Skull Guitar")
+    and fc.toolOk("Kitsune-Kitsune") and fc.toolOk("Dragon Talon"))
+P.race = { allNow = function() return false end }
+check("V4 over: the sea's own setting again", not fc.toolOk("Hallow Scythe") and not fc.toolOk("Skull Guitar"))
+P.race = nil
 player.Character:add(inst("Kitsune", "Model"))
 check("into the form mid-fight: the farm's fight hands over to the caster", fc.breakIf() == true)
 player.Character.kids = {}
@@ -1153,6 +1170,8 @@ CFG.Hunt, P.running = true, true
 beast("SeaBeast7", Z5 + vec(300, 0, 0), 100000, 100000)
 SE.step(epoch)
 check("a beast fight out of form: its caster swings no M1", CASTS[1] and CASTS[1].m1Ok and CASTS[1].m1Ok() == false)
+-- (in the form = the fruit on you: a rig without it is no form, 2026-10-12)
+TOOLS = { { Name = "Kitsune-Kitsune", ToolTip = "Blox Fruit" } }
 player.Character:add(inst("Kitsune", "Model"))
 check("...in Kitsune form: Kitsune's M1 allowed", CASTS[1].m1Ok() == true)
 player.Character.kids = {}

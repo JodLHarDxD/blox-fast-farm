@@ -149,4 +149,81 @@ pileCur = nil
 all = run("...and outside a sea event \"M1 between\" holds again",
     cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 3,
     "swap Kitsune | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
+-- RACE V4 (user, 2026-10-12): the attack list is V4's (marked .race): every
+-- weapon's M1 in turn (P.race.m1Turn - its own rule is tested in race_test),
+-- each skill the moment it is ready ("M1 between" and "M1 first" ignored), and
+-- each key fast (no CastWait); a fight that names its own M1 weapon keeps it.
+do
+    local realUsed = usedWeapons
+    local turn = { name = nil, count = 0 }
+    local function resetTurn() turn.name, turn.count = nil, 0 end
+    P.race = {
+        allNow = function() return true end,
+        m1Turn = function(used, skip)
+            local c = {}
+            for _, u in ipairs(used) do if u.cfg.M1 and not (skip and skip(u)) then table.insert(c, u) end end
+            if #c == 0 then return nil end
+            local i = nil
+            for j, u in ipairs(c) do if u.name == turn.name then i = j end end
+            if not i then i, turn.count = 1, 0
+            elseif turn.count >= 2 then i, turn.count = i % #c + 1, 0 end
+            turn.name = c[i].name
+            return c[i]
+        end,
+        m1Swung = function() turn.count += 1 end,
+        m1Skip = function() turn.count = 2 end,
+    }
+    usedWeapons = function()
+        local out = realUsed()
+        out.race = true
+        return out
+    end
+    resetTurn()
+    all = run("V4: every weapon's M1 in turn (2 each), the skill whenever ready (10 between, M1 first ignored)",
+        cfg({ M1Between = 10, StartWith = "M1" }, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 7,
+        "swap Kitsune | cast Kitsune Z | M1 Kitsune | M1 Kitsune | swap Sanguine Art | M1 Sanguine Art | M1 Sanguine Art"
+        .. " | swap Sword | M1 Sword | swap Kitsune | cast Kitsune Z") and all
+    -- each key fast: the next action the frame the key fired, no 0.5 s CastWait
+    resetTurn()
+    CFG = cfg({ M1Between = 0 }, { Kitsune = W{ Z = true }, ["Sanguine Art"] = W{}, Sword = W{} })
+    LOG, clock, held, CD, m1Count, cdStore = {}, 0, nil, {}, 0, {}
+    attackTick()
+    print((clock < 0.2 and "PASS " or "FAIL ") .. "V4: each key fast - no 0.5 s CastWait (" .. clock .. " s)")
+    all = (clock < 0.2) and all
+    -- a weapon whose M1 lands nowhere: passed over, not swung
+    resetTurn()
+    m1Plan["Sanguine Art"] = false
+    local realDue = m1Due
+    m1Due = function(name) return m1Plan[name] == nil end
+    all = run("V4: a weapon whose M1 lands nowhere is passed over",
+        cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 4,
+        "swap Kitsune | M1 Kitsune | M1 Kitsune | swap Sword | M1 Sword | M1 Sword") and all
+    m1Due = realDue
+    m1Plan["Sanguine Art"] = nil
+    -- a weapon that will not come into your hand: the next one's turn at once
+    resetTurn()
+    local realEquip = equip
+    equip = function(name)
+        if name == "Sanguine Art" then ev("no " .. name) return false end
+        return realEquip(name)
+    end
+    all = run("V4: a weapon that will not come into your hand - the next one's turn, not stuck on it",
+        cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 5,
+        "swap Kitsune | M1 Kitsune | M1 Kitsune | no Sanguine Art | swap Sword | M1 Sword | M1 Sword") and all
+    equip = realEquip
+    -- the volcano's golems name their own M1 weapon: kept, no turns
+    resetTurn()
+    pileCur = { m1Weapon = function() return "Sword" end }
+    P.m1Of = function(used) for _, u in ipairs(used) do if u.name == "Sword" then return u end end return nil end
+    all = run("V4 at the golems: their M1 weapon kept (no turns)",
+        cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{ M1 = true } }), 3,
+        "swap Sword | M1 Sword | M1 Sword | M1 Sword") and all
+    P.m1Of, pileCur = nil, nil
+    -- not V4's list (the Attack page, or V4 switched off): no turns, the old rhythm
+    usedWeapons = realUsed
+    all = run("not V4's list: the Attack page's rhythm, no turns",
+        cfg({ M1Between = 2 }, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{} }), 3,
+        "swap Kitsune | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
+    P.race = nil
+end
 print(all and "ALL PASS" or "SOME FAILED")

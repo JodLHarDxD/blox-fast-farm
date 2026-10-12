@@ -77,6 +77,23 @@ P.masteryUsed = function() return { { name = "Kabucha", cfg = {}, tool = {} } } 
 check("...the mastery farm still wins (only that weapon hurts anything)", usedWeapons()[1].name == "Kabucha"
     and #usedWeapons() == 1)
 P.masteryUsed, pileCur = nil, nil
+-- RACE V4 (user, 2026-10-12): transformed = V4's list (P.race.weapons), over
+-- the Attack page; the mastery farm and a sea fight keep their own.
+local V4LIST = { { name = "V4 list", cfg = { M1 = true }, tool = {} }, race = true }
+P.race = { allNow = function() return true end, weapons = function() return V4LIST end }
+check("V4 on: V4's list (every weapon), not the Attack page's", usedWeapons() == V4LIST)
+CFG.AutoAttack = true
+check("V4 on: V4's list over 'Every weapon you carry' too", usedWeapons() == V4LIST)
+CFG.AutoAttack = false
+P.masteryUsed = function() return { { name = "Kabucha", cfg = {}, tool = {} } } end
+check("V4 on: the mastery farm still wins", usedWeapons()[1].name == "Kabucha")
+P.masteryUsed = nil
+pileCur = { allKeys = function() return { Z = true } end }
+check("V4 on in a sea fight: the sea's own list (its keys, its no-M1 rule)", usedWeapons() ~= V4LIST and #usedWeapons() == 3)
+pileCur = nil
+P.race.allNow = function() return false end
+check("V4 over: the Attack page's list again", usedWeapons() ~= V4LIST and #usedWeapons() == 0)
+P.race = nil
 CFG.AutoAttack = true
 CARRY = { ["Dragon Talon"] = "Melee", ["Kabucha"] = "Gun" }
 check("auto: no sword - M1 with the fighting style", P.autoWeapons()[1].name == "Dragon Talon" and P.keepSword == nil)
@@ -139,6 +156,20 @@ T += 2
 check("rotate: ...but not one that takes no sword / gun (fruit + melee)", P.rotate(false) == false)
 check("rotate: ...the volcano's own ask still goes (any mode)", P.rotate(true) == true)
 pileCur.noRotate = nil
+-- RACE V4 (user, 2026-10-12): every weapon you CARRY - nothing loaded, in a
+-- sea fight or with "Every weapon you carry" on; the volcano's ask still goes.
+P.race = { allNow = function() return true end }
+T += 2
+check("rotate: V4 on - nothing loaded from the inventory (a sea fight)", P.rotate(false) == false)
+CFG.AutoAttack = true
+pileCur = nil
+T += 2
+check("rotate: V4 on - nothing loaded ('Every weapon you carry' on)", P.rotate(false) == false)
+check("rotate: V4 on - the volcano's own ask still goes", P.rotate(true) == true)
+P.race = { allNow = function() return false end }
+T += 2
+check("rotate: V4 over - loads again", P.rotate(false) == true)
+P.race = nil
 pileCur = nil
 CFG.AutoAttack = true
 CFG.InvSwap = false

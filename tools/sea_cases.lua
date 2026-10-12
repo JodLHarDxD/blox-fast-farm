@@ -733,6 +733,10 @@ check("...and the character is yours: hands off, your collisions back", P.handsO
 reset()
 S.huntStep(epoch, "gear")
 check("gear hidden: nothing moves, your turn", #FLIGHTS == 0 and P.handsOff and string.find(S.note, "your turn", 1, true) ~= nil, S.note)
+-- RACE (user, 2026-10-12): the moon turn stamped every pass - the script's
+-- auto V3 sends no T while it is fresh (your own T has to find V3 ready).
+check("...the moon turn stamped for the race ticker (fresh = no T of the script's)", P.moonTurn ~= nil
+    and CLOCK - P.moonTurn >= 0 and CLOCK - P.moonTurn < 2, tostring(P.moonTurn) .. " at " .. tostring(CLOCK))
 -- The moon resonates: the gear shows.
 gear.Transparency = 0
 ON_FLY = function(pos) if (pos - gear.Position).Magnitude < 1 then gear.Transparency = 1 end end
