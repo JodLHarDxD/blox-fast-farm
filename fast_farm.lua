@@ -249,6 +249,9 @@ local CFG = {
     -- server spawns only.
     FruitMinPrice      = 0,
     FruitPlayerDrops   = false,
+    -- A spawn whose fruit cannot be read on the ground ("Fruit "): gone for
+    -- whatever the minimum price (it might be anything; 2026-10-12).
+    FruitUnknownSpawn  = true,
     -- BERRY HUNT: the Haki colors. The Barista turns berries into Aura
     -- colors: Snow White 10 White Cloud, Winter Sky 15 Pink Pig, Pure Red 15
     -- Red Cherry (Legendary, + 7,500 fragments each). At most 4 in a server,
@@ -531,7 +534,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.3" }
 _G.BFF = P
 
 -- =========================================================
@@ -823,6 +826,69 @@ function P.isPhysicalFruit(t)
     if string.find(t.Name, " Fruit$") then return true end
     local ok, er = pcall(function() return t:FindFirstChild("EatRemote", true) end)
     return ok and er ~= nil
+end
+
+-- A FRUIT LYING IN THE WORLD (user, 2026-10-12: "the news never shows a
+-- fruit the game spawned - only what players drop"). The probe of
+-- 2026-09-28 (workspace/fruit_probe.txt) logged seven fruits, every one a
+-- player's drop - a Tool "X Fruit" with OriginalName "X-X" - and both
+-- finders asked for exactly that, so a spawn of any other shape was never
+-- seen. Now the public hubs' rule (HOSTI, Kaitun, GGEZ, 2024-26): any child
+-- of workspace, a Tool OR a Model, whose name has "Fruit" (or that carries
+-- OriginalName), with a Handle - a Model's own, or its Tool's - and that is
+-- not a player's character. Which fruit: OriginalName, else read from the
+-- name ("Kitsune Fruit" -> "Kitsune-Kitsune", "Bird: Falcon Fruit" ->
+-- "Bird-Bird: Falcon"); a name with no fruit in it ("Fruit ") = unknown.
+-- -> { orig (nil = unknown), name, handle, tool } or nil.
+function P.fruitOrig(name)
+    local base = string.match(tostring(name), "^%s*(.-)%s+Fruit%s*$")
+    if not base or base == "" then return nil end
+    local a, b = string.match(base, "^([^:]+):%s*(.+)$")
+    if a then return a .. "-" .. a .. ": " .. b end
+    return base .. "-" .. base
+end
+function P.groundFruit(c)
+    if not (c and (c:IsA("Tool") or c:IsA("Model"))) then return nil end
+    local name = tostring(c.Name)
+    local orig = c:GetAttribute("OriginalName")
+    if type(orig) ~= "string" and not string.find(name, "Fruit", 1, true) then return nil end
+    if Players:FindFirstChild(name) then return nil end        -- someone's character
+    local h = c:FindFirstChild("Handle")
+    if not (h and h:IsA("BasePart")) and c:IsA("Model") then
+        local t = c:FindFirstChildWhichIsA("Tool")
+        h = t and t:FindFirstChild("Handle")
+    end
+    if not (h and h:IsA("BasePart")) then return nil end
+    if type(orig) ~= "string" then orig = P.fruitOrig(name) end
+    return { orig = orig, name = name, handle = h, tool = c }
+end
+-- What a fruit in the world looks like, written ONCE per shape (its class,
+-- whose, its attribute names, its children) to the console and
+-- workspace/bff_fruit_seen.txt - the first game spawn tells us what the
+-- game makes. `why`: why it was not taken, if it was not.
+do
+local fruitShapes, fruitLog = {}, {}
+function P.fruitShape(c, why)
+    pcall(function()
+        local an, av, kids = {}, {}, {}
+        for k, v in pairs(c:GetAttributes()) do
+            table.insert(an, tostring(k))
+            table.insert(av, tostring(k) .. "=" .. tostring(v))
+        end
+        for _, d in ipairs(c:GetChildren()) do table.insert(kids, d.Name .. ":" .. d.ClassName) end
+        table.sort(an) table.sort(av) table.sort(kids)
+        local whose = c:GetAttribute("DroppedBy") and "DROP" or "SPAWN"
+        local key = c.ClassName .. "|" .. whose .. "|" .. table.concat(an, ",") .. "|" .. table.concat(kids, ",")
+        if fruitShapes[key] then return end
+        fruitShapes[key] = true
+        local line = string.format("[BFF] fruit seen (%s%s): Name=%q Class=%s  attributes: %s  children: %s",
+            whose, why and (" - " .. why) or "", c.Name, c.ClassName,
+            (#av > 0) and table.concat(av, ", ") or "(none)", (#kids > 0) and table.concat(kids, ", ") or "(none)")
+        print(line)
+        table.insert(fruitLog, os.date("%Y-%m-%d %H:%M  ") .. line)
+        if writefile then pcall(writefile, "bff_fruit_seen.txt", table.concat(fruitLog, "\n")) end
+    end)
+end
 end
 
 local function findTool(name)
@@ -4976,13 +5042,18 @@ do
         -- { orig, price, dropper, dropperNear } -> the dearest that passes, or
         -- nil. A player's drop only if you allow them AND its dropper has
         -- walked off (one standing by it is a trade in progress). No price
-        -- known counts as 0: it passes only when the minimum is 0.
-        local function pickFruit(list, minPrice, allowDrops)
-            local best
+        -- known counts as 0: it passes only when the minimum is 0 - except a
+        -- SERVER SPAWN whose fruit cannot be read on the ground (orig nil)
+        -- with unknownOk: it might be anything, so it is gone for, after
+        -- every known one that passes (2026-10-12).
+        local function pickFruit(list, minPrice, allowDrops, unknownOk)
+            local best, bestScore
             for _, f in ipairs(list) do
                 local ok = (not f.dropper) or (allowDrops and not f.dropperNear)
-                if ok and (f.price or 0) >= (minPrice or 0) then
-                    if not best or (f.price or 0) > (best.price or 0) then best = f end
+                local mystery = unknownOk and not f.dropper and f.orig == nil
+                if ok and (mystery or (f.price or 0) >= (minPrice or 0)) then
+                    local score = mystery and -1 or (f.price or 0)
+                    if not best or score > bestScore then best, bestScore = f, score end
                 end
             end
             return best
@@ -5528,24 +5599,25 @@ do
             return prices[orig]
         end
 
+        -- Every fruit lying in this server (P.groundFruit: a Tool or a Model -
+        -- the game's spawn too, not only a player's drop).
         local function fruitsLying()
             local out, now = {}, os.clock()
             for _, c in ipairs(workspace:GetChildren()) do
-                if c:IsA("Tool") and not (E.fruitSkip[c] and now < E.fruitSkip[c]) then
-                    local orig = c:GetAttribute("OriginalName")
-                    local h = c:FindFirstChild("Handle")
-                    if orig and h then
-                        local dropper = c:GetAttribute("DroppedBy")
-                        local near = false
-                        if dropper then
-                            for _, pl in ipairs(Players:GetPlayers()) do
-                                local rr = pl ~= player and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
-                                if rr and (rr.Position - h.Position).Magnitude < 30 then near = true break end
-                            end
+                local g = not (E.fruitSkip[c] and now < E.fruitSkip[c]) and P.groundFruit(c) or nil
+                if g then
+                    local h = g.handle
+                    local dropper = c:GetAttribute("DroppedBy")
+                    local near = false
+                    if dropper then
+                        for _, pl in ipairs(Players:GetPlayers()) do
+                            local rr = pl ~= player and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+                            if rr and (rr.Position - h.Position).Magnitude < 30 then near = true break end
                         end
-                        table.insert(out, { tool = c, orig = orig, name = c.Name, price = priceOf(orig),
-                            dropper = dropper, dropperNear = near, pos = h.Position })
                     end
+                    P.fruitShape(c)
+                    table.insert(out, { tool = c, orig = g.orig, name = g.name, price = g.orig and priceOf(g.orig) or nil,
+                        dropper = dropper, dropperNear = near, pos = h.Position, handle = h })
                 end
             end
             return out
@@ -5554,7 +5626,7 @@ do
 
         local function fruitWanted()
             if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
-            return pickFruit(fruitsLying(), CFG.FruitMinPrice, CFG.FruitPlayerDrops)
+            return pickFruit(fruitsLying(), CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn)
         end
         P.fruitWanted = fruitWanted
 
@@ -5562,10 +5634,10 @@ do
         -- hand (a click with it held EATS it), then StoreFruit with the name
         -- the game gave it. Not stored = said so; it stays in your backpack.
         local function grabFruit(f, myEpoch)
-            local h = f.tool:FindFirstChild("Handle")
-            if not h then E.fruitSkip[f.tool] = os.clock() + 30 return end
+            local h = f.handle or f.tool:FindFirstChild("Handle")
+            if not (h and h.Parent) then E.fruitSkip[f.tool] = os.clock() + 30 return end
             E.fruitNote = string.format("going for %s  (%s, %s)", f.name,
-                f.price and ("$" .. tostring(f.price)) or "price unknown",
+                f.price and ("$" .. tostring(f.price)) or (f.orig and "price unknown" or "which fruit unknown"),
                 f.dropper and ("dropped by " .. tostring(f.dropper)) or "server spawn")
             E.note = E.fruitNote
             say(E.fruitNote)
@@ -5575,7 +5647,10 @@ do
             if stale(myEpoch) then return end
             local bp = player:FindFirstChild("Backpack")
             local t0 = os.clock()
-            while os.clock() - t0 < 6 and not stale(myEpoch) and f.tool.Parent == workspace do
+            -- Still lying = its Handle still in what lies on the ground (a
+            -- spawn's Model may hold the Tool that comes to you).
+            local function lying() return f.tool.Parent == workspace and h:IsDescendantOf(f.tool) end
+            while os.clock() - t0 < 6 and not stale(myEpoch) and lying() do
                 local _, r = parts()
                 if r then
                     lockAt(h.Position)
@@ -5586,27 +5661,34 @@ do
                 end
                 task.wait(0.15)
             end
-            local where = f.tool.Parent
-            if where == workspace then
+            -- The Tool that came to you (the one holding the Handle now).
+            local got = h:FindFirstAncestorWhichIsA("Tool")
+            local mine = got and player.Character and (got:IsDescendantOf(player.Character) or (bp and got:IsDescendantOf(bp)))
+            if lying() then
                 E.fruitSkip[f.tool] = os.clock() + 60
                 E.fruitNote = f.name .. ": could not pick it up - left for a minute"
-            elseif not (where == player.Character or where == bp) then
+            elseif not mine then
                 E.fruitNote = f.name .. ": someone else took it first"
             else
                 local _, _, hum = parts()
-                if hum and where == player.Character then
+                if hum and got.Parent == player.Character then
                     pcall(function() hum:UnequipTools() end)
                     task.wait(0.1)
                 end
+                -- Its name as the game gave it to you (a spawn read as unknown on the ground).
+                local orig = got:GetAttribute("OriginalName")
+                orig = (type(orig) == "string" and orig) or f.orig or P.fruitOrig(got.Name) or got.Name
+                if not f.orig then print("[BFF] fruit: the unknown spawn was " .. tostring(orig) .. " (" .. got.Name .. ")") end
                 local cf = commF()
-                local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", f.orig, f.tool) end)
+                local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
                 task.wait(0.6)
-                if not (f.tool.Parent == player.Character or f.tool.Parent == bp) then
+                if not (got.Parent == player.Character or got.Parent == bp) then
                     E.tally.fruits += 1
-                    E.fruitNote = "STORED " .. f.orig .. (f.price and ("  ($" .. tostring(f.price) .. ")") or "")
-                    notify("Fruit stored: " .. f.orig)
+                    local price = f.price or priceOf(orig)
+                    E.fruitNote = "STORED " .. orig .. (price and ("  ($" .. tostring(price) .. ")") or "")
+                    notify("Fruit stored: " .. orig)
                 else
-                    E.fruitNote = f.orig .. " picked up but NOT stored (" .. tostring(ok and res or "error")
+                    E.fruitNote = orig .. " picked up but NOT stored (" .. tostring(ok and res or "error")
                         .. ") - it is in your backpack"
                 end
             end
@@ -12432,14 +12514,22 @@ do
                     end)
                 end
             end
+            -- Every fruit lying here - the game's spawns too (P.groundFruit;
+            -- 2026-10-12: only players' drops were ever seen). Something named
+            -- a fruit that is NOT taken is written down once (P.fruitShape).
             local fr = {}
             for _, ch in ipairs(workspace:GetChildren()) do
-                if ch:IsA("Tool") and ch:GetAttribute("OriginalName") and ch:FindFirstChild("Handle") then
-                    table.insert(fr, ch.Name)
+                local g = P.groundFruit(ch)
+                if g then
+                    local whose = ch:GetAttribute("DroppedBy") and "" or "  (server spawn)"
+                    table.insert(fr, ch.Name .. whose)
+                    P.fruitShape(ch)
                     if not fruitSeen[ch] then
                         fruitSeen[ch] = true
-                        breaking("fruit", "FRUIT ON THE MAP: " .. ch.Name, now)
+                        breaking("fruit", "FRUIT ON THE MAP: " .. ch.Name .. whose, now)
                     end
+                elseif string.find(ch.Name, "Fruit", 1, true) and not Players:FindFirstChild(ch.Name) then
+                    P.fruitShape(ch, "not read as a fruit")
                 end
             end
             N.fruits = fr
@@ -14172,9 +14262,17 @@ local function buildUI()
             "Off: server spawns only - drops are mostly trades",
             function() return CFG.FruitPlayerDrops end,
             function(x) CFG.FruitPlayerDrops = x end)
+        switchRow(v, "A spawn I cannot name: take it",
+            "The game's fruit, its name not readable on the ground - any price",
+            function() return CFG.FruitUnknownSpawn end,
+            function(x) CFG.FruitUnknownSpawn = x end)
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
         fold(v, "How it works", function(v)
             caption(v, "Fruits on the ground - grabbed and STORED, never eaten.")
+            caption(v, "The game's own spawns are seen too (a Tool or a Model named a "
+                .. "fruit - before 2026-10-12 only players' drops were). The first "
+                .. "time a fruit of a new shape is seen, the console and "
+                .. "workspace/bff_fruit_seen.txt say what it is made of.")
             caption(v, "The game's own price. 0 = any fruit. 1000000 and up = "
                 .. "Legendary and Mythical. The dearest one lying here goes first.")
             caption(v, "The whole server's fruits are seen from anywhere. A player "

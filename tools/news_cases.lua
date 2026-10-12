@@ -366,6 +366,57 @@ pass(1)
 N.tick()
 check("a tool that is no fruit (no OriginalName): ignored", #N.fruits == 1, #N.fruits)
 
+-- THE GAME'S OWN SPAWNS (2026-10-12: only players' drops were ever seen -
+-- the finder asked for a Tool with OriginalName). The public hubs' rule:
+-- a Tool OR a Model named "...Fruit..." with a Handle.
+check("which fruit, from the name: 'Kitsune Fruit', 'Bird: Falcon Fruit', 'Fruit ' (unknown)",
+    P.fruitOrig("Kitsune Fruit") == "Kitsune-Kitsune" and P.fruitOrig("Bird: Falcon Fruit") == "Bird-Bird: Falcon"
+    and P.fruitOrig("Human: Buddha Fruit") == "Human-Human: Buddha" and P.fruitOrig("Fruit ") == nil
+    and P.fruitOrig("Sword") == nil)
+do
+    fresh()
+    local spawnTool = inst("Dough Fruit", "Tool")                 -- no OriginalName, no DroppedBy
+    spawnTool.kids.Handle = inst("Handle", "Part")
+    WS_KIDS["Dough Fruit"] = spawnTool
+    local spawnModel = inst("Fruit ", "Model")                    -- a Model, its fruit not named
+    spawnModel.kids.Handle = inst("Handle", "Part")
+    WS_KIDS["Fruit "] = spawnModel
+    local wrapped = inst("Ice Fruit", "Model")                     -- a Model holding the Tool
+    local inner = inst("Ice Fruit", "Tool")
+    inner.kids.Handle = inst("Handle", "Part")
+    wrapped.kids["Ice Fruit"] = inner
+    WS_KIDS["Ice Fruit"] = wrapped
+    local char = inst("FruitLord99", "Model")                      -- a player's character
+    char.kids.Handle = inst("Handle", "Part")
+    WS_KIDS.FruitLord99 = char
+    Players.NAMES.FruitLord99 = {}
+    local noHandle = inst("Fruit Crate", "Model")                  -- named a fruit, nothing to touch
+    WS_KIDS["Fruit Crate"] = noHandle
+    N.tick()
+    local list = table.concat(N.fruits, " | ")
+    check("a SPAWNED Tool with no OriginalName: on the map, a server spawn",
+        has(list, "Dough Fruit  (server spawn)"), list)
+    check("a spawned MODEL ('Fruit ', a Handle): on the map", has(list, "Fruit   (server spawn)"), list)
+    check("a Model holding the fruit's Tool: on the map", has(list, "Ice Fruit  (server spawn)"), list)
+    check("a player called FruitLord99: never a fruit", not has(list, "FruitLord99"), list)
+    check("which fruit a spawn is: read off its name ('Dough-Dough'); 'Fruit ' = unknown (nil)",
+        P.groundFruit(spawnTool).orig == "Dough-Dough" and P.groundFruit(spawnModel).orig == nil
+        and P.groundFruit(fr).orig == "Rocket-Rocket")
+    check("breaking news for a spawn says so", printed("FRUIT ON THE MAP: Dough Fruit  (server spawn)"))
+    check("named a fruit but not read as one: written down once, for the next fix",
+        printed("[BFF] fruit seen (SPAWN - not read as a fruit): Name=\"Fruit Crate\""))
+    local seen = 0
+    for _, s in ipairs(PRINTED) do if string.find(s, "Fruit Crate", 1, true) then seen += 1 end end
+    N.tick()
+    local seen2 = 0
+    for _, s in ipairs(PRINTED) do if string.find(s, "Fruit Crate", 1, true) then seen2 += 1 end end
+    check("...once per shape, not every second", seen == 1 and seen2 == 1, seen .. " " .. seen2)
+    check("every shape seen goes to workspace/bff_fruit_seen.txt",
+        FILES["bff_fruit_seen.txt"] ~= nil and has(FILES["bff_fruit_seen.txt"], "Dough Fruit"))
+    Players.NAMES.FruitLord99 = nil
+    WS_KIDS["Dough Fruit"], WS_KIDS["Fruit "], WS_KIDS["Ice Fruit"], WS_KIDS.FruitLord99, WS_KIDS["Fruit Crate"] = nil, nil, nil, nil, nil
+end
+
 -- ---------------------------------------------------------------- THE ORDER, AND BREAKING
 fresh({ at = 10 })
 LIGHT.attrs.MoonPhase = 3

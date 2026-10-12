@@ -4,7 +4,7 @@
 -- executor's file calls and a JSON that round-trips a table. The clock is
 -- CLOCK; the game's is LIGHT.ClockTime.
 local CLOCK = 0
-local os = { clock = function() return CLOCK end, time = function() return 0 end }
+local os = { clock = function() return CLOCK end, time = function() return 0 end, date = function() return "now" end }
 local task = {
     wait = function(s) CLOCK += (s or 0.03) end,
     spawn = function(f, ...) f(...) end,
@@ -36,6 +36,7 @@ local function inst(name, class, opts)
         return false
     end
     function o:FindFirstChild(n) return self.kids[n] end
+    function o:FindFirstChildWhichIsA(c) for _, k in pairs(self.kids) do if k:IsA(c) then return k end end return nil end
     function o:GetChildren()
         local out = {}
         for _, k in pairs(self.kids) do table.insert(out, k) end
@@ -101,7 +102,8 @@ function workspace:GetChildren()
     return out
 end
 
-local Players = { MaxPlayers = 12 }
+local Players = { MaxPlayers = 12, NAMES = {} }
+function Players:FindFirstChild(n) return self.NAMES[n] end
 function Players:GetPlayers()
     local t = {}
     for i = 1, PLAYERS_N do t[i] = i end
@@ -109,6 +111,8 @@ function Players:GetPlayers()
 end
 
 local P
+-- The real fruit finder (cut from fast_farm.lua by news_test.py), put on every fresh P.
+local INSTALL_FRUITS
 local function mySea() return SEA end
 local function bossUp(n)
     local b = BOSSES[n]
@@ -151,6 +155,7 @@ local function reset(o)
     workspace.DistributedGameTime = 600
     PRINTED = {}
     P = { ELITES = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" } }
+    if INSTALL_FRUITS then INSTALL_FRUITS() end
 end
 reset()
 

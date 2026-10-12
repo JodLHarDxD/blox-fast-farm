@@ -86,6 +86,17 @@ check("minimum price: a cheap spawn is left", pickFruit({ spawnCheap }, 1000000,
 check("price unknown: taken only when the minimum is 0", pickFruit({ unknown }, 0, false) == unknown
     and pickFruit({ unknown }, 1, false) == nil)
 check("nothing lying: nil", pickFruit({}, 0, true) == nil)
+-- A SPAWN whose fruit cannot be read on the ground (2026-10-12): gone for with
+-- the switch on, whatever the minimum - after every known one that passes.
+local mystery     = { name = "Fruit " }                      -- orig nil, no dropper
+local mysteryDrop = { name = "Fruit ", dropper = "someone", dropperNear = false }
+check("an unknown SPAWN, switch on: taken even with a 1M minimum", pickFruit({ mystery }, 1000000, false, true) == mystery)
+check("...switch off: the old rule (no price = only at minimum 0)", pickFruit({ mystery }, 1000000, false, false) == nil
+    and pickFruit({ mystery }, 0, false, false) == mystery)
+check("...a known one that passes goes first", pickFruit({ mystery, spawnDear }, 1000000, false, true) == spawnDear)
+check("...a known one that does NOT pass: the unknown spawn instead", pickFruit({ spawnCheap, mystery }, 1000000, false, true) == mystery)
+check("an unknown DROP is never a mystery spawn (drops off, or a 1M minimum)", pickFruit({ mysteryDrop }, 1000000, true, true) == nil
+    and pickFruit({ mysteryDrop }, 0, false, true) == nil)
 
 -- berryNames: what a bush's attributes say is on it
 check("berry names read from attribute values, sorted, junk ignored",

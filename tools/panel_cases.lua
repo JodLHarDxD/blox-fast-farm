@@ -328,7 +328,8 @@ for _, k in ipairs(OLD_KEYS) do old[k] = true end
 local NEW_OK = { MirageJob = true,
     -- 2026-10-12: dodging per attacker (a Sea Beast / a Terrorshark its own circle).
     BeastDodgeSpeed = true, BeastDodgeMin = true, BeastDodgeMax = true,
-    SharkDodgeSpeed = true, SharkDodgeMin = true, SharkDodgeMax = true }
+    SharkDodgeSpeed = true, SharkDodgeMin = true, SharkDodgeMax = true,
+    FruitUnknownSpawn = true }   -- 2026-10-12: the game's own spawns seen
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

@@ -38,9 +38,12 @@ def cut(start, end):
 
 
 news = cut("-- SERVER NEWS\n", "-- PANEL\n")
+# The shared fruit finder the news reads (P.fruitOrig / P.groundFruit / P.fruitShape).
+fruits = cut("-- A FRUIT LYING IN THE WORLD", "local function findTool(name)")
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
-    f.write(read("news_stubs.lua") + "local function SECTION()\n" + news + "\nend\n" + read("news_cases.lua"))
+    f.write(read("news_stubs.lua") + "INSTALL_FRUITS = function()\n" + fruits + "\nend\nINSTALL_FRUITS()\n"
+            + "local function SECTION()\n" + news + "\nend\n" + read("news_cases.lua"))
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)
