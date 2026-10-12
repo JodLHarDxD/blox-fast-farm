@@ -119,6 +119,6 @@ end
 local function toolType(t) return t.ToolTip end
 local KEYS = { "Z", "X", "C", "V", "F" }
 local CFG = { RaceV4 = true, RaceAll = true, RaceM1Burst = 4, RaceV3 = true, RaceV3Wait = 28,
-    RaceV3Every = 0.5, Weapons = {} }
-local P = { handsOff = false }
+    RaceV3Every = 0.5, Weapons = {}, Pvp = false }
+local P = { handsOff = false, running = false }
 _G.BFF = P

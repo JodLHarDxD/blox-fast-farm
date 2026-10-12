@@ -196,7 +196,8 @@ local CFG = {
     GunFastEvery       = 0.08,       -- seconds a shot (0.08 = the gun's own speed)
 
     -- ---------- RACE V3 / V4 (user, 2026-10-12) ----------
-    -- Both ON by default, in EVERY situation: any mode, the farm stopped, PvP.
+    -- Both ON by default, while the script works: any mode running, or PvP
+    -- (loaded and idle = nothing fires; user, 2026-10-12).
     -- V4 (Y) the moment its meter (Character.RaceEnergy) is full. V3 (T) by
     -- the user's clock - it cools about 29-30 s: from the moment it is SEEN
     -- going on, nothing for RaceV3Wait s, then a T every RaceV3Every s until
@@ -218,6 +219,10 @@ local CFG = {
     -- Species and quests forgotten: every living enemy, any kind, within
     -- RaidRadius of the newest raid island (of you, outside a raid) goes in
     -- one pile. Observation is not pressed (raids switch it off).
+    -- THE CIRCUIT FARM (the Targets page): a mode like the others, with its
+    -- own Off (user, 2026-10-12: "loaded and doing nothing" must be possible).
+    -- Off by default: no mode = Start does nothing, nothing runs.
+    Circuit            = false,
     RaidMode           = false,
     RaidRadius         = 450,    -- the public raid scripts' "on this island"
     -- STALE ISLANDS (user, 2026-10-10: the raid over and back at the Castle
@@ -558,7 +563,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.5" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.6" }
 _G.BFF = P
 
 -- =========================================================
@@ -10021,6 +10026,21 @@ local function step()
     if CFG.Hunt then huntStep() return end
     if CFG.RandomMode then randomStep() return end
     if CFG.RaidMode then raidStep() return end
+    -- The circuit only when switched on. No mode left (a hunt switched off
+    -- mid-run): the farm stops - nothing runs, so V3 / V4 rest too - unless
+    -- the volcano event alone is on and waited for.
+    if not CFG.Circuit then
+        if CFG.Volcano then
+            say("no mode on - waiting for the volcano event")
+            task.wait(0.5)
+            return
+        end
+        say("no mode on - stopped")
+        print("[BFF] no mode on - the farm stopped")
+        task.spawn(function() pcall(P.stop) end)
+        task.wait(0.5)
+        return
+    end
 
     local list = circuit()
     if #list == 0 then
@@ -13039,7 +13059,7 @@ local function buildUI()
     -- list, the Start button, the Mode row).
     local TITLES = {
         home = "Fast Farm  ·  " .. tostring(P.build), modes = "Modes",
-        circuit = "Circuit farm", random = "Random", raid = "Raid",
+        circuit = "Circuit farm", none = "No mode", random = "Random", raid = "Raid",
         elite = "Elite pirates", fruit = "Fruits", berry = "Haki berries",
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
         ember = "Blaze Ember", sail = "Sea travel", seaevents = "Sea events",
@@ -13740,7 +13760,8 @@ local function buildUI()
     -- =====================================================
     -- One mode at a time, and the panel shows which: the one the main loop
     -- runs, in the main loop's own order - PvP (the farm stopped), the
-    -- Leviathan, a hunt, random, raid, else the circuit. PvP and the
+    -- Leviathan, a hunt, random, raid, the circuit, else none ("No mode" -
+    -- the circuit has its own Off since 2026-10-12). PvP and the
     -- Leviathan sit ON TOP of the others: switching one of them off shows the
     -- mode underneath again (user, 2026-10-11: one at a time; PvP or the
     -- Leviathan off = back to the mode you had).
@@ -13752,7 +13773,8 @@ local function buildUI()
         end
         if CFG.RandomMode then return "random" end
         if CFG.RaidMode then return "raid" end
-        return "circuit"
+        if CFG.Circuit then return "circuit" end
+        return "none"
     end
     local function modeNow()
         if CFG.Pvp then return "pvp" end
@@ -13770,14 +13792,14 @@ local function buildUI()
         CFG.RaidMode = x
         if x then CFG.RandomMode = false end
         releasePile()
-        say(x and "raid mode on" or "raid mode off - back to the circuit")
+        say(x and "raid mode on" or ("raid mode off" .. (CFG.Circuit and " - back to the circuit" or "")))
     end
     local function randomSet(x)
         if x and CFG.Hunt then P.setHunt(false) end
         CFG.RandomMode = x
         if x then CFG.RaidMode = false end
         releasePile()
-        say(x and "random mode on" or "random mode off - back to the circuit")
+        say(x and "random mode on" or ("random mode off" .. (CFG.Circuit and " - back to the circuit" or "")))
     end
     local function leviSet(x)
         CFG.LeviFight = x
@@ -13787,19 +13809,24 @@ local function buildUI()
 
     local function setMode(id, on)
         if not on then
-            -- Only the one that is on goes off. The circuit is what runs when
-            -- nothing else does: it has no off of its own.
+            -- Only the one that is on goes off; off = no mode (the circuit
+            -- too, since 2026-10-12).
             if modeNow() ~= id then return end
             if id == "pvp" then P.pvpSet(false)
             elseif id == "levi" then leviSet(false)
             elseif id == "raid" then raidSet(false)
             elseif id == "random" then randomSet(false)
-            elseif id ~= "circuit" then P.setHunt(false) end
+            elseif id == "circuit" then
+                CFG.Circuit = false
+                say("circuit off - no mode")
+            else P.setHunt(false) end
             return
         end
-        -- On: what sits on top goes first.
+        -- On: what sits on top goes first; a mode underneath replaces the
+        -- circuit (one at a time - its off is no mode, not the circuit).
         if id ~= "pvp" and CFG.Pvp then P.pvpSet(false) end
         if id ~= "levi" and CFG.LeviFight then leviSet(false) end
+        if id ~= "pvp" and id ~= "levi" then CFG.Circuit = (id == "circuit") end
         if id == "pvp" then P.pvpSet(true)
         elseif id == "levi" then leviSet(true)
         elseif id == "raid" then raidSet(true)
@@ -13816,9 +13843,9 @@ local function buildUI()
     local function offList(id)
         local now, under = modeNow(), modeUnder()
         local t = {}
-        if now ~= id then table.insert(t, modeName(now)) end
+        if now ~= id and now ~= "none" then table.insert(t, modeName(now)) end
         local overlay = (now == "pvp" or now == "levi")
-        if overlay and id ~= "pvp" and id ~= "levi" and under ~= id and under ~= "circuit" then
+        if overlay and id ~= "pvp" and id ~= "levi" and under ~= id and under ~= "none" then
             table.insert(t, modeName(under))
         end
         return table.concat(t, " and ")
@@ -13829,7 +13856,6 @@ local function buildUI()
     local function modeSwitch(view, id)
         switchRow(view, TITLES[id], function()
             if modeNow() == id then
-                if id == "circuit" then return "On - it runs whenever no other mode is on" end
                 if id == "pvp" or id == "levi" then
                     return "On, over " .. modeName(modeUnder()) .. " - Off brings it back"
                 end
@@ -13841,7 +13867,9 @@ local function buildUI()
             if id == "levi" then
                 return "Only the Leviathan, over " .. modeName(modeUnder()) .. " - it starts the run"
             end
-            return "One mode at a time - On turns " .. offList(id) .. " off"
+            local off = offList(id)
+            if off == "" then return "One mode at a time - nothing else is on" end
+            return "One mode at a time - On turns " .. off .. " off"
         end, function() return modeNow() == id end, function(x) setMode(id, x) end)
     end
 
@@ -14025,7 +14053,8 @@ local function buildUI()
             end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
-            return "circuit farm  ·  your targets, in order"  -- nothing else on (was: raid off · random off · hunt off)
+            if CFG.Circuit then return "circuit farm  ·  your targets, in order" end
+            return "no mode on  ·  pick one below - nothing runs until you do"
         end)
         local function on(id)
             return function()
@@ -15525,7 +15554,8 @@ local function buildUI()
         fold(v, "How it works", function(v)
             caption(v, "Race: V4 the moment its meter is full. V3 by your clock - from the "
                 .. "moment it went on (yours or the script's T), nothing for 28 s, then a T "
-                .. "every 0.5 s until it goes on again. Any mode, the farm stopped, PvP too; "
+                .. "every 0.5 s until it goes on again. While a mode runs or PvP is on - loaded "
+                .. "and idle, nothing; "
                 .. "no T while the Mirage gives you the moon.")
             caption(v, "While V4 is on (max stats on every weapon) the farm fights with every "
                 .. "weapon you carry: every key the moment it is ready (never a transformation "
@@ -16082,6 +16112,12 @@ end
 -- API
 -- =========================================================
 function P.start()
+    -- No mode on (user, 2026-10-12): nothing to run - nothing starts.
+    if not (CFG.Circuit or CFG.Hunt or CFG.RandomMode or CFG.RaidMode or CFG.LeviFight or CFG.Volcano) then
+        say("no mode on - pick one in Modes")
+        print("[BFF] no mode on - nothing started")
+        return
+    end
     if P.running then P.stop() end
     -- PvP and the farm both drive your character and the aim: one at a time.
     if P.pvp and P.pvp.on then pcall(P.pvpSet, false) end
@@ -17170,8 +17206,9 @@ end
 -- =========================================================
 -- RACE V3 / V4
 -- =========================================================
--- User, 2026-10-12 (voice): both ON by default and in EVERY situation - the
--- farm, raids, sea events, the Leviathan, PvP, the farm stopped. Read in the
+-- User, 2026-10-12 (voice): both ON by default while the script works - the
+-- farm, raids, sea events, the Leviathan, any mode running, or PvP mode; the
+-- script loaded and idle fires nothing (R.working). Read in the
 -- game's own client (decompiled v4623):
 --   V4 (Y)  Controllers/UI/RaceV4Button: not Character.RaceTransformed and
 --           Character.RaceEnergy >= 1 -> RS.Events.ActivateRaceV4:Fire()
@@ -17352,6 +17389,9 @@ do
         end
         -- Every weapon now? V4 on and the switch on.
         function R.allNow() return CFG.RaceAll ~= false and R.transformed() end
+        -- THE SCRIPT AT WORK (user, 2026-10-12: "loaded and doing nothing" =
+        -- no V3, no V4): a mode running, or PvP mode on.
+        function R.working() return P.running == true or CFG.Pvp == true end
         local function carried(name)
             local bp, ch = player:FindFirstChild("Backpack"), player.Character
             return (ch and ch:FindFirstChild(name)) or (bp and bp:FindFirstChild(name)) or nil
@@ -17513,6 +17553,10 @@ do
                 s.try, s.note = nil, "off"
                 return
             end
+            if not R.working() then
+                s.try, s.note = nil, "waits - nothing running (a mode, or PvP)"
+                return
+            end
             local aw = carried("Awakening")
             if s.try then
                 if now - s.try.at < 1.5 then return end
@@ -17557,7 +17601,9 @@ do
                 return
             end
             local paused = nil
-            if not alive then
+            if not R.working() then
+                paused = "waits - nothing running (a mode, or PvP)"
+            elseif not alive then
                 paused = "waiting for your character"
             elseif P.handsOff and P.moonTurn and now - P.moonTurn < 2 then
                 paused = "your turn at the moon - your own T"
@@ -17663,7 +17709,7 @@ task.spawn(function()
         task.wait(1)
     end
 end)
--- Race V3 / V4 from load, farm running or not, PvP too (RACE).
+-- Race V3 / V4 (RACE): watched from load; fired only while a mode runs or PvP is on.
 task.spawn(function()
     while _G.BFF == P do
         pcall(P.race.tick)

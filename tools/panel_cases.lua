@@ -157,7 +157,7 @@ if RUN == "full" then
         false, false, false, false, false
     P.running = false
     showModes()
-    check(onRows() == "Circuit farm", "nothing on = the circuit is On: " .. onRows())
+    check(onRows() == "", "nothing on = no mode (the circuit Off by default, 2026-10-12): " .. onRows())
 
     modePill("raid").Activated:Fire()
     check(CFG_REAL.RaidMode == true, "raid switch -> RaidMode")
@@ -201,10 +201,23 @@ if RUN == "full" then
     check(onRows() == "Raid", "raid alone On: " .. onRows())
 
     modePill("circuit").Activated:Fire()
-    check(CFG_REAL.RaidMode == false, "circuit on: raid off")
+    check(CFG_REAL.RaidMode == false and CFG_REAL.Circuit == true, "circuit on: raid off")
+    showModes()
+    check(onRows() == "Circuit farm", "circuit alone On: " .. onRows())
+    modePill("raid").Activated:Fire()
+    check(CFG_REAL.Circuit == false and CFG_REAL.RaidMode == true, "raid on: the circuit off (one at a time)")
+    modePill("raid").Activated:Fire()
+    showModes()
+    check(onRows() == "", "raid off: no mode - not the circuit back: " .. onRows())
+    modePill("circuit").Activated:Fire()
     modePill("circuit").Activated:Fire()
     showModes()
-    check(onRows() == "Circuit farm", "the circuit has no off: still On: " .. onRows())
+    check(CFG_REAL.Circuit == false and onRows() == "", "the circuit has an Off (2026-10-12): nothing On: " .. onRows())
+    table.clear(CALLS)
+    P.running = false
+    goHome() livePass()
+    check(string.find(tostring(button("home", "Start").Text), "No mode", 1, true) ~= nil,
+        "hero with no mode: Start  ·  No mode")
 
     -- ---------- the Mirage: one row, its page picks the job ----------
     table.clear(CALLS)
@@ -332,7 +345,8 @@ local NEW_OK = { MirageJob = true,
     FruitUnknownSpawn = true,   -- 2026-10-12: the game's own spawns seen
     FruitStore = true, FruitStoreOnHop = true,    -- 2026-10-12: picked fruits kept in the backpack
     -- 2026-10-12: race V4 / V3 by themselves, every weapon while V4 (Attack page).
-    RaceV4 = true, RaceAll = true, RaceM1Burst = true, RaceV3 = true, RaceV3Wait = true, RaceV3Every = true }
+    RaceV4 = true, RaceAll = true, RaceM1Burst = true, RaceV3 = true, RaceV3Wait = true, RaceV3Every = true,
+    Circuit = true }   -- 2026-10-12: the circuit has its own Off (no mode)
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end
@@ -341,7 +355,7 @@ end
 -- turns the others off (that is the one-at-a-time rule), the bone pair keeps
 -- min <= max.
 local MANY = { Hunt = true, HuntKind = true, RaidMode = true, RandomMode = true, Pvp = true,
-    LeviFight = true, MirageJob = true, BoneMin = true, BoneMax = true }
+    LeviFight = true, MirageJob = true, BoneMin = true, BoneMax = true, Circuit = true }
 for _, k in ipairs(keys) do
     local pages = {}
     for ctrl in pairs(WRITES[k]) do pages[string.match(ctrl, "^(%w+):") or ctrl] = true end

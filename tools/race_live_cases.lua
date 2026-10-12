@@ -25,6 +25,29 @@ local function printed(sub)
     return false
 end
 local function clear() CALLS, PRINTS = {}, {} end
+-- ---------------------------------------------------------------- idle (user, 2026-10-12)
+-- The script loaded and doing nothing: no V4, no V3. Only a running mode or PvP.
+P.running, CFG.Pvp = false, false
+energy.Value = 1
+tick() tick(1) tick(1)
+check("loaded and idle: no V4, no V3 sent", #CALLS == 0, table.concat(CALLS, ","))
+check("...the panel says both wait", select(2, string.gsub(R.text(), "waits %- nothing running", "")) == 2, R.text())
+CFG.Pvp = true
+tick()
+check("PvP mode on: both fire (the game's Y, and T)", count(CALLS, "event") == 1
+    and count(CALLS, "CommE ActivateAbility") == 1, table.concat(CALLS, ","))
+tick()
+transformed.Value = false
+CFG.Pvp = false
+P.running = true
+check("a mode running (the farm started): working", R.working() == true)
+P.running = false
+check("stopped, PvP off: idle again", R.working() == false)
+P.running = true
+tick()
+energy.Value = 0
+R.v3.anchor, R.v3.lastPress, R.v3.burstStart, R.v3.probed = nil, nil, nil, false
+clear()
 CFG.RaceV3 = false        -- V4 first, alone
 
 -- ---------------------------------------------------------------- V4
