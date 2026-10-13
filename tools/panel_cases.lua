@@ -347,7 +347,8 @@ local NEW_OK = { MirageJob = true,
     -- 2026-10-12: race V4 / V3 by themselves, every weapon while V4 (Attack page).
     RaceV4 = true, RaceAll = true, RaceM1Burst = true, RaceV3 = true, RaceV3Wait = true, RaceV3Every = true,
     Circuit = true,   -- 2026-10-12: the circuit has its own Off (no mode)
-    PvpCatchPx = true, PvpMark = true }   -- 2026-10-12 build .8: the player nearest your mouse, highlighted
+    PvpCatchPx = true, PvpMark = true,    -- 2026-10-12 build .8: the player nearest your mouse, highlighted
+    PvpLeadScale = true, PvpStream = true }   -- 2026-10-13: where he will be, your aim kept up during a move
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

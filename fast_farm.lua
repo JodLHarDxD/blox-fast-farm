@@ -560,7 +560,13 @@ local CFG = {
     -- held and the move plays, and 0.4 s after.
     PvpFace            = true,
     PvpFaceRange       = 100,    -- face him within this
-    PvpLead            = false,  -- aim where a moving player will be
+    -- (user, 2026-10-13: "if he is really fast, because of the animation of
+    -- my attack it misses - predict his movement") Aim where he WILL be when
+    -- the hit lands: your ping + the move's travel, his run / jump / dash.
+    PvpLead            = true,
+    PvpLeadScale       = 1.0,    -- 1 = as measured; less if your hits land ahead of him, more if behind
+    PvpSkillSpeed      = 300,    -- studs/s a skill travels (guns: the game's own number)
+    PvpStream          = true,   -- your aim sent again every frame while a move plays
     PvpDash            = true,
     PvpDashX           = 1.5,    -- your Q dash this many times as far
     PvpSpeed           = true,
@@ -571,7 +577,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-12.8" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -3626,14 +3632,20 @@ do
 
         -- nil = not a gun. gatling = fires while held. custom = a way of its
         -- own (Skull Guitar's TAP): the game's shot function is not its.
+        -- projectile (PvP lead, 2026-10-13): the SERVER flies the shot at
+        -- `speed` (Cannon 170, Bazooka 225); every other gun is a ray your
+        -- own client casts at what you see (HitscanSingleShot / Burst / Shotgun).
         function P.gunInfo(tool)
             if not tool or toolType(tool) ~= "Gun" then return nil end
-            local d = weaponData(tool.Name)
+            local wn = tool:GetAttribute("WeaponName")
+            local d = (type(wn) == "string" and weaponData(wn)) or weaponData(tool.Name)
             return {
                 gatling = (d and d.ShootStyle == "Gatling") or tool.Name == "Dragonstorm",
                 limit   = (d and tonumber(d.OverheatLimit)) or 3,
                 range   = (d and tonumber(d.Range)) or 400,
                 custom  = (d and d.ShootType == "Custom") or false,
+                projectile = (d and d.ShootType == "Projectile") or false,
+                speed   = d and tonumber(d.Speed) or nil,
             }
         end
 
@@ -14980,12 +14992,19 @@ local function buildUI()
         sliderRow(v, "Players count within", 50, 1000, 25,
             function() return CFG.PvpRange end,
             function(x) CFG.PvpRange = x end, " studs")
-        switchRow(v, "Lead a moving player", "Aim where he will be, not where he is",
+        switchRow(v, "Lead a moving player", "Where he will be when the hit lands - your ping, the move's travel, his run / jump / dash",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
+        sliderRow(v, "Lead strength", 0, 2, 0.1,
+            function() return CFG.PvpLeadScale end,
+            function(x) CFG.PvpLeadScale = x end, "x")
+        switchRow(v, "Keep aiming while the move plays", "Your aim sent again during the windup, not only at the press",
+            function() return CFG.PvpStream end,
+            function(x) CFG.PvpStream = x end)
         readout(v, function()
             if not CFG.Pvp then return "" end
             return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
+                .. "\n" .. S.leadText()
         end)
         heading2(v, "movement")
         switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
@@ -15008,6 +15027,10 @@ local function buildUI()
                 .. "ends your Ken; your screen kept clear of other players' effects.")
             caption(v, "AIM - you aim with your mouse: the player nearest it (within the catch area) "
                 .. "gets what you fire, and is highlighted red.")
+            caption(v, "LEAD - skills, fruit M1 and slow guns go where he will be when they land (the server "
+                .. "runs them: your ping + their travel ahead of what you see). Ray guns and sword / melee "
+                .. "swings hit what you see - aimed at him as he is. Hits land behind him: Lead strength up; "
+                .. "ahead of him: down. His Ken dodges whatever the aim - the PLAYER line says when it is on.")
         end)
     end
 
@@ -16312,11 +16335,14 @@ do
         end
         _G.BFF_SILENT_V2 = true
 
-        local function aimNow()
+        -- kind (PvP, 2026-10-13): "skill" = the game's skill-aim table (the
+        -- server runs the move: aimed ahead), "gun" = your mouse (a gun's
+        -- shot: a ray at what you see, or the server's slow projectile).
+        local function aimNow(kind)
             -- PvP (2026-10-11): the player you fight, whatever YOU fire.
             if P.pvp and P.pvp.on then
                 if not CFG.PvpAim then return nil end
-                local ok, t = pcall(P.pvp.aimPoint)
+                local ok, t = pcall(P.pvp.aimPoint, kind)
                 return ok and t or nil
             end
             if not (P.running and CFG.SilentAim) then return nil end
@@ -16370,7 +16396,7 @@ do
             end
             mt.__index = function(t, k)
                 if k == "Hit" or k == "Target" then
-                    local tgt = aimNow()
+                    local tgt = aimNow("skill")
                     if tgt then
                         if k == "Target" then
                             local part = P.aimPart
@@ -16440,7 +16466,7 @@ do
                 -- the game reading it, on this script's thread.
                 if (key == "Hit" or key == "Target" or key == "UnitRay" or key == "X" or key == "Y")
                     and rawequal(self, mouse) and (P.inGameShot or not cc()) then
-                    local t = aimNow()
+                    local t = aimNow("gun")
                     if t then
                         local cam = workspace.CurrentCamera
                         local o = cam and cam.CFrame.Position or t
@@ -16550,6 +16576,21 @@ end
 -- took the nearest to YOU and locked him: in a crowd your mouse was on one
 -- and the hits went to the one behind you.)
 --
+-- WHERE HE WILL BE (user, 2026-10-13: "if he is really fast, because of the
+-- animation of my attack it misses - predict his movement"). Read in the
+-- client: a skill sends your aim at the press, a frame later and at the
+-- release (new-style moves every frame), and the SERVER runs the move - it
+-- lands where he is on the server, which is your ping + the screen's buffer
+-- AHEAD of what you see, plus the move's travel. So skills, a fruit's M1 and
+-- a slow gun's shot (Cannon, Bazooka) go where he will be then: his path
+-- read every frame (run kept, a dash dying out, a jump falling, a flight
+-- straight, the floor under him), your ping measured. A ray gun (every
+-- other gun) is cast by YOUR client at what you see - aimed at him, never
+-- ahead; a melee / sword swing is a box on your client - faced at him as
+-- he is. While a move plays your aim is sent again every frame (old-style
+-- moves sent it only at the press), and the game's own gun snap to his
+-- head (no lead) is off.
+--
 -- SPEED: the game writes WalkSpeed itself every frame, 36 x (race +
 -- bonuses), and the character attribute SpeedMultiplier (Pilot Helmet 1.3)
 -- is one of the bonuses. So that attribute is set so the game's OWN number
@@ -16581,15 +16622,20 @@ do
         -- one nearer you. Only one that can be hit, in front of the camera,
         -- within range studs. cands = { {id, dist, ok, sx, sy, front} }, mx / my
         -- = the cursor (the same pixels). Nobody that near = nil: your attack
-        -- goes where your mouse points.
-        function L.cursorPick(cands, mx, my, radius, range)
-            local best, bestD = nil, nil
+        -- goes where your mouse points. cur (2026-10-13) = the id picked last
+        -- frame: his catch area is 1.5x (the game's own aim assist does the
+        -- same) and another takes over only when clearly nearer the cursor
+        -- (0.8x) - a fast player no longer drops out of the pick for a frame.
+        function L.cursorPick(cands, mx, my, radius, range, cur)
+            local best, bestD, keep, keepD = nil, nil, nil, nil
             for _, c in ipairs(cands) do
                 if c.ok and c.front and c.sx and c.sy and c.dist <= range then
                     local d = math.sqrt((c.sx - mx) ^ 2 + (c.sy - my) ^ 2)
+                    if cur ~= nil and c.id == cur and d <= radius * 1.5 then keep, keepD = c, d end
                     if d <= radius and (bestD == nil or d < bestD) then best, bestD = c, d end
                 end
             end
+            if keep and (best == nil or best == keep or bestD > keepD * 0.8) then return keep end
             return best
         end
         -- FACING (user, 2026-10-12: every attack, any weapon, "the character is
@@ -16603,10 +16649,97 @@ do
             end
             return untilNow
         end
-        -- Where to aim: him, or where he will be (PvpLead).
-        function L.lead(pos, vel, dist, on)
-            if not on or vel == nil then return pos end
-            return pos + vel * math.clamp(dist / 250, 0, 0.6)
+        -- WHERE HE WILL BE (user, 2026-10-13). h = his last places, oldest
+        -- first: { {t, x, y, z}, ... }, 0.5 s kept. A step faster than 600
+        -- studs/s (and over 25 studs) is a teleport - Soru, a respawn - and
+        -- his old path tells nothing: forgotten.
+        function L.track(h, now, x, y, z)
+            local last = h[#h]
+            if last then
+                if now <= last[1] then return end
+                local dx, dy, dz = x - last[2], y - last[3], z - last[4]
+                local d2 = dx * dx + dy * dy + dz * dz
+                local lim = 600 * (now - last[1])
+                if d2 > 625 and d2 > lim * lim then table.clear(h) end
+            end
+            table.insert(h, { now, x, y, z })
+            while #h > 2 and now - h[1][1] > 0.5 do table.remove(h, 1) end
+        end
+        -- The newest look at or before time t (the oldest, if none is).
+        local function sampleAt(h, t)
+            local best = h[1]
+            for i = 2, #h do
+                if h[i][1] <= t then best = h[i] else break end
+            end
+            return best
+        end
+        -- His velocity (studs/s) from time t0 to t1, and the middle of that
+        -- span; nil when the looks there cover under 0.03 s.
+        function L.velBetween(h, t0, t1)
+            if #h < 2 then return nil end
+            local a, b = sampleAt(h, t0), sampleAt(h, t1)
+            local dt = b[1] - a[1]
+            if dt < 0.03 then return nil end
+            return (b[2] - a[2]) / dt, (b[3] - a[3]) / dt, (b[4] - a[4]) / dt, (a[1] + b[1]) / 2
+        end
+        -- His motion now: the velocity of the last 0.1 s, and his up / down
+        -- pull (that velocity against the 0.1 s before it). nil = unknown.
+        function L.motion(h, now)
+            local vx, vy, vz, m1 = L.velBetween(h, now - 0.1, now)
+            if not vx then return nil end
+            local ay = 0
+            local _, vy0, _, m0 = L.velBetween(h, now - 0.2, now - 0.1)
+            if vy0 and m1 - m0 > 0.04 then ay = (vy - vy0) / (m1 - m0) end
+            return vx, vy, vz, ay
+        end
+        -- How long (s, in 0.1 steps, up to 0.4) he has gone faster than cap
+        -- flat: a dash is over by then, a flight / a boat / Agility is not.
+        function L.fastFor(h, now, cap)
+            local t = 0
+            for k = 0, 3 do
+                local vx, _, vz = L.velBetween(h, now - (k + 1) * 0.1, now - k * 0.1)
+                if not vx or vx * vx + vz * vz <= cap * cap then break end
+                t = (k + 1) * 0.1
+            end
+            return t
+        end
+        -- How far ahead (s) to aim for this attack. "hitscan" = a ray YOUR
+        -- client casts at what you see: none. Anything the server runs (a
+        -- skill, a fruit's M1, a slow gun's shot) lands where he is ON THE
+        -- SERVER: your ping there and back + the screen's buffer (0.05)
+        -- ahead of what you see, + the travel (dist / speed). x scale, <= 1 s.
+        function L.leadTime(kind, rtt, dist, speed, scale)
+            if kind == "hitscan" then return 0 end
+            local t = (rtt or 0.15) + 0.05 + dist / math.max(speed or 300, 50)
+            return math.clamp(t * (scale or 1), 0, 1)
+        end
+        -- How far he goes flat in t s. A run keeps going; speed past cap (a
+        -- dash) dies out in ~tau s unless it has lasted (sustained). <= 150.
+        function L.aheadXZ(vx, vz, t, cap, sustained, tau)
+            local s = math.sqrt(vx * vx + vz * vz)
+            if s < 2 or t <= 0 then return 0, 0 end
+            local d = s * t
+            if not sustained and s > cap then
+                d = cap * t + (s - cap) * tau * (1 - math.exp(-t / tau))
+            end
+            d = math.min(d, 150)
+            return vx / s * d, vz / s * d
+        end
+        -- His root's height in t s. g = the game's gravity, h0 = his root
+        -- over the floor under him now, floorThen = the floor where he will
+        -- be (nil = none seen). On the ground: the same height over that
+        -- floor (slopes, steps). In the air: gravity (falling, or just
+        -- jumped / air-jumped), unless his measured pull is ~0 (flying) -
+        -- and never under the floor.
+        function L.aheadY(y, vy, ay, t, g, h0, floorThen)
+            if t <= 0 then return y end
+            if h0 ~= nil and h0 < 4.5 and math.abs(vy) < 8 then
+                return floorThen and (floorThen + h0) or y
+            end
+            local a = (math.abs(ay) < 0.3 * g) and 0 or -g
+            local yy = y + vy * t + 0.5 * a * t * t
+            if floorThen then yy = math.max(yy, floorThen + 3) end
+            return math.clamp(yy, y - 80, y + 80)
         end
 
         -- SPEED. s = { base = the server's SpeedMultiplier (nil = none), mine
@@ -16708,6 +16841,15 @@ do
             dash  = { note = "-", st = {}, tries = 0 },
             faceUntil = 0, faced = 0, held = {}, lastAttack = -1e9,
             mark  = { hl = nil, bb = nil, char = nil },
+            -- WHERE HE WILL BE (2026-10-13): each player's path, this frame's
+            -- aim points (aimSkill = the skill table's, aimShot = your gun's),
+            -- your ping, what your last attack was, who it went at.
+            hist = setmetatable({}, { __mode = "k" }),
+            aimSkill = nil, aimShot = nil, rtt = nil, pingAt = -1e9,
+            lead = { t = 0, ahead = 0, speed = 0 },
+            lastKind = "skill", castTarget = nil,
+            stream = { last = 0, sent = 0 },
+            snap = { mod = nil, orig = nil, at = 0 },
         }
         P.pvp = S
         local function hold(c) table.insert(S.conns, c) return c end
@@ -17064,7 +17206,9 @@ do
         S.dashNote = dashNote
 
         -- ---------- AIM ----------
-        local function candidates()
+        -- Every player's path is read every frame (a new life = a new path),
+        -- so the one your mouse moves to is predicted from his first frame.
+        local function candidates(now)
             local _, root = parts()
             if not root then return {} end
             local out = {}
@@ -17076,16 +17220,20 @@ do
                     local r = ch and ch:FindFirstChild("HumanoidRootPart")
                     local h = ch and ch:FindFirstChildOfClass("Humanoid")
                     if r and h then
+                        local pos = r.Position
+                        local hs = S.hist[p]
+                        if not hs or hs.root ~= r then hs = { root = r, h = {} } S.hist[p] = hs end
+                        L.track(hs.h, now, pos.X, pos.Y, pos.Z)
                         -- Where he is on your screen: the same pixels as
                         -- GetMouseLocation (both count from the very top).
                         local sx, sy, front = nil, nil, false
                         if cam then
-                            local sp = cam:WorldToViewportPoint(r.Position)
+                            local sp = cam:WorldToViewportPoint(pos)
                             sx, sy, front = sp.X, sp.Y, sp.Z > 0
                         end
                         table.insert(out, {
-                            id = p, plr = p, char = ch, root = r,
-                            dist = (r.Position - root.Position).Magnitude,
+                            id = p, plr = p, char = ch, root = r, hist = hs.h,
+                            dist = (pos - root.Position).Magnitude,
                             ok = L.attackable(h.Health > 0, p:GetAttribute("PvpDisabled") == true,
                                 mine, p.Team and p.Team.Name or nil),
                             sx = sx, sy = sy, front = front,
@@ -17095,23 +17243,229 @@ do
             end
             return out
         end
-        local function targetTick()
-            local m = UIS:GetMouseLocation()
-            S.target = L.cursorPick(candidates(), m.X, m.Y, CFG.PvpCatchPx, CFG.PvpRange)
-            P.aimPart = S.target and S.target.root or nil
+
+        -- Your ping there and back (s): the game's own network stats, read
+        -- twice a second, smoothed.
+        local function pingNow(now)
+            if S.rtt and now - S.pingAt < 0.5 then return S.rtt end
+            S.pingAt = now
+            local rtt = nil
+            pcall(function()
+                local ms = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+                if type(ms) == "number" and ms > 0 then rtt = ms / 1000 end
+            end)
+            if not rtt then pcall(function() rtt = player:GetNetworkPing() * 2 end) end
+            rtt = math.clamp(tonumber(rtt) or 0.15, 0.02, 1)
+            S.rtt = S.rtt and (S.rtt * 0.6 + rtt * 0.4) or rtt
+            return S.rtt
         end
-        function S.aimPoint()
+
+        -- The floor under a point: a ray down from just over it, through every
+        -- character, enemy and effect.
+        local rayP = RaycastParams.new()
+        rayP.FilterType = Enum.RaycastFilterType.Exclude
+        local rayAt = -1e9
+        local function floorUnder(x, y, z, now)
+            if now - rayAt > 1 then
+                rayAt = now
+                local ex = {}
+                for _, n in ipairs({ "Characters", "Enemies", "_WorldOrigin" }) do
+                    local f = workspace:FindFirstChild(n)
+                    if f then table.insert(ex, f) end
+                end
+                if workspace.CurrentCamera then table.insert(ex, workspace.CurrentCamera) end
+                if player.Character then table.insert(ex, player.Character) end
+                rayP.FilterDescendantsInstances = ex
+            end
+            local r = workspace:Raycast(Vector3.new(x, y + 6, z), Vector3.new(0, -300, 0), rayP)
+            return r and r.Position.Y or nil
+        end
+
+        -- Your gun's shot: "hitscan" (a ray your client casts) or "gun" (the
+        -- server's projectile, at its own speed); nil = not a gun.
+        local function shotKind(tool)
+            local gi = tool and P.gunInfo and P.gunInfo(tool)
+            if not gi then return nil, nil end
+            if gi.projectile then return "gun", gi.speed or 200 end
+            return "hitscan", nil
+        end
+
+        -- Your move playing: an attack within 3 s and the game busy with it
+        -- (Busy on you, or the tool's Holding).
+        local function movePlaying(now)
+            if now - S.lastAttack > 3 then return false end
+            local char = player.Character
+            local busy = char and char:FindFirstChild("Busy")
+            if busy and busy.Value == true then return true end
+            local tool = heldTool()
+            local hv = tool and tool:FindFirstChild("Holding")
+            return hv ~= nil and hv.Value == true
+        end
+
+        -- His motion this frame (read once, used by every aim point).
+        local RUN_CAP, DASH_TAU = 140, 0.15
+        local function motionOf(c, now)
+            local pos = c.root.Position
+            local vx, vy, vz, ay
+            if c.hist then vx, vy, vz, ay = L.motion(c.hist, now) end
+            if not vx then
+                local v = c.root.AssemblyLinearVelocity
+                vx, vy, vz, ay = v.X, v.Y, v.Z, 0
+            end
+            return {
+                pos = pos, vx = vx, vy = vy, vz = vz, ay = ay,
+                sustained = c.hist ~= nil and L.fastFor(c.hist, now, RUN_CAP) >= 0.4,
+                floor = floorUnder(pos.X, pos.Y, pos.Z, now),
+            }
+        end
+        -- Where he will be when this kind of hit lands. -> point, lead (s).
+        local function predict(mo, kind, dist, speed, now)
+            local p = mo.pos
+            if not CFG.PvpLead then return p, 0 end
+            local t = L.leadTime(kind, pingNow(now), dist, speed, CFG.PvpLeadScale)
+            local dx, dz = L.aheadXZ(mo.vx, mo.vz, t, RUN_CAP, mo.sustained, DASH_TAU)
+            local fThen = mo.floor
+            -- From over where he will be: up a hill the ground ahead is higher
+            -- than he is now, and a ray started inside it sees no floor.
+            if dx ~= 0 or dz ~= 0 then fThen = floorUnder(p.X + dx, math.max(p.Y, p.Y + mo.vy * t), p.Z + dz, now) end
+            local y = L.aheadY(p.Y, mo.vy, mo.ay, t, workspace.Gravity,
+                mo.floor and (p.Y - mo.floor) or nil, fThen)
+            return Vector3.new(p.X + dx, y, p.Z + dz), t
+        end
+
+        -- The pick (the one nearest your mouse) and this frame's aim points:
+        -- aimSkill for the game's skill table, aimShot for your gun's shot.
+        local function targetTick(now)
+            local m = UIS:GetMouseLocation()
+            local cands = candidates(now)
+            local cur = S.target and S.target.id or nil
+            local pick = L.cursorPick(cands, m.X, m.Y, CFG.PvpCatchPx, CFG.PvpRange, cur)
+            -- A move playing keeps the one it was cast at (alive, in range)
+            -- if your mouse slips off him in the chaos of it.
+            if S.castTarget and movePlaying(now) then
+                for _, c in ipairs(cands) do
+                    if c.id == S.castTarget and c.ok and c.dist <= CFG.PvpRange then pick = c break end
+                end
+            end
+            S.target = pick
+            P.aimPart = pick and pick.root or nil
+            S.aimSkill, S.aimShot = nil, nil
+            if not pick then return end
+            local mo = motionOf(pick, now)
+            local LD = S.lead
+            LD.speed = math.sqrt(mo.vx * mo.vx + mo.vz * mo.vz)
+            local t
+            S.aimSkill, t = predict(mo, "skill", pick.dist, CFG.PvpSkillSpeed, now)
+            LD.t, LD.ahead = t, (S.aimSkill - mo.pos).Magnitude
+            local kind, speed = shotKind(heldTool())
+            LD.gun = kind
+            if kind == "gun" then
+                S.aimShot, LD.gunT = predict(mo, "gun", pick.dist, speed, now)
+            else
+                S.aimShot, LD.gunT = mo.pos, 0       -- a ray gun: at him, as you see him
+            end
+        end
+        -- What the aim sends: "gun" = your gun's shot, else the skill point.
+        function S.aimPoint(kind)
             local t = S.target
             if not (t and t.root and t.root.Parent) then return nil end
-            local vel = CFG.PvpLead and t.root.AssemblyLinearVelocity or nil
-            return L.lead(t.root.Position, vel, t.dist, CFG.PvpLead)
+            local a = (kind == "gun") and S.aimShot or S.aimSkill
+            return a or t.root.Position
         end
         function S.targetText()
             if not CFG.PvpAim then return "aim off" end
             local t = S.target
             if not t then return "nobody near your mouse - your attacks go where it points" end
-            return string.format("%s  ·  %.0f studs  ·  your mouse is on him%s", t.plr.DisplayName or t.plr.Name, t.dist,
-                (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "")
+            -- His Ken dodges your hits whatever the aim: said, so a miss on him
+            -- is not read as the aim's.
+            local ken = ""
+            if t.plr:GetAttribute("KenActive") == true then
+                ken = string.format("  ·  HIS KEN ON (%s dodges left)", tostring(t.plr:GetAttribute("KenDodgesLeft") or "?"))
+            end
+            return string.format("%s  ·  %.0f studs  ·  your mouse is on him%s%s", t.plr.DisplayName or t.plr.Name, t.dist,
+                (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "", ken)
+        end
+        function S.leadText()
+            if not CFG.PvpLead then return "lead off - aimed where he is" end
+            local LD = S.lead
+            local s = string.format("ping %d ms", math.floor((S.rtt or 0) * 1000 + 0.5))
+            if not S.target then return s .. "  ·  nobody picked" end
+            s = s .. string.format("  ·  him %.0f studs/s  ·  skills %.2f s ahead = %.0f studs",
+                LD.speed or 0, LD.t or 0, LD.ahead or 0)
+            if LD.gun == "gun" then
+                s = s .. string.format("  ·  gun %.2f s ahead (its shot flies)", LD.gunT or 0)
+            elseif LD.gun == "hitscan" then
+                s = s .. "  ·  gun: a ray at him, no lead"
+            end
+            return s .. string.format("\nsent again while moves play: %d", S.stream.sent)
+        end
+
+        -- THE GAME'S OWN GUN SNAP (CombatController shootGun): a shot whose
+        -- cursor is ~40 px from a head goes at that head AS IT IS - it would
+        -- put the lead back to nothing. While your aim has a player and a gun
+        -- is in your hand, its answer is "nobody" (the module's own field, the
+        -- original back 3 s after and on PvP off).
+        local SN = S.snap
+        local function snapModule()
+            if SN.mod == nil then
+                local ok, m = pcall(function() return require(RS.Controllers.CombatController.AimAssist) end)
+                SN.mod = (ok and type(m) == "table") and m or false
+            end
+            return SN.mod or nil
+        end
+        local function snapOff()
+            if SN.orig then return end
+            local m = snapModule()
+            local orig = m and rawget(m, "getTargetInfo")
+            if type(orig) ~= "function" then return end
+            local mine = function(...)
+                if S.on and CFG.PvpAim and S.target then return nil end
+                return orig(...)
+            end
+            -- A module that will not take the write: not tried again.
+            if pcall(rawset, m, "getTargetInfo", mine) then SN.orig = orig else SN.mod = false end
+        end
+        local function snapOn()
+            if not SN.orig then return end
+            pcall(rawset, SN.mod, "getTargetInfo", SN.orig)
+            SN.orig = nil
+        end
+
+        -- ---------- YOUR AIM WHILE THE MOVE PLAYS ----------
+        -- A skill sends your aim at the press, a frame later and at the
+        -- release, and the server may hit with it well after (the windup).
+        -- While your move plays it is sent again 20 times a second: the
+        -- game's own payload to the tool's own remote, as its sendMouse does
+        -- (a Vector3 to LegacyRemoteEvent / RemoteEvent, a CFrame to
+        -- RemoteEvent; never Love's). New-style moves send it every frame
+        -- themselves - this is the same value, again.
+        local SR = S.stream
+        local function streamTick(now)
+            if not (CFG.PvpStream and CFG.PvpAim and S.target and S.aimSkill) then return end
+            -- Only a move the server aims (a skill, a fruit's M1), not a swing or a shot.
+            if S.lastKind ~= "skill" then return end
+            if now - SR.last < 0.05 or not movePlaying(now) then return end
+            local tool = heldTool()
+            if not tool or tool.Name == "Love-Love" then return end
+            local mp = tool:FindFirstChild("MousePos") or tool:FindFirstChild("Mouse")
+            if not (mp and tool:FindFirstChild("Holding")) then return end
+            local function remote(n)
+                local r = tool:FindFirstChild(n)
+                return (r and r:IsA("RemoteEvent")) and r or nil
+            end
+            local at = S.aimSkill
+            SR.last = now
+            if mp:IsA("Vector3Value") then
+                local r = remote("LegacyRemoteEvent") or remote("RemoteEvent")
+                if r then r:FireServer(at) SR.sent += 1 end
+            else
+                local r, cam = remote("RemoteEvent"), workspace.CurrentCamera
+                if r and cam then
+                    local d = at - cam.CFrame.Position
+                    r:FireServer((d.Magnitude > 0.01) and CFrame.lookAt(at, at + d.Unit) or CFrame.new(at))
+                    SR.sent += 1
+                end
+            end
         end
 
         -- Every attack, any weapon (user, 2026-10-12): a melee / sword swing is
@@ -17125,22 +17479,37 @@ do
         -- The attack keys (not Q / jump / moving): M1, Z X C V F.
         local ATTACK_KEYS = { [Enum.KeyCode.Z] = "Z", [Enum.KeyCode.X] = "X", [Enum.KeyCode.C] = "C",
             [Enum.KeyCode.V] = "V", [Enum.KeyCode.F] = "F" }
-        -- Your attack: the body turned to the one your mouse is on.
+        -- Your attack: the body turned to the one your mouse is on. What it
+        -- is (2026-10-13) decides where: a melee / sword swing ("melee") and a
+        -- ray gun ("hitscan") hit what you SEE - him, as he is; a skill, a
+        -- fruit's M1 (the fox's too) and a slow gun go where he will be.
         local function attackPressed(what)
             local now = os.clock()
             S.lastAttack = now
             S.held[what] = true
+            local tool = heldTool()
+            local tt = toolType(tool)
+            if what ~= "M1" then S.lastKind = "skill"
+            elseif tt == "Melee" or tt == "Sword" then S.lastKind = "melee"
+            elseif tt == "Gun" then S.lastKind = (shotKind(tool) == "gun") and "gun" or "hitscan"
+            else S.lastKind = "skill" end
+            S.castTarget = S.target and S.target.id or nil
             if faceWanted() then
                 S.faceUntil = math.max(S.faceUntil, now + 0.4)
                 S.faced += 1
             end
+        end
+        local function faceAt(t)
+            if S.lastKind == "skill" and S.aimSkill then return S.aimSkill end
+            if S.lastKind == "gun" and S.aimShot then return S.aimShot end
+            return t.root.Position
         end
         local function faceNow()
             if os.clock() > S.faceUntil then return end
             local t = S.target
             local _, root = parts()
             if not (t and root and t.root.Parent) then return end
-            local p, q = root.Position, t.root.Position
+            local p, q = root.Position, faceAt(t)
             local flat = Vector3.new(q.X, p.Y, q.Z)
             if (flat - p).Magnitude < 1 then return end
             root.CFrame = CFrame.lookAt(p, flat)
@@ -17236,6 +17605,8 @@ do
                 S.epoch += 1
                 S.faceUntil, S.lastAttack = 0, -1e9
                 table.clear(S.held)
+                S.lastKind, S.castTarget = "skill", nil
+                S.stream.last, S.stream.sent = 0, 0
                 -- The life you are in has settled long ago: on at once (only
                 -- a NEW life waits a moment before its view is switched on).
                 V.char, V.charAt = player.Character, -1e9
@@ -17245,7 +17616,7 @@ do
                     if not S.on then return end
                     local now = os.clock()
                     -- Every frame: your mouse moves fast.
-                    pcall(targetTick)
+                    pcall(targetTick, now)
                     pcall(markTick)
                     -- The game sets the view's radius to 0 when Ken ends; it
                     -- is put back before its next refresh can empty the view.
@@ -17255,7 +17626,16 @@ do
                         if r then pcall(function() if (om.radius or 0) < r then om.radius = r end end) end
                     end
                     local want = CFG.PvpAim and S.target ~= nil
-                    pcall(P.pvpAimTick, want, want and toolType(heldTool()) == "Gun", now)
+                    local gun = toolType(heldTool()) == "Gun"
+                    pcall(P.pvpAimTick, want, want and gun, now)
+                    -- The game's own gun snap off while you aim a gun at him.
+                    if want and gun then
+                        pcall(snapOff)
+                        SN.at = now
+                    elseif SN.orig and now - SN.at > 3 then
+                        pcall(snapOn)
+                    end
+                    pcall(streamTick, now)
                     local t = S.target
                     local busy = (P :: any).canCast ~= nil and not (P :: any).canCast()
                     S.faceUntil = L.faceUntil(S.faceUntil, now, next(S.held) ~= nil, busy, S.lastAttack,
@@ -17300,7 +17680,10 @@ do
                 pcall(shakeOn)
                 pcall(speedRestore)
                 pcall(dashRestore)
+                pcall(snapOn)
                 S.target, P.aimPart = nil, nil
+                S.aimSkill, S.aimShot, S.castTarget = nil, nil, nil
+                table.clear(S.hist)
                 pcall(P.silentOff)
                 say("PvP mode off")
                 print("[BFF] PvP mode off")

@@ -50,13 +50,147 @@ check("facing switched off / nobody aimed: not turned", L.faceUntil(0, 10, true,
     and L.faceUntil(0, 10, true, true, 9, nil, 100, true) == 0)
 check("a window already longer is never shortened", L.faceUntil(11, 10, true, false, 9, 50, 100, true) == 11)
 
--- ===== lead =====
-local p0 = Vector3.new(0, 0, 0)
-local vel = Vector3.new(100, 0, 0)
-check("lead off = where he is", L.lead(p0, vel, 125, false) == p0)
-check("lead on = ahead by dist/250 s", near(L.lead(p0, vel, 125, true).X, 50))
-check("lead capped at 0.6 s", near(L.lead(p0, vel, 1000, true).X, 60))
-check("lead with no velocity = where he is", L.lead(p0, nil, 125, true) == p0)
+-- ===== the pick holds on (2026-10-13: a fast player no longer drops out for a frame) =====
+do
+    local A = P_("A", 50, 400 + 260, 300)                    -- 260 px off: outside 200, inside 300
+    check("the one picked last frame keeps a 1.5x catch area",
+        L.cursorPick({ A }, 400, 300, 200, 300, "A") == A)
+    check("...a new one does not get it", L.cursorPick({ A }, 400, 300, 200, 300, nil) == nil)
+    check("...nor past 1.5x", L.cursorPick({ P_("A", 50, 400 + 310, 300) }, 400, 300, 200, 300, "A") == nil)
+    local cur, other = P_("A", 50, 500, 300), P_("B", 50, 315, 300)   -- 100 px vs 85 px
+    check("another a little nearer the cursor does not steal him (85 vs 100 px)",
+        L.cursorPick({ cur, other }, 400, 300, 200, 300, "A") == cur)
+    local close = P_("B", 50, 350, 300)                                -- 50 px: clearly nearer
+    check("another clearly nearer (0.8x) takes over", L.cursorPick({ cur, close }, 400, 300, 200, 300, "A") == close)
+    check("held-on one dead: the other", L.cursorPick({ P_("A", 50, 500, 300, false), other }, 400, 300, 200, 300, "A") == other)
+end
+
+-- ===== where he will be (2026-10-13: "predict the movement of the player") =====
+-- his path: 60 looks a second
+local function path(fn, t0, t1)
+    local h = {}
+    local t = t0
+    while t <= t1 + 1e-9 do
+        local x, y, z = fn(t)
+        L.track(h, t, x, y, z)
+        t += 1 / 60
+    end
+    return h
+end
+do
+    local h = path(function(t) return 100 * t, 5, -40 * t end, 0, 1)
+    check("only the last 0.5 s kept", h[1][1] >= 1 - 0.5 - 1e-6 and #h <= 32)
+    local vx, vy, vz, ay = L.motion(h, 1)
+    check("a steady run: his velocity exactly", near(vx, 100, 1e-6) and near(vy, 0, 1e-6) and near(vz, -40, 1e-6))
+    check("a steady run: no pull up or down", near(ay, 0, 1e-6))
+    check("not a dash past 140 for long: 108 studs/s", L.fastFor(h, 1, 140) == 0)
+    check("past 100 for 0.4 s and more = kept up (a flight)", near(L.fastFor(h, 1, 100), 0.4))
+end
+do
+    -- a jump: up at 50, the game's gravity
+    local g = 196.2
+    local h = path(function(t) return 0, 3 + 50 * t - 0.5 * g * t * t, 0 end, 0, 0.2)
+    local _, vy, _, ay = L.motion(h, 0.2)
+    check("in a jump the pull is gravity", ay < -0.8 * g and ay > -1.2 * g)
+    check("in a jump his speed up is read", vy < 50 and vy > 0)
+end
+do
+    local h = {}
+    L.track(h, 0, 0, 0, 0)
+    L.track(h, 1 / 60, 1, 0, 0)
+    L.track(h, 2 / 60, 80, 0, 0)                               -- 79 studs in a frame: Soru
+    check("a teleport forgets his old path", #h == 1 and h[1][2] == 80)
+    L.track(h, 2 / 60, 81, 0, 0)
+    check("the same frame twice is one look", #h == 1)
+    check("one look = no velocity yet", L.motion(h, 2 / 60) == nil)
+end
+
+-- lead time
+check("a ray gun: no lead at all", L.leadTime("hitscan", 0.2, 100, 300, 1) == 0)
+check("a skill: ping + buffer + travel", near(L.leadTime("skill", 0.1, 60, 300, 1), 0.1 + 0.05 + 0.2))
+check("a slow gun (Cannon 170): its own travel", near(L.leadTime("gun", 0.1, 85, 170, 1), 0.65))
+check("lead strength scales it", near(L.leadTime("skill", 0.1, 60, 300, 0.5), 0.175))
+check("never past 1 s", L.leadTime("gun", 0.2, 400, 170, 2) == 1)
+check("ping unknown: 150 ms", near(L.leadTime("skill", nil, 0, 300, 1), 0.2))
+
+-- flat: run kept, dash dies out, flight kept
+do
+    local dx, dz = L.aheadXZ(100, 0, 0.3, 140, false, 0.15)
+    check("a run is kept up: 100 x 0.3 = 30", near(dx, 30) and near(dz, 0))
+    local dx2 = L.aheadXZ(300, 0, 0.3, 140, false, 0.15)
+    check("a dash dies out: less than a straight 90", dx2 < 90 and dx2 > 42)
+    check("...but more than the run alone", dx2 > 140 * 0.3)
+    local dx3 = L.aheadXZ(300, 0, 0.3, 140, true, 0.15)
+    check("a fast flight that has lasted: straight", near(dx3, 90))
+    local ax, az = L.aheadXZ(1, 1, 0.3, 140, false, 0.15)
+    check("standing (under 2 studs/s): no lead", ax == 0 and az == 0)
+    local fx = L.aheadXZ(2000, 0, 1, 140, true, 0.15)
+    check("never more than 150 studs", near(fx, 150))
+    local gx, gz = L.aheadXZ(60, 80, 0.5, 140, false, 0.15)
+    check("the lead keeps his direction", near(gx, 30) and near(gz, 40))
+end
+
+-- height: floor kept, a jump falls, a flight stays
+do
+    local g = 196.2
+    check("on the ground: his height over the floor where he will be (a slope up)",
+        near(L.aheadY(13, 0, 0, 0.3, g, 3, 20), 23))
+    check("on the ground, no floor seen there: his height now", near(L.aheadY(13, 0, 0, 0.3, g, 3, nil), 13))
+    local yJ = L.aheadY(20, 50, 300, 0.3, g, 8, 10)            -- just jumped (pull measured up)
+    check("just jumped: gravity takes him (not 50 x 0.3 up)", near(yJ, 20 + 15 - 0.5 * g * 0.09))
+    local yF = L.aheadY(50, -10, 0, 0.3, g, 40, 10)
+    check("flying (no pull): straight on", near(yF, 47))
+    local yD = L.aheadY(12, -60, -g, 0.5, g, 9, 0)
+    check("falling: never under the floor (+3)", near(yD, 3))
+    check("no time ahead: where he is", L.aheadY(12, -60, -g, 0, g, 9, 0) == 12)
+end
+
+-- THE WHOLE CHAIN against a network: he runs, his place reaches your screen
+-- late (his upload + the server + your download + the buffer), your aim
+-- reaches the server after your upload, the move flies dist / speed. The
+-- point aimed at must be where the SERVER has him when the hit lands.
+do
+    local up, down, buf = 0.06, 0.06, 0.05                    -- ping 120 ms there and back
+    local speed = 300
+    -- the server's own place for him at server time s: a run, then a turn
+    local function server(s) return 40 + 90 * s, 3, 10 + 30 * s end
+    -- what you see at your time t: the server's, (down + buf) late
+    local function seen(t) return server(t - down - buf) end
+    local h = path(seen, 0, 2)
+    local now = 2
+    local sx, sy, sz = seen(now)
+    local vx, vy, vz, ay = L.motion(h, now)
+    local dist = 60
+    local t = L.leadTime("skill", up + down, dist, speed, 1)
+    local dx, dz = L.aheadXZ(vx, vz, t, 140, false, 0.15)
+    local ax, az = sx + dx, sz + dz
+    -- the hit lands at server time now + up + dist / speed
+    local hx, _, hz = server(now + up + dist / speed)
+    check("steady run, ping 120: aimed within 0.5 stud of where the server has him",
+        math.sqrt((ax - hx) ^ 2 + (az - hz) ^ 2) < 0.5)
+    -- without the lead the old aim misses by his whole travel
+    check("the old aim (where you see him) misses by ~33 studs here",
+        math.sqrt((sx - hx) ^ 2 + (sz - hz) ^ 2) > 30)
+end
+do
+    -- a strafe: he turns round 0.15 s before the hit lands; the miss stays
+    -- under the turn's own doubling, never the whole lead past him
+    local up, down, buf = 0.08, 0.08, 0.05
+    local turnAt = 2 + 0.08 + 0.2 - 0.15
+    local function server(s)
+        if s <= turnAt then return 100 * s, 3, 0 end
+        return 100 * turnAt - 100 * (s - turnAt), 3, 0
+    end
+    local function seen(t) return server(t - down - buf) end
+    local h = path(seen, 0, 2)
+    local sx = seen(2)
+    local vx, _, vz = L.motion(h, 2)
+    local t = L.leadTime("skill", up + down, 60, 300, 1)
+    local dx = L.aheadXZ(vx, vz, t, 140, false, 0.15)
+    local hx = server(2 + up + 60 / 300)
+    check("a turn he makes after you fire: a miss of 2 x 100 x 0.15 at most",
+        math.abs((sx + dx) - hx) <= 30.5)
+end
 
 -- ===== speed =====
 -- The game's own number outside a transformation: 36 x (race + bonuses + attr - 1).

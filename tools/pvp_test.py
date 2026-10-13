@@ -43,9 +43,16 @@ def run(code):
 src = read(os.path.join("..", "fast_farm.lua"))
 logic = cut(src, "        -- PVP LOGIC (pure", "        -- (end of pvp logic)")
 view = cut(src, "        -- ---------- THE KEN VIEW ----------", "        local function viewTick(now)")
+# 3. THE AIM WIRING (2026-10-13): the logic + the real state table, then the
+#    real AIM .. facing code on Roblox stubs - pick, his path, ping, floor,
+#    the aim points per attack kind, the aim sent while a move plays, the
+#    game's gun snap, facing.
+state = cut(src, "        -- PVP LOGIC (pure", "        local function hold(c)")
+aim = cut(src, "        -- ---------- AIM ----------", "        -- ---------- THE MARK")
 
 out1 = run(read("pvp_stubs.lua") + logic + read("pvp_cases.lua"))
 out2 = run(read("pvp_view_stubs.lua") + view + read("pvp_view_cases.lua"))
-print(out1 + out2)
-ok = "ALL PASS (logic)" in out1 and "ALL PASS (view)" in out2
+out3 = run(read("pvp_aim_stubs.lua") + state + aim + read("pvp_aim_cases.lua"))
+print(out1 + out2 + out3)
+ok = "ALL PASS (logic)" in out1 and "ALL PASS (view)" in out2 and "ALL PASS (aim)" in out3
 sys.exit(0 if ok else 1)
