@@ -103,6 +103,17 @@ do
     L.track(h, 2 / 60, 81, 0, 0)
     check("the same frame twice is one look", #h == 1)
     check("one look = no velocity yet", L.motion(h, 2 / 60) == nil)
+    -- Flash Step smoothed by your screen: 45 studs over 3 frames (15 a frame)
+    local f = path(function(t) return 90 * t, 3, 0 end, 0, 1)
+    local t0 = f[#f][1]
+    local x0 = f[#f][2]
+    for k = 1, 3 do L.track(f, t0 + k / 60, x0 + 15 * k, 3, 0) end
+    local vx = L.motion(f, t0 + 3 / 60)
+    check("a blink smoothed over 3 frames: his path forgotten, no 900 studs/s read", vx == nil)
+    -- a real 300 studs/s dash (5 studs a frame) is not a blink
+    local g = path(function(t) return 300 * t, 3, 0 end, 0, 0.3)
+    local gx = L.motion(g, g[#g][1])
+    check("a 300 studs/s dash is kept as motion", gx ~= nil and near(gx, 300, 1e-6))
 end
 
 -- lead time
@@ -126,6 +137,10 @@ do
     check("standing (under 2 studs/s): no lead", ax == 0 and az == 0)
     local fx = L.aheadXZ(2000, 0, 1, 140, true, 0.15)
     check("never more than 150 studs", near(fx, 150))
+    local bx = L.aheadXZ(1200, 0, 0.35, 140, false, 0.15)
+    check("a blink in progress (1200 studs/s, not lasted): at most 15 studs on", near(bx, 15))
+    local by = L.aheadXZ(390, 0, 0.35, 140, false, 0.15)
+    check("a hard dash under 400: the dash rule, not the blink cap", by > 15 and by < 390 * 0.35)
     local gx, gz = L.aheadXZ(60, 80, 0.5, 140, false, 0.15)
     check("the lead keeps his direction", near(gx, 30) and near(gz, 40))
 end

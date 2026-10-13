@@ -581,7 +581,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.3" }
 _G.BFF = P
 
 -- =========================================================
@@ -16659,7 +16659,8 @@ do
         end
         -- WHERE HE WILL BE (user, 2026-10-13). h = his last places, oldest
         -- first: { {t, x, y, z}, ... }, 0.5 s kept. A step faster than 600
-        -- studs/s (and over 25 studs) is a teleport - Soru, a respawn - and
+        -- studs/s (and over 8 studs) is a blink - Soru, a script's teleport
+        -- dash, a respawn; also one your screen smooths over 2-3 frames - and
         -- his old path tells nothing: forgotten.
         function L.track(h, now, x, y, z)
             local last = h[#h]
@@ -16668,7 +16669,7 @@ do
                 local dx, dy, dz = x - last[2], y - last[3], z - last[4]
                 local d2 = dx * dx + dy * dy + dz * dz
                 local lim = 600 * (now - last[1])
-                if d2 > 625 and d2 > lim * lim then table.clear(h) end
+                if d2 > 64 and d2 > lim * lim then table.clear(h) end
             end
             table.insert(h, { now, x, y, z })
             while #h > 2 and now - h[1][1] > 0.5 do table.remove(h, 1) end
@@ -16722,12 +16723,16 @@ do
             return math.clamp(t * (scale or 1), 0, 1)
         end
         -- How far he goes flat in t s. A run keeps going; speed past cap (a
-        -- dash) dies out in ~tau s unless it has lasted (sustained). <= 150.
+        -- dash) dies out in ~tau s unless it has lasted (sustained). A burst
+        -- past 400 studs/s that has not lasted is a blink in progress: it
+        -- stops somewhere close - at most 15 studs on. <= 150.
         function L.aheadXZ(vx, vz, t, cap, sustained, tau)
             local s = math.sqrt(vx * vx + vz * vz)
             if s < 2 or t <= 0 then return 0, 0 end
             local d = s * t
-            if not sustained and s > cap then
+            if not sustained and s > 400 then
+                d = math.min(d, 15)
+            elseif not sustained and s > cap then
                 d = cap * t + (s - cap) * tau * (1 - math.exp(-t / tau))
             end
             d = math.min(d, 150)
