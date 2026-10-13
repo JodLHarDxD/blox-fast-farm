@@ -116,7 +116,7 @@ local CFG = {
 local P = {}
 function P.gunInfo(t)
     if not t or t.ToolTip ~= "Gun" then return nil end
-    return { projectile = t.projectile or false, speed = t.speed }
+    return { projectile = t.projectile or false, speed = t.speed, data = t.data }
 end
 
 local fails, count = 0, 0

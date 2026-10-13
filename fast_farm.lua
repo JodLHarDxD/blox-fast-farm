@@ -567,6 +567,10 @@ local CFG = {
     PvpLeadScale       = 1.0,    -- 1 = as measured; less if your hits land ahead of him, more if behind
     PvpSkillSpeed      = 300,    -- studs/s a skill travels (guns: the game's own number)
     PvpStream          = true,   -- your aim sent again every frame while a move plays
+    -- (user, 2026-10-13: "Dragonstorm M1 should attack them properly") A ray
+    -- gun's shot (Dragonstorm and every single-ray gun) goes straight - no
+    -- spread - while you aim it at a player.
+    PvpNoSpread        = true,
     PvpDash            = true,
     PvpDashX           = 1.5,    -- your Q dash this many times as far
     PvpSpeed           = true,
@@ -577,7 +581,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.2" }
 _G.BFF = P
 
 -- =========================================================
@@ -3646,6 +3650,7 @@ do
                 custom  = (d and d.ShootType == "Custom") or false,
                 projectile = (d and d.ShootType == "Projectile") or false,
                 speed   = d and tonumber(d.Speed) or nil,
+                data    = d,      -- the game's own entry (PvP: a ray gun's spread)
             }
         end
 
@@ -15001,6 +15006,9 @@ local function buildUI()
         switchRow(v, "Keep aiming while the move plays", "Your aim sent again during the windup, not only at the press",
             function() return CFG.PvpStream end,
             function(x) CFG.PvpStream = x end)
+        switchRow(v, "Gun shots straight", "Dragonstorm (any ray gun): no spread while you aim at him",
+            function() return CFG.PvpNoSpread end,
+            function(x) CFG.PvpNoSpread = x end)
         readout(v, function()
             if not CFG.Pvp then return "" end
             return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
@@ -16850,6 +16858,10 @@ do
             lastKind = "skill", castTarget = nil,
             stream = { last = 0, sent = 0 },
             snap = { mod = nil, orig = nil, at = 0 },
+            -- a ray gun's spread held off (d = the game's entry), and your
+            -- shots at him against his HP going down (did the server take them)
+            spread = { d = nil, orig = nil, at = 0 },
+            shots = { n = 0, drops = 0, last = nil, lastAt = -1e9, hp = nil, who = nil },
         }
         P.pvp = S
         local function hold(c) table.insert(S.conns, c) return c end
@@ -17395,9 +17407,14 @@ do
             if LD.gun == "gun" then
                 s = s .. string.format("  ·  gun %.2f s ahead (its shot flies)", LD.gunT or 0)
             elseif LD.gun == "hitscan" then
-                s = s .. "  ·  gun: a ray at him, no lead"
+                s = s .. "  ·  gun: a ray at him, no lead" .. (S.spread.d and ", straight (no spread)" or "")
             end
-            return s .. string.format("\nsent again while moves play: %d", S.stream.sent)
+            s = s .. string.format("\nsent again while moves play: %d", S.stream.sent)
+            if S.shots.n > 0 then
+                s = s .. string.format("\ngun: %d shots at him  ·  his HP went down %d times while you shot",
+                    S.shots.n, S.shots.drops)
+            end
+            return s
         end
 
         -- THE GAME'S OWN GUN SNAP (CombatController shootGun): a shot whose
@@ -17429,6 +17446,57 @@ do
             if not SN.orig then return end
             pcall(rawset, SN.mod, "getTargetInfo", SN.orig)
             SN.orig = nil
+        end
+
+        -- A RAY GUN'S SPREAD (user, 2026-10-13: "Dragonstorm M1 should attack
+        -- them properly"). Read in CombatController.shootGun: each shot is
+        -- turned by up to BulletSpreadDegree / 2 each way (Dragonstorm 3 ->
+        -- 1.5 deg; every 4th shot straight) before YOUR client casts the ray -
+        -- at 100 studs up to 2.6 studs off, about a third miss his body, at 200
+        -- most. The aim is already on him; the spread threw it off. While you
+        -- aim a single-ray gun (HitscanSingleShot) at him, its spread is off in
+        -- the game's own weapon table - the number put back 3 s after, on
+        -- another gun, and on PvP off.
+        local SPR = S.spread
+        local function spreadOn()
+            if not SPR.d then return end
+            pcall(rawset, SPR.d, "BulletSpreadDegree", SPR.orig)
+            SPR.d, SPR.orig = nil, nil
+        end
+        local function spreadOff(tool, now)
+            local gi = tool and P.gunInfo and P.gunInfo(tool)
+            local d = gi and gi.data
+            if type(d) ~= "table" or d.ShootType ~= "HitscanSingleShot" then return end
+            if SPR.d == d then SPR.at = now return end
+            spreadOn()
+            local deg = rawget(d, "BulletSpreadDegree")
+            if type(deg) ~= "number" or deg <= 0 then return end
+            if pcall(rawset, d, "BulletSpreadDegree", nil) then SPR.d, SPR.orig, SPR.at = d, deg, now end
+        end
+
+        -- YOUR SHOTS AT HIM against his HP going down: the gun's own shot count
+        -- (LocalTotalShots) climbing while he is picked, and his health falling
+        -- within 0.3 s of a shot. Many shots, few drops = the server is not
+        -- taking them (a fast player's place on the server is ahead of yours).
+        local SH_ = S.shots
+        local function shotsTick(tool, now)
+            local t = S.target
+            local hum = t and t.char and t.char:FindFirstChildOfClass("Humanoid")
+            local hp = hum and hum.Health or nil
+            if SH_.who ~= (t and t.id) then SH_.who, SH_.hp = t and t.id, hp end
+            local n = tool and tool:GetAttribute("LocalTotalShots")
+            if SH_.tool ~= tool then SH_.tool, SH_.last = tool, nil end     -- another gun: its own count
+            if type(n) == "number" then
+                if t and SH_.last and n > SH_.last then
+                    SH_.n += n - SH_.last
+                    SH_.lastAt = now
+                end
+                SH_.last = n
+            else
+                SH_.last = nil
+            end
+            if hp and SH_.hp and hp < SH_.hp and now - SH_.lastAt < 0.3 then SH_.drops += 1 end
+            SH_.hp = hp
         end
 
         -- ---------- YOUR AIM WHILE THE MOVE PLAYS ----------
@@ -17607,6 +17675,7 @@ do
                 table.clear(S.held)
                 S.lastKind, S.castTarget = "skill", nil
                 S.stream.last, S.stream.sent = 0, 0
+                S.shots.n, S.shots.drops, S.shots.last, S.shots.tool = 0, 0, nil, nil
                 -- The life you are in has settled long ago: on at once (only
                 -- a NEW life waits a moment before its view is switched on).
                 V.char, V.charAt = player.Character, -1e9
@@ -17628,13 +17697,17 @@ do
                     local want = CFG.PvpAim and S.target ~= nil
                     local gun = toolType(heldTool()) == "Gun"
                     pcall(P.pvpAimTick, want, want and gun, now)
-                    -- The game's own gun snap off while you aim a gun at him.
+                    -- The game's own gun snap off while you aim a gun at him,
+                    -- and a ray gun's spread.
                     if want and gun then
                         pcall(snapOff)
                         SN.at = now
+                        if CFG.PvpNoSpread then pcall(spreadOff, heldTool(), now) end
                     elseif SN.orig and now - SN.at > 3 then
                         pcall(snapOn)
                     end
+                    if SPR.d and (not CFG.PvpNoSpread or now - SPR.at > 3) then pcall(spreadOn) end
+                    pcall(shotsTick, gun and heldTool() or nil, now)
                     pcall(streamTick, now)
                     local t = S.target
                     local busy = (P :: any).canCast ~= nil and not (P :: any).canCast()
@@ -17681,6 +17754,7 @@ do
                 pcall(speedRestore)
                 pcall(dashRestore)
                 pcall(snapOn)
+                pcall(spreadOn)
                 S.target, P.aimPart = nil, nil
                 S.aimSkill, S.aimShot, S.castTarget = nil, nil, nil
                 table.clear(S.hist)

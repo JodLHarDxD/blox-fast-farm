@@ -196,6 +196,56 @@ snapOn()
 check("snap back: the game's own function itself", AA.getTargetInfo() == "the game's head snap"
     and S.snap.orig == nil)
 
+-- ===== a ray gun's spread (2026-10-13: Dragonstorm's M1 should land) =====
+do
+    local DS = { ShootType = "HitscanSingleShot", BulletSpreadDegree = 3, SkipSpreadInterval = 4 }
+    local storm = inst("Tool", { Name = "Dragonstorm", ToolTip = "Gun", data = DS })
+    spreadOff(storm, NOW)
+    check("Dragonstorm aimed at him: its spread off in the game's own table", DS.BulletSpreadDegree == nil and S.spread.d == DS)
+    spreadOff(storm, NOW + 1)
+    check("again: kept off, its clock moved on", DS.BulletSpreadDegree == nil and S.spread.at == NOW + 1)
+    local MUSKET = { ShootType = "HitscanSingleShot", BulletSpreadDegree = 2 }
+    spreadOff(inst("Tool", { Name = "Musket", ToolTip = "Gun", data = MUSKET }), NOW + 2)
+    check("another ray gun: the first one's spread back, the new one's off",
+        DS.BulletSpreadDegree == 3 and MUSKET.BulletSpreadDegree == nil)
+    spreadOn()
+    check("put back: its own number", MUSKET.BulletSpreadDegree == 2 and S.spread.d == nil)
+    local SHOT = { ShootType = "HitscanShotgun", BulletSpreadDegree = 12, BulletSpreadCount = 7 }
+    spreadOff(inst("Tool", { Name = "Magma Blaster", ToolTip = "Gun", data = SHOT }), NOW)
+    check("a shotgun's pellets: never touched", SHOT.BulletSpreadDegree == 12 and S.spread.d == nil)
+    spreadOff(inst("Tool", { Name = "Flintlock", ToolTip = "Gun", data = { ShootType = "HitscanSingleShot" } }), NOW)
+    check("a gun with no spread: nothing to do", S.spread.d == nil)
+    spreadOff(inst("Tool", { Name = "Katana", ToolTip = "Sword" }), NOW)
+    check("not a gun: nothing", S.spread.d == nil)
+end
+
+-- ===== your shots at him against his HP =====
+do
+    follow()
+    targetTick(NOW)
+    local gunT = inst("Tool", { Name = "Dragonstorm", ToolTip = "Gun" })
+    gunT.attrs.LocalTotalShots = 10
+    local hhum = him.Character:FindFirstChildOfClass("Humanoid")
+    hhum.Health = 100
+    S.shots.n, S.shots.drops, S.shots.last, S.shots.tool = 0, 0, nil, nil
+    shotsTick(gunT, NOW)
+    gunT.attrs.LocalTotalShots = 13
+    NOW += 0.05
+    hhum.Health = 95
+    shotsTick(gunT, NOW)
+    check("3 shots at him counted", S.shots.n == 3)
+    check("his HP down right after a shot: counted", S.shots.drops == 1)
+    NOW += 1
+    hhum.Health = 90
+    shotsTick(gunT, NOW)
+    check("his HP down a second after your last shot: not yours", S.shots.drops == 1)
+    local musket = inst("Tool", { Name = "Musket", ToolTip = "Gun" })
+    musket.attrs.LocalTotalShots = 500
+    shotsTick(musket, NOW)
+    check("another gun's own count is not shots at him", S.shots.n == 3)
+    check("the lead line says it", string.find(S.leadText(), "3 shots at him", 1, true) ~= nil)
+end
+
 -- ===== his Ken said =====
 follow()
 targetTick(NOW)
