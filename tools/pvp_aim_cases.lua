@@ -255,6 +255,49 @@ him.attrs.KenActive = false
 check("his Ken off: not said", string.find(S.targetText(), "KEN", 1, true) == nil)
 check("the lead line has your ping", string.find(S.leadText(), "ping 120 ms", 1, true) ~= nil)
 
+-- ===== per attack: Z yours, the rest aimed (2026-10-14) =====
+do
+    follow()
+    targetTick(NOW)
+    CFG.PvpAimKeys = { M1 = true, Z = false, X = true, C = true, V = true, F = true }
+    me.Character.kids.Busy.Value = false
+    S.lastKey = nil
+    check("nothing pressed: the skill table answers him", S.aimPoint("skill") ~= nil)
+    DOWN[Enum.KeyCode.Z] = true
+    check("Z down (the press frame, before this script hears it): your own mouse", S.aimPoint("skill") == nil)
+    S.faceUntil = 0
+    attackPressed("Z")
+    check("a Z press is not turned to him", S.faceUntil == 0)
+    DOWN[Enum.KeyCode.Z] = nil
+    me.Character.kids.Busy.Value = true
+    check("Z let go while its move plays (the release read): still yours", S.aimPoint("skill") == nil)
+    TOOL = fruit("Flame-Flame")
+    table.clear(SENT)
+    NOW += 0.06
+    streamTick(NOW)
+    check("Z's move: its aim never re-sent", #SENT == 0)
+    faceNow()
+    me.Character.kids.Busy.Value = false
+    check("Busy off but the key's Holding still on: still Z's move, still yours", S.aimPoint("skill") == nil)
+    TOOL.kids.Holding.Value = false
+    check("Z's move over: aimed again", S.aimPoint("skill") ~= nil)
+    DOWN[Enum.KeyCode.X] = true
+    attackPressed("X")
+    check("X: aimed and turned to him", S.aimPoint("skill") ~= nil and S.faceUntil > NOW)
+    DOWN[Enum.KeyCode.X] = nil
+    CFG.PvpAimKeys.M1 = false
+    DOWN.M1 = true
+    check("M1 switched off and held: the gun shot is yours too", S.aimPoint("gun") == nil)
+    DOWN.M1 = nil
+    CFG.PvpAimKeys = nil
+    check("no list at all: everything aimed", S.aimPoint("skill") ~= nil)
+    check("the line says which are yours", string.find(S.keysText(), "aimed M1 Z X C V F", 1, true) ~= nil)
+    CFG.PvpAimKeys = { Z = false }
+    check("...and Z yours", string.find(S.keysText(), "yours Z", 1, true) ~= nil)
+    CFG.PvpAimKeys = nil
+    TOOL = nil
+end
+
 -- ===== a teleport (Soru): his old path forgotten, no wild lead =====
 for _ = 1, 20 do runFor(1 / 60, 90, 0) follow() end
 NOW += 1 / 60

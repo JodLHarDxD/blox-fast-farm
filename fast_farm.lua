@@ -563,7 +563,12 @@ local CFG = {
     -- (user, 2026-10-13: "if he is really fast, because of the animation of
     -- my attack it misses - predict his movement") Aim where he WILL be when
     -- the hit lands: your ping + the move's travel, his run / jump / dash.
-    PvpLead            = true,
+    -- OFF (user, 2026-10-14, in game: "with it on I cannot hit him a single
+    -- time - always in front, beside, above or below him; off I hit him").
+    PvpLead            = false,
+    -- (user, 2026-10-14) Which of your attacks the aim takes: off = that one
+    -- goes where YOUR mouse points (his own aim for the Z move).
+    PvpAimKeys         = { M1 = true, Z = false, X = true, C = true, V = true, F = true },
     PvpLeadScale       = 1.0,    -- 1 = as measured; less if your hits land ahead of him, more if behind
     PvpSkillSpeed      = 300,    -- studs/s a skill travels (guns: the game's own number)
     PvpStream          = true,   -- your aim sent again every frame while a move plays
@@ -581,7 +586,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-13.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-14.1" }
 _G.BFF = P
 
 -- =========================================================
@@ -14997,7 +15002,14 @@ local function buildUI()
         sliderRow(v, "Players count within", 50, 1000, 25,
             function() return CFG.PvpRange end,
             function(x) CFG.PvpRange = x end, " studs")
-        switchRow(v, "Lead a moving player", "Where he will be when the hit lands - your ping, the move's travel, his run / jump / dash",
+        chips(v, "Aim takes", { "M1", "Z", "X", "C", "V", "F" },
+            function(k) return (CFG.PvpAimKeys or {})[k] ~= false end,
+            function(k, x)
+                CFG.PvpAimKeys = CFG.PvpAimKeys or {}
+                CFG.PvpAimKeys[k] = x
+            end)
+        caption(v, "Lit = that attack goes at him. Dark = yours: it goes where your mouse points.")
+        switchRow(v, "Lead a moving player", "Off: in game it aimed in front / beside him. Aims ahead by your ping + travel",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
         sliderRow(v, "Lead strength", 0, 2, 0.1,
@@ -16657,6 +16669,21 @@ do
             end
             return untilNow
         end
+        -- PER ATTACK (user, 2026-10-14: "I don't want aim assist on the Z
+        -- move"). Is the aim on for what you fire now? on = { M1 = bool, Z =
+        -- ... } (missing = on), down = the attack keys held this instant (the
+        -- game reads your aim in the press's own frame, whether or not this
+        -- script has heard the press yet), last = your last attack key and
+        -- playing = its move still plays (the aim is read again at release).
+        -- Any of them switched off = your own mouse.
+        function L.aimFor(on, down, last, playing)
+            for k in pairs(down) do
+                if on[k] == false then return false end
+            end
+            if last ~= nil and playing and on[last] == false then return false end
+            return true
+        end
+
         -- WHERE HE WILL BE (user, 2026-10-13). h = his last places, oldest
         -- first: { {t, x, y, z}, ... }, 0.5 s kept. A step faster than 600
         -- studs/s (and over 8 studs) is a blink - Soru, a script's teleport
@@ -17319,6 +17346,19 @@ do
             return hv ~= nil and hv.Value == true
         end
 
+        -- Is the aim on for what you fire now (CFG.PvpAimKeys, L.aimFor)?
+        local KEYCODES = { Z = Enum.KeyCode.Z, X = Enum.KeyCode.X, C = Enum.KeyCode.C,
+            V = Enum.KeyCode.V, F = Enum.KeyCode.F }
+        function S.aimAllowed(now)
+            local on = CFG.PvpAimKeys or {}
+            local down = {}
+            for k, kc in pairs(KEYCODES) do
+                if UIS:IsKeyDown(kc) then down[k] = true end
+            end
+            if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then down.M1 = true end
+            return L.aimFor(on, down, S.lastKey, movePlaying(now or os.clock()))
+        end
+
         -- His motion this frame (read once, used by every aim point).
         local RUN_CAP, DASH_TAU = 140, 0.15
         local function motionOf(c, now)
@@ -17386,6 +17426,8 @@ do
         function S.aimPoint(kind)
             local t = S.target
             if not (t and t.root and t.root.Parent) then return nil end
+            -- That attack's aim switched off: your own mouse.
+            if not S.aimAllowed() then return nil end
             local a = (kind == "gun") and S.aimShot or S.aimSkill
             return a or t.root.Position
         end
@@ -17402,14 +17444,27 @@ do
             return string.format("%s  ·  %.0f studs  ·  your mouse is on him%s%s", t.plr.DisplayName or t.plr.Name, t.dist,
                 (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "", ken)
         end
+        -- Which attacks the aim takes, in words: "aimed M1 X C V F · yours Z".
+        function S.keysText()
+            local on, a, y = CFG.PvpAimKeys or {}, {}, {}
+            for _, k in ipairs({ "M1", "Z", "X", "C", "V", "F" }) do
+                table.insert((on[k] == false) and y or a, k)
+            end
+            return "aimed " .. ((#a > 0) and table.concat(a, " ") or "-")
+                .. ((#y > 0) and ("  ·  yours " .. table.concat(y, " ")) or "")
+        end
         function S.leadText()
-            if not CFG.PvpLead then return "lead off - aimed where he is" end
             local LD = S.lead
-            local s = string.format("ping %d ms", math.floor((S.rtt or 0) * 1000 + 0.5))
-            if not S.target then return s .. "  ·  nobody picked" end
-            s = s .. string.format("  ·  him %.0f studs/s  ·  skills %.2f s ahead = %.0f studs",
-                LD.speed or 0, LD.t or 0, LD.ahead or 0)
-            if LD.gun == "gun" then
+            local s = S.keysText() .. "\n"
+            if not CFG.PvpLead then
+                s = s .. "lead off - aimed where he is"
+            else
+                s = s .. string.format("ping %d ms", math.floor((S.rtt or 0) * 1000 + 0.5))
+                if not S.target then return s .. "  ·  nobody picked" end
+                s = s .. string.format("  ·  him %.0f studs/s  ·  skills %.2f s ahead = %.0f studs",
+                    LD.speed or 0, LD.t or 0, LD.ahead or 0)
+            end
+            if LD.gun == "gun" and CFG.PvpLead then
                 s = s .. string.format("  ·  gun %.2f s ahead (its shot flies)", LD.gunT or 0)
             elseif LD.gun == "hitscan" then
                 s = s .. "  ·  gun: a ray at him, no lead" .. (S.spread.d and ", straight (no spread)" or "")
@@ -17518,6 +17573,7 @@ do
             -- Only a move the server aims (a skill, a fruit's M1), not a swing or a shot.
             if S.lastKind ~= "skill" then return end
             if now - SR.last < 0.05 or not movePlaying(now) then return end
+            if not S.aimAllowed(now) then return end
             local tool = heldTool()
             if not tool or tool.Name == "Love-Love" then return end
             local mp = tool:FindFirstChild("MousePos") or tool:FindFirstChild("Mouse")
@@ -17560,6 +17616,7 @@ do
             local now = os.clock()
             S.lastAttack = now
             S.held[what] = true
+            S.lastKey = what
             local tool = heldTool()
             local tt = toolType(tool)
             if what ~= "M1" then S.lastKind = "skill"
@@ -17567,7 +17624,8 @@ do
             elseif tt == "Gun" then S.lastKind = (shotKind(tool) == "gun") and "gun" or "hitscan"
             else S.lastKind = "skill" end
             S.castTarget = S.target and S.target.id or nil
-            if faceWanted() then
+            -- An attack whose aim is off is not turned to him either: it is yours.
+            if faceWanted() and (CFG.PvpAimKeys or {})[what] ~= false then
                 S.faceUntil = math.max(S.faceUntil, now + 0.4)
                 S.faced += 1
             end
@@ -17582,6 +17640,7 @@ do
             local t = S.target
             local _, root = parts()
             if not (t and root and t.root.Parent) then return end
+            if not S.aimAllowed() then return end
             local p, q = root.Position, faceAt(t)
             local flat = Vector3.new(q.X, p.Y, q.Z)
             if (flat - p).Magnitude < 1 then return end
@@ -17678,7 +17737,7 @@ do
                 S.epoch += 1
                 S.faceUntil, S.lastAttack = 0, -1e9
                 table.clear(S.held)
-                S.lastKind, S.castTarget = "skill", nil
+                S.lastKind, S.castTarget, S.lastKey = "skill", nil, nil
                 S.stream.last, S.stream.sent = 0, 0
                 S.shots.n, S.shots.drops, S.shots.last, S.shots.tool = 0, 0, nil, nil
                 -- The life you are in has settled long ago: on at once (only

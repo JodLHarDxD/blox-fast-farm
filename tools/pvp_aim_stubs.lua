@@ -27,6 +27,7 @@ local CFrame = {
 local Enum = {
     RaycastFilterType = { Exclude = "Exclude" },
     KeyCode = { Z = "Z", X = "X", C = "C", V = "V", F = "F" },
+    UserInputType = { MouseButton1 = "MouseButton1" },
 }
 local RaycastParams = { new = function() return {} end }
 
@@ -95,7 +96,12 @@ local function heldTool() return TOOL end
 local function toolType(t) return t and t.ToolTip or "?" end
 
 local MOUSE = { X = 400, Y = 300 }
-local UIS = { GetMouseLocation = function() return MOUSE end }
+local DOWN = {}                                      -- keys held now: { [Enum.KeyCode.Z] = true, M1 = true }
+local UIS = {
+    GetMouseLocation = function() return MOUSE end,
+    IsKeyDown = function(_, kc) return DOWN[kc] == true end,
+    IsMouseButtonPressed = function(_, b) return b == "MouseButton1" and DOWN.M1 == true end,
+}
 
 local PING_MS = 120
 local game = { GetService = function(_, n)

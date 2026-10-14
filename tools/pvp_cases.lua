@@ -50,6 +50,18 @@ check("facing switched off / nobody aimed: not turned", L.faceUntil(0, 10, true,
     and L.faceUntil(0, 10, true, true, 9, nil, 100, true) == 0)
 check("a window already longer is never shortened", L.faceUntil(11, 10, true, false, 9, 50, 100, true) == 11)
 
+-- ===== per attack (2026-10-14: "I don't want aim assist on the Z move") =====
+do
+    local on = { M1 = true, Z = false, X = true }
+    check("Z held (the press frame, heard or not): your own mouse", L.aimFor(on, { Z = true }, nil, false) == false)
+    check("X held: aimed", L.aimFor(on, { X = true }, "Z", false) == true)
+    check("Z let go, its move still playing (the release read): still yours", L.aimFor(on, {}, "Z", true) == false)
+    check("Z's move over: aimed again", L.aimFor(on, {}, "Z", false) == true)
+    check("a key not listed = on", L.aimFor(on, { C = true }, "C", true) == true)
+    check("nothing pressed yet: aimed", L.aimFor(on, {}, nil, false) == true)
+    check("M1 switched off and held: yours", L.aimFor({ M1 = false }, { M1 = true }, nil, false) == false)
+end
+
 -- ===== the pick holds on (2026-10-13: a fast player no longer drops out for a frame) =====
 do
     local A = P_("A", 50, 400 + 260, 300)                    -- 260 px off: outside 200, inside 300
