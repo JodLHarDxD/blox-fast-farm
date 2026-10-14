@@ -566,9 +566,16 @@ local CFG = {
     -- OFF (user, 2026-10-14, in game: "with it on I cannot hit him a single
     -- time - always in front, beside, above or below him; off I hit him").
     PvpLead            = false,
-    -- (user, 2026-10-14) Which of your attacks the aim takes: off = that one
-    -- goes where YOUR mouse points (his own aim for the Z move).
-    PvpAimKeys         = { M1 = true, Z = false, X = true, C = true, V = true, F = true },
+    -- (user, 2026-10-14) Which of your attacks the aim takes, PER WEAPON: your
+    -- sword's Z is not your fruit's or your fighting style's Z. Off = that
+    -- attack goes where YOUR mouse points. Keyed by the game's own label on
+    -- the tool (ToolTip); a weapon not listed = every attack aimed.
+    PvpAimKeys         = {
+        ["Blox Fruit"] = { M1 = true, Z = true,  X = true, C = true, V = true, F = true },
+        Melee          = { M1 = true, Z = true,  X = true, C = true, V = true, F = true },
+        Sword          = { M1 = true, Z = false, X = true, C = true, V = true, F = true },
+        Gun            = { M1 = true, Z = true,  X = true, C = true, V = true, F = true },
+    },
     PvpLeadScale       = 1.0,    -- 1 = as measured; less if your hits land ahead of him, more if behind
     PvpSkillSpeed      = 300,    -- studs/s a skill travels (guns: the game's own number)
     PvpStream          = true,   -- your aim sent again every frame while a move plays
@@ -586,8 +593,21 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-14.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-14.2" }
 _G.BFF = P
+
+-- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
+-- what you changed from these is saved - a default changed in a later build
+-- still reaches every setting you never touched).
+do
+    local function copy(v)
+        if type(v) ~= "table" then return v end
+        local t = {}
+        for k, x in pairs(v) do t[k] = copy(x) end
+        return t
+    end
+    P.cfgDefaults = copy(CFG)
+end
 
 -- =========================================================
 -- LEVEL -> ENEMY -> WHERE IT LIVES
@@ -14027,12 +14047,15 @@ local function buildUI()
                 .. (CFG.AutoTeam and tostring(CFG.Team) or "team: yours")
         end, "servers")
         hairline(v)
-        navRow(v, "Stats & debug", function()
+        -- SETTINGS LOCK (user, 2026-10-14) on the same page: the row says it.
+        navRow(v, "Lock & stats", function()
+            local k = (P :: any).lock
+            local lock = (k and k.on) and "locked" or "not locked"
             local m = meas
             if m and m.fight > 5 then
-                return string.format("%.1f kills/min", m.kills / (m.fight / 60))
+                return lock .. "  ·  " .. string.format("%.1f kills/min", m.kills / (m.fight / 60))
             end
-            return stats.kills .. " killed"
+            return lock .. "  ·  " .. stats.kills .. " killed"
         end, "stats")
     end
 
@@ -15002,13 +15025,24 @@ local function buildUI()
         sliderRow(v, "Players count within", 50, 1000, 25,
             function() return CFG.PvpRange end,
             function(x) CFG.PvpRange = x end, " studs")
-        chips(v, "Aim takes", { "M1", "Z", "X", "C", "V", "F" },
-            function(k) return (CFG.PvpAimKeys or {})[k] ~= false end,
-            function(k, x)
-                CFG.PvpAimKeys = CFG.PvpAimKeys or {}
-                CFG.PvpAimKeys[k] = x
-            end)
-        caption(v, "Lit = that attack goes at him. Dark = yours: it goes where your mouse points.")
+        -- (user, 2026-10-14) per weapon: the sword's Z is not the fruit's Z.
+        heading2(v, "aim takes  ·  each weapon its own")
+        for _, w in ipairs({ { "Blox Fruit", "Fruit" }, { "Melee", "Fighting" },
+            { "Sword", "Sword" }, { "Gun", "Gun" } }) do
+            local kind = w[1]
+            chips(v, w[2], { "M1", "Z", "X", "C", "V", "F" },
+                function(k)
+                    local t = (CFG.PvpAimKeys or {})[kind]
+                    return not (type(t) == "table" and t[k] == false)
+                end,
+                function(k, x)
+                    CFG.PvpAimKeys = CFG.PvpAimKeys or {}
+                    CFG.PvpAimKeys[kind] = CFG.PvpAimKeys[kind] or {}
+                    CFG.PvpAimKeys[kind][k] = x
+                end)
+        end
+        caption(v, "Lit = that attack goes at him. Dark = yours: it goes where your mouse points. "
+            .. "Only that weapon's key - the sword's Z dark leaves your fruit's Z aimed.")
         switchRow(v, "Lead a moving player", "Off: in game it aimed in front / beside him. Aims ahead by your ping + travel",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
@@ -16078,6 +16112,15 @@ local function buildUI()
     do
         local v = makeView("stats")
         gap(v, 8)
+        -- SETTINGS LOCK (user, 2026-10-14): what you set stays after a reload.
+        heading2(v, "your settings")
+        switchRow(v, "Lock my settings", "On: everything you changed stays after a reload",
+            function() return (P :: any).lock ~= nil and (P :: any).lock.on == true end,
+            function(x) if (P :: any).lockSet then (P :: any).lockSet(x) end end)
+        readout(v, function()
+            local k = (P :: any).lock
+            return k and tostring(k.note) or "-"
+        end)
         heading2(v, "which setup is better")
         readout(v, function()
             local lines = {}
@@ -16676,12 +16719,21 @@ do
         -- script has heard the press yet), last = your last attack key and
         -- playing = its move still plays (the aim is read again at release).
         -- Any of them switched off = your own mouse.
-        function L.aimFor(on, down, last, playing)
+        -- onLast (2026-10-14: per weapon) = the switches of the weapon the last
+        -- attack was made with (nil = the same as on): a sword Z still playing
+        -- stays yours after you swap to the fruit.
+        function L.aimFor(on, down, last, playing, onLast)
             for k in pairs(down) do
                 if on[k] == false then return false end
             end
-            if last ~= nil and playing and on[last] == false then return false end
+            if last ~= nil and playing and (onLast or on)[last] == false then return false end
             return true
+        end
+        -- One weapon's switches: keys[kind] ("Blox Fruit", "Melee", "Sword",
+        -- "Gun" - the tool's own label). Not listed = {} = every attack aimed.
+        function L.aimOn(keys, kind)
+            local t = type(keys) == "table" and kind ~= nil and keys[kind] or nil
+            return type(t) == "table" and t or {}
         end
 
         -- WHERE HE WILL BE (user, 2026-10-13). h = his last places, oldest
@@ -17350,13 +17402,16 @@ do
         local KEYCODES = { Z = Enum.KeyCode.Z, X = Enum.KeyCode.X, C = Enum.KeyCode.C,
             V = Enum.KeyCode.V, F = Enum.KeyCode.F }
         function S.aimAllowed(now)
-            local on = CFG.PvpAimKeys or {}
+            -- The weapon in your hand now (the fox: your fruit), and the one
+            -- your last attack was made with.
+            local on = L.aimOn(CFG.PvpAimKeys, toolType(heldTool()))
+            local onLast = L.aimOn(CFG.PvpAimKeys, S.lastType)
             local down = {}
             for k, kc in pairs(KEYCODES) do
                 if UIS:IsKeyDown(kc) then down[k] = true end
             end
             if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then down.M1 = true end
-            return L.aimFor(on, down, S.lastKey, movePlaying(now or os.clock()))
+            return L.aimFor(on, down, S.lastKey, movePlaying(now or os.clock()), onLast)
         end
 
         -- His motion this frame (read once, used by every aim point).
@@ -17444,13 +17499,18 @@ do
             return string.format("%s  ·  %.0f studs  ·  your mouse is on him%s%s", t.plr.DisplayName or t.plr.Name, t.dist,
                 (P.gameAimHooked and P.gameAimHooked()) and "  ·  aimed" or "", ken)
         end
-        -- Which attacks the aim takes, in words: "aimed M1 X C V F · yours Z".
+        -- Which attacks the aim takes for the weapon in your hand, in words:
+        -- "sword: aimed M1 X C V F · yours Z".
+        local KIND_WORD = { ["Blox Fruit"] = "fruit", Melee = "fighting style", Sword = "sword", Gun = "gun" }
         function S.keysText()
-            local on, a, y = CFG.PvpAimKeys or {}, {}, {}
+            local kind = toolType(heldTool())
+            local word = KIND_WORD[kind]
+            if not word then return "no weapon in hand" end
+            local on, a, y = L.aimOn(CFG.PvpAimKeys, kind), {}, {}
             for _, k in ipairs({ "M1", "Z", "X", "C", "V", "F" }) do
                 table.insert((on[k] == false) and y or a, k)
             end
-            return "aimed " .. ((#a > 0) and table.concat(a, " ") or "-")
+            return word .. ": aimed " .. ((#a > 0) and table.concat(a, " ") or "-")
                 .. ((#y > 0) and ("  ·  yours " .. table.concat(y, " ")) or "")
         end
         function S.leadText()
@@ -17619,13 +17679,14 @@ do
             S.lastKey = what
             local tool = heldTool()
             local tt = toolType(tool)
+            S.lastType = tt
             if what ~= "M1" then S.lastKind = "skill"
             elseif tt == "Melee" or tt == "Sword" then S.lastKind = "melee"
             elseif tt == "Gun" then S.lastKind = (shotKind(tool) == "gun") and "gun" or "hitscan"
             else S.lastKind = "skill" end
             S.castTarget = S.target and S.target.id or nil
             -- An attack whose aim is off is not turned to him either: it is yours.
-            if faceWanted() and (CFG.PvpAimKeys or {})[what] ~= false then
+            if faceWanted() and L.aimOn(CFG.PvpAimKeys, tt)[what] ~= false then
                 S.faceUntil = math.max(S.faceUntil, now + 0.4)
                 S.faced += 1
             end
@@ -17737,7 +17798,7 @@ do
                 S.epoch += 1
                 S.faceUntil, S.lastAttack = 0, -1e9
                 table.clear(S.held)
-                S.lastKind, S.castTarget, S.lastKey = "skill", nil, nil
+                S.lastKind, S.castTarget, S.lastKey, S.lastType = "skill", nil, nil, nil
                 S.stream.last, S.stream.sent = 0, 0
                 S.shots.n, S.shots.drops, S.shots.last, S.shots.tool = 0, 0, nil, nil
                 -- The life you are in has settled long ago: on at once (only
@@ -18310,6 +18371,148 @@ do
     build()
 end
 -- (end of race)
+
+-- =========================================================
+-- SETTINGS LOCK
+-- =========================================================
+-- User, 2026-10-14: "if I customize a setting and lock it, I want it to stay
+-- - even after I reload the script". Locked = every setting you CHANGED from
+-- the defaults (P.cfgDefaults) goes to your executor's workspace folder,
+-- bff_settings_<your UserId>.json - at once, then within 2 s of any change -
+-- and comes back at every load, before the panel is built (a hop's carried
+-- settings still go over it). Only what you changed: a default changed in a
+-- later build still reaches everything you never touched. Off = the file
+-- says unlocked; the next load starts from the defaults.
+do
+    local function build()
+        local HttpService = game:GetService("HttpService")
+
+        -- SETTINGS LOGIC (pure: tools/lock_test.py)
+        local LK = {}
+        -- A value a JSON file keeps as it is: a number, a string, true /
+        -- false, or a table of those under string keys or as a list.
+        function LK.plain(v)
+            local t = type(v)
+            if t == "boolean" or t == "string" then return true end
+            if t == "number" then return v == v and v ~= math.huge and v ~= -math.huge end
+            if t ~= "table" then return false end
+            local strKeys, numKeys = false, false
+            for k, x in pairs(v) do
+                if type(k) == "string" then strKeys = true
+                elseif type(k) == "number" and k >= 1 and k % 1 == 0 then numKeys = true
+                else return false end
+                if not LK.plain(x) then return false end
+            end
+            return not (strKeys and numKeys)
+        end
+        function LK.copy(v)
+            if type(v) ~= "table" then return v end
+            local t = {}
+            for k, x in pairs(v) do t[k] = LK.copy(x) end
+            return t
+        end
+        function LK.same(a, b)
+            if type(a) ~= type(b) then return false end
+            if type(a) ~= "table" then return a == b end
+            for k, x in pairs(a) do
+                if not LK.same(x, b[k]) then return false end
+            end
+            for k in pairs(b) do
+                if a[k] == nil then return false end
+            end
+            return true
+        end
+        -- What you changed: every plain setting not the same as its default.
+        function LK.diff(cfg, def)
+            local out = {}
+            for k, v in pairs(cfg) do
+                if LK.plain(v) and not LK.same(v, def[k]) then out[k] = LK.copy(v) end
+            end
+            return out
+        end
+        -- Yours back over the defaults. A setting whose kind changed in a
+        -- later build (a number now a switch) is left at its new default; a
+        -- table is laid over the default one key by key (a key the new build
+        -- added keeps its default), a list replaces it. -> how many came back.
+        local function lay(dst, src)
+            for k, x in pairs(src) do
+                if type(x) == "table" and type(dst[k]) == "table" and #x == 0 then
+                    lay(dst[k], x)
+                else
+                    dst[k] = LK.copy(x)
+                end
+            end
+            return dst
+        end
+        function LK.apply(cfg, saved, def)
+            local n = 0
+            for k, sv in pairs(saved) do
+                local dv = def[k]
+                if dv == nil or type(dv) == type(sv) then
+                    if type(sv) == "table" and type(dv) == "table" and #sv == 0 then
+                        cfg[k] = lay(LK.copy(dv), sv)
+                    else
+                        cfg[k] = LK.copy(sv)
+                    end
+                    n += 1
+                end
+            end
+            return n
+        end
+        -- (end of settings logic)
+
+        local FILE = "bff_settings_" .. tostring(player.UserId) .. ".json"
+        local K = { on = false, note = "off - a reload starts from the defaults", last = nil, LK = LK }
+        P.lock = K
+
+        local function save(force)
+            local d = LK.diff(CFG, P.cfgDefaults)
+            local ok, s = pcall(function()
+                return HttpService:JSONEncode({ v = 1, locked = true, build = P.build, cfg = d })
+            end)
+            if not ok then K.note = "locked, but your settings would not go into the file" return end
+            if s == K.last and not force then return end
+            if not (writefile and pcall(writefile, FILE, s)) then
+                K.note = "locked, but this executor cannot write a file - NOT kept"
+                return
+            end
+            K.last = s
+            local n = 0
+            for _ in pairs(d) do n += 1 end
+            K.note = string.format("locked  ·  %d you changed, kept  ·  saved %s", n, os.date("%H:%M:%S"))
+        end
+        function P.lockSet(on)
+            K.on = on and true or false
+            if K.on then
+                save(true)
+            else
+                if writefile then pcall(writefile, FILE, '{"v":1,"locked":false}') end
+                K.last = nil
+                K.note = "off - the next load starts from the defaults (this one keeps what you set)"
+            end
+        end
+
+        -- At load: your locked settings back.
+        local okR, s = pcall(function() return readfile and isfile and isfile(FILE) and readfile(FILE) end)
+        if okR and type(s) == "string" then
+            local okD, t = pcall(function() return HttpService:JSONDecode(s) end)
+            if okD and type(t) == "table" and t.locked == true and type(t.cfg) == "table" then
+                local n = LK.apply(CFG, t.cfg, P.cfgDefaults)
+                K.on, K.last = true, nil
+                K.note = string.format("locked  ·  %d of your settings back from your file", n)
+                print("[BFF] settings lock: " .. n .. " of your settings back (" .. FILE .. ")")
+            end
+        end
+        task.spawn(function()
+            while _G.BFF == P do
+                task.wait(2)
+                if K.on then pcall(save, false) end
+            end
+        end)
+    end
+    build()
+end
+-- (end of settings lock)
 
 -- Arrived by an elite hunt's hop: its settings back, and the hunt goes on.
 do

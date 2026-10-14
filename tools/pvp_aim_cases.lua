@@ -255,46 +255,73 @@ him.attrs.KenActive = false
 check("his Ken off: not said", string.find(S.targetText(), "KEN", 1, true) == nil)
 check("the lead line has your ping", string.find(S.leadText(), "ping 120 ms", 1, true) ~= nil)
 
--- ===== per attack: Z yours, the rest aimed (2026-10-14) =====
+-- ===== per attack, PER WEAPON: the sword's Z yours, the fruit's Z aimed (2026-10-14) =====
 do
     follow()
     targetTick(NOW)
-    CFG.PvpAimKeys = { M1 = true, Z = false, X = true, C = true, V = true, F = true }
+    local ON = { M1 = true, Z = true, X = true, C = true, V = true, F = true }
+    local SWORD = { M1 = true, Z = false, X = true, C = true, V = true, F = true }
+    CFG.PvpAimKeys = { ["Blox Fruit"] = ON, Melee = ON, Sword = SWORD, Gun = ON }
     me.Character.kids.Busy.Value = false
-    S.lastKey = nil
+    S.lastKey, S.lastType = nil, nil
+    local function sword()
+        local t = fruit("Buddy Sword")
+        t.ToolTip = "Sword"
+        return t
+    end
+    TOOL = sword()
+    TOOL.kids.Holding.Value = false
     check("nothing pressed: the skill table answers him", S.aimPoint("skill") ~= nil)
     DOWN[Enum.KeyCode.Z] = true
-    check("Z down (the press frame, before this script hears it): your own mouse", S.aimPoint("skill") == nil)
+    check("sword Z down (the press frame, before this script hears it): your own mouse", S.aimPoint("skill") == nil)
     S.faceUntil = 0
     attackPressed("Z")
-    check("a Z press is not turned to him", S.faceUntil == 0)
+    check("a sword Z press is not turned to him", S.faceUntil == 0)
     DOWN[Enum.KeyCode.Z] = nil
     me.Character.kids.Busy.Value = true
-    check("Z let go while its move plays (the release read): still yours", S.aimPoint("skill") == nil)
-    TOOL = fruit("Flame-Flame")
+    check("sword Z let go while its move plays (the release read): still yours", S.aimPoint("skill") == nil)
     table.clear(SENT)
+    TOOL.kids.Holding.Value = true
     NOW += 0.06
     streamTick(NOW)
-    check("Z's move: its aim never re-sent", #SENT == 0)
-    faceNow()
-    me.Character.kids.Busy.Value = false
-    check("Busy off but the key's Holding still on: still Z's move, still yours", S.aimPoint("skill") == nil)
+    check("sword Z's move: its aim never re-sent", #SENT == 0)
+    -- swapped to the fruit while the sword's Z still plays: still the sword's (yours)
+    TOOL = fruit("Kitsune-Kitsune")
     TOOL.kids.Holding.Value = false
-    check("Z's move over: aimed again", S.aimPoint("skill") ~= nil)
-    DOWN[Enum.KeyCode.X] = true
-    attackPressed("X")
-    check("X: aimed and turned to him", S.aimPoint("skill") ~= nil and S.faceUntil > NOW)
-    DOWN[Enum.KeyCode.X] = nil
-    CFG.PvpAimKeys.M1 = false
+    check("swapped to the fruit mid sword Z: the sword's switch still decides", S.aimPoint("skill") == nil)
+    me.Character.kids.Busy.Value = false
+    check("the sword's Z over, fruit in hand: aimed", S.aimPoint("skill") ~= nil)
+    DOWN[Enum.KeyCode.Z] = true
+    check("the FRUIT's Z down: aimed (only the sword's Z is yours)", S.aimPoint("skill") ~= nil)
+    attackPressed("Z")
+    check("the fruit's Z: turned to him", S.faceUntil > NOW)
+    DOWN[Enum.KeyCode.Z] = nil
+    -- the fighting style's Z, the gun's Z: aimed too
+    TOOL = fruit("Godhuman")
+    TOOL.ToolTip = "Melee"
+    TOOL.kids.Holding.Value = false
+    DOWN[Enum.KeyCode.Z] = true
+    check("the fighting style's Z down: aimed", S.aimPoint("skill") ~= nil)
+    DOWN[Enum.KeyCode.Z] = nil
+    -- the gun's M1 switched off: only the gun
+    CFG.PvpAimKeys.Gun = { M1 = false }
+    TOOL = inst("Tool", { Name = "Dragonstorm", ToolTip = "Gun" })
     DOWN.M1 = true
-    check("M1 switched off and held: the gun shot is yours too", S.aimPoint("gun") == nil)
+    check("the gun's M1 off and held: the gun shot is yours", S.aimPoint("gun") == nil)
+    TOOL = sword()
+    TOOL.kids.Holding.Value = false
+    check("the sword's M1 held: still aimed", S.aimPoint("skill") ~= nil)
     DOWN.M1 = nil
+    check("the line says the sword's", string.find(S.keysText(), "sword: aimed M1 X C V F", 1, true) ~= nil
+        and string.find(S.keysText(), "yours Z", 1, true) ~= nil)
+    TOOL = nil
+    check("no weapon in hand: said", S.keysText() == "no weapon in hand")
     CFG.PvpAimKeys = nil
-    check("no list at all: everything aimed", S.aimPoint("skill") ~= nil)
-    check("the line says which are yours", string.find(S.keysText(), "aimed M1 Z X C V F", 1, true) ~= nil)
-    CFG.PvpAimKeys = { Z = false }
-    check("...and Z yours", string.find(S.keysText(), "yours Z", 1, true) ~= nil)
-    CFG.PvpAimKeys = nil
+    TOOL = sword()
+    TOOL.kids.Holding.Value = false
+    DOWN[Enum.KeyCode.Z] = true
+    check("no lists at all: everything aimed", S.aimPoint("skill") ~= nil)
+    DOWN[Enum.KeyCode.Z] = nil
     TOOL = nil
 end
 

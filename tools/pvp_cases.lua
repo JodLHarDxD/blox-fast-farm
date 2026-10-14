@@ -60,6 +60,14 @@ do
     check("a key not listed = on", L.aimFor(on, { C = true }, "C", true) == true)
     check("nothing pressed yet: aimed", L.aimFor(on, {}, nil, false) == true)
     check("M1 switched off and held: yours", L.aimFor({ M1 = false }, { M1 = true }, nil, false) == false)
+    -- per weapon: the last attack's own weapon decides its release read
+    check("a sword Z (off) still playing after a swap to the fruit (on): yours",
+        L.aimFor({ Z = true }, {}, "Z", true, { Z = false }) == false)
+    check("the fruit's Z pressed (on) while nothing plays: aimed", L.aimFor({ Z = true }, { Z = true }, "Z", false, { Z = false }) == true)
+    local keys = { Sword = { Z = false }, ["Blox Fruit"] = { Z = true } }
+    check("each weapon its own switches", L.aimOn(keys, "Sword").Z == false and L.aimOn(keys, "Blox Fruit").Z == true)
+    check("a weapon not listed: every attack aimed", next(L.aimOn(keys, "Gun")) == nil)
+    check("no weapon / no lists: every attack aimed", next(L.aimOn(keys, "?")) == nil and next(L.aimOn(nil, "Sword")) == nil)
 end
 
 -- ===== the pick holds on (2026-10-13: a fast player no longer drops out for a frame) =====
