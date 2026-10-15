@@ -53,6 +53,12 @@ aim = cut(src, "        -- ---------- AIM ----------", "        -- ---------- TH
 out1 = run(read("pvp_stubs.lua") + logic + read("pvp_cases.lua"))
 out2 = run(read("pvp_view_stubs.lua") + view + read("pvp_view_cases.lua"))
 out3 = run(read("pvp_aim_stubs.lua") + state + aim + read("pvp_aim_cases.lua"))
-print(out1 + out2 + out3)
-ok = "ALL PASS (logic)" in out1 and "ALL PASS (view)" in out2 and "ALL PASS (aim)" in out3
+# 4. THE COOLDOWN TESTS (2026-10-15): Flash Step's cut held on the game's own
+#    attribute over the server's value and put back; the skills test's
+#    IgnoreCooldowns only on a skill tool, only ours taken off; presses vs moves.
+cool = cut(src, "        -- ---------- COOLDOWNS", "        -- ---------- THE MARK")
+out4 = run(read("pvp_aim_stubs.lua") + state + cool + read("pvp_cd_cases.lua"))
+print(out1 + out2 + out3 + out4)
+ok = ("ALL PASS (logic)" in out1 and "ALL PASS (view)" in out2 and "ALL PASS (aim)" in out3
+      and "ALL PASS (cooldowns)" in out4)
 sys.exit(0 if ok else 1)

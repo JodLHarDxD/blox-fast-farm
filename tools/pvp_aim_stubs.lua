@@ -61,6 +61,7 @@ local function inst(class, props)
     o.IsA = function(self, c) return self.ClassName == c end
     o.FindFirstChild = function(self, n) return self.kids[n] end
     o.GetAttribute = function(self, k) return self.attrs[k] end
+    o.SetAttribute = function(self, k, v) self.attrs[k] = v end
     return o
 end
 local SENT = {}

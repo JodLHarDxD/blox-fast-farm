@@ -585,6 +585,10 @@ local CFG = {
     PvpNoSpread        = true,
     PvpDash            = true,
     PvpDashX           = 1.5,    -- your Q dash this many times as far
+    -- (user, 2026-10-15: chased down over 300-400 m - "they make their
+    -- cooldowns shorter; I want mine 0 or half") Both TESTS, off by default:
+    PvpSoruCut         = 0,      -- % of Flash Step's (R) cooldown taken off - your client checks it
+    PvpCdTest          = false,  -- skills pressed during their cooldown (the server most likely refuses)
     PvpSpeed           = true,
     PvpSpeedTo         = 112.5,  -- Mink V3 + Kitsune 3 tails + Pilot Helmet
 
@@ -593,7 +597,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-14.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-15.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -15068,6 +15072,18 @@ local function buildUI()
             function() return CFG.PvpDashX end,
             function(x) CFG.PvpDashX = x end, "x")
         readout(v, function() return "dash   " .. S.dashNote() end)
+        -- (user, 2026-10-15) cooldowns - both tests, off by default.
+        heading2(v, "cooldowns  ·  tests")
+        sliderRow(v, "Flash Step cooldown cut", 0, 95, 5,
+            function() return CFG.PvpSoruCut end,
+            function(x) CFG.PvpSoruCut = x end, " %")
+        switchRow(v, "Skills off cooldown (test)", "The server most likely refuses - spam one key and read the line",
+            function() return CFG.PvpCdTest end,
+            function(x) CFG.PvpCdTest = x end)
+        readout(v, function()
+            if not CFG.Pvp then return "" end
+            return S.soruNote() .. "\n" .. S.cdNote()
+        end)
         switchRow(v, "Faster run", "The game's own speed number - Mink V3 + Kitsune 3 tails + Pilot Helmet = 112",
             function() return CFG.PvpSpeed end,
             function(x) CFG.PvpSpeed = x end)
@@ -16887,6 +16903,16 @@ do
             end
         end
 
+        -- FLASH STEP'S CUT (2026-10-15). The game's cooldown = 15 s (10 for an
+        -- evolved Human) x (1 - FlashstepCooldown); base = the server's own
+        -- value (accessories; nil = none), cut = 0..95 %. Yours first, then
+        -- the cut off what is left. -> the attribute to hold.
+        function L.soruAttr(base, cut)
+            base = base or 0
+            if not cut or cut <= 0 then return base end
+            return 1 - (1 - base) * (1 - math.clamp(cut, 0, 95) / 100)
+        end
+
         -- KEN BACK. k = { offAt, nextAt, tries }. true = send the Ken call now.
         function L.kenStep(k, now, active, cooling, hasKen)
             if active then
@@ -16931,6 +16957,8 @@ do
             shake = { saved = {}, done = false, note = "-" },
             speed = { note = "-", st = {} },
             dash  = { note = "-", st = {}, tries = 0 },
+            soru  = { base = nil, mine = nil },
+            cd    = { set = setmetatable({}, { __mode = "k" }), presses = 0, moves = 0, busy = false },
             faceUntil = 0, faced = 0, held = {}, lastAttack = -1e9,
             mark  = { hl = nil, bb = nil, char = nil },
             -- WHERE HE WILL BE (2026-10-13): each player's path, this frame's
@@ -17300,6 +17328,80 @@ do
                 D.last and string.format("%.0f studs", D.last) or "-", CFG.PvpDashX)
         end
         S.dashNote = dashNote
+
+        -- ---------- COOLDOWNS (user, 2026-10-15: chased down over 300-400 m -
+        -- "they make their cooldowns shorter; I want mine 0 or half") ----------
+        -- Read in the client (decompiled v4623), both TESTS, off by default:
+        -- FLASH STEP (R, StarterCharacterScripts.Soru): YOUR client checks its
+        --   cooldown - 15 s (10 for an evolved Human) x (1 - the character
+        --   attribute FlashstepCooldown, accessories' cut) - and moves you
+        --   itself (200 studs; 350 evolved Human), then tells the server. So
+        --   that attribute is held at the server's own cut plus PvpSoruCut %
+        --   (the server's value back when off). 10 energy a step, as ever.
+        -- SKILLS (Z X C V F): your client keeps a ready flag, but the SERVER
+        --   sends the cooldown (SetCooldown) and runs the move - it most likely
+        --   refuses one sent early. The test: the tool's own IgnoreCooldowns
+        --   (the game's admin switch) on the tool in your hand lets you press
+        --   during the cooldown; the line counts your skill presses against the
+        --   moves the game really started (Busy on you turning on).
+        local SO = S.soru
+        local function soruTick()
+            local char = player.Character
+            if not char then return end
+            local attr = char:GetAttribute("FlashstepCooldown")
+            if attr ~= SO.mine then SO.base = attr end          -- the server's own (gear, a new life)
+            local cut = CFG.PvpSoruCut or 0
+            local want = (cut > 0) and L.soruAttr(SO.base, cut) or SO.base
+            if want ~= attr then
+                char:SetAttribute("FlashstepCooldown", want)
+                SO.mine = want
+            end
+        end
+        local function soruRestore()
+            local char = player.Character
+            if char and SO.mine ~= nil and char:GetAttribute("FlashstepCooldown") == SO.mine then
+                pcall(function() char:SetAttribute("FlashstepCooldown", SO.base) end)
+            end
+            SO.mine = nil
+        end
+        function S.soruNote()
+            local race = player:FindFirstChild("Data") and player.Data:FindFirstChild("Race")
+            local full = (race and race.Value == "Human" and race:FindFirstChild("Evolved")) and 10 or 15
+            local char = player.Character
+            local a = char and char:GetAttribute("FlashstepCooldown") or 0
+            return string.format("Flash Step: %.1f s cooldown (the game's %d s)%s", full * (1 - a), full,
+                ((CFG.PvpSoruCut or 0) > 0) and string.format("  ·  %d %% cut (test)", CFG.PvpSoruCut) or "")
+        end
+
+        local CD = S.cd
+        local function cdOff()
+            for t in pairs(CD.set) do
+                pcall(function() if t:GetAttribute("IgnoreCooldowns") == true then t:SetAttribute("IgnoreCooldowns", nil) end end)
+            end
+            table.clear(CD.set)
+        end
+        local function cdTick()
+            if not CFG.PvpCdTest then
+                if next(CD.set) then cdOff() end
+                return
+            end
+            local tool = heldTool()
+            if tool and tool:FindFirstChild("Holding") and tool:GetAttribute("IgnoreCooldowns") ~= true then
+                tool:SetAttribute("IgnoreCooldowns", true)
+                CD.set[tool] = true
+            end
+            -- a move the game really started: Busy on you turning on
+            local char = player.Character
+            local b = char and char:FindFirstChild("Busy")
+            local busy = b ~= nil and b.Value == true
+            if busy and not CD.busy then CD.moves += 1 end
+            CD.busy = busy
+        end
+        function S.cdNote()
+            if not CFG.PvpCdTest then return "skills: the game's own cooldowns" end
+            return string.format("skills off cooldown (test): %d presses  ·  %d moves the game started"
+                .. "  (spam one key: far fewer moves = the server refuses it)", CD.presses, CD.moves)
+        end
 
         -- ---------- AIM ----------
         -- Every player's path is read every frame (a new life = a new path),
@@ -17677,6 +17779,7 @@ do
             S.lastAttack = now
             S.held[what] = true
             S.lastKey = what
+            if CFG.PvpCdTest and what ~= "M1" then S.cd.presses += 1 end
             local tool = heldTool()
             local tt = toolType(tool)
             S.lastType = tt
@@ -17783,6 +17886,7 @@ do
                     nextSlow = now + 0.2
                     pcall(speedTick, now)
                     pcall(dashTick)
+                    pcall(soruTick)
                 end
                 task.wait(0.1)
             end
@@ -17801,6 +17905,7 @@ do
                 S.lastKind, S.castTarget, S.lastKey, S.lastType = "skill", nil, nil, nil
                 S.stream.last, S.stream.sent = 0, 0
                 S.shots.n, S.shots.drops, S.shots.last, S.shots.tool = 0, 0, nil, nil
+                S.cd.presses, S.cd.moves, S.cd.busy = 0, 0, false
                 -- The life you are in has settled long ago: on at once (only
                 -- a NEW life waits a moment before its view is switched on).
                 V.char, V.charAt = player.Character, -1e9
@@ -17834,6 +17939,7 @@ do
                     if SPR.d and (not CFG.PvpNoSpread or now - SPR.at > 3) then pcall(spreadOn) end
                     pcall(shotsTick, gun and heldTool() or nil, now)
                     pcall(streamTick, now)
+                    pcall(cdTick)
                     local t = S.target
                     local busy = (P :: any).canCast ~= nil and not (P :: any).canCast()
                     S.faceUntil = L.faceUntil(S.faceUntil, now, next(S.held) ~= nil, busy, S.lastAttack,
@@ -17878,6 +17984,8 @@ do
                 pcall(shakeOn)
                 pcall(speedRestore)
                 pcall(dashRestore)
+                pcall(soruRestore)
+                pcall(cdOff)
                 pcall(snapOn)
                 pcall(spreadOn)
                 S.target, P.aimPart = nil, nil

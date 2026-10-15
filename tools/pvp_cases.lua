@@ -318,6 +318,12 @@ do
     check("a teleport is not a dash", d.d0 == 50)
 end
 
+-- ===== Flash Step's cut (2026-10-15) =====
+check("no cut: the server's own value", L.soruAttr(0.2, 0) == 0.2 and L.soruAttr(nil, 0) == 0)
+check("50 % with no gear: 0.5", near(L.soruAttr(nil, 50), 0.5))
+check("50 % over gear's 0.2: half of what is left", near(L.soruAttr(0.2, 50), 0.6))
+check("never past 95 %", near(L.soruAttr(0, 100), 0.95))
+
 -- ===== Ken back =====
 do
     local k = {}
