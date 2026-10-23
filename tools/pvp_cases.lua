@@ -436,6 +436,63 @@ do
     check("legs: standing (speed 0) -> nothing", L.legs(nil, 0, 182, 50) == nil)
 end
 
+-- ===== THE LEAD LEARNS (2026-10-24): the amounts, the pick, the tries =====
+check("lead amounts: none to full", #L.ARMS == 5 and L.ARMS[1] == 0 and L.ARMS[5] == 1)
+check("nothing tried: no lead first", L.ARMS[L.armPick({})] == 0)
+do
+    local a = {}
+    for _ = 1, 45 do L.armAdd(a, 2, true) end
+    check("counts fade past 40 (halved)", a[2].n < 41 and a[2].n > 20 and a[2].h == a[2].n)
+    check("an unknown amount is made", a[2] ~= nil and a[1] == nil)
+end
+do
+    -- a simulated fight: a move whose hits land with lead 0.5 (80 %), 30 % without
+    local truth = { 0.3, 0.45, 0.8, 0.5, 0.2 }
+    local seed = 7
+    local function rnd() seed = (seed * 1103515245 + 12345) % 2147483648 return seed / 2147483648 end
+    local arms, used = {}, { 0, 0, 0, 0, 0 }
+    for t = 1, 300 do
+        local i = L.armPick(arms)
+        L.armAdd(arms, i, rnd() < truth[i])
+        if t > 150 then used[i] += 1 end
+    end
+    check("a move that needs lead: settles on 0.5", L.ARMS[L.armPick(arms)] == 0.5)
+    check("...and uses it most once learned (last 150 presses)", used[3] >= 90, used[3])
+    -- a move that lands with none (Buddy Sword X): stays at none
+    truth = { 0.9, 0.6, 0.35, 0.2, 0.1 }
+    arms, used = {}, { 0, 0, 0, 0, 0 }
+    for t = 1, 200 do
+        local i = L.armPick(arms)
+        L.armAdd(arms, i, rnd() < truth[i])
+        if t > 50 then used[i] += 1 end
+    end
+    check("a move that lands with no lead: keeps none", L.ARMS[L.armPick(arms)] == 0)
+    check("...and wastes few presses trying others (after 50)", used[1] >= 120, used[1])
+end
+do
+    -- crediting: the oldest open try on HIM not yet credited
+    local him, other = {}, {}
+    local tries = {
+        { who = him, t0 = 10, hit = false, dmg = 0 },
+        { who = other, t0 = 10.1, hit = false, dmg = 0 },
+        { who = him, t0 = 10.2, hit = false, dmg = 0 },
+    }
+    check("not before the press (+0.03)", L.credit(tries, him, 10.01, 0.1) == nil)
+    local t = L.credit(tries, him, 10.5, 0.1)
+    check("the oldest on him first", t == tries[1] and tries[1].hit and not tries[3].hit)
+    t = L.credit(tries, him, 10.6, 0.2)
+    check("then the next one on him", t == tries[3] and tries[3].hit and not tries[2].hit)
+    L.credit(tries, him, 10.7, 0.05)
+    check("all on him credited: the newest takes the damage (a move hitting again)",
+        near(tries[3].dmg, 0.25, 1e-9) and near(tries[1].dmg, 0.1, 1e-9))
+    check("another player's try untouched", not tries[2].hit)
+    check("nobody's try: nil", L.credit(tries, {}, 11, 0.1) == nil)
+end
+check("a try: open before 1.5 s", not L.tryDone({ t0 = 0 }, 1.4, false))
+check("a try: over at 1.5 s if its move ended", L.tryDone({ t0 = 0 }, 1.5, false))
+check("a try: kept while its move still plays", not L.tryDone({ t0 = 0 }, 3, true))
+check("a try: never past 5 s", L.tryDone({ t0 = 0 }, 5, true))
+
 -- ===== Flash Step's cut (2026-10-15) =====
 check("no cut: the server's own value", L.soruAttr(0.2, 0) == 0.2 and L.soruAttr(nil, 0) == 0)
 check("50 % with no gear: 0.5", near(L.soruAttr(nil, 50), 0.5))

@@ -77,7 +77,7 @@ check("up a slope: his point stays 3 over the floor where he will be", near(S.ai
 FLOOR = function(x) return (x > 10) and 12 or 0 end
 do
     local mo = { pos = v3(0, 3, 0), vx = 60, vy = 10, vz = 0, ay = -196.2, sustained = false, floor = 0 }
-    local pt = predict(mo, "skill", 60, 300, NOW)
+    local pt = predict(mo, "skill", 60, 300, NOW, 1)
     check("jumping at a ledge: aimed on its top (12 + 3), not inside it", near(pt.Y, 15, 1e-6))
 end
 FLOOR = function() return 0 end
@@ -333,6 +333,92 @@ follow()
 targetTick(NOW)
 check("right after a teleport: aimed where he is now, not at a wild lead",
     (S.aimSkill - hroot.Position).Magnitude < 1e-6)
+
+-- ===== THE LEAD LEARNS (2026-10-24): per move, from your hits =====
+do
+    me.Character.kids.Busy = nil                             -- no move of yours playing
+    for _ = 1, 20 do runFor(1 / 60, 90, 0) follow() end     -- him running 90 studs/s east, the cursor on him
+    CFG.PvpLeadAuto = true
+    TOOL = inst("Tool", { Name = "Buddy Sword", ToolTip = "Sword" })
+    -- Z learned: lead 0.5 hits him (9 of 10), the others seldom
+    S.tune.moves["Buddy Sword|Z"] = { n = 50, h = 15, dmg = 1, arms = {
+        { n = 10, h = 1 }, { n = 10, h = 2 }, { n = 10, h = 9 }, { n = 10, h = 2 }, { n = 10, h = 1 } } }
+    DOWN[Enum.KeyCode.Z] = true
+    NOW += 1 / 60
+    hroot.Position = hroot.Position + v3(90 / 60, 0, 0)
+    follow()
+    targetTick(NOW)
+    check("learned: Z held -> Z's own lead (0.5)", S.aimScale == 0.5)
+    local lead05 = S.aimSkill
+    check("...and it is ahead of him", lead05.X > hroot.Position.X + 1)
+    DOWN[Enum.KeyCode.Z] = nil
+    DOWN[Enum.KeyCode.X] = true
+    targetTick(NOW)
+    check("X never tried: no lead - where he is", S.aimScale == 0
+        and (S.aimSkill - hroot.Position).Magnitude < 1e-6)
+    -- this frame's point was X's; Z pressed IN the game's read gets Z's lead
+    DOWN[Enum.KeyCode.X] = nil
+    DOWN[Enum.KeyCode.Z] = true
+    local p = S.aimPoint("skill")
+    check("pressed between frames: the game's read gets Z's own lead", p ~= nil and (p - lead05).Magnitude < 1e-6)
+
+    -- A TRY: Z at him; his HP down 0.4 s later = a hit, with lead 0.5
+    local hum = him.Character:FindFirstChildOfClass("Humanoid")
+    hum.Health, hum.MaxHealth = 1000, 1000
+    S.tune.tries, S.tune.watch = {}, {}
+    local arms = S.tune.moves["Buddy Sword|Z"].arms
+    local n3, h3, n0 = arms[3].n, arms[3].h, S.tune.moves["Buddy Sword|Z"].n
+    attackPressed("Z")
+    DOWN[Enum.KeyCode.Z] = nil
+    check("a try opened at him, with Z's lead", #S.tune.tries == 1 and S.tune.tries[1].arm == 3
+        and S.tune.tries[1].who == him)
+    NOW += 0.4
+    hum.Health = 800
+    tuneTick(NOW)
+    check("his HP down: the try is a hit, 20 % of his HP", S.tune.tries[1].hit == true
+        and near(S.tune.tries[1].dmg, 0.2, 1e-9))
+    NOW += 1.2
+    tuneTick(NOW)
+    check("1.5 s on: counted - a hit for lead 0.5", #S.tune.tries == 0 and arms[3].n == n3 + 1
+        and arms[3].h == h3 + 1 and S.tune.moves["Buddy Sword|Z"].n == n0 + 1)
+
+    -- HIS KEN took it: a dodge used = your move reached him (a hit for the aim)
+    TOOL = inst("Tool", { Name = "Lightning-Lightning", ToolTip = "Blox Fruit" })
+    him.attrs.KenDodgesLeft = 3
+    attackPressed("C")
+    NOW += 0.3
+    him.attrs.KenDodgesLeft = 2
+    tuneTick(NOW)
+    NOW += 1.3
+    tuneTick(NOW)
+    local c = S.tune.moves["Lightning-Lightning|C"]
+    check("his Ken dodge: counted as reaching him", c ~= nil and c.n == 1 and c.h == 1 and c.arms[1].h == 1)
+
+    -- NOTHING on him: a miss, for the lead it was made with
+    attackPressed("C")
+    NOW += 1.6
+    tuneTick(NOW)
+    check("nothing on him in 1.5 s: a miss", c.n == 2 and c.h == 1)
+
+    -- a swing (M1 of a sword) is counted, but has no lead to learn
+    TOOL = inst("Tool", { Name = "Buddy Sword", ToolTip = "Sword" })
+    attackPressed("M1")
+    check("a sword's M1: a try with no lead", S.tune.tries[1] and S.tune.tries[1].arm == nil)
+    NOW += 1.6
+    tuneTick(NOW)
+    check("...counted all the same", S.tune.moves["Buddy Sword|M1"] and S.tune.moves["Buddy Sword|M1"].n == 1)
+    check("the panel lists the moves", string.find(S.tuneText(), "Buddy Sword Z", 1, true) ~= nil
+        and string.find(S.tuneText(), "lead 0.50", 1, true) ~= nil)
+
+    -- learning off: the old switch decides, one lead for every move
+    CFG.PvpLeadAuto, CFG.PvpLead = false, false
+    DOWN[Enum.KeyCode.Z] = true
+    targetTick(NOW)
+    check("learning off, lead off: where he is, whatever Z learned", S.aimScale == 0)
+    DOWN[Enum.KeyCode.Z] = nil
+    CFG.PvpLeadAuto, CFG.PvpLead = nil, true
+    TOOL = nil
+end
 
 print(string.format("%d checks, %d failed", count, fails))
 if fails == 0 then print("ALL PASS (aim)") end

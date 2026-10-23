@@ -577,6 +577,10 @@ local CFG = {
     -- OFF (user, 2026-10-14, in game: "with it on I cannot hit him a single
     -- time - always in front, beside, above or below him; off I hit him").
     PvpLead            = false,
+    -- (user, 2026-10-24) the lead LEARNED per move from your hits on him
+    -- (his HP / his Ken dodges): each move keeps the amount that hits most.
+    -- Off = the switch above and Lead strength, one for every move.
+    PvpLeadAuto        = true,
     -- (user, 2026-10-14) Which of your attacks the aim takes, PER WEAPON: your
     -- sword's Z is not your fruit's or your fighting style's Z. Off = that
     -- attack goes where YOUR mouse points. Keyed by the game's own label on
@@ -613,7 +617,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -15215,7 +15219,10 @@ local function buildUI()
         end
         caption(v, "Lit = that attack goes at him. Dark = yours: it goes where your mouse points. "
             .. "Only that weapon's key - the sword's Z dark leaves your fruit's Z aimed.")
-        switchRow(v, "Lead a moving player", "Off: in game it aimed in front / beside him. Aims ahead by your ping + travel",
+        switchRow(v, "Lead learns per move", "Each move keeps the lead that hits him most - from your own hits",
+            function() return CFG.PvpLeadAuto end,
+            function(x) CFG.PvpLeadAuto = x end)
+        switchRow(v, "Lead a moving player", "Only with learning off: one lead for every move",
             function() return CFG.PvpLead end,
             function(x) CFG.PvpLead = x end)
         sliderRow(v, "Lead strength", 0, 2, 0.1,
@@ -15231,6 +15238,14 @@ local function buildUI()
             if not CFG.Pvp then return "" end
             return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
                 .. "\n" .. S.leadText()
+        end)
+        heading2(v, "your moves  ·  hit or miss")
+        readout(v, function() return S.tuneText and S.tuneText() or "" end)
+        actionRow(v, "Forget what the moves learned", nil, function()
+            table.clear(S.tune.moves)
+            table.clear(S.tune.tries)
+            S.tune.closed, S.tune.kens = 0, 0
+            pcall(S.tuneSave)
         end)
         heading2(v, "movement")
         switchRow(v, "Faster dash", "Every dash moves 0.3 s - faster is also farther",
@@ -17012,6 +17027,70 @@ do
             local t = (rtt or 0.15) + 0.05 + dist / math.max(speed or 300, 50)
             return math.clamp(t * (scale or 1), 0, 1)
         end
+
+        -- THE LEAD LEARNS (user, 2026-10-24). One lead never fits every move:
+        -- on 2026-10-14 a lead on every move gave no hits, none at all lands
+        -- the Buddy Sword's X and misses its Z ~70 %. So each MOVE (the
+        -- weapon's name + its key) tries these amounts of lead (x the lead
+        -- time) and keeps the one that hits him most. arms[i] = { n = tries,
+        -- h = hits } for L.ARMS[i].
+        L.ARMS = { 0, 0.25, 0.5, 0.75, 1 }
+        -- Which amount now: how often it hit (no lead starts ahead - it is what
+        -- lands today) plus a doubt bonus that shrinks the more an amount is
+        -- tried, so a move that keeps missing tries the others (UCB). Ties go
+        -- to less lead.
+        function L.armPick(arms)
+            local total = 0
+            for i = 1, #L.ARMS do total += (arms[i] and arms[i].n or 0) end
+            local best, bestScore = 1, -math.huge
+            for i = 1, #L.ARMS do
+                local a = arms[i]
+                local n, h = a and a.n or 0, a and a.h or 0
+                local mean = (h + ((i == 1) and 1.5 or 1)) / (n + 2)
+                local score = mean + 0.3 * math.sqrt(math.log(total + 1) / (n + 1))
+                if score > bestScore + 1e-9 then best, bestScore = i, score end
+            end
+            return best
+        end
+        -- One try into its amount; old tries fade (past 40 the counts halve:
+        -- opponents and patches change).
+        function L.armAdd(arms, i, hit)
+            local a = arms[i]
+            if not a then
+                a = { n = 0, h = 0 }
+                arms[i] = a
+            end
+            a.n += 1
+            if hit then a.h += 1 end
+            if a.n > 40 then a.n, a.h = a.n / 2, a.h / 2 end
+        end
+        -- HIT OR MISS. A try = { who, t0, hit, dmg, ... }, oldest first. Something
+        -- on him - his HP down (dmg = the share of his max), or one of his Ken
+        -- dodges used (dmg 0: your move reached him, his Ken took it) - goes to
+        -- the oldest open try on him not yet credited; all credited = the
+        -- newest's damage (a move hitting again). -> the try, or nil.
+        function L.credit(tries, who, now, dmg)
+            local newest
+            for _, t in ipairs(tries) do
+                if t.who == who and now >= t.t0 + 0.03 then
+                    if not t.hit then
+                        t.hit = true
+                        t.dmg += dmg
+                        return t
+                    end
+                    newest = t
+                end
+            end
+            if newest then newest.dmg += dmg end
+            return newest
+        end
+        -- A try is over 1.5 s after the press - later while its move still
+        -- plays (a held move) - and never past 5 s.
+        function L.tryDone(t, now, playing)
+            if now - t.t0 >= 5 then return true end
+            if now - t.t0 < 1.5 then return false end
+            return not playing
+        end
         -- How far he goes flat in t s. A run keeps going; speed past cap (a
         -- dash) dies out in ~tau s unless it has lasted (sustained). A burst
         -- past 400 studs/s that has not lasted is a blink in progress: it
@@ -17232,6 +17311,9 @@ do
             lead = { t = 0, ahead = 0, speed = 0 },
             lastKind = "skill", castTarget = nil,
             stream = { last = 0, sent = 0 },
+            -- the lead that learns per move (2026-10-24): what each move
+            -- learned, the tries still open, the players they were at
+            tune = { moves = {}, tries = {}, watch = {}, closed = 0, kens = 0 },
             snap = { mod = nil, orig = nil, at = 0 },
             -- a ray gun's spread held off (d = the game's entry), and your
             -- shots at him against his HP going down (did the server take them)
@@ -17845,11 +17927,12 @@ do
                 floor = floorUnder(pos.X, pos.Y, pos.Z, now),
             }
         end
-        -- Where he will be when this kind of hit lands. -> point, lead (s).
-        local function predict(mo, kind, dist, speed, now)
+        -- Where he will be when this kind of hit lands, scale x the lead
+        -- (0 / nil = where he is). -> point, lead (s).
+        local function predict(mo, kind, dist, speed, now, scale)
             local p = mo.pos
-            if not CFG.PvpLead then return p, 0 end
-            local t = L.leadTime(kind, pingNow(now), dist, speed, CFG.PvpLeadScale)
+            if not scale or scale <= 0 then return p, 0 end
+            local t = L.leadTime(kind, pingNow(now), dist, speed, scale)
             local dx, dz = L.aheadXZ(mo.vx, mo.vz, t, RUN_CAP, mo.sustained, DASH_TAU)
             local fThen = mo.floor
             -- From over where he will be: up a hill the ground ahead is higher
@@ -17858,6 +17941,57 @@ do
             local y = L.aheadY(p.Y, mo.vy, mo.ay, t, workspace.Gravity,
                 mo.floor and (p.Y - mo.floor) or nil, fThen)
             return Vector3.new(p.X + dx, y, p.Z + dz), t
+        end
+
+        -- ---------- THE LEAD LEARNS (user, 2026-10-24) ----------
+        -- What each move learned, kept in workspace/bff_aim_learn.json:
+        -- moves[id] = { arms = 5 x { n, h }, n, h, dmg } with id = "<weapon>|<key>".
+        local TU = S.tune
+        local TUNE_FILE = "bff_aim_learn.json"
+        local HS = game:GetService("HttpService")
+        pcall(function()
+            if readfile and isfile and isfile(TUNE_FILE) then
+                local d = HS:JSONDecode(readfile(TUNE_FILE))
+                if type(d) == "table" and type(d.moves) == "table" then TU.moves = d.moves end
+            end
+        end)
+        local function tuneSave()
+            pcall(function()
+                if writefile then writefile(TUNE_FILE, HS:JSONEncode({ v = 1, moves = TU.moves })) end
+            end)
+        end
+        S.tuneSave = tuneSave
+        local function tuneMove(id)
+            local m = TU.moves[id]
+            if type(m) ~= "table" then
+                m = { arms = {}, n = 0, h = 0, dmg = 0 }
+                for i = 1, #L.ARMS do m.arms[i] = { n = 0, h = 0 } end
+                TU.moves[id] = m
+            end
+            return m
+        end
+        -- The move being made this instant: a key held now, else the last one
+        -- while its move still plays (the aim is read again during it).
+        local function moveNow()
+            local tool = heldTool()
+            if not tool then return nil end
+            for _, k in ipairs({ "Z", "X", "C", "V", "F" }) do
+                if UIS:IsKeyDown(KEYCODES[k]) then return tool.Name .. "|" .. k end
+            end
+            if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return tool.Name .. "|M1" end
+            if S.lastKey and S.lastTool == tool.Name and movePlaying(os.clock()) then
+                return tool.Name .. "|" .. S.lastKey
+            end
+            return nil
+        end
+        -- The lead (x) for a move: learned (PvpLeadAuto), else the old switch.
+        -- Second value: the amount's index (nil = not learned).
+        local function scaleFor(id)
+            if not CFG.PvpLeadAuto then return (CFG.PvpLead and CFG.PvpLeadScale or 0), nil end
+            if not id then return 0, nil end
+            local m = TU.moves[id]
+            local i = L.armPick(type(m) == "table" and m.arms or {})
+            return L.ARMS[i], i
         end
 
         -- The pick (the one nearest your mouse) and this frame's aim points:
@@ -17879,15 +18013,18 @@ do
             S.aimSkill, S.aimShot = nil, nil
             if not pick then return end
             local mo = motionOf(pick, now)
+            S.mo, S.moDist = mo, pick.dist
             local LD = S.lead
             LD.speed = math.sqrt(mo.vx * mo.vx + mo.vz * mo.vz)
+            local sc = scaleFor(moveNow())
+            S.aimScale = sc
             local t
-            S.aimSkill, t = predict(mo, "skill", pick.dist, CFG.PvpSkillSpeed, now)
+            S.aimSkill, t = predict(mo, "skill", pick.dist, CFG.PvpSkillSpeed, now, sc)
             LD.t, LD.ahead = t, (S.aimSkill - mo.pos).Magnitude
             local kind, speed = shotKind(heldTool())
             LD.gun = kind
             if kind == "gun" then
-                S.aimShot, LD.gunT = predict(mo, "gun", pick.dist, speed, now)
+                S.aimShot, LD.gunT = predict(mo, "gun", pick.dist, speed, now, sc)
             else
                 S.aimShot, LD.gunT = mo.pos, 0       -- a ray gun: at him, as you see him
             end
@@ -17899,6 +18036,17 @@ do
             -- That attack's aim switched off: your own mouse.
             if not S.aimAllowed() then return nil end
             local a = (kind == "gun") and S.aimShot or S.aimSkill
+            -- The game reads your aim IN the press: the move pressed this
+            -- instant may want another lead than this frame's point had.
+            local sc = scaleFor(moveNow())
+            if S.mo and sc ~= S.aimScale then
+                if kind == "gun" then
+                    local k, sp = shotKind(heldTool())
+                    if k == "gun" then a = predict(S.mo, "gun", S.moDist, sp, os.clock(), sc) end
+                else
+                    a = predict(S.mo, "skill", S.moDist, CFG.PvpSkillSpeed, os.clock(), sc)
+                end
+            end
             return a or t.root.Position
         end
         function S.targetText()
@@ -17931,15 +18079,17 @@ do
         function S.leadText()
             local LD = S.lead
             local s = S.keysText() .. "\n"
-            if not CFG.PvpLead then
+            local leading = CFG.PvpLeadAuto or CFG.PvpLead
+            if not leading then
                 s = s .. "lead off - aimed where he is"
             else
-                s = s .. string.format("ping %d ms", math.floor((S.rtt or 0) * 1000 + 0.5))
+                s = s .. (CFG.PvpLeadAuto and string.format("lead learned per move (x%.2f now)", S.aimScale or 0)
+                    or "lead on") .. string.format("  ·  ping %d ms", math.floor((S.rtt or 0) * 1000 + 0.5))
                 if not S.target then return s .. "  ·  nobody picked" end
                 s = s .. string.format("  ·  him %.0f studs/s  ·  skills %.2f s ahead = %.0f studs",
                     LD.speed or 0, LD.t or 0, LD.ahead or 0)
             end
-            if LD.gun == "gun" and CFG.PvpLead then
+            if LD.gun == "gun" and leading then
                 s = s .. string.format("  ·  gun %.2f s ahead (its shot flies)", LD.gunT or 0)
             elseif LD.gun == "hitscan" then
                 s = s .. "  ·  gun: a ray at him, no lead" .. (S.spread.d and ", straight (no spread)" or "")
@@ -18101,11 +18251,99 @@ do
             elseif tt == "Gun" then S.lastKind = (shotKind(tool) == "gun") and "gun" or "hitscan"
             else S.lastKind = "skill" end
             S.castTarget = S.target and S.target.id or nil
+            S.lastTool = tool and tool.Name or nil
             -- An attack whose aim is off is not turned to him either: it is yours.
-            if faceWanted() and L.aimOn(CFG.PvpAimKeys, tt)[what] ~= false then
+            local aimed = L.aimOn(CFG.PvpAimKeys, tt)[what] ~= false
+            if faceWanted() and aimed then
                 S.faceUntil = math.max(S.faceUntil, now + 0.4)
                 S.faced += 1
             end
+            -- A try at him: did it hit (his HP / his Ken dodges)? A move the
+            -- server runs (a skill, a fruit's M1, a slow gun's shot) also says
+            -- which lead it was made with; a swing / a ray gun hits what you see.
+            local t = S.target
+            if tool and t and t.plr and aimed and CFG.PvpAim then
+                local id = tool.Name .. "|" .. what
+                local _, arm = scaleFor(id)
+                local leads = S.lastKind == "skill" or S.lastKind == "gun"
+                table.insert(TU.tries, { id = id, who = t.plr, t0 = now, hit = false, dmg = 0,
+                    arm = leads and arm or nil })
+                while #TU.tries > 30 do table.remove(TU.tries, 1) end
+                if not TU.watch[t.plr] then
+                    local ch = t.plr.Character
+                    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+                    TU.watch[t.plr] = { hp = hum and hum.Health, ken = t.plr:GetAttribute("KenDodgesLeft") }
+                end
+            end
+        end
+
+        -- Every frame: what happened to each player you tried a move at, and
+        -- each try over its time counted into its move (and its lead).
+        local function tuneTick(now)
+            if #TU.tries == 0 then
+                if next(TU.watch) then table.clear(TU.watch) end
+                return
+            end
+            for plr, w in pairs(TU.watch) do
+                local ch = plr.Character
+                local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+                local hp = hum and hum.Health
+                local ken = plr:GetAttribute("KenDodgesLeft")
+                if hp and w.hp and hp < w.hp - 0.5 then
+                    L.credit(TU.tries, plr, now, (w.hp - hp) / math.max(tonumber(hum.MaxHealth) or 100, 1))
+                end
+                if type(ken) == "number" and type(w.ken) == "number" and ken < w.ken then
+                    L.credit(TU.tries, plr, now, 0)
+                    TU.kens += 1
+                end
+                w.hp, w.ken = hp, ken
+            end
+            local keep, last = {}, TU.tries[#TU.tries]
+            for _, t in ipairs(TU.tries) do
+                if L.tryDone(t, now, t == last and movePlaying(now)) then
+                    local m = tuneMove(t.id)
+                    m.n += 1
+                    if t.hit then
+                        m.h += 1
+                        m.dmg += t.dmg
+                    end
+                    if t.arm then L.armAdd(m.arms, t.arm, t.hit) end
+                    TU.closed += 1
+                    if TU.closed % 10 == 0 then tuneSave() end
+                else
+                    table.insert(keep, t)
+                end
+            end
+            TU.tries = keep
+            -- players no try is open on: no longer watched
+            local open = {}
+            for _, t in ipairs(keep) do open[t.who] = true end
+            for plr in pairs(TU.watch) do
+                if not open[plr] then TU.watch[plr] = nil end
+            end
+        end
+        -- What each move learned, most tried first: "Buddy Sword Z · lead 0.50 · 7 of 12 hit (58 %)".
+        function S.tuneText()
+            local list = {}
+            for id, m in pairs(TU.moves) do
+                if type(m) == "table" and (m.n or 0) > 0 then table.insert(list, { id = id, m = m }) end
+            end
+            table.sort(list, function(a, b) return a.m.n > b.m.n end)
+            local lines = {}
+            for i, e in ipairs(list) do
+                if i > 8 then break end
+                local weapon, key = string.match(e.id, "^(.*)|(.-)$")
+                local lead = CFG.PvpLeadAuto and string.format("lead %.2f", L.ARMS[L.armPick(e.m.arms or {})])
+                    or "learning off"
+                table.insert(lines, string.format("%s %s  ·  %s  ·  %d of %d hit (%d %%)%s",
+                    tostring(weapon), tostring(key), lead, math.floor(e.m.h + 0.5), math.floor(e.m.n + 0.5),
+                    math.floor(100 * e.m.h / math.max(e.m.n, 1) + 0.5),
+                    (e.m.h > 0) and string.format("  ·  %d %% of his HP a hit", math.floor(100 * e.m.dmg / e.m.h + 0.5)) or ""))
+            end
+            if #lines == 0 then
+                return "nothing tried yet - every move you aim at a player is counted: hit or not"
+            end
+            return table.concat(lines, "\n") .. string.format("\nhis Ken took %d of them (counted as reaching him)", TU.kens)
         end
         local function faceAt(t)
             if S.lastKind == "skill" and S.aimSkill then return S.aimSkill end
@@ -18253,6 +18491,7 @@ do
                     end
                     if SPR.d and (not CFG.PvpNoSpread or now - SPR.at > 3) then pcall(spreadOn) end
                     pcall(shotsTick, gun and heldTool() or nil, now)
+                    pcall(tuneTick, now)
                     pcall(streamTick, now)
                     pcall(cdTick)
                     local t = S.target
@@ -18301,6 +18540,8 @@ do
                 pcall(farRestore)
                 pcall(dashRestore)
                 AN.animator = nil                 -- its hook went with S.conns
+                table.clear(S.tune.tries)
+                pcall(S.tuneSave)
                 pcall(soruRestore)
                 pcall(cdOff)
                 pcall(snapOn)
