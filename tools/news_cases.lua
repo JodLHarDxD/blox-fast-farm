@@ -417,6 +417,87 @@ do
     WS_KIDS["Dough Fruit"], WS_KIDS["Fruit "], WS_KIDS["Ice Fruit"], WS_KIDS.FruitLord99, WS_KIDS["Fruit Crate"] = nil, nil, nil, nil, nil
 end
 
+-- ---------------------------------------------------------------- WHICH FRUIT A SPAWN IS, AND WHERE
+-- (2026-10-24: a spawn is Model "Fruit ", no attributes, children Fruit /
+-- FruitAnimator / Handle - its name is its look.)
+local function spawnOf(kids, pos)
+    local s = inst("Fruit ", "Model")
+    s.kids.Handle = inst("Handle", "Part", { pos = pos })
+    s.kids.FruitAnimator = inst("FruitAnimator", "Script")
+    local fm = inst("Fruit", "Model")
+    for _, k in ipairs(kids) do fm.kids[k.Name] = k end
+    s.kids.Fruit = fm
+    return s
+end
+local function dropOf(orig, kids)
+    local base = P.fruitBase(orig)
+    local d = inst(base .. " Fruit", "Tool", { attrs = { OriginalName = orig, DroppedBy = "someone" } })
+    d.kids.Handle = inst("Handle", "Part")
+    local fm = inst("Fruit", "Model")
+    for _, k in ipairs(kids) do fm.kids[k.Name] = k end
+    d.kids.Fruit = fm
+    return d
+end
+check("fruit base names: Kitsune-Kitsune, Bird-Bird: Falcon, T-Rex-T-Rex",
+    P.fruitBase("Kitsune-Kitsune") == "Kitsune" and P.fruitBase("Bird-Bird: Falcon") == "Falcon"
+    and P.fruitBase("T-Rex-T-Rex") == "T-Rex")
+check("mesh names: 'Meshes/dragon_12' -> dragon, 'Meshes/magu_34' -> magma, 'Meshes/fruit_2' / 'Handle' -> nothing",
+    P.meshToken("Meshes/dragon_12") == "dragon" and P.meshToken("Meshes/magu_34") == "magma"
+    and P.meshToken("Meshes/fruit_2") == nil and P.meshToken("Handle") == nil and P.meshToken("Meshes/smouke") == "smoke")
+local CAT = { ["Dragon-Dragon"] = 15000000, ["T-Rex-T-Rex"] = 2700000, ["Lightning-Lightning"] = 2100000, ["Spin-Spin"] = 7500 }
+check("a mesh name -> the game's name from the price list (t-rex, an old name 'rumble')",
+    P.fruitOfToken("dragon", CAT) == "Dragon-Dragon" and P.fruitOfToken("trex", CAT) == "T-Rex-T-Rex"
+    and P.fruitOfToken("rumble", CAT) == "Lightning-Lightning")
+check("...a name the list does not have: nil; no list yet: the usual X-X",
+    P.fruitOfToken("banana", CAT) == nil and P.fruitOfToken("dragon", {}) == "Dragon-Dragon")
+do
+    fresh()
+    P.fruitCatalog = CAT
+    local s = spawnOf({ inst("Meshes/dragon_12", "MeshPart", { mesh = 111, tex = 222 }) }, Vector3.new(5600, 1000, -300))
+    local g = P.groundFruit(s)
+    check("a spawn with a mesh named after its fruit: read as it, shown as 'Dragon Fruit'",
+        g.orig == "Dragon-Dragon" and g.how == "mesh name" and g.name == "Dragon Fruit", tostring(g.orig) .. " " .. tostring(g.name))
+    local plain = spawnOf({ inst("FruitMesh", "MeshPart", { mesh = 501, tex = 502 }) })
+    check("a spawn whose mesh says nothing, its look never seen: unknown, its look kept for learning",
+        P.groundFruit(plain).orig == nil and #P.groundFruit(plain).looks == 2)
+    -- A player's drop of the same fruit teaches the look.
+    WS_KIDS["Spin Fruit"] = dropOf("Spin-Spin", { inst("FruitMesh", "MeshPart", { mesh = 501, tex = 502 }) })
+    N.tick()
+    local g2 = P.groundFruit(plain)
+    check("...a player's drop with the same look teaches it: the spawn is now Spin, 'look learned'",
+        g2.orig == "Spin-Spin" and g2.how == "look learned" and g2.name == "Spin Fruit", tostring(g2.orig))
+    check("...the look is written to workspace/bff_fruit_looks.json", FILES["bff_fruit_looks.json"] ~= nil)
+    fresh({ keepFiles = true })
+    check("...and read back in the next server", P.groundFruit(plain).orig == "Spin-Spin")
+    -- A glow both fruits share names neither; a new fruit with one unseen mesh is not named.
+    local store = {}
+    P.looksLearn(store, { "m1", "t9" }, "Spin-Spin")
+    P.looksLearn(store, { "m2", "t9" }, "Kitsune-Kitsune")
+    check("a look two fruits share (t9) names neither, each own mesh still names its fruit",
+        store.t9 == false and P.looksName(store, { "m1", "t9" }) == "Spin-Spin" and P.looksName(store, { "m2", "t9" }) == "Kitsune-Kitsune")
+    check("a key never seen = not named (a new fruit with a known glow is not taken for another)",
+        P.looksName(store, { "m3", "t9" }) == nil and P.looksName(store, { "m1", "m2" }) == nil and P.looksName(store, {}) == nil)
+    WS_KIDS["Spin Fruit"] = nil
+end
+do
+    fresh()
+    LOCS.kids["Hydra Island"] = inst("Hydra Island", "Part", { pos = Vector3.new(5228, 600, 345) })
+    LOCS.kids["Castle on the Sea"] = inst("Castle on the Sea", "Part", { pos = Vector3.new(-5000, 300, -3000) })
+    LOCS.kids["Island 1"] = inst("Island 1", "Part", { pos = Vector3.new(5600, 0, -300) })
+    check("where: the nearest place the game names (a raid's 'Island 1' is no place)",
+        P.isleOf(Vector3.new(5600, 1000, -300)) == "Hydra Island", tostring(P.isleOf(Vector3.new(5600, 1000, -300))))
+    check("...far from every place: at sea, how far from the nearest",
+        P.isleOf(Vector3.new(0, 0, 6000)) == "at sea, 7.7k from Hydra Island", tostring(P.isleOf(Vector3.new(0, 0, 6000))))
+    P.fruitCatalog = CAT
+    WS_KIDS["Fruit "] = spawnOf({ inst("Meshes/dragon_12", "MeshPart", { mesh = 111 }) }, Vector3.new(5600, 1000, -300))
+    N.tick()
+    check("the news names the spawn and its island",
+        printed("FRUIT ON THE MAP: Dragon Fruit  (server spawn)  at Hydra Island"), table.concat(PRINTED, " | "))
+    WS_KIDS["Fruit "] = nil
+end
+check("a spawn's shape log says what is inside its Fruit model (mesh names and ids)",
+    printed("inside Fruit: Meshes/dragon_12:MeshPart m=rbxassetid://111"))
+
 -- ---------------------------------------------------------------- THE ORDER, AND BREAKING
 fresh({ at = 10 })
 LIGHT.attrs.MoonPhase = 3

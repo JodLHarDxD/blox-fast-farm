@@ -15,6 +15,8 @@ run in luau.exe:
   director  huntStep(): the chalice stops everything, in every hunt; ONLY
          the hunt switched on runs; nothing for it here = hop (a moment
          after a join first); hop off = wait
+  portal P.portalPick(): the game's portal that lands nearest, only when it
+         saves 5 s+ over flying; one that refused is left till its time
 
 usage: python tools/elite_test.py [path-to-luau.exe]
 """
@@ -50,6 +52,7 @@ join = cut("-- One join. Returns only if", "-- THE HOP.")
 recipe = cut("-- AURA RECIPES: the Barista Cousin (Second", "P.cousinOffer = cousinOffer")
 sword = cut("-- THE LEGENDARY SWORD DEALER (user", "P.swordOffer = swordOffer")
 store = cut("        -- StoreFruit for a physical fruit you carry", "        -- Fly onto it, touch it, never left")
+portal = cut("-- PORTALS (user, 2026-10-24", "P.portalBad = {}")
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
@@ -61,6 +64,7 @@ runs = [
     ("sword", read("elite_stubs.lua") + pure + read("sword_stubs.lua") + sword + read("sword_cases.lua")),
     ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
     ("store", read("store_stubs.lua") + store + read("store_cases.lua")),
+    ("portal", read("portal_stubs.lua") + portal + read("portal_cases.lua")),
 ]
 ok = True
 for name, code in runs:

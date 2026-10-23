@@ -356,7 +356,8 @@ local NEW_OK = { MirageJob = true,
     PvpDashAnim = true, PvpLegs = true,       -- 2026-10-23: the dash animation sped, legs at a normal pace
     PvpHopBusy = true,                        -- 2026-10-23: PvP hops go to the busiest servers
     PvpPingMax = true,                        -- 2026-10-24: ...in regions fast for you
-    PvpLeadAuto = true }                      -- 2026-10-24: the lead learned per move
+    PvpLeadAuto = true,                       -- 2026-10-24: the lead learned per move
+    FruitPortals = true }                     -- 2026-10-24: the fruit hunt through the game's portals
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

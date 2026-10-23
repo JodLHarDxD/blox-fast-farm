@@ -33,6 +33,7 @@ local function inst(name, class, opts)
     function o:IsA(c)
         if c == self.ClassName then return true end
         if c == "BasePart" then return self.ClassName == "Part" or self.ClassName == "MeshPart" end
+        if c == "FileMesh" then return self.ClassName == "SpecialMesh" end
         return false
     end
     function o:FindFirstChild(n) return self.kids[n] end
@@ -43,6 +44,16 @@ local function inst(name, class, opts)
         table.sort(out, function(a, b) return a.Name < b.Name end)
         return out
     end
+    function o:GetDescendants()
+        local out = {}
+        for _, k in ipairs(self:GetChildren()) do
+            table.insert(out, k)
+            for _, d in ipairs(k:GetDescendants()) do table.insert(out, d) end
+        end
+        return out
+    end
+    if opts.mesh then o.MeshId = "rbxassetid://" .. opts.mesh end
+    if opts.tex then o.TextureID = "rbxassetid://" .. opts.tex end
     function o:GetAttribute(n) return self.attrs[n] end
     function o:GetAttributes() return self.attrs end
     function o:GetFullName() return "Workspace." .. self.Name end

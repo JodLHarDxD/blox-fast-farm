@@ -269,9 +269,17 @@ local CFG = {
     -- server spawns only.
     FruitMinPrice      = 0,
     FruitPlayerDrops   = false,
-    -- A spawn whose fruit cannot be read on the ground ("Fruit "): gone for
-    -- whatever the minimum price (it might be anything; 2026-10-12).
-    FruitUnknownSpawn  = true,
+    -- A spawn whose fruit cannot be read on the ground ("Fruit ", no mesh
+    -- name, its look not learned yet): on = gone for whatever the minimum
+    -- price. Off since 2026-10-24 (user: "I set 2.6 million and it still
+    -- goes for every fruit") - a spawn is named from its look now, and one
+    -- still unnamed is left when the minimum is above 0.
+    FruitUnknownSpawn  = false,
+    -- THE WAY THERE (user, 2026-10-24: "go through the portals rather than
+    -- flying long distance"): the game's own portals (requestEntrance - the
+    -- Castle on the Sea, the Mansion, Hydra Island in the Third Sea) when one
+    -- lands you nearer the fruit and saves at least 5 s of flying.
+    FruitPortals       = true,
     -- WHERE A PICKED FRUIT GOES (user, 2026-10-12: "collect the fruits in the
     -- backpack, don't store them - the fruit hunt is for raid chips"). Off =
     -- kept in your backpack (the raid loop spends a carried fruit first); on
@@ -617,7 +625,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.3" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -943,6 +951,125 @@ function P.fruitOrig(name)
     if a then return a .. "-" .. a .. ": " .. b end
     return base .. "-" .. base
 end
+-- WHICH FRUIT A SPAWN IS (user, 2026-10-24: "can it tell which fruit a
+-- server spawn is, and its cost? I set 2.6 million and it still goes for
+-- every fruit"). In game 2026-10-23 (bff_fruit_seen.txt) a spawn is a Model
+-- "Fruit " with NO attributes - children Fruit (Model), FruitAnimator,
+-- Handle - so it was always "unknown", and an unknown spawn was taken at
+-- any price. What it looks like is the only name it has: the Fruit model's
+-- meshes. Two readings, the first that answers:
+--   1. a mesh named after its file, "Meshes/<fruit>_<n>" (the public
+--      notifiers read it, 2023-25: "magu" = Magma, "smouke" = Smoke,
+--      "quaketest" = Quake), matched against the game's price list
+--   2. its LOOK, learned: every fruit whose name IS known - a player's drop
+--      (OriginalName), one you picked up, one in your backpack - teaches its
+--      MeshIds / TextureIDs -> that name (workspace/bff_fruit_looks.json).
+--      A look two fruits share names neither.
+local LOOKS_FILE = "bff_fruit_looks.json"
+local MESH_ALIAS = { magu = "magma", smouke = "smoke", quaketest = "quake" }
+-- Renamed fruits: the mesh file may keep the old name.
+local RENAMED = { rumble = "lightning", lightning = "rumble", leopard = "tiger", tiger = "leopard",
+    falcon = "eagle", eagle = "falcon" }
+local NOT_A_FRUIT = { fruit = true, handle = true, stem = true, leaf = true, leaves = true, part = true, mesh = true }
+local function norm(s) return string.lower((string.gsub(tostring(s), "[^%w]", ""))) end
+-- "Kitsune-Kitsune" -> "Kitsune", "Bird-Bird: Falcon" -> "Falcon", "T-Rex-T-Rex" -> "T-Rex".
+function P.fruitBase(orig)
+    orig = tostring(orig)
+    local sub = string.match(orig, ":%s*(.+)$")
+    if sub then return sub end
+    return string.match(orig, "^(.+)%-%1$") or orig
+end
+-- "Meshes/magu_34" -> "magma"; nil = not a mesh named after a fruit.
+function P.meshToken(name)
+    local t = string.match(tostring(name), "^Meshes/([^_]+)")
+    if not t then return nil end
+    t = norm(string.gsub(t, "%d+", ""))
+    if t == "" or NOT_A_FRUIT[t] then return nil end
+    return MESH_ALIAS[t] or t
+end
+-- A token -> the game's name ("Magma-Magma") from the price list; no list
+-- yet = the usual "X-X"; a list that has no such fruit = nil.
+function P.fruitOfToken(tok, catalog)
+    if not tok then return nil end
+    local any = false
+    for _, want in ipairs({ tok, RENAMED[tok] }) do
+        for orig in pairs(catalog or {}) do
+            any = true
+            if norm(P.fruitBase(orig)) == want then return orig end
+        end
+    end
+    if any then return nil end
+    local cap = string.upper(string.sub(tok, 1, 1)) .. string.sub(tok, 2)
+    return cap .. "-" .. cap
+end
+-- What a fruit looks like: its Fruit model's (else its own) meshes, as keys
+-- "m<MeshId>" / "t<TextureID>", and the fruit a mesh's own name gives.
+local function prop(d, k)
+    local ok, v = pcall(function() return d[k] end)
+    return ok and v or nil
+end
+function P.fruitLooks(c)
+    local keys, seen, token = {}, {}, nil
+    pcall(function()
+        local root = c:FindFirstChild("Fruit") or c
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("MeshPart") or d:IsA("SpecialMesh") or d:IsA("FileMesh") then
+                local m = string.match(tostring(prop(d, "MeshId") or ""), "(%d+)%s*$")
+                local t = string.match(tostring(prop(d, "TextureID") or prop(d, "TextureId") or ""), "(%d+)%s*$")
+                for _, k in ipairs({ m and ("m" .. m), t and ("t" .. t) }) do
+                    if not seen[k] then seen[k] = true table.insert(keys, k) end
+                end
+            end
+            token = token or P.meshToken(d.Name)
+        end
+    end)
+    table.sort(keys)
+    return keys, token
+end
+-- Teach store: these keys look like `orig`. -> true if anything changed.
+function P.looksLearn(store, keys, orig)
+    if type(orig) ~= "string" or orig == "" then return false end
+    local changed = false
+    for _, k in ipairs(keys or {}) do
+        local was = store[k]
+        if was == nil then
+            store[k], changed = orig, true
+        elseif was ~= false and was ~= orig then
+            store[k], changed = false, true          -- two fruits share it: names neither
+        end
+    end
+    return changed
+end
+-- The fruit these keys name: EVERY key seen before, and every one that
+-- names a fruit names the same. One key never seen = nil (a new fruit
+-- sharing a glow mesh with a known one must not take its name).
+function P.looksName(store, keys)
+    local name
+    for _, k in ipairs(keys or {}) do
+        local v = store[k]
+        if v == nil then return nil end
+        if type(v) == "string" then
+            if name and name ~= v then return nil end
+            name = v
+        end
+    end
+    return name
+end
+do
+    local ok, t = pcall(function() return game:GetService("HttpService"):JSONDecode(readfile(LOOKS_FILE)) end)
+    P.FRUIT_LOOKS = (ok and type(t) == "table") and t or {}
+end
+function P.looksSave()
+    if not writefile then return end
+    pcall(function() writefile(LOOKS_FILE, game:GetService("HttpService"):JSONEncode(P.FRUIT_LOOKS)) end)
+end
+-- A known fruit teaches its look (a drop's OriginalName, a pickup, the backpack).
+function P.looksTeach(c, orig)
+    local keys = P.fruitLooks(c)
+    if P.looksLearn(P.FRUIT_LOOKS, keys, orig) then P.looksSave() end
+end
+P.fruitCatalog = P.fruitCatalog or {}         -- [orig] = price, the game's list (the fruit hunt reads it)
+
 function P.groundFruit(c)
     if not (c and (c:IsA("Tool") or c:IsA("Model"))) then return nil end
     local name = tostring(c.Name)
@@ -955,8 +1082,53 @@ function P.groundFruit(c)
         h = t and t:FindFirstChild("Handle")
     end
     if not (h and h:IsA("BasePart")) then return nil end
-    if type(orig) ~= "string" then orig = P.fruitOrig(name) end
-    return { orig = orig, name = name, handle = h, tool = c }
+    local how, looks = nil, nil
+    if type(orig) == "string" then
+        how = "tag"
+        P.looksTeach(c, orig)                                  -- a known fruit teaches its look
+    else
+        orig = P.fruitOrig(name)
+        if orig then
+            how = "name"
+        else
+            local token
+            looks, token = P.fruitLooks(c)
+            orig = P.fruitOfToken(token, P.fruitCatalog)
+            how = orig and "mesh name" or nil
+            if not orig then
+                orig = P.looksName(P.FRUIT_LOOKS, looks)
+                how = orig and "look learned" or nil
+            end
+        end
+    end
+    -- A spawn read from its look shows its fruit's name, not "Fruit ".
+    local label = (orig and not P.fruitOrig(name) and not c:GetAttribute("OriginalName"))
+        and (P.fruitBase(orig) .. " Fruit") or name
+    return { orig = orig, name = label, handle = h, tool = c, how = how, looks = looks }
+end
+
+-- WHERE (user, 2026-10-24: "which island is it on?"): the nearest of the
+-- game's own place markers (workspace._WorldOrigin.Locations - the names it
+-- shows when you arrive), flat distance; a raid's "Island N" is no place.
+-- Farther than 1500 studs from every one = out at sea.
+function P.isleOf(pos)
+    local wo = pos and workspace:FindFirstChild("_WorldOrigin")
+    local locs = wo and wo:FindFirstChild("Locations")
+    if not locs then return nil end
+    local best, bd
+    for _, l in ipairs(locs:GetChildren()) do
+        if not string.match(tostring(l.Name), "^Island %d") then
+            local ok, p = pcall(function() return l:IsA("BasePart") and l.Position or l:GetPivot().Position end)
+            if ok and p then
+                local dx, dz = p.X - pos.X, p.Z - pos.Z
+                local d = math.sqrt(dx * dx + dz * dz)
+                if not bd or d < bd then best, bd = l.Name, d end
+            end
+        end
+    end
+    if not best then return nil end
+    if bd > 1500 then return string.format("at sea, %.1fk from %s", bd / 1000, best) end
+    return best
 end
 -- What a fruit in the world looks like, written ONCE per shape (its class,
 -- whose, its attribute names, its children) to the console and
@@ -977,9 +1149,25 @@ function P.fruitShape(c, why)
         local key = c.ClassName .. "|" .. whose .. "|" .. table.concat(an, ",") .. "|" .. table.concat(kids, ",")
         if fruitShapes[key] then return end
         fruitShapes[key] = true
-        local line = string.format("[BFF] fruit seen (%s%s): Name=%q Class=%s  attributes: %s  children: %s",
+        -- Inside its Fruit model (2026-10-24): what a spawn's look is made
+        -- of - the meshes' names and asset ids, the first 12.
+        local inner = {}
+        local fm = c:FindFirstChild("Fruit")
+        if fm then
+            pcall(function()
+                for _, d in ipairs(fm:GetDescendants()) do
+                    if #inner >= 12 then break end
+                    local m = prop(d, "MeshId")
+                    local t = prop(d, "TextureID") or prop(d, "TextureId")
+                    table.insert(inner, d.Name .. ":" .. d.ClassName
+                        .. ((m and m ~= "") and (" m=" .. tostring(m)) or "") .. ((t and t ~= "") and (" t=" .. tostring(t)) or ""))
+                end
+            end)
+        end
+        local line = string.format("[BFF] fruit seen (%s%s): Name=%q Class=%s  attributes: %s  children: %s%s",
             whose, why and (" - " .. why) or "", c.Name, c.ClassName,
-            (#av > 0) and table.concat(av, ", ") or "(none)", (#kids > 0) and table.concat(kids, ", ") or "(none)")
+            (#av > 0) and table.concat(av, ", ") or "(none)", (#kids > 0) and table.concat(kids, ", ") or "(none)",
+            (#inner > 0) and ("  inside Fruit: " .. table.concat(inner, ", ")) or "")
         print(line)
         table.insert(fruitLog, os.date("%Y-%m-%d %H:%M  ") .. line)
         if writefile then pcall(writefile, "bff_fruit_seen.txt", table.concat(fruitLog, "\n")) end
@@ -1409,6 +1597,80 @@ local function flatFace(pos, dir)
     return CFrame.lookAt(pos, pos + flat)
 end
 
+-- PORTALS (user, 2026-10-24: "if it is an island I can teleport to, go
+-- through the portals rather than flying long distance"). The game's portals
+-- all call CommF_("requestEntrance", <the entrance>), and the public hubs
+-- (2022-26) call it from ANYWHERE in the sea when a goal is far: it puts you
+-- at that entrance. The Mansion and Hydra Island open once rip_indra is
+-- beaten - a portal that does not move you within 4 s is left for 10 min.
+local PORTALS = {
+    [1] = {
+        { name = "the Sky Islands",     pos = Vector3.new(-4607.82275, 872.54248, -1667.55688) },
+        { name = "the Upper Skylands",  pos = Vector3.new(-7894.6176757813, 5547.1416015625, -380.29119873047) },
+        { name = "Fishman Island",      pos = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875) },
+        { name = "the whirlpool",       pos = Vector3.new(3864.6884765625, 6.7369503974915, -1926.2140197754) },
+    },
+    [2] = {
+        { name = "the Kingdom of Rose (upstairs)", pos = Vector3.new(-288.46, 306.13, 597.99) },
+        { name = "the Kingdom of Rose (door)",     pos = Vector3.new(2284.912109375, 15.152034759521, 905.48291015625) },
+        { name = "the Cursed Ship",     pos = Vector3.new(923.21252441406, 126.9760055542, 32852.83203125) },
+        { name = "the Cursed Ship's way out", pos = Vector3.new(-6508.5581054688, 89.034996032715, -132.83953857422) },
+    },
+    [3] = {
+        { name = "the Castle on the Sea", pos = Vector3.new(-5072.08984375, 314.5412902832, -3151.1098632812) },
+        { name = "the Mansion",           pos = Vector3.new(-12471.169921875, 374.94024658203, -7551.677734375) },
+        { name = "Hydra Island",          pos = Vector3.new(5661.5322265625, 1013.0907592773, -334.96499633789) },
+    },
+}
+P.PORTALS = PORTALS
+local PORTAL_SECS = 3        -- the jump itself, and the island streaming in
+local PORTAL_GAIN = 5        -- worth it only when it saves this much flying
+-- The portal that gets you to `goal` soonest, and the seconds it saves over
+-- flying straight; nil = fly. `bad[name]` = a time before which that one is
+-- not tried.
+function P.portalPick(from, goal, list, speed, bad, now)
+    speed = math.max(tonumber(speed) or 330, 50)
+    local direct = (goal - from).Magnitude / speed
+    local best, bestT
+    for _, p in ipairs(list or {}) do
+        if not (bad and bad[p.name] and now < bad[p.name]) then
+            local t = PORTAL_SECS + (goal - p.pos).Magnitude / speed
+            if not bestT or t < bestT then best, bestT = p, t end
+        end
+    end
+    if best and direct - bestT >= PORTAL_GAIN then return best, direct - bestT end
+    return nil, 0
+end
+P.portalBad = {}
+P.lastPortal = "none yet"
+-- Through the best portal, if one beats flying. -> true = you are there now.
+local function portalLeg(goal, myEpoch)
+    local _, r = parts()
+    local list = PORTALS[mySea() or 0]
+    if not (r and list) then return false end
+    local p, saves = P.portalPick(r.Position, goal, list, CFG.TravelSpeed, P.portalBad, os.clock())
+    local cf = p and commF()
+    if not cf then return false end
+    say(string.format("through the portal to %s (saves ~%.0f s of flying)", p.name, saves))
+    task.spawn(function() pcall(function() cf:InvokeServer("requestEntrance", p.pos) end) end)
+    local t0 = os.clock()
+    while os.clock() - t0 < 4 and not stale(myEpoch) do
+        task.wait(0.1)
+        local _, r2 = parts()
+        if r2 and (r2.Position - p.pos).Magnitude < 300 then
+            P.lastPortal = string.format("%s - taken, saved ~%.0f s", p.name, saves)
+            print("[BFF] portal: " .. P.lastPortal)
+            task.wait(0.3)
+            return true
+        end
+    end
+    if stale(myEpoch) then return false end
+    P.portalBad[p.name] = os.clock() + 600
+    P.lastPortal = p.name .. " - the game did not move you (not open on this account?), flying instead"
+    print("[BFF] portal: " .. P.lastPortal)
+    return false
+end
+
 local flyTo       -- declared here: the submarine leg calls it recursively
 
 -- Submerged Island is not on the sea, it is at the bottom of it, and the only
@@ -1451,6 +1713,13 @@ flyTo = function(goal, opts)
     if gy and goal.Y < gy then goal = Vector3.new(goal.X, gy, goal.Z) end
 
     local dist = (goal - r.Position).Magnitude
+    -- A long way: the game's portal first, when it lands nearer (PORTALS).
+    if opts.portal and dist > 1500 and goal.Y > SUB_Y and r.Position.Y > SUB_Y and portalLeg(goal, myEpoch) then
+        local _, r3 = parts()
+        if not r3 then return false end
+        r = r3
+        dist = (goal - r.Position).Magnitude
+    end
     if dist <= arrive then
         lockAt(goal, opts.face)
         return true
@@ -5864,25 +6133,47 @@ do
         -- "X-X"; a player's drop also carries DroppedBy / DroppedAt / ItemId.
         -- Prices: the game's own list (GetFruits gives every fruit with its
         -- price; OnSale marks today's stock), read every 5 minutes.
-        local prices, pricesAt = {}, -1e9
+        -- Both dealers' lists (2026-10-24): a fruit only the Mirage dealer
+        -- sells still gets a price; the dearer one counts. The list is also
+        -- P.fruitCatalog - a spawn's mesh name is matched against it.
+        local prices, pricesAt = P.fruitCatalog, -1e9
         local function priceOf(orig)
             if os.clock() - pricesAt > 300 then
                 pricesAt = os.clock()
                 local cf = commF()
-                local ok, res = pcall(function() return cf and cf:InvokeServer("GetFruits", false) end)
-                if ok and type(res) == "table" then
-                    for _, f in pairs(res) do
-                        if type(f) == "table" and f.Name then prices[f.Name] = tonumber(f.Price) end
+                for _, mirage in ipairs({ false, true }) do
+                    local ok, res = pcall(function() return cf and cf:InvokeServer("GetFruits", mirage) end)
+                    if ok and type(res) == "table" then
+                        for _, f in pairs(res) do
+                            local p = type(f) == "table" and f.Name and tonumber(f.Price)
+                            if p and p > (prices[f.Name] or 0) then prices[f.Name] = p end
+                        end
                     end
                 end
             end
-            return prices[orig]
+            return orig and prices[orig] or nil
         end
+        P.fruitPrice = priceOf
 
         -- Every fruit lying in this server (P.groundFruit: a Tool or a Model -
         -- the game's spawn too, not only a player's drop).
+        -- Fruits you carry teach their look (they carry OriginalName), every 15 s.
+        local bagAt = -1e9
+        local function looksFromBag()
+            if os.clock() - bagAt < 15 then return end
+            bagAt = os.clock()
+            for _, src in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
+                for _, t in ipairs(src and src:GetChildren() or {}) do
+                    local o = P.isPhysicalFruit(t) and t:GetAttribute("OriginalName")
+                    if type(o) == "string" then P.looksTeach(t, o) end
+                end
+            end
+        end
+
         local function fruitsLying()
             local out, now = {}, os.clock()
+            priceOf(nil)                    -- the list first: a spawn's mesh name is matched against it
+            pcall(looksFromBag)
             for _, c in ipairs(workspace:GetChildren()) do
                 local g = not (E.fruitSkip[c] and now < E.fruitSkip[c]) and P.groundFruit(c) or nil
                 if g then
@@ -5897,16 +6188,34 @@ do
                     end
                     P.fruitShape(c)
                     table.insert(out, { tool = c, orig = g.orig, name = g.name, price = g.orig and priceOf(g.orig) or nil,
-                        dropper = dropper, dropperNear = near, pos = h.Position, handle = h })
+                        dropper = dropper, dropperNear = near, pos = h.Position, handle = h,
+                        how = g.how, looks = g.looks, isle = P.isleOf(h.Position) })
                 end
             end
             return out
         end
         P.fruitsLying = fruitsLying
 
+        -- A fruit in words: "Dragon Fruit $3.5M at Hydra Island".
+        local function fruitWords(f)
+            local p = f.price
+            local price = p and ((p >= 1e6) and string.format("$%.1fM", p / 1e6) or ("$" .. tostring(p)))
+                or (f.orig and "$?" or "not named yet")
+            return string.format("%s %s%s", f.orig and f.name or "a spawn", price, f.isle and (" at " .. f.isle) or "")
+        end
+        P.fruitWords = fruitWords
+
         local function fruitWanted()
             if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
-            return pickFruit(fruitsLying(), CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn)
+            local list = fruitsLying()
+            local f = pickFruit(list, CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn)
+            if not f then
+                -- Why it moves on, with what it left (a cheap one, one not named).
+                local left = {}
+                for i = 1, math.min(3, #list) do left[i] = fruitWords(list[i]) end
+                E.fruitWhy = "no fruit worth it here" .. ((#left > 0) and (" (" .. table.concat(left, "; ") .. ")") or "")
+            end
+            return f
         end
         P.fruitWanted = fruitWanted
 
@@ -5950,14 +6259,15 @@ do
         local function grabFruit(f, myEpoch)
             local h = f.handle or f.tool:FindFirstChild("Handle")
             if not (h and h.Parent) then E.fruitSkip[f.tool] = os.clock() + 30 return end
-            E.fruitNote = string.format("going for %s  (%s, %s)", f.name,
-                f.price and ("$" .. tostring(f.price)) or (f.orig and "price unknown" or "which fruit unknown"),
-                f.dropper and ("dropped by " .. tostring(f.dropper)) or "server spawn")
+            E.fruitNote = string.format("going for %s  (%s%s)", fruitWords(f),
+                f.dropper and ("dropped by " .. tostring(f.dropper)) or "server spawn",
+                (f.how == "mesh name" or f.how == "look learned") and (", named by its " .. f.how) or "")
             E.note = E.fruitNote
             say(E.fruitNote)
             releasePile()
             setState("FRUIT")
-            flyTo(h.Position)
+            -- The game's portals when they beat flying (user, 2026-10-24).
+            flyTo(h.Position, { portal = CFG.FruitPortals })
             if stale(myEpoch) then return end
             local bp = player:FindFirstChild("Backpack")
             local t0 = os.clock()
@@ -5990,9 +6300,17 @@ do
                     task.wait(0.1)
                 end
                 -- Its name as the game gave it to you (a spawn read as unknown on the ground).
-                local orig = got:GetAttribute("OriginalName")
-                orig = (type(orig) == "string" and orig) or f.orig or P.fruitOrig(got.Name) or got.Name
+                local tag = got:GetAttribute("OriginalName")
+                local orig = (type(tag) == "string" and tag) or f.orig or P.fruitOrig(got.Name) or got.Name
                 if not f.orig then print("[BFF] fruit: the unknown spawn was " .. tostring(orig) .. " (" .. got.Name .. ")") end
+                if type(tag) == "string" then
+                    -- Its true name teaches the look it had on the ground.
+                    if f.orig and f.orig ~= tag then
+                        print(string.format("[BFF] fruit: read as %s (%s) on the ground, it was %s", f.orig, tostring(f.how), tag))
+                    end
+                    if P.looksLearn(P.FRUIT_LOOKS, f.looks, tag) then P.looksSave() end
+                    P.looksTeach(got, tag)
+                end
                 local price = f.price or priceOf(orig)
                 local priced = price and ("  ($" .. tostring(price) .. ")") or ""
                 if not CFG.FruitStore then
@@ -6816,7 +7134,7 @@ do
                     grabFruit(f, myEpoch)
                     return
                 end
-                E.why = "no fruit worth it here"
+                E.why = E.fruitWhy or "no fruit worth it here"
             elseif kind == "berry" then
                 local b = berryWanted()
                 if b then
@@ -12873,11 +13191,13 @@ do
                 local g = P.groundFruit(ch)
                 if g then
                     local whose = ch:GetAttribute("DroppedBy") and "" or "  (server spawn)"
-                    table.insert(fr, ch.Name .. whose)
+                    local isle = P.isleOf(g.handle.Position)
+                    local line = g.name .. whose .. (isle and ("  at " .. isle) or "")
+                    table.insert(fr, line)
                     P.fruitShape(ch)
                     if not fruitSeen[ch] then
                         fruitSeen[ch] = true
-                        breaking("fruit", "FRUIT ON THE MAP: " .. ch.Name .. whose, now)
+                        breaking("fruit", "FRUIT ON THE MAP: " .. line, now)
                     end
                 elseif string.find(ch.Name, "Fruit", 1, true) and not Players:FindFirstChild(ch.Name) then
                     P.fruitShape(ch, "not read as a fruit")
@@ -14611,14 +14931,17 @@ local function buildUI()
             local ok, list = pcall(P.fruitsLying)
             if ok and type(list) == "table" and #list > 0 then
                 for _, f in ipairs(list) do
-                    table.insert(lines, string.format("   %s  %s  %s", f.name,
-                        f.price and ("$" .. tostring(f.price)) or "$?",
+                    table.insert(lines, string.format("   %s  ·  %s%s", P.fruitWords(f),
                         f.dropper and ("dropped by " .. tostring(f.dropper) .. (f.dropperNear and ", still by it" or ""))
-                            or "server spawn"))
+                            or "server spawn",
+                        (f.how == "mesh name" or f.how == "look learned") and (", named by its " .. f.how) or ""))
                 end
             else
                 table.insert(lines, "lying in this server: none")
             end
+            local n = 0
+            for _ in pairs(P.FRUIT_LOOKS or {}) do n += 1 end
+            table.insert(lines, string.format("looks     %d learned  ·  portal: %s", n, tostring(P.lastPortal)))
             return table.concat(lines, "\n")
         end)
         modeSwitch(v, "fruit")
@@ -14631,9 +14954,14 @@ local function buildUI()
             function() return CFG.FruitPlayerDrops end,
             function(x) CFG.FruitPlayerDrops = x end)
         switchRow(v, "A spawn I cannot name: take it",
-            "The game's fruit, its name not readable on the ground - any price",
+            "Off: a spawn is gone for once its fruit is read (its mesh, or a look learned from drops) and its price passes",
             function() return CFG.FruitUnknownSpawn end,
             function(x) CFG.FruitUnknownSpawn = x end)
+        heading2(v, "the way there")
+        switchRow(v, "Portals on a long trip",
+            "The game's own (Castle on the Sea, Mansion, Hydra) when one lands you nearer and saves 5 s+",
+            function() return CFG.FruitPortals end,
+            function(x) CFG.FruitPortals = x end)
         heading2(v, "where it goes")
         switchRow(v, "Store it at once",
             "Off: kept in your backpack - the raid loop trades a carried fruit for a chip first",
@@ -14659,6 +14987,14 @@ local function buildUI()
             caption(v, "The whole server's fruits are seen from anywhere. A player "
                 .. "standing by their drop is trading it: never taken, even with "
                 .. "player drops on.")
+            caption(v, "A game spawn hides its name (\"Fruit \"). It is read from its "
+                .. "look: a mesh named after the fruit, or a look learned - every "
+                .. "player's drop, every fruit you pick up or carry teaches the "
+                .. "script what that fruit looks like (workspace/bff_fruit_looks.json). "
+                .. "The more drops it has seen, the more spawns it names.")
+            caption(v, "Where: the game's own place names. The way there: a portal "
+                .. "when it beats flying (the Mansion and Hydra open after rip_indra; "
+                .. "one that does not move you is left for 10 minutes).")
         end)
     end
 
