@@ -521,6 +521,9 @@ local CFG = {
     -- (user, 2026-10-23) PvP mode on: every hop goes to the busiest servers
     -- (most players first), whatever HopOrder says - the hunts keep theirs.
     PvpHopBusy         = true,
+    -- (user, 2026-10-24) ...in regions where YOUR ping is at most this (ms):
+    -- measured in every server you are in, kept per region at each hop.
+    PvpPingMax         = 150,
     -- The Elite Hunter's quest (the cat at the Castle on the Sea): progress
     -- toward Yama (30), money, EXP. The chalice does not need it.
     EliteQuest         = true,
@@ -610,7 +613,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -5171,6 +5174,56 @@ do
             return visited
         end
 
+        -- PING (user, 2026-10-24: "the low-ping hop"). Roblox's server list has
+        -- a ping per server, but that is the average of the players IN it, not
+        -- yours there; the game's browser gives each server's Region. So your
+        -- own ping is measured in every server you are in and kept per region:
+        -- store = { [region] = { ms, ... } }, the last 5 kept.
+        -- The middle of a list of numbers (nil = empty).
+        local function middle(t)
+            if type(t) ~= "table" or #t == 0 then return nil end
+            local s = table.clone(t)
+            table.sort(s)
+            local n = #s
+            if n % 2 == 1 then return s[(n + 1) // 2] end
+            return (s[n // 2] + s[n // 2 + 1]) / 2
+        end
+        local function regionLearn(store, region, ms)
+            if type(region) ~= "string" or region == "" or type(ms) ~= "number" or ms <= 0 then return end
+            local t = store[region]
+            if type(t) ~= "table" then
+                t = {}
+                store[region] = t
+            end
+            table.insert(t, math.floor(ms + 0.5))
+            while #t > 5 do table.remove(t, 1) end
+        end
+        -- Your ping in a region: the middle of what was measured, nil = never.
+        local function regionPing(store, region)
+            if type(region) ~= "string" then return nil end
+            return middle(store[region])
+        end
+        -- The PvP order (most players first, as given) in three groups: known
+        -- fast for you (<= max ms), never measured, known slow - a busy server
+        -- where you lag comes last, one never tried before it. Each candidate
+        -- gets .ms (its region's ping, nil = not known).
+        local function pingOrder(cands, store, max)
+            local fast, unknown, slow = {}, {}, {}
+            for _, c in ipairs(cands) do
+                c.ms = regionPing(store, c.region)
+                if c.ms == nil then
+                    table.insert(unknown, c)
+                elseif c.ms <= max then
+                    table.insert(fast, c)
+                else
+                    table.insert(slow, c)
+                end
+            end
+            for _, c in ipairs(unknown) do table.insert(fast, c) end
+            for _, c in ipairs(slow) do table.insert(fast, c) end
+            return fast
+        end
+
         -- The fruit worth going for, of the ones lying in this server:
         -- { orig, price, dropper, dropperNear } -> the dearest that passes, or
         -- nil. A player's drop only if you allow them AND its dropper has
@@ -5316,15 +5369,94 @@ do
             return (pcall(writefile, HOP_FILE, s))
         end
 
+        -- YOUR PING HERE, measured: the game's own network stats every 2 s, the
+        -- last 60 kept (2 minutes). This server's region: the one the hop that
+        -- brought you here chose (takeCarry), or this server's row in a list
+        -- read here (a list is only its first 150 servers - yours is rarely in
+        -- it). The middle of your pings is kept for that region once a server:
+        -- after a minute here, or at the hop out if sooner - in bff_ping.json
+        -- (every account on this PC shares one network).
+        local PING_FILE = "bff_ping.json"
+        E.pings, E.regionPings, E.region, E.pingKept = {}, {}, nil, false
+        pcall(function()
+            if readfile and isfile and isfile(PING_FILE) then
+                local d = HttpService:JSONDecode(readfile(PING_FILE))
+                if type(d) == "table" and type(d.regions) == "table" then E.regionPings = d.regions end
+            end
+        end)
+        local function pingHere()
+            return (#E.pings >= 5) and middle(E.pings) or nil
+        end
+        local function keepPing()
+            local ms = pingHere()
+            if E.pingKept or not (E.region and ms) then return end
+            E.pingKept = true
+            regionLearn(E.regionPings, E.region, ms)
+            pcall(function()
+                if writefile then writefile(PING_FILE, HttpService:JSONEncode({ regions = E.regionPings })) end
+            end)
+        end
+        task.spawn(function()
+            while _G.BFF == P do
+                pcall(function()
+                    local ms = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+                    if type(ms) == "number" and ms > 0 and ms < 2000 then
+                        table.insert(E.pings, ms)
+                        if #E.pings > 60 then table.remove(E.pings, 1) end
+                    end
+                end)
+                if #E.pings >= 30 then pcall(keepPing) end
+                task.wait(2)
+            end
+        end)
+        -- A list was read: this server's row names its region (when it is in
+        -- the first 150), and your ping here is kept.
+        function P.pingLearn(rows)
+            for _, r in ipairs(rows) do
+                if r.id == game.JobId and type(r.region) == "string" then
+                    E.region = r.region
+                    break
+                end
+            end
+            keepPing()
+        end
+        function P.pingRank(cands)
+            return pingOrder(cands, E.regionPings, CFG.PvpPingMax or 150)
+        end
+        function P.pingNote()
+            local ms = pingHere()
+            local known = {}
+            for region in pairs(E.regionPings) do
+                local p = regionPing(E.regionPings, region)
+                if p then table.insert(known, { region, p }) end
+            end
+            table.sort(known, function(a, b) return a[2] < b[2] end)
+            local max = CFG.PvpPingMax or 150
+            local words = {}
+            for i, k in ipairs(known) do
+                if i > 6 then break end
+                table.insert(words, string.format("%s %d%s", k[1], math.floor(k[2] + 0.5), (k[2] > max) and " (slow)" or ""))
+            end
+            return string.format("ping   here %s%s\nknown  %s",
+                ms and string.format("%d ms", math.floor(ms + 0.5)) or "measuring",
+                E.region and ("  ·  " .. E.region) or "",
+                (#words > 0) and table.concat(words, "  ·  ")
+                    or "none yet - each server you are in is measured, kept when you hop")
+        end
+
         -- The state that goes to the next server. resume = the hunt starts there by
         -- itself. Only for 5 minutes: a hunt you left an hour ago is not resumed.
-        local function carryState(resume)
+        -- to = the server being joined ({ id, region }): its region is taken
+        -- on arrival if that is really the server you land in (your ping there
+        -- is kept for it).
+        local function carryState(resume, to)
             local cfg = {}
             for k, v in pairs(CFG) do cfg[k] = v end
             local t = {
                 v = 1, build = P.build, userId = player.UserId, resume = resume and true or false,
                 freshUntil = os.time() + 300, hopAt = os.time(), fromJob = game.JobId,
                 visited = E.visited, tally = E.tally, cfg = cfg,
+                toJob = to and to.id or nil, toRegion = to and to.region or nil,
             }
             local ok, s = pcall(function() return HttpService:JSONEncode(t) end)
             if not ok then
@@ -5367,6 +5499,8 @@ do
             if not t then return false end
             -- Another account's state: nothing of it is taken.
             if t.userId ~= nil and t.userId ~= player.UserId then return false end
+            -- This server's region: the one the hop chose, if it is this one.
+            if t.toJob == game.JobId and type(t.toRegion) == "string" then E.region = t.toRegion end
             if type(t.visited) == "table" then E.visited = t.visited end
             if type(t.tally) == "table" then
                 for k, v in pairs(t.tally) do
@@ -5595,10 +5729,13 @@ do
                 say("hop: reading the server list  (" .. tostring(why) .. ")")
                 local rows, via = browserList(myEpoch), "browser"
                 if not rows or #rows == 0 then rows, via = robloxList(myEpoch), "roblox" end
-                -- PvP on: the busiest servers, whatever the hunts' order says.
+                if P.pingLearn then pcall(P.pingLearn, rows or {}) end
+                -- PvP on: the busiest servers, whatever the hunts' order says,
+                -- in regions fast for you first (P.pingRank).
                 local order = (CFG.Pvp and CFG.PvpHopBusy) and "most" or CFG.HopOrder
                 local cands = pickServers(rows or {}, game.JobId, E.visited, os.time(),
                     (CFG.HopRevisit or 10) * 60, order, math.random)
+                if order == "most" and P.pingRank then cands = P.pingRank(cands) end
                 E.lastList = string.format("%d listed, %d worth joining  ·  %s", #(rows or {}), #cands,
                     via == "browser" and "the game's server browser"
                         or ("the Roblox server list - " .. tostring(E.listWhy or "the game's was empty")))
@@ -5611,10 +5748,12 @@ do
                         return false
                     end
                     E.visited[s.id] = os.time()
-                    local carry = carryState(CFG.Hunt and P.running)
+                    local carry = carryState(CFG.Hunt and P.running, s)
                     fileWrite(carry)
                     queueReload(carry)
-                    E.note = string.format("hop: joining a server with %d players  (%s)", s.count, tostring(why))
+                    E.note = string.format("hop: joining a server with %d players%s  (%s)", s.count,
+                        s.region and ("  ·  " .. tostring(s.region) .. (s.ms and string.format(" ~%d ms", math.floor(s.ms + 0.5))
+                            or " (your ping there not known yet)")) or "", tostring(why))
                     say(E.note)
                     joinServer(s.id, myEpoch)
                     -- Still here: that one refused (full, gone, or teleports throttled).
@@ -15127,13 +15266,17 @@ local function buildUI()
             function(x) CFG.PvpSpeedTo = x end)
         readout(v, function() return "speed  " .. tostring(S.speed.note) end)
         heading2(v, "servers")
-        switchRow(v, "Busy servers", "In PvP every hop goes where the most players are",
+        switchRow(v, "Busy servers", "In PvP every hop goes where the most players are - in a region fast for you",
             function() return CFG.PvpHopBusy end,
             function(x) CFG.PvpHopBusy = x end)
+        sliderRow(v, "Ping at most", 60, 400, 10,
+            function() return CFG.PvpPingMax end,
+            function(x) CFG.PvpPingMax = x end, " ms")
         actionRow(v, "Hop to a busy server", nil, function() P.hopNow() end)
         readout(v, function()
             local el = P.elite
             return "hop    " .. tostring(el and el.note or "-")
+                .. "\n" .. (P.pingNote and P.pingNote() or "")
         end)
         fold(v, "How it works", function(v)
             caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")

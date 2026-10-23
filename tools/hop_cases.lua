@@ -73,4 +73,29 @@ ROWS = servers()
 hop("no flower")
 check("no keep-away given: marked now, as before", E.visited.here == NOW)
 
+-- 8. PvP (2026-10-24): busiest first, then the ping order; the list read is learned from
+reset()
+ROWS = servers()
+CFG.Pvp, CFG.PvpHopBusy = true, true
+local learned, rankedIn = nil, nil
+P.pingLearn = function(rows) learned = #rows end
+P.pingRank = function(c)
+    if rankedIn == nil and c[1] then rankedIn = c[1].id end    -- the first round's list
+    local out = {}
+    for i = #c, 1, -1 do table.insert(out, c[i]) end      -- a fake order: reversed
+    return out
+end
+hop("pvp")
+check("PvP: the list is learned from, every row", learned == 8, tostring(learned))
+check("PvP: busiest first into the ping order (g = 6 players)", rankedIn == "g", tostring(rankedIn))
+check("PvP: joins follow the ping order", log.joins[1] == "b", tostring(log.joins[1]))
+reset()
+ROWS = servers()
+CFG.PvpHopBusy = false
+rankedIn = nil
+hop("pvp, busy off")
+check("busy off: the hunts' order (fewest), no ping order", rankedIn == nil and log.joins[1] == "b",
+    tostring(log.joins[1]))
+CFG.Pvp, CFG.PvpHopBusy, P.pingLearn, P.pingRank = nil, nil, nil, nil
+
 print(all and "ALL PASS" or "SOME FAILED")

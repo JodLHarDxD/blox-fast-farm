@@ -104,4 +104,21 @@ DB.f1 = state({ userId = 111 })
 FILE = "f1"
 check("own account's state: resumed", takeCarry() == true and CFG.TravelSpeed == 500)
 
+-- REGION (2026-10-24, the low-ping hop): the server the hop chose names this one's region
+reset()
+DB.f1 = state({ toJob = "new", toRegion = "Singapore" })
+FILE = "f1"
+takeCarry()
+check("landed in the server chosen: its region taken", E.region == "Singapore", tostring(E.region))
+reset()
+DB.f1 = state({ toJob = "other", toRegion = "Tokyo" })
+FILE = "f1"
+takeCarry()
+check("landed somewhere else (that join failed): no region", E.region == nil, tostring(E.region))
+reset()
+DB.f1 = state({ toJob = "new", toRegion = "Tokyo", freshUntil = NOW - 1 })
+FILE = "f1"
+takeCarry()
+check("an old carry, but this very server: its region still true", E.region == "Tokyo", tostring(E.region))
+
 print(all and "ALL PASS" or "SOME FAILED")

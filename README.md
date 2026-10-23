@@ -560,6 +560,18 @@ Asked (voice): every hop landed in a server with one player - no one to fight. T
 2. After the join, PvP mode is on again by itself (your saved setting).
 3. Joins refused one after another (busy servers fill up fast) = send the `[BFF] hop:` console lines.
 
+## PvP: busy servers where YOUR ping is low - first test (2026-10-24, build 2026-10-24.1)
+
+Asked: the low-ping hop. Roblox's server list has a ping per server, but that is the average of the players IN it, not yours there - a US server full of US players shows low ping and lags for you. So the script measures YOUR ping (the game's own network stats, every 2 s) in every server you are in and keeps it per REGION (the game's server browser names each server's region) in `workspace/bff_ping.json`, the last 5 per region.
+- Which region you are in: the region of the server the hop chose for you (carried over, taken only if you landed in exactly that server). Kept after 1 minute in the server, or at the hop out.
+- PvP hops, busiest first, in three groups: regions fast for you (at most **Ping at most**, PvP page, default 150 ms), then regions never measured (tried, so they get measured), then regions measured slow.
+- PvP page, servers: `ping  here 85 ms · Singapore` and `known  Singapore 85 · Tokyo 140 · Frankfurt 230 (slow)`.
+
+1. PvP on, **Hop to a busy server** a few times (stay a minute in each): `known` fills with regions and your ping in each.
+2. After that, the hop line reads `joining a server with N players · <region> ~<ms> ms` with a fast region.
+3. `ping here` much higher than the region's number = say so (that server may be loaded, or your network changed).
+4. The first server of a session (no hop brought you) has no region - learning starts from the first hop.
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava

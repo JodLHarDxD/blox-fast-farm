@@ -77,6 +77,37 @@ out = pickServers({ { id = "x", count = 11 }, { id = "y", count = 11 }, { id = "
 check("most: equal counts - the random key decides, the small one last",
     out[1].id == "y" and out[3].id == "z", out[1].id .. "," .. out[3].id)
 
+-- PING per region (2026-10-24)
+check("middle: odd / even / empty", middle({ 300, 80, 90 }) == 90 and middle({ 80, 100, 90, 300 }) == 95
+    and middle({}) == nil and middle(nil) == nil)
+local store = {}
+regionLearn(store, "Singapore", 84.6)
+regionLearn(store, "Singapore", 90)
+regionLearn(store, "Singapore", 400)                       -- one bad minute
+check("region: the middle of what was measured, a spike ignored", regionPing(store, "Singapore") == 90,
+    tostring(regionPing(store, "Singapore")))
+for _ = 1, 6 do regionLearn(store, "Tokyo", 130) end
+check("region: the last 5 kept", #store.Tokyo == 5)
+regionLearn(store, nil, 50)
+regionLearn(store, "", 50)
+regionLearn(store, "Frankfurt", 0)
+check("region: no name / no ping = nothing kept", store[""] == nil and store.Frankfurt == nil)
+check("region never measured = nil", regionPing(store, "Mumbai") == nil and regionPing(store, nil) == nil)
+store.Frankfurt = { 230 }
+local cands = {
+    { id = "f1", count = 11, region = "Frankfurt" }, { id = "s1", count = 10, region = "Singapore" },
+    { id = "u1", count = 9, region = "Mumbai" }, { id = "t1", count = 8, region = "Tokyo" },
+    { id = "n1", count = 7 }, { id = "s2", count = 3, region = "Singapore" },
+}
+local ord = pingOrder(cands, store, 150)
+ids = {}
+for _, c in ipairs(ord) do table.insert(ids, c.id) end
+got = table.concat(ids, ",")
+check("ping order: fast regions (busiest first), never measured, slow last", got == "s1,t1,s2,u1,n1,f1", got)
+check("ping order: each gets its region's ping", ord[1].ms == 90 and ord[4].ms == nil and ord[6].ms == 230)
+ord = pingOrder({ { id = "t", count = 5, region = "Tokyo" } }, store, 100)
+check("ping order: a stricter limit makes Tokyo slow", ord[1].id == "t" and ord[1].ms == 130)
+
 -- pruneVisited
 local v = { a = 100, b = 5000, c = "x" }
 pruneVisited(v, 5000, 3600)
