@@ -366,6 +366,27 @@ do
     check("already faster in a form: base, nothing carried", s.add == 0)
 end
 
+-- ===== far vision (user, 2026-10-23: past the Pale Scarf, whatever you wear) =====
+do
+    local v = {}
+    -- maxed Observation, no scarf: the server's 3,000
+    local w = L.far(v, 3000, 50000)
+    check("far: 3,000 -> the goal", w == 50000 and v.base == 3000)
+    check("far: then steady", L.far(v, 50000, 50000) == nil)
+    -- the scarf put on: the server writes 30,000 over ours
+    local w2 = L.far(v, 30000, 50000)
+    check("far: the scarf's 30,000 over ours -> the goal again", w2 == 50000 and v.base == 30000)
+    -- a goal under the scarf's own: never less than the server's
+    local w3 = L.far(v, 50000, 20000)
+    check("far: goal under the server's own -> the server's own", w3 == 30000)
+    check("far: then steady at the server's", L.far(v, 30000, 20000) == nil)
+    -- a level up while held: the new number is the base
+    L.far(v, 3100, 50000)
+    check("far: a new server value = the new base", v.base == 3100 and v.mine == 50000)
+    -- a fresh character / nothing known: the goal
+    check("far: a low level gets the goal too", L.far({}, 150, 50000) == 50000)
+end
+
 -- ===== dash =====
 do
     local d = {}

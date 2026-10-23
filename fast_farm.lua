@@ -546,6 +546,11 @@ local CFG = {
     Pvp                = false,
     PvpVision          = true,   -- the game's Ken view is never turned off
     PvpClean           = true,   -- other players' screen effects off (Ghoul / Angel V4, Dark)
+    -- (user, 2026-10-23: the Pale Scarf gives "10x vision"; in PvP see that
+    -- far or farther whatever you wear) The Ken view's reach held at least
+    -- this many studs - the scarf on a maxed Observation is 3,000 x 10.
+    PvpFar             = true,
+    PvpFarTo           = 50000,
     PvpNoShake         = true,   -- no camera shake
     PvpKenBack         = true,   -- Ken itself (the dodges) back: 2 s after, every 0.5 s
     PvpAim             = true,   -- your skills, fruit M1 and gun land on the player
@@ -597,7 +602,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -14994,6 +14999,12 @@ local function buildUI()
         switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
             function() return CFG.PvpVision end,
             function(x) CFG.PvpVision = x end)
+        switchRow(v, "See far", "Players and enemies outlined this far, whatever you wear - past the Pale Scarf",
+            function() return CFG.PvpFar end,
+            function(x) CFG.PvpFar = x end)
+        sliderRow(v, "Vision range", 3000, 100000, 1000,
+            function() return CFG.PvpFarTo end,
+            function(x) CFG.PvpFarTo = x end, " studs")
         switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
             function() return CFG.PvpClean end,
             function(x) CFG.PvpClean = x end)
@@ -15006,6 +15017,7 @@ local function buildUI()
         readout(v, function()
             if not CFG.Pvp then return "PvP mode is off" end
             return "view    " .. tostring(S.view.note)
+                .. "\nfar     " .. tostring(S.far.note)
                 .. "\nken     " .. tostring(S.ken.note)
                 .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
                 .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
@@ -16901,6 +16913,21 @@ do
             return want
         end
 
+        -- FAR VISION (user, 2026-10-23). The game's Observation loop grows its
+        -- view to player.VisionRadius every 0.3 s and never past it; the
+        -- server writes that value (your Observation level - the hubs' auto
+        -- Ken stops at 3,000 - x your accessories' ObservationRange: Pale
+        -- Scarf 10) and nothing else reads it. v = { base = the server's
+        -- value, mine = the last value written here }, cur = the value now.
+        -- -> the value to write (never under the server's own), or nil.
+        function L.far(v, cur, goal)
+            if cur ~= v.mine then v.base = cur end       -- the server set it (gear, a level)
+            local want = math.max(v.base or 0, goal)
+            if cur == want then return nil end
+            v.mine = want
+            return want
+        end
+
         -- DASH. d = { base = the server's DashLength (nil = none), mine, d0 =
         -- your dash in studs with the base, k = studs per unit (measured) }.
         function L.dashSeen(d, attr)
@@ -16981,6 +17008,7 @@ do
             clean = { base = setmetatable({}, { __mode = "k" }), off = {}, count = 0 },
             shake = { saved = {}, done = false, note = "-" },
             speed = { note = "-", st = {} },
+            far   = { note = "-", st = {} },
             dash  = { note = "-", st = {}, tries = 0 },
             soru  = { base = nil, mine = nil },
             cd    = { set = setmetatable({}, { __mode = "k" }), presses = 0, moves = 0, busy = false },
@@ -17111,6 +17139,31 @@ do
                 if now - (V.ownRef or 0) > 0.3 then V.ownRef = now o:refresh() end
             end)
             V.note = gameOn and "ON  ·  the game's own (Ken on)" or "ON  ·  a copy of the game's view (its own object out of reach)"
+        end
+
+        -- ---------- FAR VISION ----------
+        local FV = S.far
+        local function farRestore()
+            local vr, st = player:FindFirstChild("VisionRadius"), FV.st
+            if vr and st.mine ~= nil and st.base ~= nil and vr.Value == st.mine then
+                pcall(function() vr.Value = st.base end)
+            end
+            FV.st = {}
+        end
+        -- Every frame: a server write (gear on / off, a new level) is
+        -- answered before the game's next 0.3 s step can shrink the view.
+        local function farTick()
+            if not CFG.PvpFar then
+                if FV.st.mine ~= nil then farRestore() end
+                FV.note = "off - your gear's own reach"
+                return
+            end
+            local vr = player:FindFirstChild("VisionRadius")
+            if not vr then FV.note = "the game's VisionRadius not found" return end
+            local want = L.far(FV.st, tonumber(vr.Value), CFG.PvpFarTo)
+            if want then vr.Value = want end
+            FV.note = string.format("%d studs  ·  your gear's own %s", math.floor(tonumber(vr.Value) or 0),
+                FV.st.base and tostring(math.floor(FV.st.base)) or "?")
         end
 
         -- ---------- KEN ITSELF ----------
@@ -17944,6 +17997,7 @@ do
                     -- Every frame: your mouse moves fast.
                     pcall(targetTick, now)
                     pcall(markTick)
+                    pcall(farTick)
                     -- The game sets the view's radius to 0 when Ken ends; it
                     -- is put back before its next refresh can empty the view.
                     local om = V.om
@@ -18010,6 +18064,7 @@ do
                 pcall(cleanRestore)
                 pcall(shakeOn)
                 pcall(speedRestore)
+                pcall(farRestore)
                 pcall(dashRestore)
                 pcall(soruRestore)
                 pcall(cdOff)
