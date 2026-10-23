@@ -549,6 +549,17 @@ Read in the game's own Dodge script (its bytecode, disassembled): **every dash m
 4. Run at 182+: `legs  held at a 50 run · you 182` - the legs no longer blur.
 5. Run speed 250 / 300 / 350: pulled back (rubber-band) at some number = send that number. A dash slower than your run (x low, run high) feels like a brake - raise Dash.
 
+## PvP: hop to busy servers - first test (2026-10-23, build 2026-10-23.4)
+
+Asked (voice): every hop landed in a server with one player - no one to fight. The hop sorted servers fewest players first (made for the hunts: fewer hunters). Now:
+- **PvP mode on** = every hop goes **most players first** (PvP page "Busy servers", on by default). Full servers are skipped (they cannot be joined); the busiest one with a free slot goes first, then the next.
+- The hunts keep their own order (Servers page) - that radio also has "Most players first" now.
+- PvP page, servers: **Hop to a busy server** button and the hop's own line.
+
+1. PvP on, **Hop to a busy server**: the line says `hop: joining a server with N players` with N near the server's size (11 of 12, ...), not 1.
+2. After the join, PvP mode is on again by itself (your saved setting).
+3. Joins refused one after another (busy servers fill up fast) = send the `[BFF] hop:` console lines.
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava

@@ -64,6 +64,18 @@ seq = 0
 out = pickServers({ { id = "p", count = 1 }, { id = "q", count = 9 } }, "h", {}, 0, 600, "random", function()
     seq += 1 return 10 - seq end)
 check("random order ignores the count", out[1].id == "q", out[1].id)
+-- most (PvP, 2026-10-23): the busiest first, never full / here / seen
+seq = 0
+out = pickServers(list, "here", visited, 1000, 600, "most", rnd)
+ids = {}
+for _, s in ipairs(out) do table.insert(ids, s.id) end
+got = table.concat(ids, ",")
+check("most first; not here, not full, not seen in 10 min, no duplicates", got == "a,old,b,nocount", got)
+seq = 0
+out = pickServers({ { id = "x", count = 11 }, { id = "y", count = 11 }, { id = "z", count = 3 } }, "h", {}, 0, 600,
+    "most", function() seq += 1 return 10 - seq end)
+check("most: equal counts - the random key decides, the small one last",
+    out[1].id == "y" and out[3].id == "z", out[1].id .. "," .. out[3].id)
 
 -- pruneVisited
 local v = { a = 100, b = 5000, c = "x" }

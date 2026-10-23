@@ -517,7 +517,10 @@ local CFG = {
     -- With the chalice in your backpack or hand there is no hop at all,
     -- whatever this says.
     HuntHop            = true,
-    HopOrder           = "fewest",   -- "fewest" (players first) | "random"
+    HopOrder           = "fewest",   -- "fewest" (players first) | "most" | "random"
+    -- (user, 2026-10-23) PvP mode on: every hop goes to the busiest servers
+    -- (most players first), whatever HopOrder says - the hunts keep theirs.
+    PvpHopBusy         = true,
     -- The Elite Hunter's quest (the cat at the Castle on the Sea): progress
     -- toward Yama (30), money, EXP. The chalice does not need it.
     EliteQuest         = true,
@@ -607,7 +610,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.4" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -5126,8 +5129,10 @@ do
 
         -- The servers worth joining, best first: not this one, not full, not looked
         -- at in the last revisitSecs. "fewest": fewest players first (fewer hunters,
-        -- the elite more likely still standing); "random": any order. rand() breaks
-        -- ties so two runs do not pile into the same server.
+        -- the elite more likely still standing); "most": most players first (PvP,
+        -- user 2026-10-23: "I always go into a server with one player");
+        -- "random": any order. rand() breaks ties so two runs do not pile into
+        -- the same server.
         local function pickServers(rows, here, visited, now, revisitSecs, order, rand)
             local out, seen = {}, {}
             for _, s in ipairs(rows) do
@@ -5144,6 +5149,11 @@ do
             end
             if order == "random" then
                 table.sort(out, function(a, b) return a.key < b.key end)
+            elseif order == "most" then
+                table.sort(out, function(a, b)
+                    if a.count ~= b.count then return a.count > b.count end
+                    return a.key < b.key
+                end)
             else
                 table.sort(out, function(a, b)
                     if a.count ~= b.count then return a.count < b.count end
@@ -5585,8 +5595,10 @@ do
                 say("hop: reading the server list  (" .. tostring(why) .. ")")
                 local rows, via = browserList(myEpoch), "browser"
                 if not rows or #rows == 0 then rows, via = robloxList(myEpoch), "roblox" end
+                -- PvP on: the busiest servers, whatever the hunts' order says.
+                local order = (CFG.Pvp and CFG.PvpHopBusy) and "most" or CFG.HopOrder
                 local cands = pickServers(rows or {}, game.JobId, E.visited, os.time(),
-                    (CFG.HopRevisit or 10) * 60, CFG.HopOrder, math.random)
+                    (CFG.HopRevisit or 10) * 60, order, math.random)
                 E.lastList = string.format("%d listed, %d worth joining  ·  %s", #(rows or {}), #cands,
                     via == "browser" and "the game's server browser"
                         or ("the Roblox server list - " .. tostring(E.listWhy or "the game's was empty")))
@@ -15114,6 +15126,15 @@ local function buildUI()
             function() return CFG.PvpSpeedTo end,
             function(x) CFG.PvpSpeedTo = x end)
         readout(v, function() return "speed  " .. tostring(S.speed.note) end)
+        heading2(v, "servers")
+        switchRow(v, "Busy servers", "In PvP every hop goes where the most players are",
+            function() return CFG.PvpHopBusy end,
+            function(x) CFG.PvpHopBusy = x end)
+        actionRow(v, "Hop to a busy server", nil, function() P.hopNow() end)
+        readout(v, function()
+            local el = P.elite
+            return "hop    " .. tostring(el and el.note or "-")
+        end)
         fold(v, "How it works", function(v)
             caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")
             caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
@@ -16107,8 +16128,9 @@ local function buildUI()
             "Off: wait in this one",
             function() return CFG.HuntHop end,
             function(x) CFG.HuntHop = x end)
-        radio(v, 82, {
+        radio(v, 122, {
             { "fewest", "Fewest players first", "fewer hunters" },
+            { "most",   "Most players first",   "PvP" },
             { "random", "Any order",            "" },
         }, function() return CFG.HopOrder end, function(x) CFG.HopOrder = x end)
         sliderRow(v, "Try a server again after", 5, 60, 1,
