@@ -264,7 +264,7 @@ do
     local s = {}
     check("already at the goal -> nothing", L.speed(s, nil, 120, 112.5, true, 36) == nil)
     local w = L.speed({}, nil, 36, 9999, true, 36)
-    check("capped at base + 8", near(w, 9))
+    check("capped at +500 speed", near(w, 1 + 500 / 36))
 end
 do
     -- Mink V3 + 3 tails + Pilot Helmet, the user's own goal number
@@ -357,7 +357,7 @@ end
 do
     -- the cap is the same SPEED in every form (+288), not the same units
     local w = L.speed({}, nil, 36, 9999, true, 9)
-    check("capped: +288 speed in Kitsune too", near(w, 1 + 288 / 9))
+    check("capped: +500 speed in Kitsune too", near(w, 1 + 500 / 9))
     -- nothing known yet (no clean look ever) -> nothing to carry
     check("no clean look ever -> no carry", L.speed({ mine = 2 }, 1.1, 0, 182, false, 36) == nil)
     -- already faster on its own in a form -> carry nothing
@@ -387,39 +387,53 @@ do
     check("far: a low level gets the goal too", L.far({}, 150, 50000) == 50000)
 end
 
--- ===== dash =====
+-- ===== dash (the game's Dodge script: 0.3 s at base + DashLength) =====
+check("dash base: Draco = 92.5", L.dashBase("Draco", true, false, {}) == 92.5)
+check("dash base: Draco + 3 tails = 107.5", L.dashBase("Draco", true, false, { KitsuneTail3 = true }) == 107.5)
+check("dash base: Mink evolved 112.5, Agility 120",
+    L.dashBase("Mink", true, false, {}) == 112.5 and L.dashBase("Mink", true, false, { Agility = true }) == 120)
+check("dash base: Mink not evolved = 92.5", L.dashBase("Mink", false, false, {}) == 92.5)
+check("dash base: Mink evolved in Kitsune = 105", L.dashBase("Mink", true, false, { Kitsune = true }) == 105)
+check("dash base: tails capped at 120", L.dashBase("Mink", true, false, { Agility = true, KitsuneTail3 = true }) == 120)
+check("dash base: Ghoul evolved only at night",
+    L.dashBase("Ghoul", true, true, {}) == 107.5 and L.dashBase("Ghoul", true, false, {}) == 92.5)
+check("dash base: Heightened Senses 117.5", L.dashBase("Ghoul", true, false, { ["Heightened Senses"] = true }) == 117.5)
+check("dash base: Leopard +10, its boost +25",
+    L.dashBase("Draco", true, false, { LeopardRig = true, LeopardBoost = true }) == 127.5)
+check("dash base: Mammoth 132", L.dashBase("Draco", true, false, { Mammoth = true }) == 132)
 do
+    -- the game's dash top speed = base + attribute; x = that many times it
+    local s0 = L.dashBase("Draco", true, false, { KitsuneTail3 = true })
     local d = {}
-    L.dashSeen(d, nil)
-    check("nothing measured -> your own dash untouched", L.dashWant(d, 1.5) == nil)
-    L.dashLearn(d, nil, 40)
-    check("first ground dash = your base", d.d0 == 40)
-    local w = L.dashWant(d, 1.5)
-    check("x1.5 with no slope yet = +20 (1 stud a unit)", near(w, 20))
+    check("x1, no gear -> left alone", L.dashWant(d, nil, 1, s0) == nil)
+    local w = L.dashWant(d, nil, 2.5, s0)
+    check("x2.5, no gear: top speed 2.5 x 107.5", near(s0 + w, 2.5 * 107.5))
     d.mine = w
-    L.dashSeen(d, w)
-    check("our own value is not taken for the server's", d.base == nil and d.d0 == 40)
-    L.dashLearn(d, w, 80)                                    -- it went 80, not 60
-    check("slope measured: 2 studs a unit", near(d.k, 2))
-    check("x1.5 corrected to +10", near(L.dashWant(d, 1.5), 10))
-    check("x2 = +20 at 2 studs a unit", near(L.dashWant(d, 2), 20))
-    check("x1 = your own", L.dashWant(d, 1) == nil)
-    -- a new life, the server's value the same (none): what was measured stays
-    d.mine = 10
-    L.dashSeen(d, nil)
-    check("new life, same gear: measurement kept", d.d0 == 40 and near(d.k, 2))
-    -- other gear: DashLength 10 from the server
-    d.mine = 10
-    L.dashSeen(d, 7)
-    check("other gear: measured again", d.d0 == nil and d.k == nil and d.base == 7)
-    check("other gear, unmeasured: the server's value", L.dashWant(d, 1.5) == 7)
-    L.dashLearn(d, 7, 50)
-    check("measured on top of the gear", d.d0 == 50)
-    check("x1.5 on top of the gear: 7 + 25", near(L.dashWant(d, 1.5), 32))
-    L.dashLearn(d, 7, 2)
-    check("a twitch is not a dash", d.d0 == 50)
-    L.dashLearn(d, 7, 900)
-    check("a teleport is not a dash", d.d0 == 50)
+    check("ours is not taken for the server's", L.dashWant(d, w, 2.5, s0) == w and d.base == nil)
+    -- the server's 5 (Draco's race stat) over ours: the base, x of the whole
+    local w2 = L.dashWant(d, 5, 2.5, s0)
+    check("gear 5: x2.5 of 112.5", d.base == 5 and near(s0 + w2, 2.5 * 112.5))
+    d.mine = w2
+    check("x1 with gear -> the gear's own", L.dashWant(d, w2, 1, s0) == 5)
+    check("x5: five times", near(s0 + L.dashWant({}, 10, 5, s0), 5 * (s0 + 10)))
+end
+
+-- ===== animations (2026-10-23) =====
+check("anim: DashForward = dash", L.animKind("DashForward", "DashForward") == "dash")
+check("anim: the track's name alone = dash", L.animKind(nil, "dashLeft") == "dash")
+check("anim: run / runKitsune / walkHover = legs",
+    L.animKind("run", "") == "legs" and L.animKind("runKitsune", "") == "legs" and L.animKind("walkHover", "") == "legs")
+check("anim: idle / a skill / RunningSlash = none",
+    L.animKind("idle", "") == nil and L.animKind("SuperhumanV2Z", "") == nil and L.animKind("RunningSlash", "") == nil)
+do
+    -- Animate at 182: 182 / 26 x 1.25 / 0.5 = 17.5 for the run track
+    local g = 182 / 26 * 1.25 / 0.5
+    local w = L.legs(nil, g, 182, 50)
+    check("legs at 182: the pace of a 50 run", near(w, 50 / 26 * 1.25 / 0.5))
+    check("legs: ours stands -> nothing", L.legs(w, w, 182, 50) == nil)
+    check("legs: the game writes again -> held again", near(L.legs(w, g, 182, 50), w))
+    check("legs: under the pace -> the game's own", L.legs(nil, 1.5, 40, 50) == nil)
+    check("legs: standing (speed 0) -> nothing", L.legs(nil, 0, 182, 50) == nil)
 end
 
 -- ===== Flash Step's cut (2026-10-15) =====

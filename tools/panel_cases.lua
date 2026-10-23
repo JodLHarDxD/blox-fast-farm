@@ -352,7 +352,8 @@ local NEW_OK = { MirageJob = true,
     PvpNoSpread = true,                       -- 2026-10-13 build .2: Dragonstorm's shots straight
     PvpAimKeys = true,                        -- 2026-10-14: which attacks the aim takes (Z yours)
     PvpSoruCut = true, PvpCdTest = true,      -- 2026-10-15: cooldown tests (Flash Step cut, skills)
-    PvpFar = true, PvpFarTo = true }          -- 2026-10-23: see far, past the Pale Scarf
+    PvpFar = true, PvpFarTo = true,           -- 2026-10-23: see far, past the Pale Scarf
+    PvpDashAnim = true, PvpLegs = true }      -- 2026-10-23: the dash animation sped, legs at a normal pace
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

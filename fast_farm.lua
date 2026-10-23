@@ -589,7 +589,12 @@ local CFG = {
     -- spread - while you aim it at a player.
     PvpNoSpread        = true,
     PvpDash            = true,
-    PvpDashX           = 1.5,    -- your Q dash this many times as far
+    PvpDashX           = 1.5,    -- your Q dash this many times as fast - and as far (it always lasts 0.3 s)
+    -- (user, 2026-10-23) the look only: the dash animation this many times
+    -- the game's own speed, and the run animation kept at a normal pace
+    -- however fast you run
+    PvpDashAnim        = 2.0,
+    PvpLegs            = true,
     -- (user, 2026-10-15: chased down over 300-400 m - "they make their
     -- cooldowns shorter; I want mine 0 or half") Both TESTS, off by default:
     PvpSoruCut         = 0,      -- % of Flash Step's (R) cooldown taken off - your client checks it
@@ -602,7 +607,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.3" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -15077,12 +15082,18 @@ local function buildUI()
                 .. "\n" .. S.leadText()
         end)
         heading2(v, "movement")
-        switchRow(v, "Longer dash", "Your Q dash, measured on the ground, then made longer",
+        switchRow(v, "Faster dash", "Every dash moves 0.3 s - faster is also farther",
             function() return CFG.PvpDash end,
             function(x) CFG.PvpDash = x end)
-        sliderRow(v, "Dash", 1, 2.5, 0.1,
+        sliderRow(v, "Dash", 1, 5, 0.1,
             function() return CFG.PvpDashX end,
             function(x) CFG.PvpDashX = x end, "x")
+        sliderRow(v, "Dash animation", 1, 3, 0.1,
+            function() return CFG.PvpDashAnim end,
+            function(x) CFG.PvpDashAnim = x end, "x")
+        switchRow(v, "Legs at a normal pace", "The run animation as at a 50 run, however fast you go - the look only",
+            function() return CFG.PvpLegs end,
+            function(x) CFG.PvpLegs = x end)
         readout(v, function() return "dash   " .. S.dashNote() end)
         -- (user, 2026-10-15) cooldowns - both tests, off by default.
         heading2(v, "cooldowns  ·  tests")
@@ -15096,10 +15107,10 @@ local function buildUI()
             if not CFG.Pvp then return "" end
             return S.soruNote() .. "\n" .. S.cdNote()
         end)
-        switchRow(v, "Faster run", "The game's own speed number - Mink V3 + Kitsune 3 tails + Pilot Helmet = 112",
+        switchRow(v, "Faster run", "This speed whatever you wear - every form, V4 too",
             function() return CFG.PvpSpeed end,
             function(x) CFG.PvpSpeed = x end)
-        sliderRow(v, "Run speed", 40, 185, 1,
+        sliderRow(v, "Run speed", 40, 400, 1,
             function() return CFG.PvpSpeedTo end,
             function(x) CFG.PvpSpeedTo = x end)
         readout(v, function() return "speed  " .. tostring(S.speed.note) end)
@@ -16690,9 +16701,12 @@ end
 -- counts the attribute at its own rate (Kitsune a quarter), so it is set
 -- in that form's units, and a server write over it (V4 going on) is
 -- answered at once.
--- DASH: the character attribute DashLength (accessories add 7-10). Your
--- first ground dash is measured, then the attribute is set for x PvpDashX,
--- and every dash after checks it.
+-- DASH: the game moves every dash 0.3 s at its dash speed + the character
+-- attribute DashLength, so that attribute is set for x PvpDashX the speed
+-- (and so the distance) - worked out, never measured (a measured dash was
+-- told apart from your run by speed, and a boosted run hid it). Its
+-- animation is only a look: played PvpDashAnim x the game's speed. LEGS:
+-- the run animation held at the pace of a 50 studs/s run, however fast.
 do
     local function build()
         local UIS      = game:GetService("UserInputService")
@@ -16907,7 +16921,7 @@ do
             elseif not ((wiped or newForm) and s.add) then
                 return nil
             end
-            local want = b + math.min(s.add, 288) / k    -- 288 = 8 units of 36
+            local want = b + math.min(s.add, 500) / k    -- at most +500 speed
             if math.abs(want - cur) < 0.005 then return nil end
             s.mine = want
             return want
@@ -16928,31 +16942,60 @@ do
             return want
         end
 
-        -- DASH. d = { base = the server's DashLength (nil = none), mine, d0 =
-        -- your dash in studs with the base, k = studs per unit (measured) }.
-        function L.dashSeen(d, attr)
-            if attr ~= d.mine then
-                -- The server's own value changed (other gear): measure again.
-                -- The same value back (a new life) keeps what was measured.
-                if attr ~= d.base then d.d0, d.k = nil, nil end
-                d.base = attr
+        -- DASH (the game's Dodge script, read 2026-10-23): every dash moves
+        -- you for 0.3 s at a speed easing off from its top; the top = this
+        -- base + the character attribute DashLength (race / gear add 5-10).
+        -- The time is fixed, so the distance follows the speed. race = Data.
+        -- Race.Value, night = ClockTime past 18 or before 6, has = what is on
+        -- you: { Agility, ["Heightened Senses"] (root children), Kitsune,
+        -- LeopardRig, LeopardBoost, KitsuneTail3, Mammoth } = true.
+        function L.dashBase(race, evolved, night, has)
+            local s
+            if race == "Mink" and evolved then
+                s = has.Agility and 120 or 112.5
+                if has.Kitsune then s -= 7.5 end
+            elseif race == "Ghoul" and evolved and night then
+                s = 107.5
+                if has.Kitsune then s -= 5 end
+            else
+                s = 92.5
             end
+            if has["Heightened Senses"] then s = has.Kitsune and 112.5 or 117.5 end
+            if has.LeopardRig then s += 10 end
+            if has.LeopardBoost then s += 25 end
+            if has.KitsuneTail3 then s = math.min(s + 15, math.max(s, 120)) end
+            if has.Mammoth then s = 132 end             -- (Mammoth: DashLength not counted)
+            return s
         end
-        function L.dashWant(d, x)
-            if d.d0 == nil or x <= 1 then return d.base end
-            return (d.base or 0) + (x - 1) * d.d0 / (d.k or 1)
-        end
-        -- One measured ground dash: dist studs, done with the attribute at a.
-        function L.dashLearn(d, a, dist)
-            if dist < 4 or dist > 400 then return end
+        -- d = { base = the server's DashLength (nil = none), mine = the last
+        -- value written here }. x = how many times as fast (and as far), s0 =
+        -- L.dashBase. -> the attribute to hold: exact, nothing measured.
+        function L.dashWant(d, attr, x, s0)
+            if attr ~= d.mine then d.base = attr end    -- the server set it (gear, a new life)
+            if x <= 1 then return d.base end
             local b = d.base or 0
-            a = a or 0
-            if math.abs(a - b) < 0.001 then
-                d.d0 = dist
-            elseif d.d0 and a > b and dist > d.d0 + 1 then
-                local k = (dist - d.d0) / (a - b)
-                if k > 0.05 then d.k = k end
-            end
+            return b + (x - 1) * (s0 + b)
+        end
+
+        -- ANIMATIONS. Which of yours a track is: "dash" (the game's Dash*
+        -- tracks, played at 1.65 - 1.45 sideways), "legs" (Animate's run /
+        -- walk family: run, runKitsune, walkHover, ...) or nil. a = the
+        -- Animation's name, t = the track's.
+        function L.animKind(a, t)
+            a, t = tostring(a or ""), tostring(t or "")
+            if a:lower():find("dash", 1, true) or t:lower():find("dash", 1, true) then return "dash" end
+            if a:find("^run") or a:find("^walk") then return "legs" end
+            return nil
+        end
+        -- LEGS (user, 2026-10-23: "my foot movement doesn't need to match my
+        -- speed"). Animate sets the run track's speed by your speed / 26 every
+        -- step. mine = the speed written here last (nil = none), cur = the
+        -- track's speed now, p = how fast you go (studs/s), pace = the legs'
+        -- most. -> the speed to give the track (as if you ran pace), or nil.
+        function L.legs(mine, cur, p, pace)
+            if mine ~= nil and math.abs(cur - mine) < 1e-3 then return nil end   -- ours still stands
+            if p <= pace or cur <= 0 then return nil end
+            return cur * pace / p
         end
 
         -- FLASH STEP'S CUT (2026-10-15). The game's cooldown = 15 s (10 for an
@@ -17009,7 +17052,9 @@ do
             shake = { saved = {}, done = false, note = "-" },
             speed = { note = "-", st = {} },
             far   = { note = "-", st = {} },
-            dash  = { note = "-", st = {}, tries = 0 },
+            dash  = { note = "-", st = {} },
+            anim  = { animator = nil, mine = setmetatable({}, { __mode = "k" }), dashes = 0, probes = 0,
+                note = "-", qAt = nil },
             soru  = { base = nil, mine = nil },
             cd    = { set = setmetatable({}, { __mode = "k" }), presses = 0, moves = 0, busy = false },
             faceUntil = 0, faced = 0, held = {}, lastAttack = -1e9,
@@ -17335,6 +17380,7 @@ do
 
         -- ---------- DASH ----------
         local D = S.dash
+        local AN = S.anim
         local function dashRestore()
             local char, st = player.Character, D.st
             if char and st.mine ~= nil and char:GetAttribute("DashLength") == st.mine then
@@ -17342,72 +17388,94 @@ do
             end
             st.mine = nil
         end
+        local DASH_KIDS = { "Kitsune", "LeopardRig", "LeopardBoost", "KitsuneTail3", "Mammoth" }
+        local DASH_ROOT = { "Agility", "Heightened Senses" }
         local function dashTick()
             if not CFG.PvpDash then
                 if D.st.mine ~= nil then dashRestore() end
+                D.note = "off"
                 return
             end
-            local char = player.Character
+            local char, root = parts()
             if not char then return end
+            local data = player:FindFirstChild("Data")
+            local race = data and data:FindFirstChild("Race")
+            local has = {}
+            for _, n in ipairs(DASH_KIDS) do
+                if char:FindFirstChild(n) then has[n] = true end
+            end
+            for _, n in ipairs(DASH_ROOT) do
+                if root and root:FindFirstChild(n) then has[n] = true end
+            end
+            local ct = Lighting.ClockTime
+            local s0 = L.dashBase(race and race.Value, race ~= nil and race:FindFirstChild("Evolved") ~= nil,
+                ct > 18 or ct < 6, has)
             local attr = char:GetAttribute("DashLength")
-            L.dashSeen(D.st, attr)
-            local want = L.dashWant(D.st, CFG.PvpDashX)
+            local want = L.dashWant(D.st, attr, CFG.PvpDashX, s0)
             if want ~= attr then
                 char:SetAttribute("DashLength", want)
                 D.st.mine = want
             end
+            D.note = string.format("top speed %.0f -> %.0f studs/s  ·  x%.1f  ·  0.3 s each",
+                s0 + (D.st.base or 0), s0 + (want or 0), CFG.PvpDashX)
         end
-        -- Your Q on the ground: how far did it carry you? The dash is the run
-        -- of frames faster than you can run; the rest of the walk is not counted.
-        local function dashMeasure()
-            local char, root, hum = parts()
-            if not hum or hum.FloorMaterial == Enum.Material.Air then return end
-            local a = char:GetAttribute("DashLength")
-            local t0 = os.clock()
-            local last = root.Position
-            local dist, fast, slow = 0, 0, 0
-            local done = false
-            local conn
-            local function finish()
-                if done then return end
-                done = true
-                conn:Disconnect()
-                if fast >= 2 then
-                    D.last, D.lastAttr = dist, a
-                    L.dashLearn(D.st, a, dist)
-                else
-                    D.tries += 1
-                    -- Three dashes never seen (yours slower than your run?):
-                    -- a guess, and the panel says it is one.
-                    if D.st.d0 == nil and D.tries >= 3 then D.st.d0, D.guess = 30, true end
+        S.dashNote = function()
+            local n = D.note
+            if CFG.PvpDashAnim > 1 then n ..= string.format("\nanim   x%.1f  ·  %d dashes sped", CFG.PvpDashAnim, AN.dashes) end
+            if CFG.PvpLegs then n ..= "\nlegs   " .. AN.note end
+            return n
+        end
+
+        -- ---------- ANIMATIONS (user, 2026-10-23) ----------
+        -- The dash's animation is only a look (the move is the 0.3 s above):
+        -- each Dash track the game plays is sped PvpDashAnim x. The legs:
+        -- Animate's run / walk tracks held at a 50 studs/s run's pace.
+        local LEGS_PACE = 50
+        local function animHook(animator)
+            if AN.animator == animator then return end
+            AN.animator = animator
+            hold(animator.AnimationPlayed:Connect(function(track)
+                if not S.on then return end
+                local a = track.Animation
+                local kind = L.animKind(a and a.Name, track.Name)
+                -- what starts right after Q, in the console (the first 3 dashes)
+                if os.clock() - (AN.qAt or -1e9) < 0.3 and AN.probes < 3 then
+                    AN.probes += 1
+                    print(string.format("[BFF] dash anim: %s / %s (%s)", tostring(a and a.Name), track.Name,
+                        tostring(kind)))
+                end
+                if kind ~= "dash" or CFG.PvpDashAnim <= 1 then return end
+                task.defer(function()
+                    pcall(function() track:AdjustSpeed(track.Speed * CFG.PvpDashAnim) end)
+                    AN.dashes += 1
+                end)
+            end))
+        end
+        local function animTick()
+            local _, root, hum = parts()
+            local animator = hum and hum:FindFirstChildOfClass("Animator")
+            if not animator then return end
+            animHook(animator)
+            if not CFG.PvpLegs then AN.note = "off" return end
+            local v = root.AssemblyLinearVelocity
+            local p = math.sqrt(v.X * v.X + v.Z * v.Z)
+            local n = 0
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+                local a = tr.Animation
+                if L.animKind(a and a.Name, tr.Name) == "legs" then
+                    local want = L.legs(AN.mine[tr], tr.Speed, p, LEGS_PACE)
+                    if want then
+                        tr:AdjustSpeed(want)
+                        AN.mine[tr] = want
+                    elseif AN.mine[tr] ~= nil and math.abs(tr.Speed - AN.mine[tr]) >= 1e-3 then
+                        AN.mine[tr] = nil
+                    end
+                    if AN.mine[tr] ~= nil then n += 1 end
                 end
             end
-            conn = RunService.Heartbeat:Connect(function(dt)
-                if not root.Parent or os.clock() - t0 > 0.9 then finish() return end
-                local p = root.Position
-                local step = Vector3.new(p.X - last.X, 0, p.Z - last.Z).Magnitude
-                last = p
-                local spd = step / math.max(dt, 1 / 240)
-                local ws = hum.WalkSpeed
-                if spd > math.max(ws * 1.35, ws + 20) then
-                    dist += step
-                    fast += 1
-                    slow = 0
-                elseif fast > 0 then
-                    slow += 1
-                    if slow >= 3 then finish() end
-                end
-            end)
+            AN.note = (n > 0) and string.format("held at a %d run  ·  you %d", LEGS_PACE, math.floor(p))
+                or string.format("the game's own (under %d)", LEGS_PACE)
         end
-        local function dashNote()
-            if not CFG.PvpDash then return "off" end
-            local st = D.st
-            if st.d0 == nil then return "dash once on the ground - it is measured first" end
-            return string.format("yours %.0f studs%s  ·  last %s  ·  x%.1f",
-                st.d0, D.guess and " (a guess - never measured)" or "",
-                D.last and string.format("%.0f studs", D.last) or "-", CFG.PvpDashX)
-        end
-        S.dashNote = dashNote
 
         -- ---------- COOLDOWNS (user, 2026-10-15: chased down over 300-400 m -
         -- "they make their cooldowns shorter; I want mine 0 or half") ----------
@@ -17998,6 +18066,7 @@ do
                     pcall(targetTick, now)
                     pcall(markTick)
                     pcall(farTick)
+                    pcall(animTick)
                     -- The game sets the view's radius to 0 when Ken ends; it
                     -- is put back before its next refresh can empty the view.
                     local om = V.om
@@ -18041,8 +18110,8 @@ do
                         -- the game's own skill keys may come marked as processed:
                         -- only typing (a focused text box) is left out
                         if not UIS:GetFocusedTextBox() then attackPressed(ATTACK_KEYS[i.KeyCode]) end
-                    elseif not gp and i.KeyCode == Enum.KeyCode.Q and CFG.PvpDash then
-                        task.spawn(function() pcall(dashMeasure) end)
+                    elseif not gp and i.KeyCode == Enum.KeyCode.Q then
+                        AN.qAt = os.clock()
                     end
                 end))
                 hold(UIS.InputEnded:Connect(function(i)
@@ -18066,6 +18135,7 @@ do
                 pcall(speedRestore)
                 pcall(farRestore)
                 pcall(dashRestore)
+                AN.animator = nil                 -- its hook went with S.conns
                 pcall(soruRestore)
                 pcall(cdOff)
                 pcall(snapOn)
