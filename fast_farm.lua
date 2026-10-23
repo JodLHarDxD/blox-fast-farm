@@ -597,7 +597,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-15.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-23.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -16674,6 +16674,10 @@ end
 -- bonuses), and the character attribute SpeedMultiplier (Pilot Helmet 1.3)
 -- is one of the bonuses. So that attribute is set so the game's OWN number
 -- comes out at PvpSpeedTo - never WalkSpeed (a fight: it rewrites it).
+-- Carried through V4 and every transformation (user, 2026-10-23): a form
+-- counts the attribute at its own rate (Kitsune a quarter), so it is set
+-- in that form's units, and a server write over it (V4 going on) is
+-- answered at once.
 -- DASH: the character attribute DashLength (accessories add 7-10). Your
 -- first ground dash is measured, then the attribute is set for x PvpDashX,
 -- and every dash after checks it.
@@ -16850,27 +16854,48 @@ do
             return math.clamp(yy, y - 80, y + 80)
         end
 
+        -- The speed one unit of the attribute is worth in the form you are in
+        -- (the game's Movement script, decompiled v4623): none / V4 / any
+        -- other form 36 x (race + bonuses + attr - 1) -> 36; Kitsune
+        -- (bonuses x 0.25 + 1) x 36 -> 9; Tiger (x 0.5 + 1) x 40 -> 20; the
+        -- West Dragon (x 0.0135 + 1) x 64 -> 0.864; Mammoth (bonuses / 4) and
+        -- Buddha (x 0.25) -> 9. f = the rigs on you: { Kitsune = true, ... }.
+        function L.slope(f)
+            if f.Kitsune then return 9 end
+            if f.TigerRig then return 20 end
+            if f.WesternDragonRig then return 64 * 0.0135 end
+            if f.Mammoth or f.Buddha then return 9 end
+            return 36
+        end
+
         -- SPEED. s = { base = the server's SpeedMultiplier (nil = none), mine
-        -- = the last value written here }. attr = the attribute now, ws = the
-        -- game's WalkSpeed now, clean = that number can be read (not busy,
-        -- swimming, walking, nor right after a write), rigged = transformed.
-        -- Returns the value to write, or nil = leave it. Outside a
-        -- transformation WalkSpeed = 36 x (race + bonuses + attr - 1), so one
-        -- unit of the attribute is exactly 36 speed.
-        function L.speed(s, attr, ws, target, clean, rigged)
-            if attr ~= s.mine then s.base = attr end     -- the server set it (gear, a new life)
+        -- = the last value written here, add = the speed it adds (from the
+        -- last clean look), k = the form then }. attr = the attribute now,
+        -- ws = the game's WalkSpeed now, clean = that number can be read (not
+        -- busy, swimming, walking, nor right after a write), k = L.slope of
+        -- your form now. Returns the value to write, or nil = leave it. In
+        -- every form the game's number is straight in the attribute, so the
+        -- game's own number without this = ws - k x (attr - base).
+        -- CARRY (user, 2026-10-23: "any transformation should carry the
+        -- speed"): the server writing over ours (V4 writes 1.1 the moment it
+        -- goes on; gear; a new life) or a new form = the speed added before,
+        -- written again AT ONCE in the new form's units - a fight keeps you
+        -- Busy, so a clean look can be seconds away; that look then trims it
+        -- to the goal.
+        function L.speed(s, attr, ws, target, clean, k)
+            local wiped = attr ~= s.mine
+            if wiped then s.base = attr end              -- the server set it (gear, V4, a new life)
+            local newForm = s.k ~= nil and k ~= s.k
+            s.k = k
             local b = s.base or 1
             local cur = attr or 1
-            local want
-            if rigged then
-                want = b                                 -- a transformation has its own speed
-            elseif not clean then
+            if clean and not newForm then
+                local own = ws - k * (cur - b)           -- the game's number without this
+                s.add = math.max(0, target - own)
+            elseif not ((wiped or newForm) and s.add) then
                 return nil
-            else
-                local own = ws - 36 * (cur - b)          -- the game's number without this
-                want = (own >= target) and b or (b + (target - own) / 36)
-                want = math.min(want, b + 8)
             end
+            local want = b + math.min(s.add, 288) / k    -- 288 = 8 units of 36
             if math.abs(want - cur) < 0.005 then return nil end
             s.mine = want
             return want
@@ -17215,7 +17240,7 @@ do
 
         -- ---------- SPEED ----------
         local SP = S.speed
-        local RIGS = { "Kitsune", "TigerRig", "WesternDragonRig", "Mammoth" }
+        local RIGS = { Kitsune = "Kitsune", TigerRig = "Tiger", WesternDragonRig = "Dragon", Mammoth = "Mammoth" }
         local function speedRestore()
             local char, st = player.Character, SP.st
             if char and st.mine ~= nil and char:GetAttribute("SpeedMultiplier") == st.mine then
@@ -17229,13 +17254,14 @@ do
                 SP.note = "off"
                 return
             end
-            local char, _, hum = parts()
+            local char, root, hum = parts()
             if not hum then SP.note = "waiting for your character" return end
             if SP.char ~= char then SP.char, SP.charAt = char, now end
-            local rigged = false
-            for _, n in ipairs(RIGS) do
-                if char:FindFirstChild(n) then rigged = true break end
+            local f, form = {}, nil
+            for n, label in pairs(RIGS) do
+                if char:FindFirstChild(n) then f[n], form = true, label end
             end
+            if root and root:FindFirstChild("Buddha") then f.Buddha, form = true, form or "Buddha" end
             local busy = char:FindFirstChild("Busy")
             local g = G()
             local walking = g ~= nil and g.Running == false
@@ -17243,14 +17269,15 @@ do
                 and hum:GetState() ~= Enum.HumanoidStateType.Swimming
                 and now - (SP.wroteAt or 0) > 0.15 and now - (SP.charAt or 0) > 1
             local want = L.speed(SP.st, char:GetAttribute("SpeedMultiplier"), hum.WalkSpeed,
-                CFG.PvpSpeedTo, clean, rigged)
+                CFG.PvpSpeedTo, clean, L.slope(f))
             if want then
                 char:SetAttribute("SpeedMultiplier", want)
                 SP.wroteAt = now
             end
-            SP.note = string.format("%.0f now  ·  goal %.0f%s", hum.WalkSpeed, CFG.PvpSpeedTo,
-                rigged and "  ·  transformed: the game's own speed"
-                    or (walking and "  ·  walking (Ctrl)" or ""))
+            local v4 = char:FindFirstChild("RaceTransformed")
+            SP.note = string.format("%.0f now  ·  goal %.0f%s%s", hum.WalkSpeed, CFG.PvpSpeedTo,
+                form and ("  ·  " .. form .. " form") or "",
+                (v4 and v4.Value and "  ·  V4" or "") .. (walking and "  ·  walking (Ctrl)" or ""))
         end
 
         -- ---------- DASH ----------

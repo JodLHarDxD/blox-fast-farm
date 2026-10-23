@@ -234,40 +234,36 @@ local DRACO = 1.325
 do
     local s = {}
     local ws = game(DRACO, 0, nil)                         -- 47.7, no speed gear
-    local w = L.speed(s, nil, ws, 112.5, true, false)
+    local w = L.speed(s, nil, ws, 112.5, true, 36)
     check("no gear: attribute set so the game says 112.5", near(game(DRACO, 0, w), 112.5))
     check("no gear: written value remembered", s.mine == w)
     -- next tick: the game has used it
-    local w2 = L.speed(s, w, game(DRACO, 0, w), 112.5, true, false)
+    local w2 = L.speed(s, w, game(DRACO, 0, w), 112.5, true, 36)
     check("stable once there (nothing written)", w2 == nil)
     -- the game busy / swimming: no reading, no write, nothing forgotten
-    check("not a clean reading -> nothing", L.speed(s, w, 20, 112.5, false, false) == nil and s.mine == w)
+    check("not a clean reading -> nothing", L.speed(s, w, 20, 112.5, false, 36) == nil and s.mine == w)
     -- Agility comes on (+2): the game alone is past the goal -> back to the base
-    local w3 = L.speed(s, w, game(DRACO, 2, w), 112.5, true, false)
+    local w3 = L.speed(s, w, game(DRACO, 2, w), 112.5, true, 36)
     check("already faster on its own -> the base back", near(w3, 1))
     check("game alone after that", near(game(DRACO, 2, w3), 36 * 3.325))
     -- Agility ends
-    local w4 = L.speed(s, w3, game(DRACO, 0, w3), 112.5, true, false)
+    local w4 = L.speed(s, w3, game(DRACO, 0, w3), 112.5, true, 36)
     check("Agility over -> boosted again", near(game(DRACO, 0, w4), 112.5))
 end
 do
     local s = {}
     -- Pilot Helmet (1.3) from the server
-    local w = L.speed(s, 1.3, game(DRACO, 0, 1.3), 112.5, true, false)
+    local w = L.speed(s, 1.3, game(DRACO, 0, 1.3), 112.5, true, 36)
     check("helmet: the server's 1.3 is the base", s.base == 1.3)
     check("helmet: the goal reached", near(game(DRACO, 0, w), 112.5))
-    -- a transformation: the base back, whatever it is
-    local w2 = L.speed(s, w, 999, 112.5, true, true)
-    check("transformed -> the server's own value back", w2 == 1.3)
-    check("transformed, already base -> nothing", L.speed(s, 1.3, 999, 112.5, true, true) == nil)
     -- new gear while boosted: the server writes 1.5 over ours
-    L.speed(s, 1.5, game(DRACO, 0, 1.5), 112.5, true, false)
+    L.speed(s, 1.5, game(DRACO, 0, 1.5), 112.5, true, 36)
     check("new gear seen as the new base", s.base == 1.5)
 end
 do
     local s = {}
-    check("already at the goal -> nothing", L.speed(s, nil, 120, 112.5, true, false) == nil)
-    local w = L.speed({}, nil, 36, 9999, true, false)
+    check("already at the goal -> nothing", L.speed(s, nil, 120, 112.5, true, 36) == nil)
+    local w = L.speed({}, nil, 36, 9999, true, 36)
     check("capped at base + 8", near(w, 9))
 end
 do
@@ -277,10 +273,97 @@ do
     local s, attr = {}, nil
     local writes = 0
     for _ = 1, 10 do
-        local w = L.speed(s, attr, game(1, 0, attr), 112.5, true, false)
+        local w = L.speed(s, attr, game(1, 0, attr), 112.5, true, 36)
         if w then attr, writes = w, writes + 1 end
     end
     check("human: one write, then steady", writes == 1 and near(game(1, 0, attr), 112.5))
+end
+
+-- ===== speed carried through V4 and forms (user, 2026-10-23) =====
+-- The game's Movement script per form (decompiled v4623); bonus = the
+-- other bonuses (KitsuneTail3 0.875, ...), attr = SpeedMultiplier.
+local function formWs(form, race, bonus, attr)
+    local v17 = bonus + (attr or 1) - 1
+    if form == "Kitsune" then return (v17 * 0.25 + 1) * 36 end
+    if form == "TigerRig" then return (v17 * 0.5 + 1) * 40 end
+    if form == "WesternDragonRig" then return (v17 * 0.0135 + 1) * 64 end
+    if form == "Mammoth" then return 36 * (1.25 + v17 / 4) end
+    if form == "Buddha" then return 36 * (v17 * 0.25 + 1.15) end
+    return 36 * (race + v17)
+end
+local function slopeOf(form)
+    local f = {}
+    if form then f[form] = true end
+    return L.slope(f)
+end
+check("slope: none = 36", slopeOf(nil) == 36)
+for _, form in ipairs({ "Kitsune", "TigerRig", "WesternDragonRig", "Mammoth", "Buddha" }) do
+    -- the slope is the game's own: one unit more = exactly k more speed
+    local k = slopeOf(form)
+    check("slope: " .. form .. " = the game's own rate",
+        near(formWs(form, DRACO, 0.875, 3) - formWs(form, DRACO, 0.875, 2), k))
+    -- from the base, in that form, to the user's 182 in one clean look
+    local s = {}
+    local w = L.speed(s, nil, formWs(form, DRACO, 0.875, nil), 182, true, k)
+    check(form .. ": the goal reached in the form", near(formWs(form, DRACO, 0.875, w), 182))
+    check(form .. ": then steady", L.speed(s, w, formWs(form, DRACO, 0.875, w), 182, true, k) == nil)
+end
+do
+    -- The user's own V4 (probe, 2026-10-23): goal 182, Draco evolved, tail 3.
+    -- Boosted, then V4 goes on: the server writes 1.1 over ours while the
+    -- fight keeps you Busy (no clean look).
+    local s = {}
+    local w = L.speed(s, nil, formWs(nil, DRACO, 0.875, nil), 182, true, 36)
+    check("before V4: 182", near(formWs(nil, DRACO, 0.875, w), 182))
+    local c = L.speed(s, 1.1, 0, 182, false, 36)
+    check("V4's 1.1 over ours -> written again at once, Busy or not", c ~= nil and s.base == 1.1)
+    -- (V4's own +0.1 is inside the attribute: the server's 1.1)
+    check("V4: still about the goal before any clean look (+V4's own 3.6)",
+        near(formWs(nil, DRACO, 0.875, c), 182 + 3.6))
+    local t = L.speed(s, c, formWs(nil, DRACO, 0.875, c), 182, true, 36)
+    check("V4: the clean look trims it to the goal", t ~= nil and near(formWs(nil, DRACO, 0.875, t), 182))
+    check("the probe's own number: 1.1 + (182 - 82.8) / 36", near(t, 3.8555555))
+    -- V4 ends: the server takes its 1.1 away (nil)
+    local e = L.speed(s, nil, 0, 182, false, 36)
+    check("V4 over -> written again at once", e ~= nil and s.base == nil)
+end
+do
+    -- Boosted, then Kitsune form while Busy: carried at once, in the form's units.
+    local s = {}
+    local w = L.speed(s, nil, formWs(nil, DRACO, 0.875, nil), 182, true, 36)
+    local kw = L.speed(s, w, 0, 182, false, 9)
+    check("into Kitsune -> written at once", kw ~= nil)
+    local before = formWs("Kitsune", DRACO, 0.875, 1)
+    check("into Kitsune: the same speed added on top of the fox's own",
+        near(formWs("Kitsune", DRACO, 0.875, kw) - before, 182 - formWs(nil, DRACO, 0.875, 1)))
+    check("into Kitsune: far over the fox's base", formWs("Kitsune", DRACO, 0.875, kw) > before + 90)
+    -- the first look in the new form is skipped even if clean (its WalkSpeed
+    -- may still be the old form's this frame)
+    local s2 = {}
+    local w2 = L.speed(s2, nil, formWs(nil, DRACO, 0.875, nil), 182, true, 36)
+    local kw2 = L.speed(s2, w2, formWs(nil, DRACO, 0.875, w2), 182, true, 9)
+    check("new form + a stale clean look -> the carry, not the stale read", kw2 ~= nil and kw2 > w2)
+    -- a clean look in the fox: exactly the goal
+    local k3 = L.speed(s, kw, formWs("Kitsune", DRACO, 0.875, kw), 182, true, 9)
+    check("in Kitsune: the clean look sets 182", k3 ~= nil and near(formWs("Kitsune", DRACO, 0.875, k3), 182))
+    check("in Kitsune: then steady", L.speed(s, k3, formWs("Kitsune", DRACO, 0.875, k3), 182, true, 9) == nil)
+    -- out of the fox, Busy: carried back in 36s
+    local o = L.speed(s, k3, 0, 182, false, 36)
+    check("out of Kitsune -> written at once", o ~= nil and near(formWs(nil, DRACO, 0.875, o) - formWs(nil, DRACO, 0.875, 1),
+        182 - formWs("Kitsune", DRACO, 0.875, 1)))
+    local o2 = L.speed(s, o, formWs(nil, DRACO, 0.875, o), 182, true, 36)
+    check("out of Kitsune: the clean look sets 182", o2 ~= nil and near(formWs(nil, DRACO, 0.875, o2), 182))
+end
+do
+    -- the cap is the same SPEED in every form (+288), not the same units
+    local w = L.speed({}, nil, 36, 9999, true, 9)
+    check("capped: +288 speed in Kitsune too", near(w, 1 + 288 / 9))
+    -- nothing known yet (no clean look ever) -> nothing to carry
+    check("no clean look ever -> no carry", L.speed({ mine = 2 }, 1.1, 0, 182, false, 36) == nil)
+    -- already faster on its own in a form -> carry nothing
+    local s = {}
+    L.speed(s, nil, 400, 182, true, 9)
+    check("already faster in a form: base, nothing carried", s.add == 0)
 end
 
 -- ===== dash =====
