@@ -625,7 +625,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.4" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -16634,11 +16634,11 @@ local function buildUI()
         switchRow(v, "Pick my team on join",
             "The Pirates / Marines screen every new server shows",
             function() return CFG.AutoTeam end,
-            function(x) CFG.AutoTeam = x end)
+            function(x) CFG.AutoTeam = x P.teamSave() end)
         radio(v, 82, {
             { "Pirates", "Pirates", "" },
             { "Marines", "Marines", "" },
-        }, function() return CFG.Team end, function(x) CFG.Team = x end)
+        }, function() return CFG.Team end, function(x) CFG.Team = x P.teamSave() end)
         readout(v, function() return "team      " .. tostring(P.teamNote) end)
         readout(v, function() return P.reloadWay() end)
         heading2(v, "by hand")
@@ -16893,6 +16893,7 @@ function P.state() return state, statusLine end
 -- on (removed 2026-09-30 while client crashes on join were being traced).
 P.teamNote = "not needed yet"
 function P.pickTeam()
+    P.teamLoad()
     while _G.BFF == P and player.Team == nil do
         local team = CFG.Team
         if CFG.AutoTeam and (team == "Pirates" or team == "Marines") then
@@ -16913,6 +16914,35 @@ function P.pickTeam()
             local ct = player.PlayerGui.Main.ChooseTeam
             if ct.Visible then ct.Visible = false end
         end)
+    end
+end
+
+-- YOUR PICK IS KEPT (user, 2026-10-24: Marines picked, every hop still
+-- joined Pirates). autoexec_team.lua asks the moment a server loads, seconds
+-- before this script is back from the queued reload, and a team once set is
+-- never switched -- so its own TEAM ("Pirates") always won. Now the pick is
+-- a file per account, written whenever you change it on Servers & team and
+-- read at every load, here and by the autoexec: the last team you picked is
+-- the one every join asks for, settings lock or not.
+P.teamFile = "bff_team_" .. tostring(player.UserId) .. ".json"
+function P.teamSave()
+    if not writefile then return end
+    pcall(function()
+        writefile(P.teamFile, game:GetService("HttpService"):JSONEncode({
+            team = CFG.Team, pick = CFG.AutoTeam and true or false }))
+    end)
+end
+-- Your kept pick into CFG. None kept yet: this load's (carried, locked or
+-- default) becomes it, so the autoexec has one from the next join on.
+function P.teamLoad()
+    local ok, t = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(readfile(P.teamFile))
+    end)
+    if ok and type(t) == "table" and (t.team == "Pirates" or t.team == "Marines") then
+        CFG.Team = t.team
+        if type(t.pick) == "boolean" then CFG.AutoTeam = t.pick end
+    else
+        P.teamSave()
     end
 end
 

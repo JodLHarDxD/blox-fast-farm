@@ -17,8 +17,21 @@ local function newButton(team)
 end
 local getconnections = function(sig) return { sig.owner.conn } end
 local firesignal = nil
+-- The executor's files: FILES[name] = the table the JSON stands for.
+local FILES = {}
+local function readfile(n)
+    if FILES[n] == nil then error("no such file") end
+    return n
+end
+local function writefile(n, s) FILES[n] = s end
+local HttpService = {
+    JSONEncode = function(_, t) return t end,
+    JSONDecode = function(_, s) return FILES[s] end,
+}
+local game = { GetService = function(_, n) return n == "HttpService" and HttpService or nil end }
 local function reset()
     _G.BFF = P
+    FILES = {}
     CFG = { AutoTeam = true, Team = "Pirates" }
     CALLS, WAITS, REMOTE_WORKS, BUTTON_WORKS = {}, 0, true, false
     screen = { Visible = true }
@@ -29,7 +42,7 @@ local function reset()
         boxes[t] = { GetDescendants = function() return { b } end }
     end
     screen.Container = { FindFirstChild = function(_, n) return boxes[n] end }
-    player = { Team = nil, PlayerGui = { Main = { ChooseTeam = screen } } }
+    player = { UserId = 42, Team = nil, PlayerGui = { Main = { ChooseTeam = screen } } }
 end
 reset()
 local cf = {}

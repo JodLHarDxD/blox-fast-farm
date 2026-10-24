@@ -45,4 +45,19 @@ check("no remotes: no error, no call", w.ok and #w.calls == 0, tostring(w.err))
 w = run({ place = THIRD, errorFirst = true, joinAfter = 2 })
 check("a call error does not end it", w.ok and #w.calls == 2 and w.player.Team ~= nil, tostring(w.err))
 
+-- 8. Marines picked in fast_farm (its kept file): Marines, not TEAM
+--    (user, 2026-10-24: every hop joined Pirates)
+w = run({ place = THIRD, joinAfter = 1, kept = { team = "Marines", pick = true } })
+check("kept Marines: asks for Marines", w.ok and table.concat(w.calls, ",") == "SetTeam:Marines"
+    and w.player.Team.Name == "Marines", table.concat(w.calls, ",") .. " " .. tostring(w.err))
+check("this account's file", READ_NAME == "bff_team_42.json", READ_NAME)
+
+-- 9. picking switched off in fast_farm: nothing asked here either
+w = run({ place = THIRD, joinAfter = 1, kept = { team = "Marines", pick = false } })
+check("kept pick off: no call", w.ok and #w.calls == 0 and w.player.Team == nil, #w.calls)
+
+-- 10. a kept file with no team in it: TEAM
+w = run({ place = THIRD, joinAfter = 1, kept = { team = "Navy" } })
+check("kept nonsense: TEAM", w.ok and table.concat(w.calls, ",") == "SetTeam:Pirates", table.concat(w.calls, ","))
+
 print(all and "ALL PASS" or "SOME FAILED")

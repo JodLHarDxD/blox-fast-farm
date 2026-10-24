@@ -114,7 +114,9 @@ the game's hit sender was reached.
 The script comes back by itself only after a hop IT made (a hunt's hop, the
 panel's "Hop now"). A hop through the game's own server menu, or a fresh join,
 arrives without it -- so `autoexec_team.lua` sits in the executor's autoexec
-folder: at every Blox Fruits join it asks for Pirates (`TEAM` at its top) until
+folder: at every Blox Fruits join it asks for the team you last picked on
+Servers & team (fast_farm keeps it in `bff_team_<UserId>.json`; `TEAM` at its
+top only until that file exists; "Pick my team on join" off = it asks nothing) until
 you are on a team, then hides the team screen; the console says
 `[BFF] autoexec team: on Pirates`. It never loads the farm, does nothing in
 other games, and never switches a team you are on.
@@ -663,9 +665,9 @@ python tools/pose_test.py                        # where you hang + the remote h
 python tools/probe_test.py                       # the M1 probe, real code: the game's own hit sender tried first; "nothing landed" tried again after 12 s, not final for the server
 python tools/fire_test.py                        # where each M1 way goes, real code: remote (both shapes), fruit click per enemy, held gun, past the heat, a gun's click aimed for its burst, a sword's click
 python tools/gun_test.py                         # a gun's M1, real code: the one enemy (kept while it lives, then the weakest), the button through a whole heat cycle (press / keep / let go / locked / again), the frame watchdog, the game's own shot found + paced + seen as the game's, the mastery farm (only that weapon, loaded, read, stops at 500 once)
-python tools/team_test.py                        # the team pick, real code: SetTeam until on a team, the screen's button never fired, Marines when picked, never a switch, off = nothing
+python tools/team_test.py                        # the team pick, real code: SetTeam until on a team, the screen's button never fired, Marines when picked, never a switch, off = nothing, the kept pick (bff_team_<UserId>.json) read at load and written by the panel
 python tools/berry_test.py                       # the berry pick, real code: a real hold first (a game refusing the instant fire still gets picked), fireproximityprompt as the fallback, ~15 s then left a minute, taken by another = out at once, a stop = out at once
-python tools/autoexec_test.py                    # autoexec_team.lua, real file: Pirates at every join, other games untouched, never a switch, a minute at most, place read after load, call errors survived
+python tools/autoexec_test.py                    # autoexec_team.lua, real file: Pirates at every join, the kept pick (Marines / off) over TEAM, other games untouched, never a switch, a minute at most, place read after load, call errors survived
 python tools/leash_test.py                       # checkPutBack: pull limit measured (contrast rule), random mode's in-place escalation
 python tools/magnet_test.py                      # the magnet's frame, real code: frozen while held (again if undone), each keeps its own ring spot through deaths / reorders
 python tools/flower_test.py                      # the Fire Flower hunt, real code: the flower found, held like a player (fire fallback), stuck / gone / picked, the clock from the first kill, 3-min no-kill exit, Third Sea, hop off stays, camps in turn

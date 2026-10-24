@@ -4,6 +4,8 @@
 -- game: it does nothing. Only while you have no team: the one you are on is
 -- never switched. fast_farm.lua's own team pick (CFG.AutoTeam) does the same
 -- when it is loaded; both at once is harmless.
+-- The team is the one you picked on fast_farm's Servers & team page (its
+-- bff_team_<UserId>.json); TEAM only until that file is there.
 local TEAM = "Pirates"   -- or "Marines"
 
 -- PlaceId is only certain once the game has loaded.
@@ -20,6 +22,16 @@ local player = Players.LocalPlayer
 while not player do
     task.wait(0.1)
     player = Players.LocalPlayer
+end
+-- YOUR PICK (user, 2026-10-24: Marines picked, every hop joined Pirates -
+-- this file asked first, always with its own TEAM). "Pick my team on join"
+-- off there = nothing asked here either.
+local ok, kept = pcall(function()
+    return game:GetService("HttpService"):JSONDecode(readfile("bff_team_" .. tostring(player.UserId) .. ".json"))
+end)
+if ok and type(kept) == "table" then
+    if kept.pick == false then return end
+    if kept.team == "Pirates" or kept.team == "Marines" then TEAM = kept.team end
 end
 local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 30)
 local cf = remotes and remotes:WaitForChild("CommF_", 30)

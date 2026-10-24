@@ -6,11 +6,20 @@
 --   joinAfter  the SetTeam call that puts you on the team (nil = never)
 --   noRemotes  ReplicatedStorage has no Remotes
 --   errorFirst the first SetTeam call errors (throttled)
+--   kept       what fast_farm keeps in bff_team_<UserId>.json (nil = no file)
 -- The file runs as RUN(game, task, print); its `return`s end RUN.
+local KEPT, READ_NAME
+local function readfile(n)
+    READ_NAME = n
+    if KEPT == nil then error("no such file") end
+    return "json"
+end
+local HttpService = { JSONDecode = function() return KEPT end }
 local function mk(opts)
     local calls, printed = {}, {}
     local clock = 0
-    local player = { Team = opts.team, PlayerGui = { Main = { ChooseTeam = { Visible = true } } } }
+    KEPT, READ_NAME = opts.kept, nil
+    local player = { UserId = 42, Team = opts.team, PlayerGui = { Main = { ChooseTeam = { Visible = true } } } }
     local cf = {}
     function cf:InvokeServer(a, b)
         table.insert(calls, a .. ":" .. tostring(b))
@@ -31,6 +40,7 @@ local function mk(opts)
     function game:GetService(n)
         if n == "Players" then return { LocalPlayer = player } end
         if n == "ReplicatedStorage" then return RS end
+        if n == "HttpService" then return HttpService end
         return nil
     end
     local task = { wait = function(s) clock += (s or 0.03) end }
