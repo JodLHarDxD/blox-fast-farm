@@ -125,7 +125,7 @@ local CFG = {
     -- ---------- M1 ----------
     -- "auto" tries each way of landing an M1 against the pile and keeps the
     -- first one that takes HP off. The others force one way.
-    M1Method           = "auto", -- "auto" | "remote" | "click" | "keys"
+    M1Method           = "auto", -- "auto" | "remote" | "click" | "tap" | "keys"
     M1Every            = 0.06,   -- seconds between M1s (user, 2026-10-05: 0.06)
     HitRange           = 60,     -- the remote hit names enemies this close
 
@@ -625,7 +625,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.5" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -3034,6 +3034,12 @@ local function skillReady(w, k)
     -- Sent, and its bar never moved: not this weapon's (or not unlocked yet).
     local dead = cd[w] and cd[w][k] and cd[w][k].deadUntil
     if dead and os.clock() < dead then return false end
+    -- The game's own block on the key (FruitSkillUtil.isToolSkillDisabled,
+    -- decompiled v4623): the tool's DisabledSkill<key>, which the SERVER sets
+    -- - a move switched off for now. Not pressed until the game lifts it.
+    local t = findTool(w)
+    local okD, dis = pcall(function() return t and t:GetAttribute("DisabledSkill" .. k) end)
+    if okD and dis == true then return false end
     local b = barReady(w, k)
     local held = heldTool()
     -- The bar of the weapon in hand is the truth. Others: trust a bar that
@@ -3308,6 +3314,7 @@ end
 local m1Plan  = {}           -- [weapon] = chosen way, or false (nothing landed)
 local m1Retry = {}           -- [weapon] = when a "nothing landed" is tried again
 P.m1Notes     = {}
+P.m1Fails     = {}           -- [weapon] = "nothing landed" in a row (the wait grows)
 
 -- Try the ways now? Never tried, or a "nothing landed" whose wait is over.
 local function m1Due(name)
@@ -3449,12 +3456,34 @@ do
         return true
     end
 
+    -- A FRUIT'S OWN M1 (decompiled v4623, MovesetClientRunner): the fruit's
+    -- tool turns its own Activated into the TAP move - casFunc, the call a
+    -- real click makes, with every gate the game keeps (TAP's own cooldown, a
+    -- move still playing, energy, mastery). Tool:Activate() is that click
+    -- without the mouse; Deactivate a moment later is the button let go. The
+    -- move aims at require(RS.Mouse).Hit - the SILENT AIM's table - so the
+    -- aim is held on ONE enemy, as for a gun (P.gunAimFor): the rest of the
+    -- pile waits its turn instead of being judged as taking no damage (put
+    -- back, the camp left half done - user, 2026-10-24, Lightning). Pressed
+    -- every tick: the game takes it the moment its cooldown lets it.
+    local function m1Tap(tool, list)
+        if not tool or heldTool() ~= tool or P.isPhysicalFruit(tool) or #list == 0 then return false end
+        local ga = (P :: any).gunAimFor
+        if ga then ga(0.6, P.hitReach()) end
+        pcall(function() tool:Activate() end)
+        task.wait(0.05)
+        pcall(function() tool:Deactivate() end)
+        return true
+    end
+
     function fireM1(way, tool)
         local list = hitTargets()
         if way.path == "remote" then
             m1Remote(way.variant, list)
         elseif way.path == "click" then
             m1Click(tool, list)
+        elseif way.path == "tap" then
+            m1Tap(tool, list)
         elseif way.path == "hold" then
             (P :: any).gunHoldTick(tool)
         elseif way.path == "gunshot" then
@@ -3490,6 +3519,7 @@ local function describeWay(way)
     local where = (way.pose == "melee") and "close" or "from above"
     if way.path == "remote" then return "remote hit (" .. way.variant .. "), " .. where end
     if way.path == "click" then return "fruit click, " .. where end
+    if way.path == "tap" then return "the fruit's own M1 (the game's click), " .. where end
     if way.path == "hold" then return "held like a player (the game's own fire), " .. where end
     if way.path == "gunshot" then return "the game's own shot, past the heat, " .. where end
     return "key press, " .. where
@@ -3512,6 +3542,12 @@ do
             if tool:FindFirstChild("LeftClickRemote") then
                 table.insert(all, { path = "click", pose = "safe" })
                 table.insert(all, { path = "click", pose = "melee" })
+            end
+            -- A FRUIT'S OWN M1: every fruit the game runs through its moveset
+            -- (a Holding flag on the tool - without one it binds no M1).
+            if tool:FindFirstChild("Holding") then
+                table.insert(all, { path = "tap", pose = "safe" })
+                table.insert(all, { path = "tap", pose = "melee" })
             end
             table.insert(all, { path = "remote", variant = "new", pose = "safe" })
             table.insert(all, { path = "keys", pose = "melee" })
@@ -3557,6 +3593,19 @@ do
     function probeM1(name, tool)
         stats.probes += 1
         probing = true
+        -- A SKILL'S DAMAGE IS NOT AN M1's (user, 2026-10-24: Lightning's M1
+        -- "never clicks" - the log said "remote hit (new)", a sword's way, for
+        -- a fruit). The probe ran right after the casts, and what they still
+        -- did (a storm, a strike that lands later) took the HP inside the M1's
+        -- window. So the moves end first (up to 2.5 s after the last cast),
+        -- and each way is judged against what the pile lost with NOTHING
+        -- fired just before it (another player, a burn).
+        local cc = (P :: any).canCast
+        local ts = os.clock()
+        while P.running and #pile > 0 and os.clock() - ts < 2.5
+            and ((cc and not cc()) or os.clock() - (P.lastCastAt or -1e9) < 1.5) do
+            task.wait(0.1)
+        end
         local tried = {}
         for _, way in ipairs(waysFor(tool)) do
             if not P.running or #pile == 0 then break end
@@ -3572,13 +3621,17 @@ do
                 end
                 return s
             end
+            local q0, tq = sumHP(), os.clock()
+            task.wait(0.5)
+            local quiet = math.max(q0 - sumHP(), 0) / math.max(os.clock() - tq, 0.05)
             local hp0, t0 = sumHP(), os.clock()
             while os.clock() - t0 < 1.6 and P.running and #pile > 0 do
                 fireM1(way, tool)
                 task.wait(math.max(CFG.M1Every or 0.06, 0.06))
             end
             task.wait(0.2)
-            local landed = (hp0 - sumHP()) > 0.5
+            local lost = hp0 - sumHP()
+            local landed = lost > 0.5 and lost > quiet * (os.clock() - t0) * 1.5 + 0.5
             -- A held button that landed nothing is let go before the next way.
             local gr = (P :: any).gunRelease
             if not landed and way.path == "hold" and gr then gr() end
@@ -3586,6 +3639,7 @@ do
             if landed then
                 probing = false
                 m1Plan[name] = way
+                P.m1Fails[name] = nil
                 P.m1Notes[name] = describeWay(way)
                 say(name .. " M1: " .. describeWay(way))
                 print("[BFF] M1 " .. name .. ": " .. describeWay(way))
@@ -3595,10 +3649,16 @@ do
         probing = false
         if #tried == 0 then return nil end              -- interrupted: try again later
         -- NOT FINAL: one bad moment (just arrived, the target turning away)
-        -- used to leave M1 off for the rest of the server. Tried again soon.
+        -- used to leave M1 off for the rest of the server. Tried again soon -
+        -- and later each time it finds nothing again (12 s, 24, 48, 96, then
+        -- every 2 min): a weapon whose M1 lands nowhere spent about 10 s of
+        -- every 22 probing instead of casting.
+        local fails = (P.m1Fails[name] or 0) + 1
+        P.m1Fails[name] = fails
+        local again = math.min(12 * 2 ^ (fails - 1), 120)
         m1Plan[name] = false
-        m1Retry[name] = os.clock() + 12
-        P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. ")  - trying again in 12 s"
+        m1Retry[name] = os.clock() + again
+        P.m1Notes[name] = "nothing landed  (" .. table.concat(tried, "; ") .. string.format(")  - trying again in %d s", again)
         print("[BFF] M1 " .. name .. ": " .. P.m1Notes[name])
         return false
     end
@@ -3608,6 +3668,7 @@ function P.reprobe()
     table.clear(m1Retry)
     table.clear(m1Plan)
     table.clear(P.m1Notes)
+    table.clear(P.m1Fails)
     say("M1 ways forgotten - each weapon is tried again on the next pile")
 end
 
@@ -3675,8 +3736,11 @@ local function castSkill(u, k)
     -- is out of cooldown it is pressed"): the key the moment the game takes
     -- it, the next one the frame this one's bar starts - no fixed wait.
     -- ...and while V4 is on (RACE: every weapon's keys, user 2026-10-12).
+    -- ...and the mastery farm (user, 2026-10-24: "Lightning's Z every 1 to
+    -- 1.5 s"): a fixed wait after each key was a third of a cooldown that short.
     local race = (P :: any).race
-    local fast = (pileCur and pileCur.fastCast) or (race ~= nil and race.allNow()) or false
+    local fast = (pileCur and pileCur.fastCast) or (race ~= nil and race.allNow())
+        or (CFG.MasteryWeapon or "") ~= ""
     if fast then
         -- The move before still playing: wait for it (up to 3 s), never press into it.
         local tw = os.clock()
@@ -3686,6 +3750,7 @@ local function castSkill(u, k)
     holdKey(KEYCODE[k], hold, before)
     local c = cdOf(u.name, k)
     c.lastCast = os.clock()
+    P.lastCastAt = c.lastCast        -- the M1 probe waits for the move to end
     stats.casts += 1
     actions += 1
     -- DID IT START (user, 2026-10-09: "Kitsune Z and X missed, only C and F"):
@@ -3782,6 +3847,9 @@ local function attackTick()
     if pileCur and pileCur.allKeys then between = 0 end
     -- V4: every weapon's skill the moment it is ready, the M1s in the gaps.
     if race then between = 0 end
+    -- The mastery farm: the same - its one weapon's every key the moment it
+    -- is ready, its M1 in the gaps (a Lightning M1 is also what refills its orbs).
+    if (CFG.MasteryWeapon or "") ~= "" then between = 0 end
 
     if anySkill and (not m1u or m1Count >= between) then
         for _, u in ipairs(used) do
@@ -4202,10 +4270,72 @@ do
             if not tool then return {} end
             local keys = CFG.AutoKeys or {}
             local w = wcfg(name)
+            -- A key its mastery has not unlocked is never pressed (SEA EVENTS'
+            -- unlocked, the rule V4 uses too): pressed, the game only says
+            -- "Skill locked!" - and every fast cast waited on it for nothing.
+            local se = (P :: any).seaev
+            local function on(k)
+                if keys[k] ~= true then return false end
+                if se and se.unlocked then return se.unlocked(name, k) ~= false end
+                return true
+            end
             return { { name = name, tool = tool, cfg = {
                 use = true, M1 = true, hold = w.hold, F = false,
-                Z = keys.Z == true, X = keys.X == true, C = keys.C == true, V = keys.V == true,
+                Z = on("Z"), X = on("X"), C = on("C"), V = on("V"),
             } } }
+        end
+
+        -- THE GAME'S OWN NUMBERS for the mastery weapon, printed once (user,
+        -- 2026-10-24: "research how fast Lightning can attack"): its cooldown,
+        -- cost and mastery per key from Remotes.GetFruitData - the table the
+        -- game's own FruitSkillUtil asks for (a key's seconds = its number
+        -- x 1.5, less your gear's cut) - and what its tool carries: which M1
+        -- ways it has, which attributes (where a fruit keeps its orbs).
+        local factsFor = {}
+        function P.masteryFacts(name)
+            if factsFor[name] then return end
+            factsFor[name] = true
+            local bits = {}
+            local ok, all = pcall(function()
+                return RS:WaitForChild("Remotes", 5):WaitForChild("GetFruitData", 5):InvokeServer()
+            end)
+            local d = ok and type(all) == "table" and all[name] or nil
+            if type(d) == "table" then
+                for _, part in ipairs({ "Cooldown", "Cost", "Lvl" }) do
+                    local t = d[part]
+                    if type(t) == "table" then
+                        local kv = {}
+                        for _, k in ipairs({ "TAP", "Z", "X", "C", "V", "F" }) do
+                            if t[k] ~= nil then table.insert(kv, k .. " " .. tostring(t[k])) end
+                        end
+                        table.insert(bits, part .. " " .. table.concat(kv, ", "))
+                    end
+                end
+            else
+                table.insert(bits, "the game's numbers: " .. (ok and "none for it" or "not readable"))
+            end
+            local tool = findTool(name)
+            if tool then
+                local kids, attrs = {}, {}
+                for _, c in ipairs(tool:GetChildren()) do table.insert(kids, c.Name .. " (" .. c.ClassName .. ")") end
+                for k, v in pairs(tool:GetAttributes()) do table.insert(attrs, k .. "=" .. tostring(v)) end
+                table.sort(attrs)
+                table.insert(bits, "tool: " .. table.concat(kids, ", "))
+                table.insert(bits, "tool attributes: " .. table.concat(attrs, ", "))
+            end
+            local ch = player.Character
+            local base = string.lower(string.match(name, "^([^-]+)") or name)
+            local mine = {}
+            for k, v in pairs(ch and ch:GetAttributes() or {}) do
+                local lk = string.lower(k)
+                if string.find(lk, "orb", 1, true) or string.find(lk, "cooldown", 1, true)
+                    or string.find(lk, base, 1, true) then
+                    table.insert(mine, k .. "=" .. tostring(v))
+                end
+            end
+            table.sort(mine)
+            table.insert(bits, "your character: " .. (#mine > 0 and table.concat(mine, ", ") or "nothing of it"))
+            print("[BFF] mastery " .. name .. " - " .. table.concat(bits, "  ·  "))
         end
 
         -- Once a second (the side loop): not carried = loaded from your
@@ -4230,6 +4360,7 @@ do
                 end
                 return
             end
+            task.spawn(function() pcall(P.masteryFacts, name) end)
             local m = P.masteryOf(name)
             local stopAt = tonumber(CFG.MasteryStop) or 0
             P.masteryNote = string.format("%s  mastery %s%s", name, m and tostring(m) or "not readable",
@@ -16183,10 +16314,11 @@ local function buildUI()
             function(x) CFG.MasteryStop = x end, " mastery")
         readout(v, function() return tostring(P.masteryNote) end)
         heading2(v, "how M1 lands")
-        radio(v, 164, {
+        radio(v, 205, {
             { "auto", "Auto - keep what hurts" },
             { "remote", "Remote hit - whole pile" },
             { "click", "Fruit click" },
+            { "tap", "Fruit M1 - the game's own click" },
             { "keys", "Key press" },
         }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
         actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)

@@ -42,3 +42,8 @@ local function toolType(t) return t.kind end
 function P.gunHoldTick(t) ev("hold " .. t.Name) end
 function P.gunShotTick(t) ev("gunshot " .. t.Name) end
 function P.gunAimFor(secs) ev("aim " .. secs) end
+-- A FRUIT'S OWN M1: the tool in your hand, and whether it is a fruit to eat.
+HELD, PHYSICAL = nil, false
+local function heldTool() return HELD end
+function P.isPhysicalFruit() return PHYSICAL end
+local task = { wait = function() end }

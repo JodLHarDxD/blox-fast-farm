@@ -226,4 +226,30 @@ do
         "swap Kitsune | M1 Kitsune | M1 Kitsune | M1 Kitsune") and all
     P.race = nil
 end
+-- THE MASTERY FARM (user, 2026-10-24: "Lightning's Z every 1 to 1.5 s"): every key the
+-- moment it is ready, the M1 in the gaps - "M1 between" and the fixed CastWait do not hold.
+pileCur, P.m1Of = nil, nil
+local function mcfg(over)
+    local c = cfg(over, { Kitsune = W{ M1 = true, Z = true, X = true }, ["Sanguine Art"] = W{}, Sword = W{} })
+    c.MasteryWeapon = "Kitsune"
+    return c
+end
+all = run("mastery: skills whenever ready, M1 only while they cool (4 between ignored)", mcfg({ M1Between = 4 }), 4,
+    "swap Kitsune | cast Kitsune Z | cast Kitsune X | M1 Kitsune | M1 Kitsune") and all
+all = run("...the same setup without the mastery farm keeps its 4 between",
+    (function() local c = mcfg({ M1Between = 4 }) c.MasteryWeapon = "" return c end)(), 3,
+    "swap Kitsune | cast Kitsune Z | M1 Kitsune | M1 Kitsune") and all
+CFG = mcfg({ M1Between = 0 })
+LOG, clock, held, CD, m1Count, cdStore = {}, 0, nil, {}, 0, {}
+attackTick()
+print((clock < 0.2 and "PASS " or "FAIL ") .. "mastery: the next action the frame the key fired - no 0.5 s CastWait (" .. clock .. " s)")
+all = (clock < 0.2) and all
+REFUSE = true
+LOG, clock, held, CD, m1Count, cdStore = {}, 0, nil, {}, 0, {}
+attackTick()
+local md = cdStore["KitsuneZ"] and cdStore["KitsuneZ"].deadUntil
+local mdOk = md ~= nil and md - clock <= 3.01 and md - clock > 2
+print((mdOk and "PASS " or "FAIL ") .. "mastery: a refused key (out of orbs, too early) is tried again in 3 s, not a minute")
+all = mdOk and all
+REFUSE = false
 print(all and "ALL PASS" or "SOME FAILED")
