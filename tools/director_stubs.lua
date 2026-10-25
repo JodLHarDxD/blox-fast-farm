@@ -3,17 +3,19 @@ local NOW = 100
 local os = { clock = function() return NOW end, time = function() return NOW end }
 local task = { wait = function() end }
 local epoch = 0
-local CFG, E, LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY, FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP
+local CFG, E, LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY, FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP
 local function reset()
     CFG = { Hunt = true, HuntKind = "elite", HuntHop = true }
     E = { chalice = false, used = false, lookStart = NOW - 10, note = "", why = nil }
     LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY = {}, false, nil, nil, false, false
-    FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP = false, nil, nil
+    FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP = false, nil, nil, false
 end
 reset()
 local function log(s) table.insert(LOG, s) end
 local function holdingChalice() return HOLD end
 local function chaliceStop() log("chalice") end
+-- KEEP = a fruit too good to lose, no slot for it (keepHold holds you).
+local function keepHold() if KEEP then log("keep hold") end return KEEP end
 local function lookAgain() E.lookStart = NOW end
 local function readProgress() end
 local function berryCounts() end

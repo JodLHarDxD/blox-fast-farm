@@ -98,4 +98,24 @@ check("busy off: the hunts' order (fewest), no ping order", rankedIn == nil and 
     tostring(log.joins[1]))
 CFG.Pvp, CFG.PvpHopBusy, P.pingLearn, P.pingRank = nil, nil, nil, nil
 
+-- A FRUIT TOO GOOD TO LOSE, no slot (user, 2026-10-25): not one teleport -
+-- by hand, PvP or hunt alike; storage tried once more first
+local KEEPERS, TRIED = {}, nil
+P.keepersLeft = function(tryStore) TRIED = tryStore return KEEPERS end
+P.keepWords = function(list) return list[1].orig end
+reset()
+ROWS, KEEPERS = servers(), { { orig = "Control-Control", value = 120e6 } }
+r = hop("by hand")
+check("kept fruit, no slot: refused, no join, nothing carried", r == false and #log.joins == 0
+    and log.carries == 0 and not E.hopping, #log.joins)
+check("...storage tried once more first", TRIED == true)
+check("...nothing else stored either (no hop, nothing to lose)", log.stores == 0)
+check("...says which fruit and why", string.find(E.note, "Control-Control", 1, true)
+    and string.find(E.note, "hop loses it", 1, true), E.note)
+reset()
+ROWS, KEEPERS = servers(), {}
+r = hop("test")
+check("traded / stored since: the hop goes on", #log.joins > 0, #log.joins)
+P.keepersLeft, P.keepWords = nil, nil
+
 print(all and "ALL PASS" or "SOME FAILED")

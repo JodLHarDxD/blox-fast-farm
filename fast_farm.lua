@@ -289,6 +289,16 @@ local CFG = {
     -- on = every one is stored just before a hop (the raid loop can still
     -- load it back for a chip). Off = it is left behind.
     FruitStoreOnHop    = true,
+    -- A FRUIT TOO GOOD TO LOSE (user, 2026-10-25: a Control and a second
+    -- Dough picked with no storage slot free - a hop would have left them
+    -- behind). Worth at least this on the TRADING MARKET (P.TRADE_VALUES, a
+    -- physical fruit's value - not the game's Beli): stored at once,
+    -- whatever "Store it at once" says; when it cannot be (no +1 Fruit
+    -- Storage, one of it already stored) you are taken to a safe zone and
+    -- held there - no hop, no hunt - until it leaves your backpack (traded to
+    -- your other account, given away, stored by you) or you press Stop.
+    -- 0 = off.
+    FruitKeepValue     = 20000000,
     -- BERRY HUNT: the Haki colors. The Barista turns berries into Aura
     -- colors: Snow White 10 White Cloud, Winter Sky 15 Pink Pig, Pure Red 15
     -- Red Cherry (Legendary, + 7,500 fragments each). At most 4 in a server,
@@ -625,7 +635,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-24.5" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-25.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -978,6 +988,147 @@ function P.fruitBase(orig)
     local sub = string.match(orig, ":%s*(.+)$")
     if sub then return sub end
     return string.match(orig, "^(.+)%-%1$") or orig
+end
+-- TRADE VALUE (user, 2026-10-25: "follow the trading market's value, not the
+-- Beli the game asks"). A PHYSICAL fruit's value on the list every trader
+-- uses - bloxfruitsvalues.com = fruityblox.com, mirrored by Traderie
+-- (records of 2026-10-17 .. 22, Update 30) - never a permanent's or a skin's.
+-- Keyed by the fruit's own name ("Control" of "Control-Control"). Dragon is
+-- one fruit in the game (West / East is picked once eaten): East's, the
+-- lower, counts.
+P.TRADE_VALUES = {
+    Dragon = 2.97e9, Kitsune = 570e6, Magnet = 540e6, Control = 120e6, Tiger = 100e6,
+    Yeti = 90e6, Gas = 60e6, Dough = 30e6, Venom = 25e6, Lightning = 20e6, ["T-Rex"] = 20e6,
+    Pain = 10e6, Gravity = 10e6, Mammoth = 10e6, Spirit = 10e6, Portal = 10e6, Buddha = 10e6,
+    Shadow = 6.5e6, Blizzard = 5e6, Phoenix = 2.75e6, Creation = 2.5e6, Sound = 2.5e6,
+    Spider = 1.5e6, Love = 1.5e6, Magma = 1.15e6, Quake = 1e6, Diamond = 1e6, Light = 800e3,
+    Ghost = 800e3, Eagle = 800e3, Rubber = 700e3, Ice = 550e3, Sand = 420e3, Dark = 400e3,
+    Flame = 250e3, Spike = 180e3, Smoke = 100e3, Bomb = 80e3, Spring = 60e3, Blade = 50e3,
+    Spin = 7.5e3, Rocket = 5e3,
+}
+-- -> its trade value; nil = a fruit the list does not know (newer than it).
+function P.tradeValue(orig)
+    if orig == nil then return nil end
+    local want = norm(P.fruitBase(orig))
+    if string.find(want, "dragon", 1, true) then return P.TRADE_VALUES.Dragon end
+    for _, alt in ipairs({ want, RENAMED[want] }) do
+        for name, v in pairs(P.TRADE_VALUES) do
+            if norm(name) == alt then return v end
+        end
+    end
+    return nil
+end
+-- Too good to lose (CFG.FruitKeepValue): worth at least `min` - a fruit the
+-- list does not know counts too, a new one is dear until shown otherwise.
+-- min 0 = nothing is.
+function P.isKeeper(orig, min)
+    min = tonumber(min) or 0
+    if min <= 0 then return false end
+    local v = P.tradeValue(orig)
+    return v == nil or v >= min
+end
+-- 120000000 -> "120M", 2970000000 -> "2.97B", nil -> "?".
+function P.valueWords(v)
+    if type(v) ~= "number" then return "?" end
+    if v >= 1e9 then return (string.gsub(string.format("%.2fB", v / 1e9), "%.?0+B$", "B")) end
+    if v >= 1e6 then return (string.gsub(string.format("%.2fM", v / 1e6), "%.?0+M$", "M")) end
+    if v >= 1e3 then return (string.gsub(string.format("%.1fK", v / 1e3), "%.?0+K$", "K")) end
+    return tostring(v)
+end
+
+-- THE FRUIT HISTORY (user, 2026-10-25: "which fruits it gets, in which
+-- server of the hops, how many of each, stored or not"). Every fruit picked
+-- up, newest last, the last 300, in workspace/bff_fruit_log_<UserId>.json.
+-- An entry: t (os.time), orig, value (trade), price (Beli), server (the
+-- hunt's join count when it came), from ("spawn" / "drop"), isle, state.
+-- The state changes as the fruit moves on: stored, backpack (kept for raid
+-- chips), held (too good to lose, no free slot), notstored, slot (stored
+-- once a slot was free), hopstored (stored right before a hop), gone (left
+-- your backpack while held - traded, given, stored by you), lost (left
+-- behind at a hop).
+P.FRUIT_STATES = {
+    stored = "stored", backpack = "in backpack, not stored", held = "HELD - no storage slot",
+    notstored = "not stored - no slot", slot = "stored once a slot was free",
+    hopstored = "stored before a hop", gone = "left the backpack - traded / stored by you",
+    lost = "LOST - left behind at a hop",
+}
+P.fruitLogFile = "bff_fruit_log_" .. tostring(player.UserId) .. ".json"
+P.fruitLog = {}
+pcall(function()
+    local t = game:GetService("HttpService"):JSONDecode(readfile(P.fruitLogFile))
+    if type(t) == "table" and type(t.log) == "table" then P.fruitLog = t.log end
+end)
+function P.fruitLogSave()
+    if not writefile then return end
+    pcall(function()
+        writefile(P.fruitLogFile, game:GetService("HttpService"):JSONEncode({ v = 1, log = P.fruitLog }))
+    end)
+end
+function P.fruitLogAdd(e)
+    e.t = e.t or os.time()
+    table.insert(P.fruitLog, e)
+    while #P.fruitLog > 300 do table.remove(P.fruitLog, 1) end
+    P.fruitLogSave()
+    return e
+end
+-- The newest entry of `orig` whose state is one of `from` (a set) gets `state`.
+-- -> the entry, or nil.
+function P.fruitLogSet(orig, state, from)
+    for i = #P.fruitLog, 1, -1 do
+        local e = P.fruitLog[i]
+        if e.orig == orig and (from == nil or from[e.state]) then
+            e.state = state
+            P.fruitLogSave()
+            return e
+        end
+    end
+    return nil
+end
+function P.fruitLogClear()
+    table.clear(P.fruitLog)
+    P.fruitLogSave()
+end
+-- Per fruit, dearest first: "Control   x2  ·  120M  ·  1 stored, 1 HELD...".
+function P.fruitLogSummary()
+    local by, order = {}, {}
+    for _, e in ipairs(P.fruitLog) do
+        local name = P.fruitBase(e.orig)
+        local s = by[name]
+        if not s then
+            s = { name = name, n = 0, value = e.value, states = {} }
+            by[name] = s
+            table.insert(order, s)
+        end
+        s.n += 1
+        s.states[e.state or "?"] = (s.states[e.state or "?"] or 0) + 1
+    end
+    table.sort(order, function(a, b)
+        if (a.value or 0) ~= (b.value or 0) then return (a.value or 0) > (b.value or 0) end
+        return a.name < b.name
+    end)
+    local lines = {}
+    for _, s in ipairs(order) do
+        local bits = {}
+        for st, n in pairs(s.states) do
+            table.insert(bits, string.format("%d %s", n, P.FRUIT_STATES[st] or st))
+        end
+        table.sort(bits)
+        table.insert(lines, string.format("%-10s x%-3d %6s  ·  %s", s.name, s.n, P.valueWords(s.value),
+            table.concat(bits, ", ")))
+    end
+    return lines
+end
+-- The newest `n` entries, newest first: "25 Oct 18:42  server #37  Dough  30M  HELD...".
+function P.fruitLogLines(n)
+    local lines = {}
+    for i = #P.fruitLog, math.max(1, #P.fruitLog - (n or 40) + 1), -1 do
+        local e = P.fruitLog[i]
+        table.insert(lines, string.format("%s  server #%s  %-10s %6s  %s%s",
+            os.date("%d %b %H:%M", e.t or 0), tostring(e.server or "?"), P.fruitBase(e.orig),
+            P.valueWords(e.value), P.FRUIT_STATES[e.state] or tostring(e.state),
+            e.from == "drop" and "  (a drop)" or ""))
+    end
+    return lines
 end
 -- "Meshes/magu_34" -> "magma"; nil = not a mesh named after a fruit.
 function P.meshToken(name)
@@ -5716,6 +5867,9 @@ do
             hopping = false,
             chalice = false,         -- seen in this server: no hop here, ever
             safeAt = nil,
+            -- A fruit too good to lose, no slot (keepHold): [orig] = true while
+            -- held; where you wait; the next storage try.
+            keepHeld = nil, keepAt = nil, keepTryAt = nil,
             lookStart = nil, foundHere = false,
             asks = 0, askAt = -100, questAskAt = -100, reply = nil, replyText = nil,
             npcVisited = false, dropped = false, isleTried = false,
@@ -6119,6 +6273,17 @@ do
                 say(E.note)
                 return false
             end
+            -- A FRUIT TOO GOOD TO LOSE (CFG.FruitKeepValue) that cannot be
+            -- stored stays with you here: storage tried once more first, then
+            -- not one teleport - by hand, PvP or hunt.
+            if P.keepersLeft and not E.hopping then
+                local keep = P.keepersLeft(true)
+                if #keep > 0 then
+                    E.note = "hop refused - " .. P.keepWords(keep) .. " cannot be stored and a hop loses it"
+                    say(E.note)
+                    return false
+                end
+            end
             if E.hopping then return false end
             E.hopping = true
             local myEpoch = epoch
@@ -6377,8 +6542,46 @@ do
                     local ok, orig, why = storeTool(t, nil)
                     print(string.format("[BFF] hop: %s %s%s", ok and "stored" or "could NOT store", tostring(orig),
                         ok and " before leaving (a fruit in the backpack is lost on a hop)" or (" (" .. tostring(why) .. ") - it goes with this server")))
+                    P.fruitLogSet(orig, ok and "hopstored" or "lost", { backpack = true, notstored = true })
                 end
             end
+        end
+
+        -- A FRUIT TOO GOOD TO LOSE (CFG.FruitKeepValue, P.isKeeper): each one
+        -- you carry - backpack or hand - and, with tryStore, tried in storage
+        -- once more (a slot you freed counts). -> the ones still carried,
+        -- { tool, orig, value }.
+        local function keepersLeft(tryStore)
+            local left = {}
+            if (tonumber(CFG.FruitKeepValue) or 0) <= 0 then return left end
+            local _, _, hum = parts()
+            for _, src in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
+                for _, t in ipairs(src and src:GetChildren() or {}) do
+                    if P.isPhysicalFruit(t) then
+                        local o = t:GetAttribute("OriginalName")
+                        o = (type(o) == "string" and o) or P.fruitOrig(t.Name) or t.Name
+                        if P.isKeeper(o, CFG.FruitKeepValue) then
+                            if hum and t.Parent == player.Character then pcall(function() hum:UnequipTools() end) end
+                            if tryStore and storeTool(t, o) then
+                                P.fruitLogSet(o, "slot", { held = true, notstored = true, backpack = true })
+                                print("[BFF] fruit: " .. tostring(o) .. " stored - a slot was free")
+                            else
+                                table.insert(left, { tool = t, orig = o, value = P.tradeValue(o) })
+                            end
+                        end
+                    end
+                end
+            end
+            return left
+        end
+        P.keepersLeft = keepersLeft
+        -- "Control (120M), Dough (30M)".
+        function P.keepWords(list)
+            local w = {}
+            for _, k in ipairs(list) do
+                table.insert(w, string.format("%s (%s)", P.fruitBase(k.orig), P.valueWords(k.value)))
+            end
+            return table.concat(w, ", ")
         end
 
         -- Fly onto it, touch it, never left in your hand (a click with it
@@ -6443,24 +6646,108 @@ do
                     P.looksTeach(got, tag)
                 end
                 local price = f.price or priceOf(orig)
-                local priced = price and ("  ($" .. tostring(price) .. ")") or ""
-                if not CFG.FruitStore then
+                local value = P.tradeValue(orig)
+                local priced = string.format("  (trade %s%s)", P.valueWords(value),
+                    price and (", $" .. tostring(price)) or "")
+                -- Too good to lose (CFG.FruitKeepValue): stored at once, raid chips or not.
+                local keep = P.isKeeper(orig, CFG.FruitKeepValue)
+                local st
+                if not (CFG.FruitStore or keep) then
                     E.tally.fruits += 1
+                    st = "backpack"
                     E.fruitNote = "IN YOUR BACKPACK " .. orig .. priced .. " - not stored (for raid chips)"
                     notify("Fruit picked up: " .. orig)
                 else
                     local ok, _, why = storeTool(got, orig)
                     if ok then
                         E.tally.fruits += 1
+                        st = "stored"
                         E.fruitNote = "STORED " .. orig .. priced
                         notify("Fruit stored: " .. orig)
+                    elseif keep then
+                        st = "held"
+                        E.fruitNote = "NO SLOT for " .. orig .. priced .. " (" .. tostring(why)
+                            .. ") - held in a safe zone, no hop until it leaves your backpack"
+                        notify(P.fruitBase(orig) .. " cannot be stored - holding safe, no server hop")
                     else
+                        st = "notstored"
                         E.fruitNote = orig .. " picked up but NOT stored (" .. tostring(why) .. ") - it is in your backpack"
                     end
                 end
+                -- Which server of the run: the hunt's join count.
+                P.fruitLogAdd({ orig = orig, value = value, price = price, server = E.tally.joins,
+                    from = f.dropper and "drop" or "spawn", isle = f.isle, state = st })
             end
             E.note = E.fruitNote
             say(E.fruitNote)
+        end
+
+        -- WHERE A HELD FRUIT WAITS: the Mansion in the Third Sea (user: "go to
+        -- a safe zone, go to the mansion"); elsewhere 300 up where you are, the
+        -- chalice's hover.
+        function P.keepSpot(sea, here)
+            if sea == 3 then
+                for _, p in ipairs(P.PORTALS[3] or {}) do
+                    if p.name == "the Mansion" then return p.pos + Vector3.new(0, 3, 0) end
+                end
+            end
+            return (here or Vector3.new(0, 0, 0)) + Vector3.new(0, 300, 0)
+        end
+
+        -- HELD SAFE (CFG.FruitKeepValue): a fruit too good to lose that cannot
+        -- be stored keeps you at P.keepSpot - no hop, no hunt - until it leaves
+        -- your backpack (traded to your other account in this server, given
+        -- away, stored by you) or you press Stop. Storage is tried again every
+        -- 20 s. The game's own InSafeZone flag says whether the spot is a safe
+        -- zone. Far from the spot (a respawn) = flown there again, never
+        -- snapped. true = held this step.
+        local function keepHold(myEpoch)
+            local now = os.clock()
+            local tryStore = now >= (E.keepTryAt or 0)
+            if tryStore then E.keepTryAt = now + 20 end
+            local left = keepersLeft(tryStore)
+            if #left == 0 then
+                if E.keepHeld then
+                    for o in pairs(E.keepHeld) do P.fruitLogSet(o, "gone", { held = true }) end
+                    E.keepHeld, E.keepAt = nil, nil
+                    E.fruitNote = "no fruit held any more - the hunt goes on"
+                    say(E.fruitNote)
+                end
+                return false
+            end
+            if not E.keepHeld then
+                E.keepHeld = {}
+                releasePile()
+                notify(P.keepWords(left) .. " cannot be stored - held safe, no server hop")
+            end
+            for _, k in ipairs(left) do
+                if not E.keepHeld[k.orig] then
+                    E.keepHeld[k.orig] = true
+                    -- Carried from before this hunt picked anything: an entry of its own.
+                    if not P.fruitLogSet(k.orig, "held", { held = true, notstored = true, backpack = true }) then
+                        P.fruitLogAdd({ orig = k.orig, value = k.value, server = E.tally.joins,
+                            from = "carried", state = "held" })
+                    end
+                end
+            end
+            local _, r = parts()
+            E.keepAt = E.keepAt or P.keepSpot(mySea(), r and r.Position)
+            if r and (r.Position - E.keepAt).Magnitude > 60 then
+                setState("FLY")
+                say("to a safe zone with " .. P.keepWords(left))
+                flyTo(E.keepAt, { portal = true })
+                if stale(myEpoch) then return true end
+            end
+            lockAt(E.keepAt)
+            setState("FRUIT HOLD")
+            local safe = player:GetAttribute("InSafeZone")
+            E.fruitNote = string.format("HOLDING %s - no storage slot. %s. No hop until it leaves your "
+                .. "backpack: trade it to your other account here, or store it.", P.keepWords(left),
+                (safe == true and "In a safe zone") or (safe == false and "NOT in a safe zone") or "Safe zone not known")
+            E.note = E.fruitNote
+            say(E.fruitNote)
+            task.wait(0.5)
+            return true
         end
 
         -- BERRIES in this server: every tagged bush with one on it. The berry
@@ -7249,6 +7536,8 @@ do
                 task.wait(0.5)
                 return
             end
+            -- A fruit too good to lose with no slot for it: held safe, nothing else.
+            if keepHold(myEpoch) then return end
             E.used = true
             local kind = CFG.HuntKind
             if not E.lookStart then
@@ -13730,7 +14019,7 @@ local function buildUI()
     local TITLES = {
         home = "Fast Farm  ·  " .. tostring(P.build), modes = "Modes",
         circuit = "Circuit farm", none = "No mode", random = "Random", raid = "Raid",
-        elite = "Elite pirates", fruit = "Fruits", berry = "Haki berries",
+        elite = "Elite pirates", fruit = "Fruits", fruitlog = "Fruit history", berry = "Haki berries",
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
         ember = "Blaze Ember", sail = "Sea travel", seaevents = "Sea events",
         prehistoric = "Prehistoric", mirage = "Mirage", levi = "Leviathan", pvp = "PvP",
@@ -15073,6 +15362,9 @@ local function buildUI()
             local n = 0
             for _ in pairs(P.FRUIT_LOOKS or {}) do n += 1 end
             table.insert(lines, string.format("looks     %d learned  ·  portal: %s", n, tostring(P.lastPortal)))
+            table.insert(lines, string.format("keep safe %s  ·  history %d fruits",
+                ((CFG.FruitKeepValue or 0) > 0) and ("worth " .. P.valueWords(CFG.FruitKeepValue) .. "+ on the market") or "off",
+                #(P.fruitLog or {})))
             return table.concat(lines, "\n")
         end)
         modeSwitch(v, "fruit")
@@ -15102,8 +15394,25 @@ local function buildUI()
             "A fruit in the backpack is lost when you leave the server",
             function() return CFG.FruitStoreOnHop end,
             function(x) CFG.FruitStoreOnHop = x end)
+        heading2(v, "too good to lose - trade value")
+        radio(v, 205, {
+            { 0,         "Off",            "a fruit with no slot is left at a hop" },
+            { 10000000,  "10M and up",     "Portal, Buddha, Spirit, Pain..." },
+            { 20000000,  "20M and up",     "Lightning, T-Rex, Venom, Dough..." },
+            { 60000000,  "60M and up",     "Gas, Yeti, Tiger, Control..." },
+            { 100000000, "100M and up",    "Tiger, Control, Magnet, Kitsune, Dragon" },
+        }, function() return CFG.FruitKeepValue end, function(x) CFG.FruitKeepValue = x end)
+        link(v, "Fruit history", function() return tostring(#(P.fruitLog or {})) .. " picked" end, "fruitlog")
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
         fold(v, "How it works", function(v)
+            caption(v, "Too good to lose: a fruit worth at least this on the TRADING "
+                .. "market (the value list traders use, a physical fruit - not the game's "
+                .. "Beli) is stored at once, even with \"Store it at once\" off. No slot "
+                .. "for it (no +1 Fruit Storage, one already stored): you are taken to the "
+                .. "Mansion (Third Sea; elsewhere 300 up) and held there - no hop, no hunt, "
+                .. "\"Hop now\" refused too - until it leaves your backpack: trade it to "
+                .. "your other account in this server, or store it. Then the hunt goes on. "
+                .. "Storage is tried again every 20 s. A fruit newer than the list counts.")
             caption(v, "Fruits on the ground - grabbed, never eaten, and kept in your "
                 .. "backpack (or stored, with \"Store it at once\"). The raid loop trades a "
                 .. "fruit you carry for a chip before it loads a stored one - a carried "
@@ -15126,6 +15435,39 @@ local function buildUI()
             caption(v, "Where: the game's own place names. The way there: a portal "
                 .. "when it beats flying (the Mansion and Hydra open after rip_indra; "
                 .. "one that does not move you is left for 10 minutes).")
+        end)
+    end
+
+    -- =====================================================
+    -- FRUIT HISTORY (user, 2026-10-25): every fruit picked, kept across
+    -- servers and reloads (P.fruitLog)
+    -- =====================================================
+    do
+        local v = makeView("fruitlog")
+        gap(v, 6)
+        readout(v, function()
+            local log = P.fruitLog or {}
+            local lines = { string.format("picked    %d fruits%s", #log,
+                (#log > 0) and ("  ·  since " .. os.date("%d %b %H:%M", log[1].t or 0)) or "") }
+            local held = P.elite and P.elite.keepHeld
+            if held and next(held) then table.insert(lines, "now       " .. tostring(P.elite.fruitNote)) end
+            table.insert(lines, "server #  the hunt's join count when it came (Servers & team)")
+            return table.concat(lines, "\n")
+        end)
+        heading2(v, "each fruit - dearest first")
+        readout(v, function()
+            local s = P.fruitLogSummary()
+            return (#s > 0) and table.concat(s, "\n") or "none yet"
+        end)
+        heading2(v, "newest first")
+        readout(v, function()
+            local s = P.fruitLogLines(40)
+            return (#s > 0) and table.concat(s, "\n") or "none yet"
+        end)
+        fold(v, "Clear it", function(v)
+            caption(v, "Empties the history for good - the file too "
+                .. "(workspace/bff_fruit_log_<your id>.json).")
+            actionRow(v, "Clear the fruit history", nil, function() P.fruitLogClear() end)
         end)
     end
 

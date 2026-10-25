@@ -252,6 +252,12 @@ function P.hopNow() call("hopNow") end
 function P.kenNextIn() return 0 end
 function P.reloadWay() return "-" end
 function P.teamSave() end
+-- The fruit history and the market's values (fast_farm's main chunk).
+P.fruitLog = {}
+function P.fruitLogSummary() return {} end
+function P.fruitLogLines() return {} end
+function P.fruitLogClear() end
+function P.valueWords(v) return tostring(v) end
 function P.skillState() return "-" end
 function P.heldTool() return nil end
 -- The mode setters as the real ones change CFG (P.setHunt: ELITE HUNT;

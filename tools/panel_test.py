@@ -2,7 +2,7 @@
 with stand-in Roblox objects (panel_stubs.lua) and the REAL config table,
 then pressed (panel_cases.lua):
 
-- it builds; 28 pages; Home fits its body without a scroll bar;
+- it builds; 29 pages; Home fits its body without a scroll bar;
 - one mode at a time and the panel says which: the Modes list shows exactly
   one On; PvP and the Leviathan sit on top (off = the mode underneath
   again); the circuit has no off; a mode's switch says what On turns off;

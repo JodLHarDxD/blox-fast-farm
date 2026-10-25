@@ -15,6 +15,16 @@ for _, k in ipairs({ "elite", "fruit", "berry", "recipe", "flower", "sail" }) do
     check("THE CHALICE (" .. k .. " hunt): nothing else runs, no hop", run() == "chalice")
 end
 
+-- A FRUIT TOO GOOD TO LOSE, no slot (user, 2026-10-25): held, whichever hunt is on
+for _, k in ipairs({ "elite", "fruit", "berry", "recipe", "flower", "sail" }) do
+    reset() CFG.HuntKind = k KEEP = true FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true RECIPE_BUSY = true
+    check("KEPT FRUIT (" .. k .. " hunt): held, nothing else runs, no hop", run() == "keep hold")
+end
+reset() CFG.HuntKind = "fruit" KEEP = true HOLD = true FRUIT = KITSUNE
+check("the chalice AND a kept fruit: the chalice's stop first", run() == "chalice")
+reset() CFG.HuntKind = "fruit" FRUIT = KITSUNE
+check("no kept fruit: the hunt as before", run() == "grab Kitsune-Kitsune")
+
 -- ONE HUNT AT A TIME: the one switched on, nothing else, whatever is lying about
 reset() CFG.HuntKind = "elite" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
 local got = run()

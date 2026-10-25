@@ -130,14 +130,14 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 28 pages ----------
-    local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "berry",
+    -- ---------- 29 pages ----------
+    local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
         "servers", "stats" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "28 pages, got " .. n)
+    check(n == #EXPECT, "29 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -357,7 +357,8 @@ local NEW_OK = { MirageJob = true,
     PvpHopBusy = true,                        -- 2026-10-23: PvP hops go to the busiest servers
     PvpPingMax = true,                        -- 2026-10-24: ...in regions fast for you
     PvpLeadAuto = true,                       -- 2026-10-24: the lead learned per move
-    FruitPortals = true }                     -- 2026-10-24: the fruit hunt through the game's portals
+    FruitPortals = true,                      -- 2026-10-24: the fruit hunt through the game's portals
+    FruitKeepValue = true }                   -- 2026-10-25: a fruit too good to lose, held safe
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

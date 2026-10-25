@@ -141,6 +141,8 @@ local function commF()
 end
 local function parts() return {}, ROOT, {} end
 
+-- The fruit history's file is per account (P.fruitLogFile).
+local player = { UserId = 1 }
 local writefile = function(name, s) FILES[name] = s end
 local readfile = function(name)
     local s = FILES[name]
