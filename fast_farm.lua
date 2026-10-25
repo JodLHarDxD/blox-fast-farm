@@ -280,6 +280,10 @@ local CFG = {
     -- Castle on the Sea, the Mansion, Hydra Island in the Third Sea) when one
     -- lands you nearer the fruit and saves at least 5 s of flying.
     FruitPortals       = true,
+    -- THE HOME BUTTON on a long trip (user, 2026-10-25: "my home point is the
+    -- Castle on the Sea - click Home when that is shorter"): planned with the
+    -- pads (ROUTES) when your Home Point is in this sea.
+    TravelHome         = true,
     -- WHERE A PICKED FRUIT GOES (user, 2026-10-12: "collect the fruits in the
     -- backpack, don't store them - the fruit hunt is for raid chips"). Off =
     -- kept in your backpack (the raid loop spends a carried fruit first); on
@@ -635,7 +639,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-25.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-25.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1864,12 +1868,18 @@ flyTo = function(goal, opts)
     if gy and goal.Y < gy then goal = Vector3.new(goal.X, gy, goal.Z) end
 
     local dist = (goal - r.Position).Magnitude
-    -- A long way: the game's portal first, when it lands nearer (PORTALS).
-    if opts.portal and dist > 1500 and goal.Y > SUB_Y and r.Position.Y > SUB_Y and portalLeg(goal, myEpoch) then
-        local _, r3 = parts()
-        if not r3 then return false end
-        r = r3
-        dist = (goal - r.Position).Magnitude
+    -- A long way: the cheapest route first - the Home button, the Third Sea's
+    -- pads (ROUTES); the First and Second Sea's entrances as before (PORTALS).
+    if opts.portal and dist > 1500 and goal.Y > SUB_Y and r.Position.Y > SUB_Y then
+        local go = (P :: any).routeGo
+        local moved = go and go(goal, myEpoch)
+        if not moved and mySea() ~= 3 then moved = portalLeg(goal, myEpoch) end
+        if moved then
+            local _, r3 = parts()
+            if not r3 then return false end
+            r = r3
+            dist = (goal - r.Position).Magnitude
+        end
     end
     if dist <= arrive then
         lockAt(goal, opts.face)
@@ -1940,6 +1950,382 @@ flyTo = function(goal, opts)
     return arrived
 end
 P.flyTo = function(pos) return flyTo(pos) end
+
+-- =========================================================
+-- ROUTES: THE HOME BUTTON AND THE PORTAL PADS (user, 2026-10-25)
+-- =========================================================
+-- "Find the shortest path - where the portals are, where they go, the Home
+-- button." A long trip is a graph: START, GOAL, HOME (your Home Point) and
+-- every portal pad - its entry (the Hitbox you stand in) and its exit (where
+-- its partner puts you). Edges: fly (distance / CFG.TravelSpeed), a ride
+-- (entry -> exit, ~2.5 s), the Home button (START -> HOME, ~6 s). The
+-- cheapest path wins (P.routePlan, Dijkstra); a straight flight when nothing
+-- saves 3 s. What the game does (decompiled client v4623):
+--   HOME  the Home button = CommF_("TeleportToSpawn"). Your Home Point's name
+--         is player.Data.SpawnPoint (the Set Home Point NPC - Pirates only),
+--         its spawn a model in workspace._WorldOrigin.PlayerSpawns. Planned
+--         only when that model is in THIS sea (another sea's Home would be a
+--         server change). The NPC says "from any safe zone": a try that does
+--         not move you from outside one is remembered, and Home is then
+--         planned only from inside one.
+--   PADS  Third Sea: Models tagged "BoatCastleTeleporter" - the Castle on
+--         the Sea's three, one each at the Mansion, Hydra Island and Tiki
+--         Outpost. The two ends of a pair share a Name; Hitbox = where you
+--         stand, attribute Pivot = where you come out. Touched, the game's
+--         client puts you at the partner's Pivot and asks the server (Net RF
+--         BoatCastleTeleporters "InitiateTeleport", the pad); "GetInfo" says
+--         isUnlocked (rip_indra / Tyrant of the Skies). Only standing in the
+--         Hitbox works (user) - requestEntrance from anywhere no longer does.
+-- A pad far away is streamed out: every pad seen, where its ride really
+-- ended, your Home's landing spot and the measured seconds are kept in
+-- workspace/bff_routes.json.
+
+-- THE PLAN (pure). net = { home = { pos, secs } | nil, pads = { { id, name,
+-- hit, out, secs } } } - out = where its ride puts you. -> the steps
+-- ({ kind = "home" } / { kind = "portal", pad = p }, in order), the plan's
+-- seconds, a straight flight's seconds. The flight after the last step is
+-- the caller's.
+function P.routePlan(from, goal, net, speed)
+    speed = math.max(tonumber(speed) or 330, 50)
+    local function fly(a, b) return (a - b).Magnitude / speed end
+    local V = { { pos = from }, { pos = goal, goal = true } }
+    if net.home then table.insert(V, { pos = net.home.pos, home = true }) end
+    for _, p in ipairs(net.pads or {}) do
+        if p.out then
+            local exitV = { pos = p.out }
+            table.insert(V, exitV)
+            table.insert(V, { pos = p.hit, pad = p, exit = exitV })
+        end
+    end
+    local index = {}
+    for i, v in ipairs(V) do index[v] = i end
+    local dist, prev, how, done = {}, {}, {}, {}
+    for i in ipairs(V) do dist[i] = math.huge end
+    dist[1] = 0
+    while true do
+        local u, best = nil, math.huge
+        for i in ipairs(V) do
+            if not done[i] and dist[i] < best then u, best = i, dist[i] end
+        end
+        if not u or u == 2 then break end
+        done[u] = true
+        local vu = V[u]
+        local function relax(j, c, step)
+            if not done[j] and dist[u] + c < dist[j] then
+                dist[j], prev[j], how[j] = dist[u] + c, u, step
+            end
+        end
+        -- Standing in a pad: its ride.
+        if vu.pad then relax(index[vu.exit], vu.pad.secs or 2.5, { kind = "portal", pad = vu.pad }) end
+        for j, vj in ipairs(V) do
+            if j ~= u then
+                if vj.home then
+                    if u == 1 then relax(j, net.home.secs or 6, { kind = "home" }) end
+                elseif vj.pad or vj.goal then
+                    relax(j, fly(vu.pos, vj.pos), nil)
+                end
+            end
+        end
+    end
+    local steps, j = {}, 2
+    while prev[j] do
+        if how[j] then table.insert(steps, 1, how[j]) end
+        j = prev[j]
+    end
+    return steps, dist[2], fly(from, goal)
+end
+
+do
+    -- In a function of its own: the main chunk is at Luau's local limit.
+    local function build()
+        local HttpService = game:GetService("HttpService")
+        local CS = game:GetService("CollectionService")
+        local FILE = "bff_routes.json"
+        local R = {
+            pads = {},          -- [id] = { name, hit, pivot, landed (where its ride ended) }; .model while loaded
+            homes = {},         -- ["<UserId>:<sea>:<Home Point>"] = where the Home button landed you
+            homeSecs = 6, portalSecs = 2.5,
+            homeOutside = nil,  -- Home from outside a safe zone: true = worked, false = did not, nil = not tried
+            bad = {},           -- [pad id] = os.clock() before which it is not planned
+            homeBad = 0,        -- the Home button: not planned before this os.clock()
+            locked = {},        -- [pad name] = true: not unlocked on this account (GetInfo)
+            last = "no long trip yet",
+        }
+        P.route = R
+
+        local function vec(t) return type(t) == "table" and Vector3.new(t[1] or 0, t[2] or 0, t[3] or 0) or nil end
+        local function tab(v) return v and { math.floor(v.X + 0.5), math.floor(v.Y + 0.5), math.floor(v.Z + 0.5) } or nil end
+        local function save()
+            if not writefile then return end
+            local pads, homes = {}, {}
+            for id, p in pairs(R.pads) do
+                pads[id] = { name = p.name, hit = tab(p.hit), pivot = tab(p.pivot), landed = tab(p.landed) }
+            end
+            for k, v in pairs(R.homes) do homes[k] = tab(v) end
+            pcall(function()
+                writefile(FILE, HttpService:JSONEncode({ v = 1, pads = pads, homes = homes,
+                    homeSecs = R.homeSecs, portalSecs = R.portalSecs, homeOutside = R.homeOutside }))
+            end)
+        end
+        pcall(function()
+            local t = HttpService:JSONDecode(readfile(FILE))
+            if type(t) ~= "table" then return end
+            for id, p in pairs(type(t.pads) == "table" and t.pads or {}) do
+                if type(p) == "table" and type(p.name) == "string" and vec(p.hit) then
+                    R.pads[id] = { name = p.name, hit = vec(p.hit), pivot = vec(p.pivot), landed = vec(p.landed) }
+                end
+            end
+            for k, v in pairs(type(t.homes) == "table" and t.homes or {}) do R.homes[k] = vec(v) end
+            R.homeSecs = tonumber(t.homeSecs) or R.homeSecs
+            R.portalSecs = tonumber(t.portalSecs) or R.portalSecs
+            if type(t.homeOutside) == "boolean" then R.homeOutside = t.homeOutside end
+        end)
+
+        -- Every pad loaded now, kept (a far one is streamed out).
+        function R.scan()
+            local ok, list = pcall(function() return CS:GetTagged("BoatCastleTeleporter") end)
+            if not ok or type(list) ~= "table" then return end
+            local changed, seen = false, {}
+            for _, m in ipairs(list) do
+                local hb = m:IsA("Model") and m:FindFirstChild("Hitbox")
+                if hb and hb:IsA("BasePart") then
+                    local id = string.format("%s@%d,%d", m.Name, math.floor(hb.Position.X), math.floor(hb.Position.Z))
+                    local p = R.pads[id]
+                    if not p then
+                        p = { name = m.Name, hit = hb.Position }
+                        R.pads[id] = p
+                        changed = true
+                    end
+                    p.model = m
+                    seen[id] = true
+                    local piv = m:GetAttribute("Pivot")
+                    if typeof(piv) == "CFrame" and not (p.pivot and (p.pivot - piv.Position).Magnitude < 1) then
+                        p.pivot = piv.Position
+                        changed = true
+                    end
+                end
+            end
+            -- Not loaded now (streamed out, gone): kept, but not stood in.
+            for id, p in pairs(R.pads) do
+                if not seen[id] then p.model = nil end
+            end
+            if changed then save() end
+        end
+
+        -- Your Home Point: its name, and where the Home button puts you - only
+        -- when its spawn is in this sea. -> pos, name (pos nil = no Home here).
+        local function homeKey(name) return string.format("%s:%s:%s", tostring(player.UserId), tostring(mySea()), name) end
+        function R.homeAt()
+            local okN, name = pcall(function() return player.Data.SpawnPoint.Value end)
+            if not (okN and type(name) == "string" and name ~= "") then return nil, nil end
+            local pos
+            pcall(function()
+                local ps = workspace._WorldOrigin.PlayerSpawns
+                for _, team in ipairs({ "Pirates", "Marines" }) do
+                    local f = ps:FindFirstChild(team)
+                    local m = f and f:FindFirstChild(name)
+                    if m then
+                        pos = m:GetPivot().Position
+                        break
+                    end
+                end
+            end)
+            if not pos then return nil, name end          -- another sea's: never planned
+            return R.homes[homeKey(name)] or pos, name
+        end
+
+        -- The graph's edges as they stand: pads not refused, not locked, whose
+        -- ride's end is known (where it ended last time, else the partner's
+        -- Pivot, else the partner's own spot); the Home button when your Home is
+        -- in this sea and allowed from here.
+        function R.net(inSafe)
+            local now = os.clock()
+            local net = { pads = {} }
+            for id, p in pairs(R.pads) do
+                if not (R.bad[id] and now < R.bad[id]) and not R.locked[p.name] then
+                    local out = p.landed
+                    if not out then
+                        for id2, q in pairs(R.pads) do
+                            if id2 ~= id and q.name == p.name then out = q.pivot or q.hit end
+                        end
+                    end
+                    if out then
+                        table.insert(net.pads, { id = id, name = p.name, hit = p.hit, out = out, secs = R.portalSecs })
+                    end
+                end
+            end
+            local hp = CFG.TravelHome ~= false and R.homeAt()
+            if hp and now >= R.homeBad and not (R.homeOutside == false and not inSafe) then
+                net.home = { pos = hp, secs = R.homeSecs }
+            end
+            return net
+        end
+
+        -- THE HOME BUTTON. -> true = you are at your Home.
+        function R.goHome(myEpoch)
+            local hp, name = R.homeAt()
+            local _, r = parts()
+            local cf = commF()
+            if not (hp and name and r and cf) then return false end
+            if (r.Position - hp).Magnitude < 300 then return true end
+            local from, t0 = r.Position, os.clock()
+            local inSafe = player:GetAttribute("InSafeZone") == true
+            say("the Home button - to " .. name)
+            task.spawn(function() pcall(function() cf:InvokeServer("TeleportToSpawn") end) end)
+            while os.clock() - t0 < 15 and not stale(myEpoch) do
+                task.wait(0.2)
+                local _, r2 = parts()
+                if r2 and ((r2.Position - hp).Magnitude < 400 or (r2.Position - from).Magnitude > 1500) then
+                    R.homeSecs = R.homeSecs * 0.7 + (os.clock() - t0) * 0.3
+                    R.homes[homeKey(name)] = r2.Position
+                    if not inSafe then R.homeOutside = true end
+                    save()
+                    print(string.format("[BFF] route: Home - at %s in %.1f s", name, os.clock() - t0))
+                    return true
+                end
+            end
+            if stale(myEpoch) then return false end
+            R.homeBad = os.clock() + 120
+            if not inSafe then
+                R.homeOutside = false
+                save()
+            end
+            print("[BFF] route: the Home button did not move you" .. (inSafe and "" or " (outside a safe zone)"))
+            return false
+        end
+
+        -- THROUGH A PAD: flown into its Hitbox and touched there - the game's own
+        -- handler takes it; nothing after 2.5 s = what that handler does, done
+        -- here (out at the partner's Pivot, InitiateTeleport). Kept only if you
+        -- are still there 0.6 s later (a server that pulls you back = refused).
+        function R.ride(p, myEpoch)
+            flyTo(p.hit + Vector3.new(0, 2, 0))
+            if stale(myEpoch) then return false end
+            R.scan()
+            local live = R.pads[p.id] and R.pads[p.id].model
+            local hb = live and live.Parent and live:FindFirstChild("Hitbox")
+            if not hb then
+                R.bad[p.id] = os.clock() + 600
+                return false
+            end
+            local rf = netRemote("RF", "BoatCastleTeleporters")
+            if rf and R.locked[p.name] == nil then
+                local ok, info = pcall(function() return rf:InvokeServer("GetInfo", p.name) end)
+                if ok and type(info) == "table" and info.isUnlocked == false then R.locked[p.name] = true end
+            end
+            if R.locked[p.name] then
+                print("[BFF] route: the " .. p.name .. " pad is not unlocked on this account")
+                return false
+            end
+            local _, r = parts()
+            if not r then return false end
+            local from, t0 = r.Position, os.clock()
+            local function away()
+                local _, r2 = parts()
+                return r2 and (r2.Position - from).Magnitude > 300 and r2.Position or nil
+            end
+            lockAt(hb.Position)
+            if firetouchinterest then
+                pcall(firetouchinterest, r, hb, 0)
+                pcall(firetouchinterest, r, hb, 1)
+            end
+            while os.clock() - t0 < 2.5 and not stale(myEpoch) and not away() do task.wait(0.1) end
+            if not away() and not stale(myEpoch) and rf then
+                local out = p.out
+                pcall(function()
+                    for id2, q in pairs(R.pads) do
+                        local piv = id2 ~= p.id and q.name == p.name and q.model and q.model:GetAttribute("Pivot")
+                        if typeof(piv) == "CFrame" then out = piv.Position end
+                    end
+                end)
+                pcall(function()
+                    r.CFrame = CFrame.new(out)
+                    if rf:InvokeServer("InitiateTeleport", live) then r.CFrame = CFrame.new(out) end
+                end)
+                task.wait(0.5)
+            end
+            local at = away()
+            if at then
+                task.wait(0.6)
+                local _, r3 = parts()
+                if r3 and (r3.Position - at).Magnitude < 200 then
+                    R.pads[p.id].landed = r3.Position
+                    R.portalSecs = R.portalSecs * 0.7 + (os.clock() - t0) * 0.3
+                    save()
+                    print(string.format("[BFF] route: through the %s pad in %.1f s", p.name, os.clock() - t0))
+                    return true
+                end
+            end
+            R.bad[p.id] = os.clock() + 300
+            print("[BFF] route: the " .. p.name .. " pad did not take you - left 5 min")
+            return false
+        end
+
+        local function stepWords(steps, secs, direct)
+            local w = {}
+            for _, s in ipairs(steps) do
+                if s.kind == "home" then
+                    table.insert(w, "Home")
+                else
+                    local isle = P.isleOf and P.isleOf(s.pad.out)
+                    table.insert(w, s.pad.name .. " pad" .. (isle and (" to " .. isle) or ""))
+                end
+            end
+            return string.format("%s, then fly  ·  ~%.0f s, straight %.0f s", table.concat(w, " -> "), secs, direct)
+        end
+
+        -- A LONG TRIP (flyTo with opts.portal): the cheapest route's teleports,
+        -- in order - a step that fails is left out and the route planned again
+        -- (three plans at most). -> true = a teleport moved you (the flight goes
+        -- on from there).
+        function R.go(goal, myEpoch)
+            local any = false
+            for _ = 1, 3 do
+                R.scan()
+                local _, r = parts()
+                if not r or stale(myEpoch) then return any end
+                local inSafe = player:GetAttribute("InSafeZone") == true
+                local steps, secs, direct = P.routePlan(r.Position, goal, R.net(inSafe), CFG.TravelSpeed)
+                if #steps == 0 or secs > direct - 3 then
+                    if not any then R.last = string.format("straight flight, %.0f s", direct) end
+                    return any
+                end
+                R.last = stepWords(steps, secs, direct)
+                say("route: " .. R.last)
+                print("[BFF] route: " .. R.last)
+                local failed = false
+                for _, s in ipairs(steps) do
+                    if stale(myEpoch) then return any end
+                    local ok
+                    if s.kind == "home" then ok = R.goHome(myEpoch) else ok = R.ride(s.pad, myEpoch) end
+                    if not ok then
+                        failed = true
+                        break
+                    end
+                    any = true
+                end
+                if not failed then return any end
+            end
+            return any
+        end
+        P.routeGo = R.go
+
+        -- The panel's line.
+        function R.words()
+            local n, known = 0, 0
+            for _, p in pairs(R.pads) do
+                n += 1
+                if p.landed then known += 1 end
+            end
+            local hp, name = R.homeAt()
+            return string.format("route     %s\nhome      %s%s  ·  pads %d known, %d ridden",
+                tostring(R.last),
+                name and (name .. (hp and "" or " (another sea - not used here)")) or "no Home Point set",
+                (R.homeOutside == false) and "  ·  Home only from a safe zone" or "", n, known)
+        end
+    end
+    build()
+end
 
 -- =========================================================
 -- TARGETING
@@ -5870,6 +6256,7 @@ do
             -- A fruit too good to lose, no slot (keepHold): [orig] = true while
             -- held; where you wait; the next storage try.
             keepHeld = nil, keepAt = nil, keepTryAt = nil,
+            keepWhere = nil, keepTried = nil,    -- the spot's name; [name] = true: the game said not a safe zone
             lookStart = nil, foundHere = false,
             asks = 0, askAt = -100, questAskAt = -100, reply = nil, replyText = nil,
             npcVisited = false, dropped = false, isleTried = false,
@@ -6682,16 +7069,28 @@ do
             say(E.fruitNote)
         end
 
-        -- WHERE A HELD FRUIT WAITS: the Mansion in the Third Sea (user: "go to
-        -- a safe zone, go to the mansion"); elsewhere 300 up where you are, the
-        -- chalice's hover.
-        function P.keepSpot(sea, here)
-            if sea == 3 then
-                for _, p in ipairs(P.PORTALS[3] or {}) do
-                    if p.name == "the Mansion" then return p.pos + Vector3.new(0, 3, 0) end
-                end
+        -- WHERE A HELD FRUIT WAITS (user, 2026-10-25: "the Home button takes me
+        -- to the Castle on the Sea, a safe zone; inside the Mansion, the Castle
+        -- and Tiki's front deck are safe zones"). Where you are, when the game
+        -- says it is a safe zone (keepHold); else, in order: your Home Point (a
+        -- spawn - the Home button gets you there, ROUTES), the Castle on the
+        -- Sea, the Mansion (Third Sea). One the game says is NOT a safe zone
+        -- once you are there (`tried`) is passed over; none left = 300 up where
+        -- you are, the chalice's hover. -> the spot, its name.
+        P.SAFE_SPOTS = {
+            [3] = {
+                { name = "the Castle on the Sea", pos = Vector3.new(-5072, 317, -3151) },
+                { name = "the Mansion", pos = Vector3.new(-12471, 378, -7552) },
+            },
+        }
+        function P.keepSpot(sea, here, home, tried)
+            local list = {}
+            if home then table.insert(list, { name = "your Home Point", pos = home }) end
+            for _, s in ipairs(P.SAFE_SPOTS[sea] or {}) do table.insert(list, s) end
+            for _, s in ipairs(list) do
+                if not (tried and tried[s.name]) then return s.pos, s.name end
             end
-            return (here or Vector3.new(0, 0, 0)) + Vector3.new(0, 300, 0)
+            return (here or Vector3.new(0, 0, 0)) + Vector3.new(0, 300, 0), "300 up where you are"
         end
 
         -- HELD SAFE (CFG.FruitKeepValue): a fruit too good to lose that cannot
@@ -6731,18 +7130,36 @@ do
                 end
             end
             local _, r = parts()
-            E.keepAt = E.keepAt or P.keepSpot(mySea(), r and r.Position)
+            -- Already in a safe zone: held right here.
+            if not E.keepAt and r and player:GetAttribute("InSafeZone") == true then
+                E.keepAt, E.keepWhere = r.Position, "where you are"
+            end
+            if not E.keepAt then
+                local home = P.route and (P.route.homeAt())
+                E.keepAt, E.keepWhere = P.keepSpot(mySea(), r and r.Position, home, E.keepTried)
+            end
             if r and (r.Position - E.keepAt).Magnitude > 60 then
                 setState("FLY")
-                say("to a safe zone with " .. P.keepWords(left))
+                say("to " .. tostring(E.keepWhere) .. " (a safe zone) with " .. P.keepWords(left))
+                -- The cheapest way (ROUTES): the Home button, the pads, flying.
                 flyTo(E.keepAt, { portal = true })
                 if stale(myEpoch) then return true end
+                -- There, and the game says this is NOT a safe zone: the next spot.
+                local _, r2 = parts()
+                if r2 and (r2.Position - E.keepAt).Magnitude <= 60 and player:GetAttribute("InSafeZone") == false then
+                    E.keepTried = E.keepTried or {}
+                    E.keepTried[E.keepWhere] = true
+                    print("[BFF] fruit hold: " .. tostring(E.keepWhere) .. " is not a safe zone - the next spot")
+                    E.keepAt = nil
+                    return true
+                end
             end
             lockAt(E.keepAt)
             setState("FRUIT HOLD")
             local safe = player:GetAttribute("InSafeZone")
-            E.fruitNote = string.format("HOLDING %s - no storage slot. %s. No hop until it leaves your "
+            E.fruitNote = string.format("HOLDING %s at %s - no storage slot. %s. No hop until it leaves your "
                 .. "backpack: trade it to your other account here, or store it.", P.keepWords(left),
+                tostring(E.keepWhere or "a safe spot"),
                 (safe == true and "In a safe zone") or (safe == false and "NOT in a safe zone") or "Safe zone not known")
             E.note = E.fruitNote
             say(E.fruitNote)
@@ -15361,7 +15778,8 @@ local function buildUI()
             end
             local n = 0
             for _ in pairs(P.FRUIT_LOOKS or {}) do n += 1 end
-            table.insert(lines, string.format("looks     %d learned  ·  portal: %s", n, tostring(P.lastPortal)))
+            table.insert(lines, string.format("looks     %d learned", n))
+            if P.route then table.insert(lines, P.route.words()) end
             table.insert(lines, string.format("keep safe %s  ·  history %d fruits",
                 ((CFG.FruitKeepValue or 0) > 0) and ("worth " .. P.valueWords(CFG.FruitKeepValue) .. "+ on the market") or "off",
                 #(P.fruitLog or {})))
@@ -15381,10 +15799,14 @@ local function buildUI()
             function() return CFG.FruitUnknownSpawn end,
             function(x) CFG.FruitUnknownSpawn = x end)
         heading2(v, "the way there")
-        switchRow(v, "Portals on a long trip",
-            "The game's own (Castle on the Sea, Mansion, Hydra) when one lands you nearer and saves 5 s+",
+        switchRow(v, "Shortest route on a long trip",
+            "The Third Sea's portal pads (Castle on the Sea <-> Mansion, Hydra, Tiki), stood in like a player",
             function() return CFG.FruitPortals end,
             function(x) CFG.FruitPortals = x end)
+        switchRow(v, "Use the Home button",
+            "When going Home first (your Home Point, in this sea) and flying on is shorter",
+            function() return CFG.TravelHome end,
+            function(x) CFG.TravelHome = x end)
         heading2(v, "where it goes")
         switchRow(v, "Store it at once",
             "Off: kept in your backpack - the raid loop trades a carried fruit for a chip first",
@@ -15408,8 +15830,10 @@ local function buildUI()
             caption(v, "Too good to lose: a fruit worth at least this on the TRADING "
                 .. "market (the value list traders use, a physical fruit - not the game's "
                 .. "Beli) is stored at once, even with \"Store it at once\" off. No slot "
-                .. "for it (no +1 Fruit Storage, one already stored): you are taken to the "
-                .. "Mansion (Third Sea; elsewhere 300 up) and held there - no hop, no hunt, "
+                .. "for it (no +1 Fruit Storage, one already stored): held where you are if "
+                .. "the game says it is a safe zone, else taken to your Home Point (the Home "
+                .. "button), the Castle on the Sea or the Mansion - the next one if the game "
+                .. "says that is not a safe zone (elsewhere 300 up) - and held there: no hop, no hunt, "
                 .. "\"Hop now\" refused too - until it leaves your backpack: trade it to "
                 .. "your other account in this server, or store it. Then the hunt goes on. "
                 .. "Storage is tried again every 20 s. A fruit newer than the list counts.")
@@ -15432,9 +15856,15 @@ local function buildUI()
                 .. "player's drop, every fruit you pick up or carry teaches the "
                 .. "script what that fruit looks like (workspace/bff_fruit_looks.json). "
                 .. "The more drops it has seen, the more spawns it names.")
-            caption(v, "Where: the game's own place names. The way there: a portal "
-                .. "when it beats flying (the Mansion and Hydra open after rip_indra; "
-                .. "one that does not move you is left for 10 minutes).")
+            caption(v, "Where: the game's own place names. The way there: the shortest "
+                .. "route - the Home button (to your Home Point, if it is in this sea), the "
+                .. "Third Sea's pads (the Castle on the Sea's three to the Mansion, Hydra "
+                .. "Island and Tiki Outpost, and back - flown into and stood in), flying. "
+                .. "Taken only when it saves 3 s+. Pads seen, where each ride ended and your "
+                .. "Home's spot are kept (workspace/bff_routes.json). A pad not unlocked on "
+                .. "this account (rip_indra / Tyrant of the Skies) is never planned again; "
+                .. "one that does not take you is left 5 min; Home that does not move you "
+                .. "from outside a safe zone is then used only from inside one.")
         end)
     end
 
@@ -20038,6 +20468,14 @@ task.spawn(function()
     while _G.BFF == P do
         pcall(keepWater)
         task.wait(0.25)
+    end
+end)
+-- ROUTES: every portal pad that streams in is kept (its spot, its Pivot), farm
+-- running or not - the next long trip knows it.
+task.spawn(function()
+    while _G.BFF == P do
+        pcall(function() P.route.scan() end)
+        task.wait(3)
     end
 end)
 -- The server news: one look a second from load, farm running or not.

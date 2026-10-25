@@ -24,12 +24,12 @@ local os = { clock = function() return NOW end, time = function() return NOW end
 local task = { wait = function() end }
 local epoch = 0
 local function stale(e) return e ~= epoch end
-local E, LEFT, TRIES, LOG, SEA, ROOT, SAFE, FLIGHTS, LOCKS, STATES, NOTES
+local E, LEFT, TRIES, LOG, SEA, ROOT, SAFE, FLIGHTS, FLIGHT_OPTS, LOCKS, STATES, NOTES, HOME
 local function reset()
     E = { tally = { joins = 4 } }
     LEFT, TRIES, LOG, SEA, SAFE = {}, {}, {}, 3, nil
     ROOT = { Position = v3(100, 50, 100) }
-    FLIGHTS, LOCKS, STATES, NOTES = {}, {}, {}, {}
+    FLIGHTS, FLIGHT_OPTS, LOCKS, STATES, NOTES, HOME = {}, {}, {}, {}, {}, nil
     NOW = 1000
 end
 reset()
@@ -46,7 +46,9 @@ end
 function P.fruitLogAdd(e) table.insert(LOG, "add " .. e.orig .. " " .. e.state .. " " .. tostring(e.from)) return e end
 local function parts() return {}, ROOT, {} end
 local function mySea() return SEA end
-local function flyTo(goal) table.insert(FLIGHTS, goal) ROOT.Position = goal end
+local function flyTo(goal, opts) table.insert(FLIGHTS, goal) table.insert(FLIGHT_OPTS, opts or {}) ROOT.Position = goal end
+-- Your Home Point (ROUTES): HOME, nil = none in this sea.
+P.route = { homeAt = function() return HOME, HOME and "Castle on the Sea" or nil end }
 local function lockAt(pos) table.insert(LOCKS, pos) end
 local function setState(s) table.insert(STATES, s) end
 local function say() end
