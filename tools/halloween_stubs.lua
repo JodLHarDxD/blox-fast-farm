@@ -243,15 +243,24 @@ local function toolNames() return TOOLS end
 local function toolType(t) return t.tip end
 
 -- ---------- the pumpkin server ----------
--- model -> { hp, way, blink }: each hit takes 1; at 0 PumpkinState goes "Smashed".
+-- model -> { hp, way, blink, rare }: each hit takes 1; at 0 PumpkinState goes "Smashed".
 -- blink = every hit flips it "Hit" and back to "Idle" 0.5 s later.
+-- rare = at 0 it goes "Summoning" with 3 more hits in it (still tagged), then
+-- its tags come off and it is "Burst".
 local PUMPKINS = {}
 local function hitPumpkin(part, way)
     local m = rawget(part, "Parent")
     local pk = m and PUMPKINS[m]
-    if not pk or pk.way ~= way or pk.hp <= 0 or m:GetAttribute("PumpkinState") ~= "Idle" then return end
+    local st = m and m:GetAttribute("PumpkinState")
+    if not pk or pk.way ~= way or pk.hp <= 0 or (st ~= "Idle" and not (pk.rare and st == "Summoning")) then return end
     pk.hp -= 1
-    if pk.hp <= 0 then
+    if pk.hp <= 0 and pk.rare and st == "Idle" then
+        pk.hp = 3
+        m:SetAttribute("PumpkinState", "Summoning")
+    elseif pk.hp <= 0 and pk.rare then
+        for _, d in ipairs(m:GetDescendants()) do d.tags.M1HitRegistry = nil end
+        m:SetAttribute("PumpkinState", "Burst")
+    elseif pk.hp <= 0 then
         m:SetAttribute("PumpkinState", "Smashed")
     elseif pk.blink then
         m:SetAttribute("PumpkinState", "Hit")
@@ -385,7 +394,7 @@ local getscriptbytecode, decompile, fireproximityprompt, fireclickdetector = nil
 
 -- ---------- the farm ----------
 local CFG = { Hunt = true, HuntKind = "halloween", M1Weapon = "", EscapeBelow = 0.35,
-    HalloweenPumpkins = true, HalloweenSkipGray = true, HalloweenDoors = true, HalloweenBoss = true,
+    HalloweenPumpkins = true, HalloweenRareFirst = true, HalloweenDoors = true, HalloweenBoss = true,
     HalloweenReturn = true, HalloweenTour = true, HalloweenWatch = false }
 local HAVE = { ["Cursed Pumpkin Seed"] = 12, ["Candy Corn"] = 81, ["Pumpkin Bits"] = 3 }
 local P = { running = true, build = "test" }
@@ -407,6 +416,7 @@ local function pumpkin(at, opts)
     local look = opts.look or "pumpkinv1"
     local m = new("Model", "Pumpkin")
     m.attrs.PumpkinState = opts.state or "Idle"
+    if opts.rare then m.attrs.PumpkinRare = true end
     local root = new("Part", "RootPart", { Position = at, Size = vec(0.1, 0.1, 0.1), Transparency = 1,
         Color = { R = 0.64, G = 0.64, B = 0.65 }, Anchored = true })
     root.tags.M1HitRegistry = true
@@ -420,7 +430,7 @@ local function pumpkin(at, opts)
         Color = { R = 0.27, G = 0.19, B = 0.12 } })
     stem.tags.M1HitRegistry = true
     m:Add(stem)
-    PUMPKINS[m] = { hp = opts.hp or 3, way = opts.way or "remote", blink = opts.blink }
+    PUMPKINS[m] = { hp = opts.hp or 3, way = opts.way or "remote", blink = opts.blink, rare = opts.rare }
     HUNT:Add(m)
     return m, body
 end

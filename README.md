@@ -672,6 +672,16 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Halloween: the rare (seed) pumpkin first, the Gray switch gone - first test (2026-10-31, build 2026-10-31.5)
+
+Asked: "the Cursed Pumpkin Seed is not from the ordinary Jack o' Lantern - it is a pile of three pumpkins together, Floating Turtle or the Castle on the Sea" and "why is there Skip the Gray Pumpkin - what is that?"
+- **Confirmed by build .4 (user: "perfectly punching the right pumpkins")**: 3 hits a pumpkin, then `Shaking -> Burst` (a Candy Corn spill) or `Awakening` (a Jack o' Lantern). Pumpkin Bits stopped at **1000** (the cap). No seed came from ordinary pumpkins.
+- **The seed pumpkin**: the recorder caught one appearing - a `PumpkinHunt` model with **`PumpkinRare = true`** (the game's pumpkin script also has `Pumpkin Snowman` = three stacked pumpkins, `PumpkinSnowmanFormed / Headbutt / Death`). Build .4 went nearest-first and never reached it. **Now a rare one goes first, from anywhere in the server** (`[BFF] halloween: a RARE pumpkin (the seed one) at ... - going`). On a rare one its state is not believed: it is hit while a part is still tagged (the snowman may form out of the same model). Whatever comes out is fought first, as always. Page: `rare  N here now · N smashed` and the switch **Rare pumpkins first** (on).
+- **Skip the Gray Pumpkin: deleted.** It came from a guide only ("the Gray Pumpkin is dangerous"). The game has none (195 seen, all orange). Its only effect was build .3's bug, and it could have skipped the rare one.
+
+1. When a rare one is up: send the `a RARE pumpkin ... going` line, then the `RARE pumpkin smashed (... -> <state>)` line, and whether a Cursed Pumpkin Seed came (the page's seeds count).
+2. Keep **Record what I smash** on while it does one - the file shows what the snowman is (an enemy, a state, a candy spill).
+
 ## Halloween: the real pumpkins, the two rewards, the recorder - first test (2026-10-31, build 2026-10-31.4)
 
 Asked: "it attacks the wrong pumpkins - the big ones are decoration, the small ones break. It can kill the pumpkin NPC but not the pumpkins you have to break - they have no name." And: "two rewards - the pumpkin seeds and the candy corn, same as last year." And: "if I turn Halloween off and attack by hand, will it record?"

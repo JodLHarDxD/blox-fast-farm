@@ -18,11 +18,16 @@ check("idle: any other state is not", not t.idle("Smashed") and not t.idle("Hit"
 check("look: pumpkinv1.007 -> pumpkinv1", t.variant("pumpkinv1.007") == "pumpkinv1" and t.variant("PumpkinV4") == "PumpkinV4",
     t.variant("pumpkinv1.007"))
 
-check("gray: by name", t.isGray("Gray Pumpkin", nil) and t.isGray("GreyPumpkin", { R = 1, G = 0.5, B = 0 }))
-check("gray: an orange one is not", not t.isGray("Pumpkin", { R = 0.91, G = 0.45, B = 0.14 }))
-check("gray: a colourless body is", t.isGray("Pumpkin", { R = 0.5, G = 0.5, B = 0.52 }))
-check("gray: near black / white / no colour = not gray", not t.isGray("Pumpkin", { R = 0.05, G = 0.05, B = 0.05 })
-    and not t.isGray("Pumpkin", { R = 1, G = 1, B = 1 }) and not t.isGray("Pumpkin", nil))
+local near = { id = "near", pos = Vector3.new(10, 0, 0) }
+local farRare = { id = "rare", pos = Vector3.new(9000, 0, 0), rare = true }
+local mid = { id = "mid", pos = Vector3.new(500, 0, 0) }
+local pick = t.pickPumpkin({ near, farRare, mid }, Vector3.new(0, 0, 0), nil, true)
+check("pick: a rare one (the seed) before a near one, from any distance", pick and pick.id == "rare", pick and pick.id)
+pick = t.pickPumpkin({ near, farRare, mid }, Vector3.new(0, 0, 0), nil, false)
+check("pick: rare-first off = the nearest", pick and pick.id == "near", pick and pick.id)
+pick = t.pickPumpkin({ mid, farRare }, Vector3.new(0, 0, 0), 100, true)
+check("pick: a limit holds the ordinary ones, not the rare one", pick and pick.id == "rare", pick and pick.id)
+check("pick: nothing within the limit = nil", t.pickPumpkin({ mid }, Vector3.new(0, 0, 0), 100, true) == nil)
 
 local from = Vector3.new(0, 0, 0)
 local doorsL = {
@@ -71,7 +76,8 @@ local deco = decoration(Vector3.new(15, 10, 0))
 local pk1, body1 = pumpkin(Vector3.new(400, 10, 0))
 local list = P.halloweenPumpkins()
 check("decoration: the Map's big pumpkin is never a target", #list == 1 and list[1].root == pk1, #list)
-check("REGRESSION build .3: the invisible grey RootPart does not make it gray", list[1] and not list[1].gray)
+check("REGRESSION build .3: a real one is listed (its invisible grey RootPart skipped nothing)", list[1] ~= nil
+    and list[1].pos.X == 400, list[1] and list[1].pos.X)
 check("the body is the visible one, its parts tagged", list[1] and list[1].tagged and #list[1].hits == 2
     and list[1].kind == "pumpkinv1", list[1] and (#list[1].hits .. " " .. list[1].kind))
 
@@ -114,13 +120,27 @@ M.step(1)
 check("stands through every way: tried once, left 3 min", (M.kinds["PumpkinV4"] or {}).tries == 1 and (M.skip[stub] or 0) > T)
 stub:Destroy()
 
--- ---------------------------------------------------------------- 6. GRAY, SEA FLOOR, ALREADY SMASHED
+-- ---------------------------------------------------------------- 5b. THE RARE ONE (the seed) FIRST
+local near5 = pumpkin(Vector3.new(ROOT.Position.X + 20, 10, 0))
+local rare5, rareBody = pumpkin(Vector3.new(ROOT.Position.X + 3000, 10, 0), { rare = true })
+M.step(1)
+check("rare: flew past the near one to the rare one", (ROOT.Position - rareBody.Position).Magnitude < 8
+    and near5:GetAttribute("PumpkinState") == "Idle", (ROOT.Position - rareBody.Position).Magnitude)
+check("rare: kept hitting through Summoning until its tags went", rare5:GetAttribute("PumpkinState") == "Burst"
+    and M.tally.rare == 1, tostring(rare5:GetAttribute("PumpkinState")))
+rare5:Destroy()
+M.step(1)
+check("rare: then the ordinary one", near5:GetAttribute("PumpkinState") == "Smashed")
+near5:Destroy()
+
+-- ---------------------------------------------------------------- 6. SEA FLOOR, ALREADY SMASHED
 local gray = pumpkin(Vector3.new(ROOT.Position.X + 30, 10, 0), { color = { R = 0.5, G = 0.5, B = 0.5 } })
+gray:SetAttribute("PumpkinState", "Smashed")
 local deep = pumpkin(Vector3.new(11408, -2158, 9800))
 local done = pumpkin(Vector3.new(ROOT.Position.X + 20, 10, 0), { state = "Smashed" })
 local rh0 = LOG.rh
 local r = M.step(1)
-check("gray / sea floor / smashed: none of them touched", LOG.rh == rh0 and gray:GetAttribute("PumpkinState") == "Idle", LOG.rh - rh0)
+check("sea floor / smashed: none of them touched", LOG.rh == rh0, LOG.rh - rh0)
 check("none to smash: false (the director takes the next server)", r == false, tostring(r))
 check("none to smash: why says it", type(M.why) == "string" and string.find(M.why, "smashed", 1, true) ~= nil, M.why)
 CFG.HalloweenTour = false

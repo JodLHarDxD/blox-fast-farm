@@ -361,7 +361,7 @@ local NEW_OK = { MirageJob = true,
     FruitKeepValue = true,                    -- 2026-10-25: a fruit too good to lose, held safe
     TravelHome = true,                        -- 2026-10-25: the Home button on a long trip (ROUTES)
     TravelRoutes = true,                      -- 2026-10-31: every long trip routed (Travel & boat)
-    HalloweenPumpkins = true, HalloweenSkipGray = true,   -- 2026-10-31: the Halloween hunt's page
+    HalloweenPumpkins = true, HalloweenRareFirst = true,  -- 2026-10-31: the Halloween hunt's page
     HalloweenDoors = true, HalloweenBoss = true,
     HalloweenReturn = true, HalloweenTour = true,
     HalloweenWatch = true }                   -- 2026-10-31: record what you smash by hand

@@ -345,7 +345,7 @@ local CFG = {
     -- smashed with your fighting style, what jumps out of them killed, and
     -- at every Harvest Moon (XX:00, 10 min) the Halloween doors knocked.
     HalloweenPumpkins  = true,
-    HalloweenSkipGray  = true,       -- the Gray Pumpkin is left alone (the guides: dangerous)
+    HalloweenRareFirst = true,       -- a rare pumpkin (the Cursed Pumpkin Seed) first, from anywhere
     HalloweenDoors     = true,       -- knock at the Harvest Moon; the game's teleport there accepted
     HalloweenBoss      = true,       -- a hellfire door: through its portal to the Hell Rider
     HalloweenReturn    = true,       -- the moon over: the game's teleport back accepted
@@ -654,7 +654,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.5" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -11785,8 +11785,8 @@ end
 -- kill it - both count"). Live 2026-10-31 14:00 UTC .. 11-15 (the guides).
 -- Spooky Tokens (last year: Candy Corn) from three things:
 --   THE PUMPKINS (Jack-o'-lanterns) on every island, smashed with a
---     fighting style; some come alive and fight. The Gray Pumpkin is left
---     alone (HalloweenSkipGray: the guides call it the dangerous one).
+--     fighting style; some come alive and fight. (A guide's "dangerous Gray
+--     Pumpkin": none in the game - 195 seen, all orange - so no skip for it.)
 --   THE DOORS at the Harvest Moon (XX:00, 10 min, all seas): knock, a treat
 --     (tokens) or a trick (enemies / a minigame). A hellfire door opens a
 --     portal to the Hell Rider (tokens + a Special Spooky Concoction).
@@ -11846,19 +11846,6 @@ do
             return string.find(low, "jack", 1, true) ~= nil and string.find(low, "lantern", 1, true) ~= nil
         end
 
-        -- The Gray Pumpkin: by its name, or a body with no colour in it.
-        -- c = Color3-like { R, G, B } (0-1) or nil. Near white is NOT gray: a
-        -- textured mesh is left white and its texture paints it.
-        local function isGray(name, c)
-            local low = string.lower(tostring(name or ""))
-            if string.find(low, "gray", 1, true) or string.find(low, "grey", 1, true) then return true end
-            if c == nil then return false end
-            local ok, r, g, b = pcall(function() return tonumber(c.R), tonumber(c.G), tonumber(c.B) end)
-            if not (ok and r and g and b) then return false end
-            local hi, lo = math.max(r, g, b), math.min(r, g, b)
-            return hi > 0.12 and lo < 0.85 and (hi - lo) / hi < 0.2
-        end
-
         -- The door to knock: nearest of the ones open to a knock now.
         -- d = { pos, open, cool (server time), enabled, skipUntil }.
         local function pickDoor(list, from, now, serverNow)
@@ -11889,6 +11876,26 @@ do
         -- same, should a server not set one).
         local function idle(st)
             return st == nil or st == "Idle"
+        end
+
+        -- THE SEED PUMPKIN (user, 2026-10-31: "the cursed pumpkin seed is not from
+        -- the ordinary jack-o'-lantern - it is a pile of three pumpkins together,
+        -- Floating Turtle or the Castle on the Sea"; the game's PumpkinHunt
+        -- strings: "Pumpkin Snowman", PumpkinSnowmanFormed / Headbutt / Death).
+        -- The recorder saw one come: a PumpkinHunt model with PumpkinRare =
+        -- true. The one to smash: a rare one first, from ANY distance (the seed;
+        -- the Bits stop at 1000), else the nearest within `within`.
+        -- c = { pos, rare }.
+        local function pickPumpkin(list, from, within, rareFirst)
+            local best, bd, br = nil, math.huge, false
+            for _, c in ipairs(list) do
+                local d = (c.pos - from).Magnitude
+                local rare = rareFirst and c.rare == true
+                if rare or d <= (within or math.huge) then
+                    if (rare and not br) or (rare == br and d < bd) then best, bd, br = c, d, rare end
+                end
+            end
+            return best
         end
 
         -- Its look: "pumpkinv1.007" -> "pumpkinv1" (the mesh set it is cut from).
@@ -12121,7 +12128,7 @@ do
         -- PumpkinV4 = the four looks). The Map's own pumpkins (pumpkin1 /
         -- pumpkin2, 7.8 studs, untagged, e.g. the Turtle's HalloweenHotel) are
         -- decorations: never looked at. -> { root, part, hits, kind, pos,
-        -- gray, prompt, detector, tagged }.
+        -- prompt, detector, tagged, rare }.
         local function pumpkins()
             local folder = workspace:FindFirstChild("PumpkinHunt")
             local out, now = {}, os.clock()
@@ -12147,8 +12154,8 @@ do
                         if not kindDropped(M.kinds[kind]) then
                             table.insert(out, {
                                 root = m, part = hits[1] or body, hits = hits, kind = kind, pos = body.Position,
-                                gray = isGray(m.Name, body.Color), prompt = prompt, detector = detector,
-                                tagged = #hits > 0,
+                                prompt = prompt, detector = detector,
+                                tagged = #hits > 0, rare = m:GetAttribute("PumpkinRare") == true,
                             })
                         end
                     end
@@ -12158,30 +12165,23 @@ do
         end
         P.halloweenPumpkins = pumpkins
 
-        -- How many there are, by state (the panel; the probe).
+        -- How many there are, by state, and the rare ones Idle (the panel; the probe).
         function M.census()
             local folder = workspace:FindFirstChild("PumpkinHunt")
-            local by, total = {}, 0
+            local by, total, rare = {}, 0, 0
             for _, m in ipairs(folder and folder:GetChildren() or {}) do
                 if m:IsA("Model") then
                     local st = tostring(m:GetAttribute("PumpkinState") or "none")
                     by[st] = (by[st] or 0) + 1
                     total += 1
+                    if m:GetAttribute("PumpkinRare") == true and idle(m:GetAttribute("PumpkinState")) then rare += 1 end
                 end
             end
-            return by, total, folder ~= nil
+            return by, total, folder ~= nil, rare
         end
 
-        -- The nearest; the Gray Pumpkin left out.
         local function nearestPumpkin(list, from, within)
-            local best, bd = nil, within or math.huge
-            for _, c in ipairs(list) do
-                if not (c.gray and CFG.HalloweenSkipGray ~= false) then
-                    local d = (c.pos - from).Magnitude
-                    if d < bd then best, bd = c, d end
-                end
-            end
-            return best
+            return pickPumpkin(list, from, within, CFG.HalloweenRareFirst ~= false)
         end
 
         local function doorList()
@@ -12400,12 +12400,14 @@ do
             local by, total, has = M.census()
             local st = {}
             for k2, v2 in pairs(by) do table.insert(st, k2 .. " " .. v2) end
-            add(string.format("PUMPKINHUNT: %s  ·  %d pumpkins  ·  states: %s  ·  to smash now: %d",
-                has and "found" or "NOT in this server", total, table.concat(st, ", "), #list))
+            local rares = 0
+            for _, pk in ipairs(list) do if pk.rare then rares += 1 end end
+            add(string.format("PUMPKINHUNT: %s  ·  %d pumpkins  ·  states: %s  ·  to smash now: %d (rare %d)",
+                has and "found" or "NOT in this server", total, table.concat(st, ", "), #list, rares))
             for j, pk in ipairs(list) do
                 if j > 30 then add("  ...") break end
-                add(string.format("  kind %s  tagged %s  gray %s  prompt %s  detector %s", pk.kind, tostring(pk.tagged),
-                    tostring(pk.gray), tostring(pk.prompt ~= nil), tostring(pk.detector ~= nil)))
+                add(string.format("  kind %s  tagged %s  rare %s  prompt %s  detector %s", pk.kind, tostring(pk.tagged),
+                    tostring(pk.rare), tostring(pk.prompt ~= nil), tostring(pk.detector ~= nil)))
                 describe(pk.root)
             end
             add("")
@@ -12668,10 +12670,12 @@ do
             return first
         end
         -- Still there to smash: in the folder, Idle, a tagged part you can see.
+        -- A RARE one: its state is not believed (the pile may turn into the
+        -- Pumpkin Snowman out of the same model) - hit while a part is tagged.
         local function alive(c)
             local m = c.root
             if not (m.Parent and m:IsDescendantOf(workspace)) then return false end
-            if not idle(m:GetAttribute("PumpkinState")) then return false end
+            if not c.rare and not idle(m:GetAttribute("PumpkinState")) then return false end
             if c.tagged then
                 for _, p in ipairs(c.hits) do
                     if visible(p) and hasTag(p) then return true end
@@ -12743,7 +12747,11 @@ do
             if (r.Position - stand).Magnitude > 6 then
                 releasePile()
                 setState("FLY")
-                M.note = string.format("to a pumpkin (%s), %.0f studs", c.kind, (r.Position - at).Magnitude)
+                M.note = string.format("to a %spumpkin (%s), %.0f studs", c.rare and "RARE " or "", c.kind, (r.Position - at).Magnitude)
+                if c.rare then
+                    print(string.format("[BFF] halloween: a RARE pumpkin (the seed one) at %.0f,%.0f,%.0f - %.0f studs - going",
+                        at.X, at.Y, at.Z, (r.Position - at).Magnitude))
+                end
                 say(M.note)
                 flyTo(stand, { face = at })
                 if stale(myEpoch) or not alive(c) then return end
@@ -12785,8 +12793,9 @@ do
                             saved.way = way
                             save()
                         end
-                        M.note = string.format("pumpkin smashed (%s, %s -> %s)  ·  %d this session", c.kind, way,
-                            tostring(c.endState), M.tally.pumpkins)
+                        if c.rare then M.tally.rare = (M.tally.rare or 0) + 1 end
+                        M.note = string.format("%spumpkin smashed (%s, %s -> %s)  ·  %d this session", c.rare and "RARE " or "",
+                            c.kind, way, tostring(c.endState), M.tally.pumpkins)
                         print("[BFF] halloween: " .. M.note)
                         if not M.probedHit then
                             M.probedHit = true
@@ -13053,8 +13062,8 @@ do
         end
 
         M._t = {
-            pumpkinName = pumpkinName, isGray = isGray, pickDoor = pickDoor, soonestCool = soonestCool,
-            idle = idle, variant = variant, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
+            pumpkinName = pumpkinName, pickDoor = pickDoor, soonestCool = soonestCool,
+            idle = idle, variant = variant, pickPumpkin = pickPumpkin, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
             kindDropped = kindDropped,
         }
     end
@@ -17635,6 +17644,7 @@ local function buildUI()
                 table.sort(st)
                 server = string.format("%d pumpkins  ·  %s", total, table.concat(st, "  ·  "))
             end
+            local _, _, _, rareNow = m.census()
             local rw = {}
             for _, n in ipairs({ "Cursed Pumpkin Seed", "Candy Corn", "Pumpkin Bits" }) do
                 local c = m.counts and m.counts[n]
@@ -17650,6 +17660,7 @@ local function buildUI()
                 "moon      " .. moon,
                 "server    " .. server,
                 string.format("pumpkins  %d smashed   ·   way %s", t.pumpkins, tostring(m.way or "not found yet")),
+                string.format("rare      %d here now (the seed one)   ·   %d smashed", rareNow or 0, t.rare or 0),
                 string.format("doors     %d knocked   ·   %d treats   ·   %d tricks   ·   %d Hell Riders", t.doors, t.treats, t.tricks, t.bosses),
                 string.format("killed    %d that came at you", t.kills),
                 "rewards   " .. (#rw > 0 and table.concat(rw, "   ·   ") or "not read yet"),
@@ -17666,9 +17677,9 @@ local function buildUI()
             function() return CFG.HalloweenPumpkins ~= false end,
             function(x) CFG.HalloweenPumpkins = x end)
         hairline(v)
-        switchRow(v, "Skip the Gray Pumpkin", "The dangerous one - left alone",
-            function() return CFG.HalloweenSkipGray ~= false end,
-            function(x) CFG.HalloweenSkipGray = x end)
+        switchRow(v, "Rare pumpkins first", "The Cursed Pumpkin Seed one - from anywhere in the server",
+            function() return CFG.HalloweenRareFirst ~= false end,
+            function(x) CFG.HalloweenRareFirst = x end)
         hairline(v)
         switchRow(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
             function() return CFG.HalloweenDoors ~= false end,
