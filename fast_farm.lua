@@ -349,7 +349,8 @@ local CFG = {
     HalloweenDoors     = true,       -- knock at the Harvest Moon; the game's teleport there accepted
     HalloweenBoss      = true,       -- a hellfire door: through its portal to the Hell Rider
     HalloweenReturn    = true,       -- the moon over: the game's teleport back accepted
-    HalloweenTour      = true,       -- none here: every island in the sea, then the next server
+    HalloweenTour      = true,       -- every pumpkin here smashed: the next server (off = wait for them)
+    HalloweenWatch     = false,      -- RECORD what you smash by hand (watch only - touches nothing)
     -- PREHISTORIC HUNT (Third Sea): a boat bought at Tiki Outpost's BACK boat
     -- dealer and driven west into Sea Danger 6 until the island comes. None
     -- by SeaSearchTo = the next server. The island up = the hunt's job done;
@@ -653,7 +654,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.4" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -11805,13 +11806,17 @@ end
 --           HalloweenEventActive = the moon is up.
 --   smash   CombatUtil.RunHitDetection: a melee M1's box touching a part
 --           tagged "M1HitRegistry" -> Net "RE/RegisterHit":FireServer(part).
--- NOT READ (2026 code, after the dump): what a pumpkin IS. So it is FOUND BY
--- TRYING (as the M1 ways): every M1HitRegistry part and every model named
--- like a pumpkin is a candidate; the way that breaks one (the remote hit, a
--- real click facing it, its prompt or click detector) is kept; a kind that
--- never breaks is dropped. The first run writes what it saw to
--- workspace/bff_halloween_probe.txt and the event's scripts' bytecode to
--- workspace/bff_halloween_dump/ - to pin it down in the next build.
+--   pumpkins  READ IN THE USER'S PROBE (2026-10-31, build .3): workspace
+--           .PumpkinHunt = every one in the server, Model "Pumpkin", attr
+--           PumpkinState "Idle", small MeshParts tagged M1HitRegistry. The
+--           Map's big pumpkins are decorations (build .3 went for those: its
+--           Gray test read every real one's invisible grey RootPart).
+-- NOT READ YET: what a smash does (the state it goes to, how many hits) - the
+-- way that breaks one (the remote hit, a real click facing it, its prompt or
+-- click detector) is FOUND BY TRYING and kept. "Record what I smash" writes
+-- down what the game does while the user smashes by hand
+-- (workspace/bff_halloween_watch.txt); the probe and the event's scripts'
+-- bytecode go to workspace/bff_halloween_probe.txt / bff_halloween_dump/.
 do
     local function build()
         local M: { [string]: any } = {
@@ -11880,49 +11885,34 @@ do
             return s
         end
 
-        -- One stop per island: the level table's camps in this sea, none
-        -- within `gap` of another, nearest-next from `from`.
-        local function tourPoints(rows, sea, seaOf, gap, from)
-            local pts = {}
-            for _, row in ipairs(rows) do
-                local p = row[4]
-                -- Not the sea floor (Submerged Island: the submarine's, not a flight).
-                if p and p.Y > -20 and seaOf(row[1]) == sea then
-                    local near = false
-                    for _, q in ipairs(pts) do
-                        if (q - p).Magnitude < gap then near = true break end
-                    end
-                    if not near then table.insert(pts, p) end
-                end
-            end
-            local out, at = {}, from
-            while #pts > 0 do
-                local bi, bd = 1, math.huge
-                for i, p in ipairs(pts) do
-                    local d = (p - at).Magnitude
-                    if d < bd then bi, bd = i, d end
-                end
-                at = table.remove(pts, bi)
-                table.insert(out, at)
-            end
-            return out
+        -- A pumpkin there to smash: PumpkinState "Idle" (no state at all = the
+        -- same, should a server not set one).
+        local function idle(st)
+            return st == nil or st == "Idle"
         end
 
-        -- The event's item ids off Economy.ItemId.RawSource: the tokens (a
-        -- "Spooky" material / currency), Candy Corn (last year's), and every
-        -- event-sounding one (the probe).
+        -- Its look: "pumpkinv1.007" -> "pumpkinv1" (the mesh set it is cut from).
+        local function variant(n)
+            return (string.gsub(tostring(n or "?"), "%.%d+$", ""))
+        end
+
+        -- The event's item ids off Economy.ItemId.RawSource. The rewards (user,
+        -- 2026-10-31: "two types - the pumpkin seeds and the candy corn, same as
+        -- last year"): Cursed Pumpkin Seed (1608) and Candy Corn (832); Pumpkin
+        -- Bits (1607) counted too, should it be one. names = every id's name
+        -- (the recorder); all = every event-sounding one (the probe).
+        local COUNTED = { "Cursed Pumpkin Seed", "Candy Corn", "Pumpkin Bits", "Spooky Token" }
         local function tokenIds(list)
-            local out = { token = {}, candy = {}, all = {} }
+            local out = { byName = {}, names = {}, all = {} }
+            for _, n in ipairs(COUNTED) do out.byName[n] = {} end
             for _, e in ipairs(list) do
                 local id = type(e) == "table" and type(e.Id) == "table" and e.Id or nil
                 local key = id and id.StorageKey
                 if type(key) == "string" then
+                    out.names[id.ItemId] = key
                     local low = string.lower(key)
-                    if string.find(low, "spooky", 1, true) and (string.find(low, "token", 1, true)
-                        or id.Type == "Material" or id.Type == "Currency") then
-                        table.insert(out.token, id.ItemId)
-                    elseif low == "candy corn" then
-                        table.insert(out.candy, id.ItemId)
+                    for _, n in ipairs(COUNTED) do
+                        if low == string.lower(n) then table.insert(out.byName[n], id.ItemId) end
                     end
                     for _, w in ipairs({ "spook", "pumpkin", "hallow", "hellfire", "hell rider", "candy", "lantern", "poltergeist", "soul swap" }) do
                         if string.find(low, w, 1, true) then
@@ -11976,8 +11966,7 @@ do
         end
 
         -- ---------- the game ----------
-        -- Pumpkin-named instances and the doors, indexed below (index()).
-        local named = setmetatable({}, { __mode = "k" })
+        -- The doors, indexed below (index()).
         local doors = setmetatable({}, { __mode = "k" })
         local function huntOn() return CFG.Hunt and CFG.HuntKind == "halloween" end
         local function remotes()
@@ -12047,39 +12036,40 @@ do
             if not (ok and type(list) == "table") then return nil end
             M.ids = tokenIds(list)
             local S = (P :: any).sea
-            if S and S.addIds then
-                S.addIds("Spooky Token", M.ids.token)
-                S.addIds("Candy Corn", M.ids.candy)
+            local said = {}
+            for _, n in ipairs(COUNTED) do
+                if S and S.addIds then S.addIds(n, M.ids.byName[n]) end
+                table.insert(said, n .. " " .. (#M.ids.byName[n] > 0 and table.concat(M.ids.byName[n], ",") or "-"))
             end
-            print(string.format("[BFF] halloween: token ids %s  ·  Candy Corn %s",
-                #M.ids.token > 0 and table.concat(M.ids.token, ",") or "none named Spooky",
-                #M.ids.candy > 0 and table.concat(M.ids.candy, ",") or "?"))
+            print("[BFF] halloween: reward ids  ·  " .. table.concat(said, "  ·  "))
             return M.ids
         end
+        -- { [name] = count } of the rewards (nil = unreadable). M.have = the
+        -- seeds (the panel's Home line); the start is kept for "+N this session".
         local function readTokens()
             local S = (P :: any).sea
             if not (S and S.have and resolveIds()) then return nil end
-            local h = S.have({ "Spooky Token", "Candy Corn" }, false)
+            local h = S.have(COUNTED, false)
             if not h then return nil end
-            local n = (#M.ids.token > 0 and h["Spooky Token"]) or (#M.ids.candy > 0 and h["Candy Corn"]) or nil
-            M.have = n
-            if n and not M.tally.tokens0 then M.tally.tokens0 = n end
-            return n
+            local out = {}
+            for _, n in ipairs(COUNTED) do
+                if #M.ids.byName[n] > 0 then out[n] = h[n] end
+            end
+            M.counts = out
+            M.counts0 = M.counts0 or table.clone(out)
+            M.have = out["Cursed Pumpkin Seed"]
+            if M.have and not M.tally.tokens0 then M.tally.tokens0 = M.have end
+            return out
         end
         M.readTokens = readTokens
 
         -- ---------- what is out there ----------
-        -- Name-matched instances, kept current the way the game keeps its
-        -- doors: one scan, then DescendantAdded. A cheap plain find first -
-        -- this runs for every effect a fight spawns.
+        -- The doors, kept current the way the game keeps them: one scan, then
+        -- DescendantAdded (a plain name compare - this runs for every effect a
+        -- fight spawns).
         local indexed, indexing = false, false
         local function maybeAdd(d)
-            local n = d.Name
-            if n == "HalloweenDoor" then doors[d] = true return end
-            if string.find(n, "umpkin", 1, true) or (string.find(n, "antern", 1, true)
-                and (string.find(n, "ack", 1, true) or string.find(n, "ACK", 1, true))) then
-                if d:IsA("Model") or d:IsA("BasePart") then named[d] = true end
-            end
+            if d.Name == "HalloweenDoor" then doors[d] = true end
         end
         local function index()
             if indexed or indexing then return end
@@ -12090,7 +12080,8 @@ do
                     if _G.BFF ~= P then conn:Disconnect() return end
                     pcall(maybeAdd, d)
                 end)
-                local all = workspace:GetDescendants()
+                local map = workspace:FindFirstChild("Map")
+                local all = map and map:GetDescendants() or {}
                 for i, d in ipairs(all) do
                     pcall(maybeAdd, d)
                     if i % 20000 == 0 then task.wait() end
@@ -12099,39 +12090,6 @@ do
             end)
         end
 
-        local function under(i, folder)
-            return folder ~= nil and i:IsDescendantOf(folder)
-        end
-        local function excluded(i)
-            if under(i, workspace:FindFirstChild("Characters")) or under(i, workspace:FindFirstChild("Enemies")) then return true end
-            if workspace.CurrentCamera and under(i, workspace.CurrentCamera) then return true end
-            for _, pl in ipairs(Players:GetPlayers()) do
-                if pl.Character and under(i, pl.Character) then return true end
-            end
-            return false
-        end
-        local function mainPart(m)
-            if m:IsA("BasePart") then return m end
-            if m.PrimaryPart then return m.PrimaryPart end
-            local best, bv = nil, -1
-            for _, d in ipairs(m:GetDescendants()) do
-                if d:IsA("BasePart") then
-                    local v = d.Size.X * d.Size.Y * d.Size.Z
-                    if v > bv then best, bv = d, v end
-                end
-            end
-            return best
-        end
-        -- The outermost pumpkin-named ancestor (a model "Pumpkin" holding a
-        -- part "Pumpkin" is ONE pumpkin), else the thing itself.
-        local function rootOf(i)
-            local top, at = i, i.Parent
-            while at and at ~= workspace and at ~= workspace:FindFirstChild("Map") do
-                if pumpkinName(at.Name) and (at:IsA("Model") or at:IsA("BasePart")) then top = at end
-                at = at.Parent
-            end
-            return top
-        end
         local function hasTag(i)
             local ok, t = pcall(function() return i:HasTag("M1HitRegistry") end)
             return ok and t
@@ -12139,49 +12097,60 @@ do
         local function visible(p)
             return p and p.Parent ~= nil and p.Transparency < 0.99
         end
+        -- The biggest part you can SEE (the probe: a pumpkin's PrimaryPart is an
+        -- invisible grey 0.1-stud RootPart - its colour made every pumpkin
+        -- "gray" in build .3, so every one was skipped).
+        local function bodyOf(m)
+            if m:IsA("BasePart") then return m end
+            local best, bv = nil, -1
+            for _, d in ipairs(m:GetDescendants()) do
+                if d:IsA("BasePart") and visible(d) then
+                    local v = d.Size.X * d.Size.Y * d.Size.Z
+                    if v > bv then best, bv = d, v end
+                end
+            end
+            return best
+        end
 
-        -- Every pumpkin there is now: { root, part, hits, kind, pos, gray,
-        -- prompt, detector, tagged }.
+        -- THE PUMPKINS (the probe, 2026-10-31 15:37Z, Third Sea; user: "big
+        -- pumpkins are decoration, the small ones break - it attacks the wrong
+        -- ones"). workspace.PumpkinHunt holds every one in the server (~200,
+        -- on every island, all replicated - no streaming, so no tour): a Model
+        -- "Pumpkin", attr PumpkinState ("Idle" = there to smash), ~11 small
+        -- MeshParts tagged M1HitRegistry (pumpkin / pumpkinv1 / pumpkinv2 /
+        -- PumpkinV4 = the four looks). The Map's own pumpkins (pumpkin1 /
+        -- pumpkin2, 7.8 studs, untagged, e.g. the Turtle's HalloweenHotel) are
+        -- decorations: never looked at. -> { root, part, hits, kind, pos,
+        -- gray, prompt, detector, tagged }.
         local function pumpkins()
-            index()
-            local roots = {}
-            local CS = game:GetService("CollectionService")
-            local okT, tagged = pcall(function() return CS:GetTagged("M1HitRegistry") end)
-            for _, p in ipairs(okT and tagged or {}) do
-                if p:IsA("BasePart") and p:IsDescendantOf(workspace) and not excluded(p) then
-                    local r = rootOf(p)
-                    roots[r] = roots[r] or {}
-                    table.insert(roots[r], p)
-                end
-            end
-            for d in pairs(named) do
-                if d.Parent and d:IsDescendantOf(workspace) and not excluded(d) then
-                    local r = rootOf(d)
-                    roots[r] = roots[r] or {}
-                end
-            end
-            local now, out = os.clock(), {}
-            for r, hits in pairs(roots) do
-                local part = (#hits > 0) and hits[1] or mainPart(r)
-                if visible(part) and now >= (M.skip[r] or 0) then
-                    local kind = r.Name
-                    if #hits > 0 then M.tagged[kind] = true end
-                    -- A kind that came tagged and stands here untagged = broken.
-                    local brokenShell = #hits == 0 and M.tagged[kind]
-                    if not brokenShell and not kindDropped(M.kinds[kind]) then
-                        local body = mainPart(r) or part
-                        local prompt, detector = nil, nil
-                        pcall(function()
-                            for _, d in ipairs(r:GetDescendants()) do
-                                if not prompt and d:IsA("ProximityPrompt") and d.Enabled then prompt = d end
-                                if not detector and d:IsA("ClickDetector") then detector = d end
-                            end
-                        end)
-                        table.insert(out, {
-                            root = r, part = part, hits = hits, kind = kind, pos = part.Position,
-                            gray = isGray(kind, body and body.Color), prompt = prompt, detector = detector,
-                            tagged = #hits > 0,
-                        })
+            local folder = workspace:FindFirstChild("PumpkinHunt")
+            local out, now = {}, os.clock()
+            if not folder then return out end
+            for _, m in ipairs(folder:GetChildren()) do
+                if m:IsA("Model") and idle(m:GetAttribute("PumpkinState")) and now >= (M.skip[m] or 0) then
+                    local hits, body, bv, prompt, detector = {}, nil, -1, nil, nil
+                    for _, d in ipairs(m:GetDescendants()) do
+                        if d:IsA("BasePart") and visible(d) then
+                            if hasTag(d) then table.insert(hits, d) end
+                            local v = d.Size.X * d.Size.Y * d.Size.Z
+                            if v > bv then body, bv = d, v end
+                        elseif not prompt and d:IsA("ProximityPrompt") and d.Enabled then
+                            prompt = d
+                        elseif not detector and d:IsA("ClickDetector") then
+                            detector = d
+                        end
+                    end
+                    -- Not on the sea floor (the probe saw one at Y -2158:
+                    -- Submerged Island, the submarine's, not a flight).
+                    if body and body.Position.Y > -50 then
+                        local kind = variant((hits[1] or body).Name)
+                        if not kindDropped(M.kinds[kind]) then
+                            table.insert(out, {
+                                root = m, part = hits[1] or body, hits = hits, kind = kind, pos = body.Position,
+                                gray = isGray(m.Name, body.Color), prompt = prompt, detector = detector,
+                                tagged = #hits > 0,
+                            })
+                        end
                     end
                 end
             end
@@ -12189,16 +12158,27 @@ do
         end
         P.halloweenPumpkins = pumpkins
 
-        -- Nearest, a TAGGED one (the game's own breakable mark) before any
-        -- named-only one (maybe a decoration); the Gray Pumpkin left out.
+        -- How many there are, by state (the panel; the probe).
+        function M.census()
+            local folder = workspace:FindFirstChild("PumpkinHunt")
+            local by, total = {}, 0
+            for _, m in ipairs(folder and folder:GetChildren() or {}) do
+                if m:IsA("Model") then
+                    local st = tostring(m:GetAttribute("PumpkinState") or "none")
+                    by[st] = (by[st] or 0) + 1
+                    total += 1
+                end
+            end
+            return by, total, folder ~= nil
+        end
+
+        -- The nearest; the Gray Pumpkin left out.
         local function nearestPumpkin(list, from, within)
-            local best, bd, bt = nil, within or math.huge, false
+            local best, bd = nil, within or math.huge
             for _, c in ipairs(list) do
                 if not (c.gray and CFG.HalloweenSkipGray ~= false) then
                     local d = (c.pos - from).Magnitude
-                    if (c.tagged and not bt and d <= (within or math.huge)) or (c.tagged == bt and d < bd) then
-                        best, bd, bt = c, d, c.tagged
-                    end
+                    if d < bd then best, bd = c, d end
                 end
             end
             return best
@@ -12305,23 +12285,29 @@ do
             return false
         end
         -- The event's scripts: bytecode (getscriptbytecode) and, when the
-        -- executor has one, its decompile. Strong names first, 80 at most.
+        -- executor has one, its decompile. PUMPKIN-named scripts first (build
+        -- .3's 80 all went to HalloweenLocal's door events and PumpkinHuntView
+        -- was left out), then the strong names, then the weak; 150 at most.
+        M.decompileWhy = "not tried"
         local function dumpScripts()
             if not (writefile and getscriptbytecode) then return 0 end
             pcall(function() if makefolder and not (isfolder and isfolder(DUMP)) then makefolder(DUMP) end end)
             local roots = { player:FindFirstChild("PlayerScripts"), RS, game:GetService("ReplicatedFirst"),
                 player:FindFirstChild("PlayerGui") }
             local n, done = 0, {}
-            for pass = 1, 2 do
+            for pass = 1, 3 do
                 for i = 1, 4 do
                     local root = roots[i]
                     if root then
                         for _, s in ipairs(root:GetDescendants()) do
-                            if n >= 80 then break end
+                            if n >= 150 then break end
                             if (s:IsA("LocalScript") or s:IsA("ModuleScript")) and not done[s] then
                                 local full = fullName(s)
                                 local low = string.lower(full)
-                                if words(low, STRONG) or (pass == 2 and words(string.lower(s.Name), WEAK)) then
+                                local want = (pass == 1 and string.find(string.lower(s.Name), "pumpkin", 1, true) ~= nil)
+                                    or (pass == 2 and words(low, STRONG))
+                                    or (pass == 3 and words(string.lower(s.Name), WEAK))
+                                if want then
                                     done[s] = true
                                     local okB, bc = pcall(getscriptbytecode, s)
                                     if okB and type(bc) == "string" and #bc > 0 then
@@ -12329,7 +12315,14 @@ do
                                         pcall(writefile, file .. ".luac", bc)
                                         if decompile then
                                             local okD, src = pcall(decompile, s)
-                                            if okD and type(src) == "string" then pcall(writefile, file .. ".lua", src) end
+                                            if okD and type(src) == "string" and #src > 0 then
+                                                pcall(writefile, file .. ".lua", src)
+                                                M.decompileWhy = "works"
+                                            elseif M.decompileWhy ~= "works" then
+                                                M.decompileWhy = okD and ("gave a " .. type(src)) or ("error: " .. string.sub(tostring(src), 1, 120))
+                                            end
+                                        else
+                                            M.decompileWhy = "this executor has no decompile"
                                         end
                                         n += 1
                                     end
@@ -12368,7 +12361,7 @@ do
                 return ok and table.concat(t, ",") or "?"
             end
             local function describe(i)
-                local p = i:IsA("BasePart") and i or mainPart(i)
+                local p = i:IsA("BasePart") and i or bodyOf(i)
                 add(string.format("  %s  [%s]  tags {%s}", fullName(i), i.ClassName, tagsOf(i)))
                 if p then
                     add(string.format("      part %s  size %.1f,%.1f,%.1f  at %.0f,%.0f,%.0f  colour %.2f,%.2f,%.2f  transp %.2f  anchored %s",
@@ -12404,9 +12397,11 @@ do
             end
             add("")
             local list = pumpkins()
-            local c = 0
-            for _ in pairs(named) do c += 1 end
-            add(string.format("PUMPKIN-NAMED instances indexed: %d  ·  pumpkins (grouped, live): %d", c, #list))
+            local by, total, has = M.census()
+            local st = {}
+            for k2, v2 in pairs(by) do table.insert(st, k2 .. " " .. v2) end
+            add(string.format("PUMPKINHUNT: %s  ·  %d pumpkins  ·  states: %s  ·  to smash now: %d",
+                has and "found" or "NOT in this server", total, table.concat(st, ", "), #list))
             for j, pk in ipairs(list) do
                 if j > 30 then add("  ...") break end
                 add(string.format("  kind %s  tagged %s  gray %s  prompt %s  detector %s", pk.kind, tostring(pk.tagged),
@@ -12451,19 +12446,214 @@ do
             add("GACHA controllers: " .. table.concat(gl, "  "))
             local ids = resolveIds()
             add("ITEM IDS: " .. (ids and table.concat(ids.all, "  |  ") or "RawSource not readable"))
-            add("tokens now: " .. tostring(readTokens()))
+            local counts = readTokens()
+            local cl = {}
+            for k2, v2 in pairs(counts or {}) do table.insert(cl, k2 .. " " .. tostring(v2)) end
+            add("rewards now: " .. (counts and table.concat(cl, "  ·  ") or "not readable"))
             local ps = player:FindFirstChild("PlayerScripts")
             local sl = {}
             for _, x in ipairs(ps and ps:GetChildren() or {}) do table.insert(sl, x.Name) end
             add("PLAYERSCRIPTS: " .. table.concat(sl, "  "))
             add("")
-            add(string.format("SCRIPTS dumped to workspace/%s: %d  (getscriptbytecode %s, decompile %s)",
-                DUMP, M.dumped, tostring(getscriptbytecode ~= nil), tostring(decompile ~= nil)))
+            add(string.format("SCRIPTS dumped to workspace/%s: %d  (getscriptbytecode %s, decompile: %s)",
+                DUMP, M.dumped, tostring(getscriptbytecode ~= nil), tostring(M.decompileWhy)))
             if writefile then pcall(writefile, "bff_halloween_probe.txt", table.concat(L, "\n")) end
             print(string.format("[BFF] halloween: probe (%s) - %d pumpkins, %d doors, %d tagged M1HitRegistry - workspace/bff_halloween_probe.txt",
                 why, #list, #dl, okM and #tagged or -1))
         end
         M.probe = probe
+
+        -- ---------- the recorder ----------
+        -- WATCH ONLY (user, 2026-10-31: "if I turn off the Halloween mode and
+        -- I attack, will it record?"). Its own switch; it runs with the farm
+        -- stopped and touches nothing in the game - it writes down what the
+        -- game does while YOU smash: each pumpkin's attributes (old -> new),
+        -- its parts and its M1HitRegistry tags going, enemies appearing (with
+        -- LocalEnemy, how far), the item counts the game pushes (named), the
+        -- event's remote messages, things appearing near you, the game's
+        -- notices; each line with the tool in your hand. The pumpkin scripts
+        -- are dumped once. -> workspace/bff_halloween_watch.txt, every 3 s.
+        local W: { [string]: any } = { on = false, lines = {}, conns = {}, t0 = 0, n = 0, seen = {} }
+        M.watch = W
+        local function attrsOf(i)
+            local t = {}
+            pcall(function()
+                for k2, v2 in pairs(i:GetAttributes()) do
+                    if k2 ~= "RBX_ReimportId" then table.insert(t, k2 .. "=" .. tostring(v2)) end
+                end
+            end)
+            return table.concat(t, ", ")
+        end
+        local function myPos()
+            local _, r = parts()
+            return r and r.Position
+        end
+        local function wlog(text)
+            local held = heldTool()
+            table.insert(W.lines, string.format("%8.2f  %s  [%s]", os.clock() - W.t0, text, held and held.Name or "no tool"))
+            if #W.lines > 4000 then table.remove(W.lines, 1) end
+            W.n += 1
+            W.last = text
+        end
+        local function flush()
+            if not writefile then return end
+            local head = string.format("[BFF] Halloween recorder  ·  build %s  ·  started %s  ·  place %s",
+                tostring(P.build), tostring(W.started), tostring(game.PlaceId))
+            pcall(writefile, "bff_halloween_watch.txt", table.concat({ head,
+                "seconds since start  ·  what  ·  [the tool in your hand]", "", table.concat(W.lines, "\n") }, "\n"))
+        end
+        local function pid(m)
+            W.ids = W.ids or setmetatable({}, { __mode = "k" })
+            if not W.ids[m] then
+                W.nextId = (W.nextId or 0) + 1
+                W.ids[m] = W.nextId
+            end
+            return W.ids[m]
+        end
+        local function tellPumpkin(m)
+            local b = bodyOf(m)
+            local at, mine = b and b.Position, myPos()
+            return string.format("pumpkin #%d %s at %s, %s studs from you", pid(m), variant(b and b.Name or "?"),
+                at and string.format("%.0f,%.0f,%.0f", at.X, at.Y, at.Z) or "?",
+                (at and mine) and string.format("%.0f", (at - mine).Magnitude) or "?")
+        end
+        local function guard(fn)
+            return function(...)
+                if _G.BFF ~= P then W.stop() return end
+                local ok, err = pcall(fn, ...)
+                if not ok then wlog("recorder error: " .. tostring(err)) end
+            end
+        end
+        local function hold(c) table.insert(W.conns, c) end
+        local function watchPumpkin(m)
+            if not m:IsA("Model") then return end
+            local old = m:GetAttributes()
+            hold(m.AttributeChanged:Connect(guard(function(a)
+                local v = m:GetAttribute(a)
+                wlog(string.format("%s: %s %s -> %s", tellPumpkin(m), a, tostring(old[a]), tostring(v)))
+                old[a] = v
+            end)))
+            hold(m.DescendantRemoving:Connect(guard(function(d)
+                if d:IsA("BasePart") then wlog(tellPumpkin(m) .. ": part gone " .. d.Name) end
+            end)))
+        end
+        function W.start()
+            if W.on then return end
+            W.on, W.t0, W.lines, W.n, W.seen = true, os.clock(), {}, 0, {}
+            W.started = os.date("!%Y-%m-%d %H:%M:%SZ")
+            pcall(resolveIds)
+            local folder = workspace:FindFirstChild("PumpkinHunt")
+            local by, total, has = M.census()
+            local st = {}
+            for k2, v2 in pairs(by) do table.insert(st, k2 .. " " .. v2) end
+            wlog(string.format("start  ·  PumpkinHunt %s  ·  %d pumpkins  ·  states %s", has and "found" or "NOT here",
+                total, table.concat(st, ", ")))
+            if folder then
+                for _, m in ipairs(folder:GetChildren()) do watchPumpkin(m) end
+                hold(folder.ChildAdded:Connect(guard(function(m)
+                    wlog("new in PumpkinHunt: " .. (m:IsA("Model") and (tellPumpkin(m) .. "  ·  " .. attrsOf(m))
+                        or (m.Name .. " [" .. m.ClassName .. "]")))
+                    watchPumpkin(m)
+                end)))
+                hold(folder.ChildRemoved:Connect(guard(function(m)
+                    wlog(string.format("left PumpkinHunt: %s #%s", m.Name, tostring(W.ids and W.ids[m])))
+                end)))
+                local CS = game:GetService("CollectionService")
+                hold(CS:GetInstanceRemovedSignal("M1HitRegistry"):Connect(guard(function(p)
+                    if p:IsDescendantOf(folder) then
+                        local m = p:FindFirstAncestorOfClass("Model")
+                        wlog("tag M1HitRegistry off " .. p.Name .. (m and (" of " .. tellPumpkin(m)) or ""))
+                    end
+                end)))
+            end
+            local ef = workspace:FindFirstChild("Enemies")
+            if ef then
+                hold(ef.ChildAdded:Connect(guard(function(e)
+                    task.wait(0.1)
+                    local root = e:FindFirstChild("HumanoidRootPart")
+                    local mine = myPos()
+                    local d = (root and mine) and (root.Position - mine).Magnitude or nil
+                    if d and d > 400 then return end
+                    wlog(string.format("enemy appeared: %s  ·  LocalEnemy %s  ·  %s studs from you  ·  %s", e.Name,
+                        tostring(e:GetAttribute("LocalEnemy")), d and string.format("%.0f", d) or "?", attrsOf(e)))
+                end)))
+            end
+            local ev = remotes()
+            if ev then
+                hold(ev.OnClientEvent:Connect(guard(function(...)
+                    local t = {}
+                    for i = 1, select("#", ...) do
+                        local x = select(i, ...)
+                        t[i] = (typeof(x) == "Instance") and fullName(x) or tostring(x)
+                    end
+                    wlog("HalloweenEvent: " .. table.concat(t, " | "))
+                end)))
+            end
+            local re = netRemote("RE", "OnItemValueChanged")
+            if re then
+                hold(re.OnClientEvent:Connect(guard(function(items)
+                    if type(items) ~= "table" then return end
+                    for _, it in pairs(items) do
+                        if type(it) == "table" and it.Key == "Quantity" then
+                            local nm = M.ids and M.ids.names[tonumber(it.ItemId)] or "?"
+                            wlog(string.format("item: %s (%s) = %s", tostring(nm), tostring(it.ItemId), tostring(it.Value)))
+                        end
+                    end
+                end)))
+            end
+            -- Appearing near you: the first 5 of each name (a fight's effects are many).
+            hold(workspace.ChildAdded:Connect(guard(function(c)
+                task.wait()
+                local mine = myPos()
+                local okP, at = pcall(function() return c:IsA("BasePart") and c.Position or c:GetPivot().Position end)
+                if okP and at and mine and (at - mine).Magnitude < 60 then
+                    W.seen[c.Name] = (W.seen[c.Name] or 0) + 1
+                    if W.seen[c.Name] <= 5 then
+                        wlog(string.format("appeared near you: %s [%s] %.0f studs  ·  %s", c.Name, c.ClassName,
+                            (at - mine).Magnitude, attrsOf(c)))
+                    end
+                end
+            end)))
+            local pg = player:FindFirstChild("PlayerGui")
+            local nf = pg and pg:FindFirstChild("Notifications")
+            if nf then
+                hold(nf.DescendantAdded:Connect(guard(function(d)
+                    if d:IsA("TextLabel") then
+                        task.wait(0.05)
+                        if d.Text ~= "" then wlog("notice: " .. d.Text) end
+                    end
+                end)))
+            end
+            if not W.dumped then
+                W.dumped = true
+                task.spawn(function()
+                    M.dumped = dumpScripts()
+                    wlog(string.format("scripts dumped: %d to workspace/%s (decompile: %s)", M.dumped, DUMP,
+                        tostring(M.decompileWhy)))
+                end)
+            end
+            local function every3()
+                if W.on and _G.BFF == P then
+                    flush()
+                    task.delay(3, every3)
+                end
+            end
+            task.delay(3, every3)
+            print("[BFF] halloween: RECORDING - smash pumpkins by hand; workspace/bff_halloween_watch.txt")
+        end
+        function W.stop()
+            if not W.on then return end
+            W.on = false
+            for _, c in ipairs(W.conns) do pcall(function() c:Disconnect() end) end
+            table.clear(W.conns)
+            wlog("stop")
+            flush()
+            print(string.format("[BFF] halloween: recording stopped - %d lines in workspace/bff_halloween_watch.txt", W.n))
+        end
+        -- Left on (saved settings, a hop): on again once the world is there.
+        task.delay(8, function()
+            if CFG.HalloweenWatch and _G.BFF == P then pcall(W.start) end
+        end)
 
         -- ---------- the smash ----------
         local function meleeTool()
@@ -12477,11 +12667,18 @@ do
             end
             return first
         end
+        -- Still there to smash: in the folder, Idle, a tagged part you can see.
         local function alive(c)
-            local r, p = c.root, c.part
-            if not (r.Parent and r:IsDescendantOf(workspace) and visible(p)) then return false end
-            if c.tagged and not hasTag(p) then return false end
-            return true
+            local m = c.root
+            if not (m.Parent and m:IsDescendantOf(workspace)) then return false end
+            if not idle(m:GetAttribute("PumpkinState")) then return false end
+            if c.tagged then
+                for _, p in ipairs(c.hits) do
+                    if visible(p) and hasTag(p) then return true end
+                end
+                return false
+            end
+            return visible(c.part)
         end
         -- What can show a hit landed: the attributes on it, a health.
         local function snap(c)
@@ -12566,7 +12763,20 @@ do
                 while n < budget do
                     n += 1
                     if stale(myEpoch) or not huntOn() then return end
-                    if not alive(c) then
+                    -- Out of Idle: a hit (back to Idle in a moment) or the end.
+                    local gone = not alive(c)
+                    if gone then
+                        local st = c.root:GetAttribute("PumpkinState")
+                        local t0 = os.clock()
+                        while os.clock() - t0 < 2 and not alive(c) and not stale(myEpoch) do task.wait(0.1) end
+                        gone = not alive(c)
+                        if not gone then
+                            print(string.format("[BFF] halloween: a pumpkin went %s and back to Idle - kept on it", tostring(st)))
+                            if budget == PER_WAY then budget = PER_WAY * 6 end
+                        end
+                        c.endState = st
+                    end
+                    if gone then
                         k.broke += 1
                         M.tally.pumpkins += 1
                         M.skip[c.root] = os.clock() + 20
@@ -12575,7 +12785,8 @@ do
                             saved.way = way
                             save()
                         end
-                        M.note = string.format("pumpkin smashed (%s, %s)  ·  %d this session", c.kind, way, M.tally.pumpkins)
+                        M.note = string.format("pumpkin smashed (%s, %s -> %s)  ·  %d this session", c.kind, way,
+                            tostring(c.endState), M.tally.pumpkins)
                         print("[BFF] halloween: " .. M.note)
                         if not M.probedHit then
                             M.probedHit = true
@@ -12818,7 +13029,8 @@ do
                 end
             end
 
-            -- 5. None loaded: the next island (one lap), then the director.
+            -- 5. None to smash. Every pumpkin in the server is in PumpkinHunt
+            -- (none streamed away), so none here = none in this server.
             if moon and CFG.HalloweenDoors ~= false then
                 M.note = "the Harvest Moon - no door and no pumpkin near - waiting"
                 say(M.note)
@@ -12826,39 +13038,23 @@ do
                 task.wait(0.5)
                 return true
             end
-            if CFG.HalloweenPumpkins ~= false and CFG.HalloweenTour ~= false then
-                local sea = mySea()
-                if not M.tour then
-                    M.tour = { pts = sea and tourPoints(LEVELS, sea, seaOfLevel, 1500, r.Position) or {}, i = 0 }
-                end
-                local t = M.tour
-                if t.i < #t.pts then
-                    t.i += 1
-                    local p = t.pts[t.i]
-                    releasePile()
-                    setState("FLY")
-                    M.note = string.format("looking for pumpkins - island %d of %d", t.i, #t.pts)
-                    say(M.note)
-                    flyTo(p + Vector3.new(0, 60, 0))
-                    if stale(myEpoch) then return true end
-                    local t0 = os.clock()
-                    while os.clock() - t0 < 2.5 and not stale(myEpoch) do
-                        if nearestPumpkin(pumpkins(), r.Position) then break end
-                        task.wait(0.25)
-                    end
-                    return true
-                end
-                M.tour = nil
-                M.why = string.format("no pumpkin on any of %d islands", #t.pts)
-                return false
+            local _, total, has = M.census()
+            M.why = (not has) and "no PumpkinHunt in this server"
+                or string.format("every pumpkin here is smashed (%d)", total)
+            if CFG.HalloweenTour == false then
+                -- Stay: they come back.
+                M.note = M.why .. " - waiting for them to come back"
+                say(M.note)
+                setState("WAIT")
+                task.wait(1)
+                return true
             end
-            M.why = "no pumpkin here"
             return false
         end
 
         M._t = {
             pumpkinName = pumpkinName, isGray = isGray, pickDoor = pickDoor, soonestCool = soonestCool,
-            tourPoints = tourPoints, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
+            idle = idle, variant = variant, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
             kindDropped = kindDropped,
         }
     end
@@ -17431,16 +17627,37 @@ local function buildUI()
                 local ok, d = pcall(function() return os.date("!*t") end)
                 moon = (ok and d) and string.format("next in %d min (every hour on the hour, 10 min)", 60 - d.min) or "?"
             end
-            local gained = (m.have and t.tokens0) and string.format("  (+%d this session)", m.have - t.tokens0) or ""
+            local by, total, has = m.census()
+            local server = "no PumpkinHunt in this server"
+            if has then
+                local st = {}
+                for k, n in pairs(by) do table.insert(st, k .. " " .. n) end
+                table.sort(st)
+                server = string.format("%d pumpkins  ·  %s", total, table.concat(st, "  ·  "))
+            end
+            local rw = {}
+            for _, n in ipairs({ "Cursed Pumpkin Seed", "Candy Corn", "Pumpkin Bits" }) do
+                local c = m.counts and m.counts[n]
+                if c then
+                    local c0 = m.counts0 and m.counts0[n]
+                    table.insert(rw, string.format("%s %d%s", n == "Cursed Pumpkin Seed" and "seeds" or string.lower(n), c,
+                        (c0 and c > c0) and string.format(" (+%d)", c - c0) or ""))
+                end
+            end
+            local w = m.watch
             local lines = {
                 "now       " .. tostring(m.note),
                 "moon      " .. moon,
+                "server    " .. server,
                 string.format("pumpkins  %d smashed   ·   way %s", t.pumpkins, tostring(m.way or "not found yet")),
                 string.format("doors     %d knocked   ·   %d treats   ·   %d tricks   ·   %d Hell Riders", t.doors, t.treats, t.tricks, t.bosses),
                 string.format("killed    %d that came at you", t.kills),
-                "tokens    " .. (m.have and tostring(m.have) or "not read yet") .. gained,
+                "rewards   " .. (#rw > 0 and table.concat(rw, "   ·   ") or "not read yet"),
             }
-            if m.tour then table.insert(lines, string.format("islands   %d of %d looked at", m.tour.i, #m.tour.pts)) end
+            if w and (w.on or w.n > 0) then
+                table.insert(lines, string.format("recorder  %s  ·  %d lines  ·  %s", w.on and "ON" or "off", w.n,
+                    string.sub(tostring(w.last or ""), 1, 60)))
+            end
             return table.concat(lines, "\n")
         end)
         modeSwitch(v, "halloween")
@@ -17465,20 +17682,29 @@ local function buildUI()
             function() return CFG.HalloweenReturn ~= false end,
             function(x) CFG.HalloweenReturn = x end)
         hairline(v)
-        switchRow(v, "Every island, then the next server", "Off: only what is near you",
+        switchRow(v, "All smashed: the next server", "Off: wait here for them to come back",
             function() return CFG.HalloweenTour ~= false end,
             function(x) CFG.HalloweenTour = x end)
+        heading2(v, "find out")
+        switchRow(v, "Record what I smash", "Watch only - smash by hand, the farm can be off; bff_halloween_watch.txt",
+            function() return P.halloween.watch.on end,
+            function(x)
+                CFG.HalloweenWatch = x
+                if x then P.halloween.watch.start() else P.halloween.watch.stop() end
+            end)
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
         fold(v, "How it works", function(v)
-            caption(v, "Pumpkins all event, the doors at every Harvest Moon, the next server when the islands are bare.")
+            caption(v, "Pumpkins all event, the doors at every Harvest Moon, the next server when every pumpkin is smashed.")
             caption(v, "First, anything sent at you (a door's trick, a pumpkin that comes alive) "
                 .. "is fought where it stands. At the moon (on the hour, 10 min) the game's "
                 .. "teleport to the doors is taken and every door knocked; a treat is "
                 .. "accepted, a minigame waited out (45 s). A hellfire door: into the "
-                .. "Hell Rider's portal. Otherwise the nearest pumpkin: beside it, a fighting "
-                .. "style in hand, smashed - the way that breaks one (the game's hit, a "
-                .. "click, its prompt) is learned and kept. None near: every island in "
-                .. "the sea, then the next server. The first run writes what it saw to "
+                .. "Hell Rider's portal. Otherwise the nearest pumpkin to smash - the small "
+                .. "ones in the game's PumpkinHunt, never the big decorations on the map - "
+                .. "beside it, a fighting style in hand; the way that breaks one (the game's "
+                .. "hit, a click, its prompt) is learned and kept. Every one smashed: the "
+                .. "next server. Record what I smash writes down what the game does while "
+                .. "you break them by hand. The first run writes what it saw to "
                 .. "workspace/bff_halloween_probe.txt and the event's scripts to "
                 .. "workspace/bff_halloween_dump/.")
         end)

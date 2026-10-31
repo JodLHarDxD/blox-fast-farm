@@ -238,6 +238,10 @@ P.sea = { tally = { mirages = 0, dealers = 0, chests = 0, gears = 0, found = 0, 
 P.seaev = { count = { total = 0, kinds = {}, since = 0 }, levi = { note = "-", kills = 0, now = {}, share = {} },
     form = {}, learn = {} }
 P.ember = { tally = { embers = 0, quests = 0, trees = 0 }, learn = {} }
+P.halloween = { tally = { pumpkins = 0, kills = 0, doors = 0, treats = 0, tricks = 0, bosses = 0 }, note = "off",
+    moonUp = function() return false end, census = function() return {}, 0, false end,
+    watch = { on = false, n = 0, start = function() P.halloween.watch.on = true end,
+        stop = function() P.halloween.watch.on = false end } }
 P.pvp = { targetText = function() return "-" end, dashNote = function() return "-" end,
     next = function() call("pvp next") end, view = { note = "-" }, ken = { note = "-" },
     clean = { count = 0 }, shake = { note = "-" }, speed = { note = "-" }, faced = 0 }

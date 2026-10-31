@@ -672,6 +672,17 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Halloween: the real pumpkins, the two rewards, the recorder - first test (2026-10-31, build 2026-10-31.4)
+
+Asked: "it attacks the wrong pumpkins - the big ones are decoration, the small ones break. It can kill the pumpkin NPC but not the pumpkins you have to break - they have no name." And: "two rewards - the pumpkin seeds and the candy corn, same as last year." And: "if I turn Halloween off and attack by hand, will it record?"
+- **What your probe showed** (`bff_halloween_probe.txt`, 15:37Z): the pumpkins to break are `workspace.PumpkinHunt` - about 200 in a server, on every island, all loaded at once. Each is a Model `Pumpkin` with `PumpkinState = Idle`, about 11 small parts tagged `M1HitRegistry`, and an **invisible grey 0.1-stud RootPart**. Build .3's Gray Pumpkin test read that RootPart, so **every real pumpkin counted as gray and was skipped**, and only the Map's big untagged decorations (`pumpkin1` / `pumpkin2`, e.g. the Turtle's HalloweenHotel) were left. That was the bug.
+- **Now**: targets come only from `PumpkinHunt`, only `Idle` ones, the colour from the biggest part you can see, never one on the sea floor. Map decorations are never looked at (the name search is gone). With no streaming there is no island tour: straight to the nearest one, then the next. If one goes out of `Idle` and back within 2 s, that was a hit, not the end - it keeps at it. The console says the state it ended in (`pumpkin smashed (pumpkinv1, remote -> <state>)`). Every one smashed: the next server (switch off = wait for them to come back).
+- **Rewards on the page**: seeds (`Cursed Pumpkin Seed`, 1608), candy corn (832), pumpkin bits (1607), with `+N` this session. There is no "Spooky Token" item in this game - build .3's "tokens 81" was Candy Corn.
+- **Record what I smash** (Halloween page, "find out"): watch only, works with the farm stopped, never touches the game. While you smash by hand it writes `workspace/bff_halloween_watch.txt`: each pumpkin's state change (`PumpkinState Idle -> ...`), parts and tags going, enemies that appear (with `LocalEnemy`), each item count the game pushes (named), the event's messages, what appears near you, the game's notices, the tool in your hand. It also dumps the pumpkin scripts (`PumpkinHuntView`, missed last time) to `bff_halloween_dump/`.
+
+1. Halloween on, Start: it flies to a SMALL pumpkin. Send the `[BFF] halloween: pumpkin smashed (...)` line, or `stood through every way`.
+2. Turn **Record what I smash** on, farm stopped, break 3 pumpkins by hand (one that turns into the NPC if you can), turn it off. Send `bff_halloween_watch.txt` and say whether `bff_halloween_dump` now has `...PumpkinHunt...` files.
+
 ## Halloween hunt: pumpkins + Harvest Moon doors - first test (2026-10-31, build 2026-10-31.3)
 
 Asked: "the Halloween event - break the pumpkins, sometimes an NPC comes up and you have to kill it, both count. Make it automatic, 10x-100x faster, the best out of the event."

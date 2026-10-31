@@ -363,7 +363,8 @@ local NEW_OK = { MirageJob = true,
     TravelRoutes = true,                      -- 2026-10-31: every long trip routed (Travel & boat)
     HalloweenPumpkins = true, HalloweenSkipGray = true,   -- 2026-10-31: the Halloween hunt's page
     HalloweenDoors = true, HalloweenBoss = true,
-    HalloweenReturn = true, HalloweenTour = true }
+    HalloweenReturn = true, HalloweenTour = true,
+    HalloweenWatch = true }                   -- 2026-10-31: record what you smash by hand
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end
