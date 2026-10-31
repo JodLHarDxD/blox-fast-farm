@@ -18,6 +18,7 @@ local READABLE = true
 local CRAFT_WORKS = "anywhere"         -- "anywhere" | "npc" | "never"
 local AT_NPC = false
 local CRAFTS = 0
+local LEGACY_CALLS, LEGACY_WORKS = 0, false
 local CF = {}
 function CF:InvokeServer(what, a, b)
     if what == "getInventory" then
@@ -27,17 +28,44 @@ function CF:InvokeServer(what, a, b)
             { Name = "Scrap Metal", Count = INV.scrap }, { Name = "Leather", Count = 50 },
         }
     end
+    -- The hubs' CommF_ craft: refused on the user's client (2026-10-31 log),
+    -- unless LEGACY_WORKS (a client without the Net Craft remote).
     if what == "CraftItem" and a == "Craft" and b == "Volcanic Magnet" then
-        CRAFTS += 1
-        if CRAFT_WORKS == "anywhere" or (CRAFT_WORKS == "npc" and AT_NPC) then
-            if INV.ember >= 15 and INV.scrap >= 10 and INV.magnet == 0 then
-                INV.magnet, INV.ember, INV.scrap = 1, INV.ember - 15, INV.scrap - 10
-            end
+        LEGACY_CALLS += 1
+        if LEGACY_WORKS and INV.ember >= 15 and INV.scrap >= 10 and INV.magnet == 0 then
+            INV.magnet, INV.ember, INV.scrap = 1, INV.ember - 15, INV.scrap - 10
         end
     end
     return nil
 end
 local function commF() return CF end
+
+-- The game's Net RF "Craft" (decompiled v4623, the Dragon Hunter's dialogue
+-- and CraftWindow): PossibleHardcode -> Check -> Craft(Recipe, 1, {}).
+local RFC, CRAFT_CALLS, NET = {}, {}, true
+function RFC:InvokeServer(what, name, qty, picks)
+    table.insert(CRAFT_CALLS, what)
+    if what == "PossibleHardcode" then return name == "Volcanic Magnet" end
+    if what == "Check" then
+        local could = INV.ember >= 15 and INV.scrap >= 10
+        return { Required = {}, Result = { Recipe = name, Name = name, Count = 1, Could = could,
+            ErrorMessage = (not could) and "Not enough materials" or nil } }
+    end
+    if what == "Craft" and name == "Volcanic Magnet" and qty == 1 and type(picks) == "table" then
+        CRAFTS += 1
+        if CRAFT_WORKS == "anywhere" or (CRAFT_WORKS == "npc" and AT_NPC) then
+            if INV.ember >= 15 and INV.scrap >= 10 and INV.magnet == 0 then
+                INV.magnet, INV.ember, INV.scrap = 1, INV.ember - 15, INV.scrap - 10
+                return { Required = {}, Result = {} }
+            end
+        end
+    end
+    return nil
+end
+local function netRemote(kind, name)
+    if NET and kind == "RF" and name == "Craft" then return RFC end
+    return nil
+end
 
 local FLIGHTS, FIGHTS = {}, {}
 local HUNTER = vec(5864, 1209, 810)

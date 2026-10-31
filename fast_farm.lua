@@ -284,6 +284,11 @@ local CFG = {
     -- Castle on the Sea - click Home when that is shorter"): planned with the
     -- pads (ROUTES) when your Home Point is in this sea.
     TravelHome         = true,
+    -- EVERY LONG TRIP the shortest way (user, 2026-10-31: "any type of
+    -- traveling through the script goes through the portals and the
+    -- shortest path" - Tiki to Hydra = Tiki pad, Castle, Hydra pad, not a
+    -- 22k flight). Off = only the fruit hunt routes (FruitPortals).
+    TravelRoutes       = true,
     -- WHERE A PICKED FRUIT GOES (user, 2026-10-12: "collect the fruits in the
     -- backpack, don't store them - the fruit hunt is for raid chips"). Off =
     -- kept in your backpack (the raid loop spends a carried fruit first); on
@@ -639,7 +644,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-25.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1870,9 +1875,21 @@ flyTo = function(goal, opts)
     local dist = (goal - r.Position).Magnitude
     -- A long way: the cheapest route first - the Home button, the Third Sea's
     -- pads (ROUTES); the First and Second Sea's entrances as before (PORTALS).
-    if opts.portal and dist > 1500 and goal.Y > SUB_Y and r.Position.Y > SUB_Y then
-        local go = (P :: any).routeGo
-        local moved = go and go(goal, myEpoch)
+    -- Every trip unless it says portal = false (the boat, the sea hunts,
+    -- raids) or CFG.TravelRoutes is off; never inside a route's own legs
+    -- (P.inRoute - the flight into a pad is part of the plan already).
+    local route = opts.portal
+    if route == nil then route = CFG.TravelRoutes ~= false end
+    local PA: any = P
+    if route and not PA.inRoute and dist > 1500 and goal.Y > SUB_Y and r.Position.Y > SUB_Y then
+        local go = PA.routeGo
+        local moved = false
+        if go then
+            PA.inRoute = true
+            local ok, res = pcall(go, goal, myEpoch)
+            PA.inRoute = false
+            if ok then moved = res else print("[BFF] route: " .. tostring(res)) end
+        end
         if not moved and mySea() ~= 3 then moved = portalLeg(goal, myEpoch) end
         if moved then
             local _, r3 = parts()
@@ -2072,7 +2089,9 @@ do
             if type(t) ~= "table" then return end
             for id, p in pairs(type(t.pads) == "table" and t.pads or {}) do
                 if type(p) == "table" and type(p.name) == "string" and vec(p.hit) then
-                    R.pads[id] = { name = p.name, hit = vec(p.hit), pivot = vec(p.pivot), landed = vec(p.landed) }
+                    local landed = vec(p.landed)
+                    if landed and (landed - vec(p.hit)).Magnitude < 300 then landed = nil end   -- a ride to itself: not one
+                    R.pads[id] = { name = p.name, hit = vec(p.hit), pivot = vec(p.pivot), landed = landed }
                 end
             end
             for k, v in pairs(type(t.homes) == "table" and t.homes or {}) do R.homes[k] = vec(v) end
@@ -2219,7 +2238,10 @@ do
             end
             local _, r = parts()
             if not r then return false end
-            local from, t0 = r.Position, os.clock()
+            -- Away = from the pad itself: a flight that fell short of it, then
+            -- the lock's jump onto it, is not a ride (bff_routes.json had the
+            -- Castle's pad "landing" on itself).
+            local from, t0 = hb.Position, os.clock()
             local function away()
                 local _, r2 = parts()
                 return r2 and (r2.Position - from).Magnitude > 300 and r2.Position or nil
@@ -2274,10 +2296,11 @@ do
             return string.format("%s, then fly  ·  ~%.0f s, straight %.0f s", table.concat(w, " -> "), secs, direct)
         end
 
-        -- A LONG TRIP (flyTo with opts.portal): the cheapest route's teleports,
-        -- in order - a step that fails is left out and the route planned again
-        -- (three plans at most). -> true = a teleport moved you (the flight goes
-        -- on from there).
+        -- A LONG TRIP (every flyTo over 1500 unless portal = false): the
+        -- cheapest route's teleports, in order - a step that fails is left out
+        -- and the route planned again; a plan done is planned again from where
+        -- it put you (the Castle's other pads stream in there). Three plans at
+        -- most. -> true = a teleport moved you (the flight goes on from there).
         function R.go(goal, myEpoch)
             local any = false
             for _ = 1, 3 do
@@ -2293,18 +2316,13 @@ do
                 R.last = stepWords(steps, secs, direct)
                 say("route: " .. R.last)
                 print("[BFF] route: " .. R.last)
-                local failed = false
                 for _, s in ipairs(steps) do
                     if stale(myEpoch) then return any end
                     local ok
                     if s.kind == "home" then ok = R.goHome(myEpoch) else ok = R.ride(s.pad, myEpoch) end
-                    if not ok then
-                        failed = true
-                        break
-                    end
+                    if not ok then break end
                     any = true
                 end
-                if not failed then return any end
             end
             return any
         end
@@ -5922,7 +5940,7 @@ do
                     releasePile()
                     setState("FLY")
                     say("raid: to Island " .. n)
-                    flyTo(over)
+                    flyTo(over, { portal = false })
                 end
             end
             setState("WAIT")
@@ -8437,7 +8455,11 @@ do
             local centre = (isle and volcanoCentre(isle)) or mk
             local wps = centre and arcPath(r.Position, to, centre, tonumber(CFG.VolcanoKeepOut) or 220) or { to }
             for i, wp in ipairs(wps) do
-                flyTo(wp, (i == #wps) and opts or nil)
+                -- The volcano's arc, from where you are: never a route (a Home
+                -- jump would leave the arc behind).
+                local o = { portal = false }
+                for k, x in pairs((i == #wps) and opts or {}) do o[k] = x end
+                flyTo(wp, o)
                 if stale(myEpoch) then return false end
             end
             return true
@@ -9038,7 +9060,7 @@ do
                 if at and not (kind == "dealer" and findDealer(isle, mk, false)) then
                     setState("FLY")
                     say("onto the Mirage")
-                    flyTo(at + UP * 20)
+                    flyTo(at + UP * 20, { portal = false })
                     if stale(myEpoch) then return true end
                 end
                 m.landed = true
@@ -9327,7 +9349,7 @@ do
                     S.boatNote = "to your boat"
                     setState("FLY")
                     say(S.boatNote)
-                    flyTo(seat.Position + UP * 6)
+                    flyTo(seat.Position + UP * 6, { portal = false })
                     if stale(myEpoch) then return true end
                 end
                 if not sit(seat, myEpoch) then
@@ -11138,9 +11160,14 @@ end
 -- island comes far more often - the wiki: "drastically increases the spawn
 -- chances"; it is CONSUMED when the island spawns, so every trip wants a new
 -- one; you hold at most 1). In your inventory = sail. Not: craft it - 15
--- Blaze Ember + 10 Scrap Metal at the Dragon Hunter,
--- CommF_("CraftItem", "Craft", "Volcanic Magnet") (two hubs; one calls it
--- from anywhere, one at the NPC: from here first, then at him). Short of
+-- Blaze Ember + 10 Scrap Metal at the Dragon Hunter. The game's own way
+-- (decompiled client v4623: DialoguesList/NPCs/DragonHunter, CraftWindow),
+-- Net RF "Craft": ("PossibleHardcode", name) -> ("Check", name), whose
+-- .Result carries Recipe / Could / ErrorMessage -> ("Craft", Recipe, 1, {})
+-- - quantity 1, no chosen ingredients. Needs the Dojo's Yellow Belt
+-- (CraftUtil). CommF_("CraftItem", ...) - the hubs' - was refused 3 times
+-- out of 3 on the user's client (2026-10-31 log); the last resort now.
+-- From here first, then at him. Short of
 -- either: Scrap Metal from Forest Pirates (else Pirate Millionaires - the
 -- wiki's Third Sea droppers, the hubs' picks), Blaze Embers by the Ember
 -- hunt's own quests. Anything that cannot be done (no Ember quests, the
@@ -11199,10 +11226,26 @@ do
         local function craft(myEpoch)
             local cf = commF()
             local function try()
-                pcall(function() return cf and cf:InvokeServer("CraftItem", "Craft", "Volcanic Magnet") end)
-                task.wait(1)
-                local c = counts(true)
-                return c and c.magnet >= 1
+                local rf = netRemote("RF", "Craft")
+                if rf then
+                    pcall(function() return rf:InvokeServer("PossibleHardcode", "Volcanic Magnet") end)
+                    local okC, chk = pcall(function() return rf:InvokeServer("Check", "Volcanic Magnet") end)
+                    local res = okC and type(chk) == "table" and type(chk.Result) == "table" and chk.Result or nil
+                    if res and res.Could == false then
+                        print("[BFF] magnet: the game's check says no - " .. tostring(res.ErrorMessage or "short of something"))
+                    end
+                    pcall(function() return rf:InvokeServer("Craft", (res and res.Recipe) or "Volcanic Magnet", 1, {}) end)
+                else
+                    pcall(function() return cf and cf:InvokeServer("CraftItem", "Craft", "Volcanic Magnet") end)
+                end
+                -- The count, up to 3 s (the game's push can trail the answer).
+                local t0 = os.clock()
+                repeat
+                    task.wait(0.5)
+                    local c = counts(true)
+                    if c and c.magnet >= 1 then return true end
+                until os.clock() - t0 > 3 or stale(myEpoch)
+                return false
             end
             G.note = "crafting the Volcanic Magnet"
             say(G.note)
@@ -12171,7 +12214,7 @@ do
                     S.boatNote = "to your boat"
                     setState("FLY")
                     say(S.boatNote)
-                    flyTo(seat.Position + UP * 6)
+                    flyTo(seat.Position + UP * 6, { portal = false })
                     if stale(myEpoch) then return false end
                 end
                 if not S.sit(seat, myEpoch) then
@@ -12909,7 +12952,7 @@ do
                 if SE.ev then SE.ev.h = 200 end       -- the circle goes on, 200 over the water
                 SE.note = x.label .. " under the water - waiting over it"
                 say(SE.note)
-                if (r.Position - over).Magnitude > (CFG.InstantHop or 150) then flyTo(over) else lockAt(over, rp) end
+                if (r.Position - over).Magnitude > (CFG.InstantHop or 150) then flyTo(over, { portal = false }) else lockAt(over, rp) end
                 task.wait(0.3)
                 return
             end
@@ -12927,7 +12970,7 @@ do
             end
             local spot = hangSpot(rp, r.Position, close, sea, cls, hOwn)
             if (r.Position - spot).Magnitude > (CFG.InstantHop or 150) then
-                flyTo(spot, { face = rp })
+                flyTo(spot, { face = rp, portal = false })
                 if stale(myEpoch) then return end
             end
             lockAt(spot, rp)
@@ -17456,6 +17499,11 @@ local function buildUI()
         sliderRow(v, "Instant under", 0, 400, 10,
             function() return CFG.InstantHop end,
             function(x) CFG.InstantHop = x end, " studs")
+        switchRow(v, "Shortest route on every long trip",
+            "The Home button and the portal pads (Castle on the Sea <-> Mansion, Hydra, Tiki) when they beat flying - not on the boat, the sea hunts or raids",
+            function() return CFG.TravelRoutes end,
+            function(x) CFG.TravelRoutes = x end)
+        readout(v, function() return P.route and P.route.words() or "route     -" end)
         heading2(v, "the boat")
         sliderRow(v, "Boat speed", 250, 350, 5,
             function() return CFG.SeaSpeed end,

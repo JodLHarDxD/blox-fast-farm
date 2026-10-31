@@ -17,6 +17,7 @@ local function reset()
     LOCKED, TOUCH_WORKS, MIMIC_WORKS, PULL_BACK, PULL_DELAY = {}, true, true, false, 0.3
     CALLS, FLIGHTS, LOCKS, SAID, TOUCHES, FILES = {}, {}, {}, {}, 0, {}
     CFG.TravelHome = true
+    STREAM, FLY_SHORT, LOCK_MOVES = nil, false, false
     epoch = 0
 end
 local function called(w) for _, c in ipairs(CALLS) do if c == w then return true end end return false end
@@ -175,6 +176,28 @@ check("...said: straight flight", string.find(R.last, "straight", 1, true) ~= ni
 reset()
 POS = v3(-2900, 320, -3000)
 check("saves under 3 s: straight", R.go(SPAWNS["Castle on the Sea"], 0) == false and not called("TeleportToSpawn"))
+
+-- A flight that fell short of the pad, then the lock's jump onto it: not a
+-- ride (bff_routes.json had the Castle's pad "landing" on itself).
+reset()
+R.scan()
+POS = v3(-6500, 320, -3300)
+FLY_SHORT, LOCK_MOVES, TOUCH_WORKS, PULL_BACK = true, true, false, true
+p = padOf(R.net(false), "HydraTP", CASTLE_HYDRA.hb.Position)
+check("flight fell short, lock jumped onto the pad: not a ride", R.ride(p, 0) == false
+    and R.pads[p.id].landed == nil, tostring(R.pads[p.id].landed))
+
+-- THE USER'S TRIP (2026-10-31): Tiki -> Hydra. Known from before: the Tiki
+-- pad pair and Hydra's pad - the Castle's Hydra pad streams in only at the
+-- Castle. Tiki pad to the Castle, planned again there, the Hydra pad.
+reset()
+TAGGED = { TIKI, CASTLE_TIKI, HYDRA }
+R.scan()
+TAGGED = { CASTLE_HYDRA, CASTLE_MANSION, CASTLE_TIKI, HYDRA, MANSION, TIKI }
+STREAM, POS = 2000, v3(-16000, 20, 600)
+check("Tiki -> Hydra: moved by the route", R.go(HYDRA_TOWN, 0) == true)
+check("...the Castle's Hydra pad, seen at the Castle, ridden", called("GetInfo HydraTP"), table.concat(CALLS, ","))
+check("...out at Hydra, not a 22k flight", near(POS, HYDRA.attrs.Pivot.Position), tostring(R.last))
 
 -- stopped mid-route: back at once
 reset()

@@ -646,6 +646,19 @@ Asked: "it does not know how to get to the safe zone. The Home button teleports 
 3. Send these lines if you see them: `the Home button did not move you (outside a safe zone)` (then Home is only used from safe zones), `pad did not take you`, `is not unlocked on this account`.
 4. A held fruit: `HOLDING Control (120M) at your Home Point ... In a safe zone`.
 
+## Volcanic Magnet crafted + every trip the shortest route - first test (2026-10-31, build 2026-10-31.1)
+
+Asked: "it collects the scrap metals and the embers, but it never crafts the Volcanic Magnet, not even once" and "Tiki Outpost, volcano event on, no magnet: it flies straight to Hydra Island. It should go Tiki pad -> Castle on the Sea -> Hydra pad, and click Home when that helps - for every trip, not only the fruit hunt."
+- **The craft**: the log (2026-10-31 05:39) showed `the craft did not take` 3 times in 10 s. The script called `CommF_("CraftItem", "Craft", "Volcanic Magnet")`, the call the public hubs use, and the game ignores it. The game's own client (decompiled v4623: the Dragon Hunter's dialogue + CraftWindow) uses Net `RF/Craft`: `("PossibleHardcode", "Volcanic Magnet")`, then `("Check", "Volcanic Magnet")`, then `("Craft", <the Check's Recipe>, 1, {})`. The script now sends exactly that. It tries from where you are first, then at the Dragon Hunter. If the game's check says no, the console says why (`[BFF] magnet: the game's check says no - ...`). The magnet needs the Dojo's Yellow Belt. Item id 550 checked against the game's id list.
+- **Every long trip** (over 1,500 studs) is routed now. That means the Home button and the Castle's pads when they save 3 s or more: the magnet's trips (Dragon Hunter, Forest Pirates), Ember quests, the Elite Hunter, the Tiki boat dealer, the submarine and the rest. **Not** routed: getting back into your boat, the volcano's arc around the crater, landing on the Mirage, sea events, raid islands. A Home jump there would leave the boat or the raid behind.
+- **Planned again at each stop**: after a ride, the route is planned again from where you came out. A Castle pad that streams in only when you are AT the Castle (its Hydra pad, say) gets used the same trip. Before, it flew on from the Castle.
+- **Fixed**: a pad "ride" was counted when the flight fell short of the pad and the lock then jumped you onto it. Your `bff_routes.json` had the Castle's pad landing on itself. That kind of entry is now dropped when the file is read.
+- Travel & boat page: **Shortest route on every long trip** (on) and the `route / home` lines. Off = only the fruit hunt routes (its own switch on the Fruits page).
+
+1. Prehistoric + volcano on, no magnet, 15 embers + 10 scrap: `[BFF] magnet: Volcanic Magnet crafted (from here)` or `(at the Dragon Hunter)`. If it fails, send every `[BFF] magnet:` line, especially `the game's check says no - ...`.
+2. Same, standing at Tiki Outpost, short of embers: the console says `[BFF] route: TikiTP pad ...` (or `Home -> ...`), then `through the ... pad`, then a second `[BFF] route:` line at the Castle with the Hydra pad (only once the Castle's Hydra pad has been seen; the first time it may fly on from the Castle and learn it).
+3. Anything routed that should not have been (left the boat, left a raid, Home in the middle of a fight): say which, with the `[BFF] route:` line.
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava

@@ -21,8 +21,20 @@ G.inv = nil
 FLIGHTS = {}
 check("step: enough - crafting (busy)", G.step(1) == true)
 check("craft from here: the magnet made, no flight", INV.magnet == 1 and #FLIGHTS == 0 and G.crafts == 1)
+check("...the game's own order: PossibleHardcode, Check, Craft",
+    CRAFT_CALLS[1] == "PossibleHardcode" and CRAFT_CALLS[2] == "Check" and CRAFT_CALLS[3] == "Craft",
+    table.concat(CRAFT_CALLS, ","))
+check("...and not the hubs' CommF_ CraftItem (refused in game)", LEGACY_CALLS == 0, LEGACY_CALLS)
 G.inv = nil
 check("then: sail", G.step(1) == false)
+
+-- No Net Craft remote on this client: the hubs' CommF_ call, the last resort.
+NET, LEGACY_WORKS = false, true
+INV = { magnet = 0, ember = 15, scrap = 10 }
+G.inv, FLIGHTS = nil, {}
+G.step(1)
+check("no Net Craft remote: CommF_ CraftItem tried, magnet made", LEGACY_CALLS >= 1 and INV.magnet == 1, LEGACY_CALLS)
+NET, LEGACY_WORKS = true, false
 
 -- The craft only at the Dragon Hunter: flown there.
 CRAFT_WORKS = "npc"

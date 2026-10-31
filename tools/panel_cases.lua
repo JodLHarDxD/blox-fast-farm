@@ -359,7 +359,8 @@ local NEW_OK = { MirageJob = true,
     PvpLeadAuto = true,                       -- 2026-10-24: the lead learned per move
     FruitPortals = true,                      -- 2026-10-24: the fruit hunt through the game's portals
     FruitKeepValue = true,                    -- 2026-10-25: a fruit too good to lose, held safe
-    TravelHome = true }                       -- 2026-10-25: the Home button on a long trip (ROUTES)
+    TravelHome = true,                        -- 2026-10-25: the Home button on a long trip (ROUTES)
+    TravelRoutes = true }                     -- 2026-10-31: every long trip routed (Travel & boat)
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

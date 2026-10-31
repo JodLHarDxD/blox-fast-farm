@@ -69,7 +69,8 @@ local workspace = { FindFirstChild = function(_, n) return n == "Map" and MAP or
 -- What a flight calls.
 local RunService = { Heartbeat = { Wait = function() CLOCK += 1 / 60 return 1 / 60 end } }
 local game = { GetService = function() return {} end }
-local CFG = { TravelSpeed = 330, InstantHop = 150 }
+-- TravelRoutes off: these flights test the water, not the route (travel_test.py does).
+local CFG = { TravelSpeed = 330, InstantHop = 150, TravelRoutes = false }
 local stats = { flights = 0, hops = 0, pulledBack = 0 }
 local epoch, moveEnabled = 0, true
 local function stale(e) return e ~= epoch end

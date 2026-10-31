@@ -41,8 +41,16 @@ local root = setmetatable({}, {
 })
 local function parts() return {}, root, {} end
 local FLIGHTS, LOCKS = {}, {}
-local function flyTo(goal) table.insert(FLIGHTS, goal) POS = goal return true end
-local function lockAt(p) table.insert(LOCKS, p) end
+-- FLY_SHORT: a flight that never gets there (the body stays put);
+-- LOCK_MOVES: the lock writes the body to its spot (the real BODY does).
+local FLY_SHORT, LOCK_MOVES = false, false
+local function flyTo(goal)
+    table.insert(FLIGHTS, goal)
+    if FLY_SHORT then return false end
+    POS = goal
+    return true
+end
+local function lockAt(p) table.insert(LOCKS, p) if LOCK_MOVES then POS = p end end
 
 -- the clock's waiting things
 local HOME_AT, HOME_LAND, PULL_TO = nil, nil, nil
@@ -89,7 +97,17 @@ local function pad(name, x, y, z, px, py, pz)
     function m:GetAttribute(n) return self.attrs[n] end
     return m
 end
-local CS = { GetTagged = function(_, tag) return tag == "BoatCastleTeleporter" and TAGGED or {} end }
+-- STREAM: only pads this near the body are in the world (nil = all).
+local STREAM = nil
+local CS = { GetTagged = function(_, tag)
+    if tag ~= "BoatCastleTeleporter" then return {} end
+    if not STREAM then return TAGGED end
+    local near = {}
+    for _, m in ipairs(TAGGED) do
+        if (m.hb.Position - POS).Magnitude < STREAM then table.insert(near, m) end
+    end
+    return near
+end }
 
 -- the remotes
 local HOME_WORKS, HOME_DELAY = true, 5
