@@ -659,6 +659,19 @@ Asked: "it collects the scrap metals and the embers, but it never crafts the Vol
 2. Same, standing at Tiki Outpost, short of embers: the console says `[BFF] route: TikiTP pad ...` (or `Home -> ...`), then `through the ... pad`, then a second `[BFF] route:` line at the Castle with the Hydra pad (only once the Castle's Hydra pad has been seen; the first time it may fly on from the Castle and learn it).
 3. Anything routed that should not have been (left the boat, left a raid, Home in the middle of a fight): say which, with the `[BFF] route:` line.
 
+## A Dragon fruit from the volcano: stored and confirmed before the hop - first test (2026-10-31, build 2026-10-31.2)
+
+Asked: "after the volcano event there is a chance of a physical Dragon fruit. Store it properly, and confirm it is totally in my inventory before the server hop."
+- **How it comes** (the game's own client, decompiled v4623 + the guides): after the event the Dragon Egg lies in `Map.PrehistoricIsland.Core.SpawnedDragonEggs` (tag `PrehistoricIslandDragonEgg`, a ProximityPrompt - only with the Dragon Tether). Picking it up is the roll: almost always the Dragon Egg material, very rarely the Dragon **fruit**, a physical one (`Dragon Fruit`, item 1447), into your backpack. Before, the script saw only that the Dragon Egg count did not go up. It said `NOT given to you` and nobody looked at the backpack.
+- **Now, at the egg**: every physical fruit that is in your backpack after the pick and was not there before it is said (`[BFF] loot: the Dragon Egg gave a FRUIT - Dragon Fruit - storing it now`) and stored at once.
+- **Stored = proven twice**: the game's `StoreFruit` (the call its own Store dialogue makes), then (1) the fruit has left your backpack and hand, and (2) the game's own count of that fruit in your storage went up (`getInventoryFruits`, else the item list). The console: `[BFF] fruit: Dragon-Dragon (2.97B) STORED - confirmed: your storage has 1 (was 0)`. If the count cannot be read, it says so instead of claiming it. If the game answers with a number (storage full - the game's own answer), it says `storage full - it holds N of each fruit` and the fruit stays with you.
+- **Before the respawn and the hop**: every fruit that came during this island's event, and every fruit too good to lose (the keeper line), is stored and confirmed. If one cannot be stored: **no home by respawn** (a death with it) and **no next server** (a hop loses it). It is tried again every 20 s. The usual keeper hold (safe zone, no hops) takes over from there.
+- Fruit history (`fruitlog` page) gets an entry `from volcano egg`.
+
+1. When it happens: send the `[BFF] loot: the Dragon Egg gave a FRUIT` line and the `[BFF] fruit: ... STORED - confirmed` line.
+2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
+3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava

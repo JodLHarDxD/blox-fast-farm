@@ -81,4 +81,58 @@ CFG.FruitKeepValue = 20000000
 check("in words: Control (120M)", P.keepWords({ { orig = "Control-Control", value = 120e6 } }) == "Control (120M)",
     P.keepWords({ { orig = "Control-Control", value = 120e6 } }))
 
+-- STORED AND CONFIRMED (user, 2026-10-31: the volcano's Dragon fruit "totally
+-- in my inventory" before the hop): the tool gone AND the storage count up.
+VALUES["Dragon-Dragon"] = 2.97e9
+local function dragonIn(where)
+    local d = tool("Dragon Fruit", { OriginalName = "Dragon-Dragon" }, true)
+    BACKPACK.kids, CHAR.kids = {}, {}
+    d.Parent = where
+    table.insert(where.kids, d)
+    return d
+end
+STORED, PRINTED, LOGADD = {}, {}, {}
+STORAGE, STORAGE_LAGS = { ["Kitsune-Kitsune"] = 1 }, false
+local d = dragonIn(BACKPACK)
+local okS, o, words = P.fruitSecure(d, "volcano egg")
+check("the Dragon stored: CONFIRMED by the storage count 0 -> 1", okS == true and o == "Dragon-Dragon"
+    and string.find(words, "STORED - confirmed: your storage has 1 (was 0)", 1, true) ~= nil, words)
+check("...said in the console, logged as from the volcano egg, stored", said("[BFF] fruit: Dragon-Dragon")
+    and LOGADD[1] and LOGADD[1].from == "volcano egg" and LOGADD[1].state == "stored" and LOGADD[1].server == 7,
+    LOGADD[1] and LOGADD[1].state)
+
+STORAGE = { ["Dragon-Dragon"] = 1 }
+STORE_FULL["Dragon-Dragon"] = 1
+LOGADD = {}
+d = dragonIn(BACKPACK)
+okS, o, words = P.fruitSecure(d, "volcano")
+check("storage full (the game answers a number): NOT stored, still with you, says why", okS == false
+    and d.Parent == BACKPACK and string.find(words, "storage full - it holds 1 of each fruit", 1, true) ~= nil, words)
+check("...logged as held", LOGADD[1] and LOGADD[1].state == "held")
+STORE_FULL["Dragon-Dragon"] = nil
+
+STORAGE = nil
+d = dragonIn(BACKPACK)
+okS, o, words = P.fruitSecure(d, "volcano")
+check("storage not readable: gone from your backpack, said as not confirmed", okS == true
+    and string.find(words, "is not readable here", 1, true) ~= nil and not string.find(words, "confirmed", 1, true), words)
+
+STORAGE, STORAGE_LAGS = { ["Dragon-Dragon"] = 1 }, true
+local t0 = CLOCK
+d = dragonIn(BACKPACK)
+okS, o, words = P.fruitSecure(d, "volcano")
+check("the count never rises: read again for 5 s, then said (not claimed)", okS == true
+    and string.find(words, "did not show it yet", 1, true) ~= nil and CLOCK - t0 >= 5, words)
+STORAGE_LAGS = false
+
+UNEQUIPS = 0
+STORAGE = { ["Dragon-Dragon"] = 0 }
+d = dragonIn(CHAR)
+okS = P.fruitSecure(d, "volcano")
+check("in your hand: put away first, then stored", UNEQUIPS == 1 and okS == true and STORAGE["Dragon-Dragon"] == 1)
+
+check("a stored name read either way ('Dragon Fruit' / 'Dragon-Dragon')",
+    P.storedCount({ ["Dragon Fruit"] = 1, ["Dragon-Dragon"] = 2, ["Spin-Spin"] = 4 }, "Dragon-Dragon") == 3
+    and P.storedCount(nil, "Dragon-Dragon") == nil)
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

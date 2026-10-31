@@ -634,6 +634,51 @@ reset()
 S.volcanoStep()
 check("an egg prompt gone, your Dragon Egg unchanged: NOT counted, said so", S.ev.eggs == 1 and S.ev.eggGone == true
     and saidP("Dragon Egg stayed 2"), tostring(S.ev.eggGone))
+-- THE EGG'S ROLL (user, 2026-10-31): the Dragon FRUIT into your backpack,
+-- the Dragon Egg count unchanged - said, stored at once from the egg.
+do
+    local egg4 = prompt(true)
+    egg4.Name = "P4"
+    molten:add(egg4)
+    egg4.onHold = function(p) p.Enabled = false FRUIT.bp:add(inst("Dragon Fruit", "Tool")) end
+    reset()
+    PRINTED, FRUIT.secured = {}, {}
+    S.volcanoStep()
+    check("the egg gave the Dragon FRUIT: said, not 'NOT given'", saidP("the Dragon Egg gave a FRUIT - Dragon Fruit")
+        and not saidP("Dragon Egg stayed"), table.concat(PRINTED, " | "))
+    check("...stored at once (the confirmed store), from the egg", FRUIT.secured[1] and FRUIT.secured[1].name == "Dragon Fruit"
+        and FRUIT.secured[1].from == "volcano egg" and FRUIT.bp.kids["Dragon Fruit"] == nil, tostring(FRUIT.secured[1] and FRUIT.secured[1].from))
+    check("...counted as picked (the stay before leaving applies)", S.ev.fruits == 1 and S.ev.lastPickAt ~= nil, S.ev.fruits)
+end
+
+-- BEFORE THE RESPAWN AND THE HOP: what came during the event and what is
+-- too good to lose - stored; a cheap fruit you brought is left alone.
+do
+    CFG.FruitKeepValue = 20e6
+    local brought = FRUIT.bp:add(inst("Spin Fruit", "Tool"))
+    local ev = { fruitsBefore = { [brought] = true } }
+    local dragon = FRUIT.bp:add(inst("Dragon Fruit", "Tool"))
+    FRUIT.works, FRUIT.secured = false, {}
+    check("storage refuses the Dragon: held here (no respawn, no hop)", S.secureFruits(ev) == true
+        and string.find(ev.note, "Dragon-Dragon could not be stored", 1, true) ~= nil, ev.note)
+    check("...only the Dragon tried, not the Spin you brought", #FRUIT.secured == 1 and FRUIT.secured[1].from == "volcano",
+        #FRUIT.secured)
+    CLOCK += 5
+    check("...5 s later: still held, storage not asked again", S.secureFruits(ev) == true and #FRUIT.secured == 1, #FRUIT.secured)
+    FRUIT.works = true
+    CLOCK += 16
+    check("...20 s on, storage takes it: free to go", S.secureFruits(ev) == false and FRUIT.bp.kids["Dragon Fruit"] == nil
+        and dragon.Parent == nil, #FRUIT.secured)
+    -- A keeper carried from before the island: stored too.
+    local kit = FRUIT.bp:add(inst("Kitsune Fruit", "Tool"))
+    ev = { fruitsBefore = { [brought] = true, [kit] = true } }
+    FRUIT.secured = {}
+    check("a fruit too good to lose, brought along: stored before leaving", S.secureFruits(ev) == false
+        and FRUIT.secured[1] and FRUIT.secured[1].name == "Kitsune Fruit" and FRUIT.secured[1].from == "carried", #FRUIT.secured)
+    FRUIT.bp.kids["Spin Fruit"] = nil
+    CFG.FruitKeepValue = nil
+end
+
 -- An egg that will not come: given up after two holds.
 local egg2 = prompt(true)
 egg2.Name = "P2"
@@ -1188,7 +1233,8 @@ end)()
 ;(function()
     local ENERGY = { Value = 100 }
     local energyOn = true
-    player.Character = { FindFirstChild = function(_, n) return (n == "Energy" and energyOn) and ENERGY or nil end }
+    player.Character = { FindFirstChild = function(_, n) return (n == "Energy" and energyOn) and ENERGY or nil end,
+        GetChildren = function() return {} end }
     local TAPS = {}
     local spends = true
     local RE = { FireServer = function(_, what, pos)
@@ -1356,11 +1402,11 @@ end)()
     CFG.Hunt, CFG.HuntKind, CFG.Volcano, CFG.VolcanoAfter, CFG.LootStay = true, "prehistoric", false, "hop", 60
     local isleS = fresh(true, false)
     player.attrs.PrehistoricIslandParticipant = true
-    player.Character = { name = "life 1" }
+    player.Character = { name = "life 1", GetChildren = function() return {} end }
     PRINTED = {}
     S.volcanoStep()
     check("event on: whether the game counts you is said", saidP("you ARE counted"))
-    player.Character = { name = "life 2" }
+    player.Character = { name = "life 2", GetChildren = function() return {} end }
     S.volcanoStep()
     check("a death during the event: said (the game gives no loot after one)", saidP("you died during the event"))
     ITEMS[585], ITEMS[565] = 20, 3
@@ -1382,7 +1428,7 @@ end)()
     -- 6b. HOME BY RESPAWN (user, 2026-10-10): the stay over, the character
     --     reset - the game's new one at your spawn (Tiki) - then the next server.
     CFG.RespawnHome, CFG.RespawnWait = true, 20
-    local oldLife, newLife = player.Character, { name = "life 3" }
+    local oldLife, newLife = player.Character, { name = "life 3", GetChildren = function() return {} end }
     local healthWrites = 0
     -- The game: Health 0 = dead, the new character at the spawn.
     local function gameRespawns(onRung)
@@ -1401,6 +1447,19 @@ end)()
     end
     local function gameDone() setmetatable(HUM, nil) HUM.Health = 100 end
     local islandAt = ROOT.Position
+    -- 6a. A FRUIT FROM THE EVENT (the egg's Dragon, user 2026-10-31) that
+    --     storage refuses: no respawn (a death with it), not the next server.
+    do
+        FRUIT.bp:add(inst("Dragon Fruit", "Tool"))
+        FRUIT.works, FRUIT.secured = false, {}
+        reset()
+        local okF = S.huntStep(epoch, "prehistoric")
+        check("a Dragon from the event, storage refuses: no respawn, not the next server", okF == true
+            and player.Character == oldLife and S.ev.home == nil and #FRUIT.secured == 1
+            and FRUIT.secured[1].from == "volcano", tostring(S.ev.home) .. " " .. #FRUIT.secured)
+        FRUIT.works = true
+        CLOCK += 21                    -- the next try stores it; the respawn below goes on
+    end
     gameRespawns("Health 0")
     reset()
     PRINTED = {}

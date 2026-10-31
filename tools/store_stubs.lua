@@ -1,6 +1,9 @@
 -- The backpack before a hop (P.storeBeforeHop) and the one store (storeTool),
 -- cut from fast_farm.lua: the game's StoreFruit answers from STORE_OK.
-local task = { wait = function() end }
+-- The clock: task.wait moves it (P.fruitSecure reads the storage up to 5 s).
+local CLOCK = 0
+local os = { clock = function() return CLOCK end, time = function() return 0 end }
+local task = { wait = function(t) CLOCK += (t or 0.03) end }
 local CFG = { FruitStoreOnHop = true, FruitKeepValue = 20000000 }
 local PRINTED = {}
 local realPrint = print
@@ -24,16 +27,29 @@ local HUM = { UnequipTools = function()
     CHAR.kids = {}
 end }
 local function parts() return {}, {}, HUM end
-local STORED, STORE_OK = {}, {}
+local STORED, STORE_OK, STORE_FULL = {}, {}, {}
+-- Your storage as the game reads it (P.storedFruits): { [name] = count };
+-- nil = not readable. STORAGE_LAGS = the store took but the count never shows.
+local STORAGE, STORAGE_LAGS = {}, false
 local function commF()
     return { InvokeServer = function(_, what, orig, t)
         if what ~= "StoreFruit" then return nil end
         table.insert(STORED, orig)
-        if STORE_OK[orig] ~= false then t.Parent = "storage" return true end
+        -- The game's own answers: a number = storage full (how many of each it holds).
+        if STORE_FULL[orig] then return STORE_FULL[orig] end
+        if STORE_OK[orig] ~= false then
+            t.Parent = "storage"
+            if STORAGE and not STORAGE_LAGS then STORAGE[orig] = (STORAGE[orig] or 0) + 1 end
+            return true
+        end
         return "you already have one"
     end }
 end
 local P = {}
+local E = { tally = { joins = 7 } }
+function P.storedFruits() if STORAGE then return STORAGE, "test" end return nil, "not readable" end
+local LOGADD = {}
+function P.fruitLogAdd(e) table.insert(LOGADD, e) return e end
 -- The market's values (P.tradeValue) for the fruits used here; the history
 -- logged (P.fruitLogSet).
 local VALUES = { ["Dough-Dough"] = 30e6, ["Control-Control"] = 120e6, ["Buddha-Buddha"] = 10e6,

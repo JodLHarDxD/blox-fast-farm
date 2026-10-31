@@ -644,7 +644,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -5732,6 +5732,7 @@ do
             end
             return nil, "no stored fruit read"
         end
+        P.storedFruits = storedFruits
         -- Pure (tools/raidloop_test.py): the cheapest of `stored` at most
         -- `cap` (priceFn(name) -> Beli or nil; unpriced = never). -> name, price.
         local function cheapest(stored, cap, priceFn)
@@ -6921,7 +6922,10 @@ do
         P.fruitWanted = fruitWanted
 
         -- StoreFruit for a physical fruit you carry, by the name the game gave
-        -- it. -> true + its name, or false + its name + why.
+        -- it. -> true + its name, or false + its name + why. The game's
+        -- answers (its own Store dialogue, decompiled v4623): a number = your
+        -- storage is full (that number = how many of EACH fruit it holds),
+        -- nil / false = failed.
         local function storeTool(got, origHint)
             local bp = player:FindFirstChild("Backpack")
             local orig = got:GetAttribute("OriginalName")
@@ -6930,6 +6934,9 @@ do
             local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
             task.wait(0.6)
             if not (got.Parent == player.Character or got.Parent == bp) then return true, orig end
+            if ok and type(res) == "number" then
+                return false, orig, string.format("storage full - it holds %d of each fruit", res)
+            end
             return false, orig, tostring(ok and res or "error")
         end
 
@@ -6980,6 +6987,58 @@ do
             return left
         end
         P.keepersLeft = keepersLeft
+
+        -- STORED AND CONFIRMED (user, 2026-10-31: "a Dragon fruit from the
+        -- volcano event - store it properly and confirm it is totally in my
+        -- inventory before the hop"). StoreFruit, then two proofs: the fruit
+        -- left your backpack and hand, AND the game's own count of that fruit
+        -- in your storage went up (P.storedFruits - getInventoryFruits, the
+        -- item list). The count not readable = said, not claimed. -> true (it
+        -- is no longer carried) / false (still with you), its name, words.
+        local function storedCount(list, orig)
+            if type(list) ~= "table" then return nil end
+            local want, n = string.lower(P.fruitBase(orig)), 0
+            for name, c in pairs(list) do
+                if string.lower(P.fruitBase(P.fruitOrig(name) or name)) == want then n += (tonumber(c) or 0) end
+            end
+            return n
+        end
+        P.storedCount = storedCount
+        function P.fruitSecure(t, from)
+            local sf = (P :: any).storedFruits
+            local o = t:GetAttribute("OriginalName")
+            o = (type(o) == "string" and o) or P.fruitOrig(t.Name) or t.Name
+            local n0 = sf and storedCount((sf()), o)
+            local _, _, hum = parts()
+            if hum and t.Parent == player.Character then
+                pcall(function() hum:UnequipTools() end)
+                task.wait(0.1)
+            end
+            local ok, orig, why = storeTool(t, o)
+            local value = P.tradeValue(orig)
+            local words
+            if not ok then
+                words = string.format("%s (%s) NOT stored - %s - it is still with you", orig, P.valueWords(value), tostring(why))
+            else
+                local n1, t0 = nil, os.clock()
+                repeat
+                    n1 = sf and storedCount((sf()), orig)
+                    if n1 and n1 > (n0 or 0) then break end
+                    task.wait(0.5)
+                until os.clock() - t0 > 5
+                if n1 and n1 > (n0 or 0) then
+                    words = string.format("%s (%s) STORED - confirmed: your storage has %d%s", orig, P.valueWords(value),
+                        n1, n0 and string.format(" (was %d)", n0) or "")
+                else
+                    words = string.format("%s (%s) left your backpack for storage - the storage count %s", orig,
+                        P.valueWords(value), (n1 or n0) and "did not show it yet" or "is not readable here")
+                end
+            end
+            print("[BFF] fruit: " .. words)
+            P.fruitLogAdd({ orig = orig, value = value, server = E.tally.joins, from = from,
+                state = ok and "stored" or "held" })
+            return ok, orig, words
+        end
         -- "Control (120M), Dough (30M)".
         function P.keepWords(list)
             local w = {}
@@ -9142,7 +9201,7 @@ do
         local function goHome(ev, myEpoch)
             if ev.home then return end
             ev.home = "skipped"
-            local picked = ev.bones + ev.eggs + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
+            local picked = ev.bones + ev.eggs + (ev.fruits or 0) + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
             if not CFG.RespawnHome or picked == 0 then return end
             local chalice = (P :: any).holdingChalice
             if chalice and chalice() then
@@ -9235,6 +9294,16 @@ do
                 if S.driving then stopDrive() end
                 local ev = S.ev
                 if ev and ev.complete and (ev.stuck or (CFG.VolcanoAfter or "hop") == "hop") then
+                    -- A fruit from the event (the egg's Dragon) or one too good to
+                    -- lose: stored and confirmed first. Not stored = here, alive.
+                    if S.secureFruits(ev) then
+                        S.note = ev.note
+                        E.note = S.note
+                        say(S.note)
+                        setState("FRUIT")
+                        task.wait(0.5)
+                        return true
+                    end
                     goHome(ev, myEpoch)
                     if stale(myEpoch) then return true end
                     E.why = ev.stuck and "the volcano event would not start here (the game's bug) - the next server"
@@ -10193,6 +10262,63 @@ do
             return now, (before ~= nil and now ~= nil and now > before)
         end
 
+        -- ---------- a fruit from the event ----------
+        -- (user, 2026-10-31): now and then the Dragon Egg's roll gives the
+        -- Dragon FRUIT, a physical one, into your backpack - the Dragon Egg
+        -- count does not move. The fruits you carry: { [tool] = true }.
+        local function fruitsWithYou()
+            local s = {}
+            local holders = { player:FindFirstChild("Backpack"), player.Character }
+            for i = 1, 2 do
+                local h = holders[i]
+                for _, t in ipairs(h and h:GetChildren() or {}) do
+                    if P.isPhysicalFruit(t) then s[t] = true end
+                end
+            end
+            return s
+        end
+        S.fruitsWithYou = fruitsWithYou
+        local function newFruits(had)
+            local out = {}
+            for t in pairs(fruitsWithYou()) do
+                if not had[t] then table.insert(out, t) end
+            end
+            return out
+        end
+
+        -- BEFORE THE RESPAWN AND THE HOP: every fruit that came during this
+        -- island's event (not carried when it began), and every one too good
+        -- to lose (CFG.FruitKeepValue), stored and confirmed (P.fruitSecure).
+        -- One that cannot be stored: tried again every 20 s, and true = still
+        -- with you - no respawn (a death with it), no hop (a hop loses it).
+        function S.secureFruits(ev)
+            if os.clock() < (ev.secureAt or 0) then
+                for t in pairs(ev.unsecured or {}) do
+                    if fruitsWithYou()[t] then return true end
+                end
+                return false
+            end
+            local left, names = {}, {}
+            for t in pairs(fruitsWithYou()) do
+                local o = t:GetAttribute("OriginalName")
+                o = (type(o) == "string" and o) or P.fruitOrig(t.Name) or t.Name
+                local came = ev.fruitsBefore ~= nil and not ev.fruitsBefore[t]
+                if came or P.isKeeper(o, CFG.FruitKeepValue) then
+                    local ok = P.fruitSecure and P.fruitSecure(t, came and "volcano" or "carried")
+                    if not ok then
+                        left[t] = true
+                        table.insert(names, o)
+                    end
+                end
+            end
+            ev.unsecured = left
+            if #names == 0 then return false end
+            ev.secureAt = os.clock() + 20
+            ev.note = table.concat(names, ", ") .. " could not be stored - no respawn, no hop; trying again every 20 s"
+            notify(table.concat(names, ", ") .. " NOT stored - staying in this server")
+            return true
+        end
+
         -- ---------- the loot ----------
         local function bonesLying(isle)
             local c = posOf(isle)
@@ -10276,6 +10402,7 @@ do
                 say(ev.note)
                 local h0 = S.have({ "Dragon Egg" }, true)
                 local before = h0 and h0["Dragon Egg"]
+                local had = fruitsWithYou()
                 if at then flyTo(at + UP * 3) end
                 if stale(myEpoch) then return end
                 if at then lockAt(at + UP * 3) end         -- still, right here, the whole pickup
@@ -10293,6 +10420,17 @@ do
                 if not (pp.Parent and pp.Enabled) then
                     while os.clock() - pressAt < stay and not stale(myEpoch) do task.wait(0.1) end
                 end
+                -- THE EGG'S ROLL: a fruit in your backpack that was not there
+                -- before E - stored at once, confirmed (P.fruitSecure).
+                local came = newFruits(had)
+                for _, t in ipairs(came) do
+                    S.eggSkip[pp] = true
+                    ev.fruits = (ev.fruits or 0) + 1
+                    ev.lastPickAt = os.clock()
+                    print("[BFF] loot: the Dragon Egg gave a FRUIT - " .. t.Name .. " - storing it now")
+                    notify(t.Name .. " from the Dragon Egg! Storing it")
+                    if P.fruitSecure then P.fruitSecure(t, "volcano egg") end
+                end
                 if up then
                     ev.eggs += 1
                     S.tally.eggs += 1
@@ -10300,6 +10438,8 @@ do
                     S.eggSkip[pp] = true
                     notify("Dragon Egg - in your inventory!")
                     print(string.format("[BFF] loot: Dragon Egg %d -> %d - in your inventory", before, now))
+                elseif #came > 0 then
+                    ev.note = "the egg gave a fruit, not an egg"           -- said and stored above
                 elseif pp.Parent and pp.Enabled then
                     local n = (S.eggTries[pp] or 0) + 1
                     S.eggTries[pp] = n
@@ -10506,7 +10646,8 @@ do
             end
             local ev = S.ev
             if not ev or ev.isle ~= isle then
-                ev = { isle = isle, vents = 0, golems = 0, bones = 0, eggs = 0, starts = 0, note = "island up" }
+                ev = { isle = isle, vents = 0, golems = 0, bones = 0, eggs = 0, fruits = 0, starts = 0, note = "island up",
+                    fruitsBefore = fruitsWithYou() }
                 S.ev = ev
                 S.seen = setmetatable({}, { __mode = "k" })
                 S.boneSkip, S.boneTries = setmetatable({}, { __mode = "k" }), setmetatable({}, { __mode = "k" })
@@ -10579,7 +10720,7 @@ do
                 -- LootStay s after the last pick first, so the game saves it
                 -- (user, 2026-10-07: loot lost - the loop left ~3 s after the
                 -- last bone, ~10 s after the egg).
-                local picked = ev.bones + ev.eggs + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
+                local picked = ev.bones + ev.eggs + (ev.fruits or 0) + (ev.bonesUnread or 0) + (ev.eggUnread and 1 or 0)
                 local leaving = CFG.Hunt and CFG.HuntKind == "prehistoric" and (CFG.VolcanoAfter or "hop") == "hop"
                 local stay = (picked > 0 and leaving) and math.max(tonumber(CFG.LootStay) or 20, 0) or 0
                 local since = os.clock() - (ev.lastPickAt or ev.overAt)

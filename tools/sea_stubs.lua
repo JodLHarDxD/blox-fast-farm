@@ -140,6 +140,14 @@ setmetatable(PG, { __index = function(_, k)
 end })
 local player = { Name = "Me", attrs = {}, PlayerGui = PG }
 function player:GetAttribute(n) return self.attrs[n] end
+-- Your backpack and character: what a physical fruit sits in. FRUIT is a
+-- global (the test chunk is at Luau's 200 locals): bp, secured
+-- (P.fruitSecure's calls), works (the game takes it out of your backpack),
+-- values (trade).
+FRUIT = { bp = inst("Backpack", "Backpack"), secured = {}, works = true,
+    values = { ["Dragon-Dragon"] = 2.97e9, ["Spin-Spin"] = 7.5e3 } }
+player.Character = inst("Me", "Model")
+function player:FindFirstChild(n) return (n == "Backpack") and FRUIT.bp or nil end
 local function parts() return {}, ROOT, HUM end
 
 -- ---------------------------------------------------------------- the farm
@@ -156,6 +164,27 @@ function P.setHunt(x) table.insert(SET_HUNT, x) P.handsOff = false end
 local STOPPED = 0
 function P.stop() STOPPED += 1 end
 P.news = { sky = nil }
+-- Physical fruits (a Tool "X Fruit"), the keeper rule (CFG.FruitKeepValue,
+-- unknown = dear) and the confirmed store, as recorders.
+function P.isPhysicalFruit(t) return t.ClassName == "Tool" and string.find(t.Name, " Fruit$") ~= nil end
+function P.fruitOrig(n)
+    local b = string.match(tostring(n), "^(.-) Fruit$")
+    return b and (b .. "-" .. b) or nil
+end
+function P.isKeeper(o, min)
+    if (tonumber(min) or 0) <= 0 then return false end
+    local v = FRUIT.values[o]
+    return v == nil or v >= min
+end
+function P.fruitSecure(t, from)
+    table.insert(FRUIT.secured, { name = t.Name, from = from })
+    if FRUIT.works then
+        t.Parent.kids[t.Name] = nil
+        t.Parent = nil
+        return true
+    end
+    return false
+end
 local _G = { BFF = P }
 
 local SEA = 3
