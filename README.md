@@ -672,6 +672,21 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Halloween hunt: pumpkins + Harvest Moon doors - first test (2026-10-31, build 2026-10-31.3)
+
+Asked: "the Halloween event - break the pumpkins, sometimes an NPC comes up and you have to kill it, both count. Make it automatic, 10x-100x faster, the best out of the event."
+- **The event** (Hellfire Halloween, 2026-10-31 14:00 UTC to 11-15, all three seas): Spooky Tokens (last year: Candy Corn) from (1) the **Jack-o'-lanterns** on every island, smashed with a fighting style, some come alive and fight, the **Gray Pumpkin** is the dangerous one; (2) the **doors** at every **Harvest Moon** (on the hour, 10 min): knock, a treat (tokens) or a trick (enemies / a minigame); a **hellfire door** = a portal to the **Hell Rider** (tokens + a Special Spooky Concoction). Tokens go to **Zioles'** Spooky Gacha (Hellfire Gas mutation) - not rolled by the script.
+- **Modes -> Halloween** (hunt section). In this order, every step: (1) anything sent at **you** (enemies with `LocalEnemy` = your name - the game hides everyone else's - or pumpkin-named) is fought where it stands; (2) at the moon: the game's own teleport to the doors is accepted, every door knocked (its prompt, then the game's own `HalloweenFunction` if the prompt does not take), a treat accepted, a minigame waited out (45 s); a hellfire door: into its portal, and everything in the Hell Rider's domain fought; (3) the nearest **pumpkin**: beside it, a fighting style in hand, smashed; (4) none near: every island in the sea (one stop each, from the level table's camps), then the next server.
+- **The smash** (from the game's own combat code, decompiled v4623): a melee M1 that touches a part tagged `M1HitRegistry` sends `RE/RegisterHit` with that part. The script sends exactly that (`RegisterAttack` + `RegisterHit(part)`), 5 a second. **Not proven on a 2026 pumpkin** (the event's code came after the dump). So the ways are tried in turn: the remote hit, a real M1 click facing it, its prompt / click detector if it has one. The way that breaks one is kept (`bff_halloween.json`). A pumpkin that reacts (an attribute moves) gets 90 tries; one that stands through every way is left 3 min; a kind that never breaks twice (a decoration) is dropped. Tagged pumpkins go before untagged ones.
+- **The probe**: the first run writes `workspace/bff_halloween_probe.txt` (tags, every pumpkin with its parts/attributes/children, doors, enemies + `LocalEnemy`, the event's remotes, item ids) and the event's scripts' bytecode to `workspace/bff_halloween_dump/`. A second probe is written after the first pumpkin breaks.
+- Page switches (all on): Pumpkins, Skip the Gray Pumpkin, Doors at the Harvest Moon, Hell Rider, Teleport back after the moon, Every island then the next server.
+
+1. Stand near a pumpkin, Modes -> Halloween on, Start: expect `[BFF] halloween: pumpkin smashed (<kind>, remote)` (or `click` / `prompt`). If it says `stood through every way`, send that line **and `bff_halloween_probe.txt`**.
+2. Send `bff_halloween_probe.txt` either way (and say whether `bff_halloween_dump` has files) - it pins the pumpkin down for the next build.
+3. A pumpkin that came alive: `fighting what jumped out` on the panel and the kill counted.
+4. At XX:00: `[BFF] halloween: the Harvest Moon - the game's teleport to the doors accepted`, then `door opened - <event> (treat / fight / game)` lines. Any door that only says `nobody home`: send it.
+5. If the token count on the page stays `not read yet`: send the `[BFF] halloween: token ids ...` line.
+
 ## Draco V4 trial mode (v4_trial.lua, its own script)
 
 The Trial of Flames: relics at the bottom of the cave, extractors ~1,300 studs up, lava

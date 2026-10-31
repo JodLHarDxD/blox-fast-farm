@@ -130,14 +130,14 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 29 pages ----------
+    -- ---------- 30 pages ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
-        "recipe", "sword", "flower", "ember", "sail", "seaevents", "prehistoric", "mirage", "levi",
+        "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
         "servers", "stats" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "29 pages, got " .. n)
+    check(n == #EXPECT, "30 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -360,7 +360,10 @@ local NEW_OK = { MirageJob = true,
     FruitPortals = true,                      -- 2026-10-24: the fruit hunt through the game's portals
     FruitKeepValue = true,                    -- 2026-10-25: a fruit too good to lose, held safe
     TravelHome = true,                        -- 2026-10-25: the Home button on a long trip (ROUTES)
-    TravelRoutes = true }                     -- 2026-10-31: every long trip routed (Travel & boat)
+    TravelRoutes = true,                      -- 2026-10-31: every long trip routed (Travel & boat)
+    HalloweenPumpkins = true, HalloweenSkipGray = true,   -- 2026-10-31: the Halloween hunt's page
+    HalloweenDoors = true, HalloweenBoss = true,
+    HalloweenReturn = true, HalloweenTour = true }
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end
