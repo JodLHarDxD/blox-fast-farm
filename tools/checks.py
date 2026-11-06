@@ -1,4 +1,4 @@
-"""Two checks luau-compile and luau-analyze cannot do for a Roblox script.
+"""Three checks luau-compile and luau-analyze cannot do for a Roblox script.
 
 fieldcheck: every CFG.x / stats.x read is a key the table literal defines,
             and every P.x read is assigned somewhere (P.x = ... / function P.x).
@@ -6,6 +6,8 @@ hoistcheck: no file-level local is used ABOVE its declaration. Lua does not
             hoist locals: such a use resolves to a nil global and throws when
             indexed. luau-analyze only calls it "Unknown global", buried under
             Roblox's own globals, so it is invisible without this.
+yieldcheck: the script's first statement is task.wait(), and so is the line
+            after every game:HttpGet (see the section below for why).
 
 usage: python tools/checks.py fast_farm.lua        (exit 1 on any finding)
 """
@@ -133,6 +135,23 @@ for nm, dln in decl.items():
             print(f"hoistcheck: '{nm}' used at line {ln}, declared at line {dln}")
             bad += 1
             break
+
+# ---------- yieldcheck ----------
+# Roblox 0.746 + Velocity 1.5.8 (2026-11-06): code running straight on from
+# game:HttpGet holds no DataModel lock, and the first print there kills the
+# client (RBXCRASH: DM Lock Violation). loadstring(game:HttpGet(...))() starts
+# the whole script in that state, so its first statement must be task.wait(),
+# and every HttpGet of its own must be followed by one.
+first = next((l.strip() for l in lines if l.strip()), "")
+if first != "task.wait()":
+    print(f"yieldcheck: first statement is not task.wait(): {first[:60]}")
+    bad += 1
+for ln, line in enumerate(lines, 1):
+    if re.search(r":HttpGet(Async)?\(", line):
+        after = next((l.strip() for l in lines[ln:] if l.strip()), "")
+        if after != "task.wait()":
+            print(f"yieldcheck: no task.wait() right after the HttpGet at line {ln}")
+            bad += 1
 
 print("checks: " + ("clean" if bad == 0 else f"{bad} finding(s)"))
 sys.exit(1 if bad else 0)

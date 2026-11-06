@@ -43,6 +43,14 @@
         _G.BFF.start()          _G.BFF.stop()          _G.BFF.config
 ]]
 
+-- THROUGH ROBLOX'S SCHEDULER FIRST (2026-11-06, Roblox 0.746 + Velocity 1.5.8:
+-- every load killed the client on its first print, "RBXCRASH: DM Lock
+-- Violation", inside print, with Velocity's frames under this script). Code
+-- running straight on from game:HttpGet holds no DataModel lock, and the
+-- loaders all run this file that way; one task.wait() comes back on Roblox's
+-- own resume, which does. tools/checks.py (yieldcheck) keeps this first.
+task.wait()
+
 -- "reload": a new copy replacing this one, not you stopping -- an elite hunt
 -- carried over a hop stays carried.
 if _G.BFF and _G.BFF.stop then pcall(_G.BFF.stop, "reload") end
@@ -654,7 +662,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-10-31.5" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-06.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -6610,6 +6618,7 @@ do
                 local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
                     game.PlaceId, (cursor ~= "") and ("&cursor=" .. cursor) or "")
                 local ok, body = pcall(function() return game:HttpGet(url) end)
+                task.wait()     -- never run on from HttpGet: the top of this file
                 if not ok or type(body) ~= "string" then break end
                 local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
                 if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then break end

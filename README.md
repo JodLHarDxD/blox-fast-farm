@@ -672,6 +672,17 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Load crash on Roblox 0.746: through Roblox's scheduler first - first test (2026-11-06, build 2026-11-06.1)
+
+Asked: "when I try to load the script it crashes Roblox - Velocity is fine, the script is doing something while it loads."
+- **What the two crash dumps show** (19:21 and 21:45 IST): the same stack both times. `RBXCRASH: DM Lock Violation` inside the script's first `print` (`[BFF] settings lock`), with Velocity's frames under the script. Roblox 0.746 + Velocity 1.5.8 only: the same script made 102 joins clean on 0.745 + 1.5.7, and it had not changed since 10-31.
+- **Why that print (the working theory, until a load proves it)**: a script started by `loadstring(game:HttpGet(...))()` runs on from HttpGet without Roblox's DataModel lock, and on 0.746 `print` needs it. The game's own prints and the autoexec files (no HttpGet) are fine on the same build.
+- **Now**: the script's first statement is `task.wait()`, so all of it runs from Roblox's own resume. The same after the one other HttpGet, the Roblox server list, because its caller prints the `hop:` line. `tools/checks.py` (yieldcheck) fails if either goes.
+
+1. Press Execute once. The panel should come up and the log should show `[BFF] loaded`.
+2. If it crashes again: say so. The log and the new dump show whether it died at the same place.
+3. One server hop afterwards, to prove the second fix.
+
 ## Halloween: the rare (seed) pumpkin first, the Gray switch gone - first test (2026-10-31, build 2026-10-31.5)
 
 Asked: "the Cursed Pumpkin Seed is not from the ordinary Jack o' Lantern - it is a pile of three pumpkins together, Floating Turtle or the Castle on the Sea" and "why is there Skip the Gray Pumpkin - what is that?"
