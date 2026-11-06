@@ -45,6 +45,10 @@
         _G.BFV4.on()   _G.BFV4.off()   _G.BFV4.next()   _G.BFV4.config
 ]]
 
+-- Through Roblox's scheduler first (2026-11-06): on Roblox 0.746 + Velocity 1.5.8
+-- a script running straight on from game:HttpGet dies on its first print.
+task.wait()
+
 if _G.BFV4 and _G.BFV4.off then pcall(_G.BFV4.off, "reload") end
 
 local Players      = game:GetService("Players")
