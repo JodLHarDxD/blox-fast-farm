@@ -672,6 +672,19 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Light mode: Fast Mode on, camera shake and music off, in every server - first test (2026-11-07, build 2026-11-07.1)
+
+Asked: "normally in a server I always stop the background music, stop the camera shake, and go to Fast Mode. Can the script do that automatically?"
+- **What the game's Settings script does** (decompiled v4623): music is a bindable (`Events.ToggleMusic`), shake is `SetEnabled` on `Util.CameraShake` and `Util.CameraShaker`, Fast Mode is private to that script: plastic map, textures gone, half the particles, lower-res effect textures, no blur.
+- **Now**: `Light mode` on Servers & team, on by default. Once you have a team (the wiki: Fast Mode before the pick may not fully apply), music and shake are set, again 6 s later (the Settings script sets them back at join), then Fast Mode. Nothing goes to the server, and the menu's buttons still work until the next server. The menu's shake button will still say On.
+- **It does not download less**, and the wiki says it changes little FPS on a PC. Expect the most in heavy fights.
+- **Two side effects dealt with**: water parts stay water, because `partWater` reads the material; and a thumbnail texture now gives the fruit's real look key, not `t150` (it would have left fruits unnamed).
+- **`v4_trial` and `farm_pro`** get the same `task.wait()` first as the load crash fix below.
+
+1. Load in a server and pick a team. About 6 s later the log should say `[BFF] light mode: music off  ·  shake off  ·  fast mode on`, and the same line is on Servers & team.
+2. A `not found` or `not confirmed` in that line: send it. The game has changed since v4623.
+3. On a hop, watch whether anything stutters. The walk over the map runs once per server.
+
 ## Load crash on Roblox 0.746: through Roblox's scheduler first - first test (2026-11-06, build 2026-11-06.1)
 
 Asked: "when I try to load the script it crashes Roblox - Velocity is fine, the script is doing something while it loads."

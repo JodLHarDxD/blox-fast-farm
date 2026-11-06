@@ -558,6 +558,9 @@ local CFG = {
     -- for you. Never switches the team you are already on.
     AutoTeam           = true,
     Team               = "Pirates",  -- "Pirates" | "Marines"
+    -- LIGHT MODE: in every server the game's Fast Mode on, its camera shake
+    -- and music off (P.lightRun). Off: from the next server, left as they are.
+    LightMode          = true,
     -- Nothing worth doing here: the next server. Off: wait in this one.
     -- With the chalice in your backpack or hand there is no hop at all,
     -- whatever this says.
@@ -662,7 +665,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-06.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1193,7 +1196,9 @@ function P.fruitLooks(c)
         for _, d in ipairs(root:GetDescendants()) do
             if d:IsA("MeshPart") or d:IsA("SpecialMesh") or d:IsA("FileMesh") then
                 local m = string.match(tostring(prop(d, "MeshId") or ""), "(%d+)%s*$")
-                local t = string.match(tostring(prop(d, "TextureID") or prop(d, "TextureId") or ""), "(%d+)%s*$")
+                -- Fast Mode's thumbnail form ends in its size (...&id=123&w=150&h=150).
+                local tx = tostring(prop(d, "TextureID") or prop(d, "TextureId") or "")
+                local t = string.match(tx, "id=(%d+)") or string.match(tx, "(%d+)%s*$")
                 for _, k in ipairs({ m and ("m" .. m), t and ("t" .. t) }) do
                     if not seen[k] then seen[k] = true table.insert(keys, k) end
                 end
@@ -19163,6 +19168,12 @@ local function buildUI()
         }, function() return CFG.Team end, function(x) CFG.Team = x P.teamSave() end)
         readout(v, function() return "team      " .. tostring(P.teamNote) end)
         readout(v, function() return P.reloadWay() end)
+        heading2(v, "lighter game")
+        switchRow(v, "Light mode",
+            "Fast Mode on, camera shake and music off, in every server",
+            function() return CFG.LightMode end,
+            function(x) CFG.LightMode = x end)
+        readout(v, function() return "light     " .. tostring(P.light.note) end)
         heading2(v, "by hand")
         actionRow(v, "Hop now", nil, function() P.hopNow() end)
         actionRow(v, "Forget the servers looked at", nil, function()
@@ -19467,6 +19478,115 @@ function P.teamLoad()
         P.teamSave()
     end
 end
+
+-- =========================================================
+-- LIGHT MODE
+-- =========================================================
+-- What you press by hand in every server, done for you (user, 2026-11-06: "I
+-- always stop the background music, stop the camera shake, and go to Fast
+-- Mode"). All of it the game's own Settings script (decompiled v4623), all on
+-- this client: nothing goes to the server, and the menu's buttons still work.
+-- Fast Mode has no call of its own, so its steps are copied, only once you
+-- have a team (the wiki: before the pick it may not fully apply), and water
+-- parts stay water (partWater reads the material). No button is fired: firing
+-- a game's connections is the one call here an executor can crash on.
+-- The Settings script sets the shakers on at join and its music event has no
+-- listener before it has run: music and shake are set twice, SETTLE apart.
+P.light = { note = "waiting for your team" }
+do
+    local L = P.light
+    local SETTLE = 6
+
+    local function need(parent, name)
+        local f = parent and parent:FindFirstChild(name)
+        if not f then return nil end
+        local ok, m = pcall(require, f)
+        return (ok and type(m) == "table") and m or nil
+    end
+
+    local function muteReadable(G)
+        return G ~= nil and type(G.isMusicMuted) == "function"
+    end
+
+    -- -> false when the game's event is not there to ask.
+    local function music(G)
+        if muteReadable(G) and G.isMusicMuted() then return true end
+        local ev = RS:FindFirstChild("Events")
+        ev = ev and ev:FindFirstChild("ToggleMusic")
+        if not ev then return false end
+        ev:Fire(true)
+        return true
+    end
+
+    local function shake()
+        local u, n = RS:FindFirstChild("Util"), 0
+        for _, name in ipairs({ "CameraShake", "CameraShaker" }) do
+            local m = need(u, name)
+            if m and type(m.SetEnabled) == "function" and pcall(m.SetEnabled, m, false) then
+                n += 1
+            end
+        end
+        return n > 0
+    end
+
+    -- The game's own loop: 1/120 s of work, then a frame back to the game.
+    local function strip(G, list)
+        local t0 = os.clock()
+        for _, o in next, list do
+            if o:IsA("BasePart") then
+                if o.Material ~= Enum.Material.Water then
+                    G.FastModeCache[o] = o.Material
+                    o.Material = Enum.Material.SmoothPlastic
+                end
+                if os.clock() - t0 > 1 / 120 then
+                    task.wait()
+                    t0 = os.clock()
+                end
+            elseif o:IsA("Texture") and not o:GetAttribute("Offset") then
+                o:Destroy()
+            end
+        end
+    end
+
+    local function fastMode(G)
+        if not G then return false end
+        if G.FastMode or G.reducing then return true end
+        local map, unloaded = workspace:FindFirstChild("Map"), RS:FindFirstChild("Unloaded")
+        if not map then return false end
+        G.reducing, G.FastMode, G.FastModeCache = true, true, {}
+        strip(G, map:GetDescendants())
+        if unloaded then strip(G, unloaded:GetDescendants()) end
+        local ps = player:FindFirstChild("PlayerScripts")
+        local actor = ps and ps:FindFirstChild("OptimizerClientActor")
+        if actor then pcall(function() actor:SendMessage("Optimize", true) end) end
+        return true
+    end
+
+    function P.lightRun()
+        if not CFG.LightMode then L.note = "off" return end
+        while player.Team == nil do
+            if _G.BFF ~= P then return end
+            task.wait(1)
+        end
+        if _G.BFF ~= P then return end
+        L.note = "setting it"
+        local G = need(RS, "Global")
+        music(G)
+        shake()
+        task.wait(SETTLE)
+        if _G.BFF ~= P then return end
+        local asked, shook = music(G), shake()
+        local fast = fastMode(G)
+        L.note = string.format("%s  ·  %s  ·  %s",
+            (not asked and "music not found")
+                or (muteReadable(G) and not G.isMusicMuted() and "music not confirmed")
+                or "music off",
+            shook and "shake off" or "shake not found",
+            fast and "fast mode on" or "fast mode not found")
+        print("[BFF] light mode: " .. L.note)
+    end
+end
+-- (end of light mode)
 
 -- =========================================================
 -- SILENT AIM
@@ -22074,6 +22194,7 @@ do
     pcall(function() resumed = P.takeCarry() end)
     -- The team AFTER the carried settings: the one you picked, not the default.
     task.spawn(function() pcall(P.pickTeam) end)
+    task.spawn(function() pcall(P.lightRun) end)
     pcall(syncWeapons)
     say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
         or "loaded - pick targets, then press Start")
