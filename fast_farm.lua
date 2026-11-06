@@ -231,6 +231,10 @@ local CFG = {
     -- own Off (user, 2026-10-12: "loaded and doing nothing" must be possible).
     -- Off by default: no mode = Start does nothing, nothing runs.
     Circuit            = false,
+    -- QUESTS BY YOUR LEVEL (Circuit page): the best quest your level allows in
+    -- this sea, taken at its giver, its species killed, the next one. Your
+    -- Targets wait meanwhile. For leveling a new account.
+    Quests             = false,
     RaidMode           = false,
     RaidRadius         = 450,    -- the public raid scripts' "on this island"
     -- STALE ISLANDS (user, 2026-10-10: the raid over and back at the Castle
@@ -665,7 +669,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -5303,11 +5307,190 @@ end
 -- =========================================================
 -- THE CIRCUIT: THE SPECIES ON THE TARGETS PAGE
 -- =========================================================
--- No quests (removed 2026-09-28 - max level; git tag quest-engine-2026-09-28
--- has them): each species' camp is piled and killed, then the next one;
--- alone on the circuit, it waits for the respawn.
+-- Each species' camp is piled and killed, then the next one; alone on the
+-- circuit, it waits for the respawn. Quests by your level replace the list.
+-- =========================================================
+-- QUESTS BY YOUR LEVEL (the switch on the Circuit page)
+-- =========================================================
+-- For leveling a new account (user, 2026-11-07). The old engine went on
+-- 2026-09-28 (tag quest-engine-2026-09-28); what came back is smaller, because
+-- it all comes from the game now, so every sea works and an update cannot
+-- leave a table behind (the old table's Hydra rows had already moved):
+--   RS.Quests                     quest id -> tiers { LevelReq, Task = { enemy = n } }
+--   RS.GuideModule Data.NPCList   THIS sea's givers: their quest id, where they stand
+-- The server refuses StartQuest away from the giver, so you fly there first.
+-- It answers 0 yes, 1 error, 2 done already, or the level it needs. Asking
+-- again while a quest runs resets its count, so a running one is never asked.
+P.quest = { note = "off", done = 0 }
+do
+    local Q = P.quest
+    local RETRY, HOLD = 60, 180
+    local refused = {}                 -- "id/tier" -> when to try it again
+    local gone, lookAt = 0, 0          -- looks in a row with no tracker
+    local blind, blindUntil = nil, 0   -- taken, but the tracker cannot be read
+
+    -- A fresh Start: everything refused is tried again.
+    function Q.reset()
+        table.clear(refused)
+        gone, lookAt, blind, blindUntil = 0, 0, nil, 0
+        Q.note, Q.done = "", 0
+    end
+
+    local function gameData()
+        local function mod(n)
+            local f = RS:FindFirstChild(n)
+            if not f then return nil end
+            local ok, m = pcall(require, f)
+            return (ok and type(m) == "table") and m or nil
+        end
+        local quests, guide = mod("Quests"), mod("GuideModule")
+        local npcs = guide and type(guide.Data) == "table" and guide.Data.NPCList or nil
+        return quests, type(npcs) == "table" and npcs or nil
+    end
+
+    local function tracker()
+        local ok, txt = pcall(function()
+            local q = player.PlayerGui.Main.Quest
+            return q.Visible and q.Container.QuestTitle.Title.Text
+        end)
+        return (ok and type(txt) == "string" and txt ~= "") and txt or nil
+    end
+
+    -- The enemy the tracker names: the longest match, so Desert Bandit is not Bandit.
+    local function enemyIn(quests, txt)
+        local best
+        for _, tiers in pairs(quests) do
+            for _, t in ipairs(tiers) do
+                for enemy in pairs(t.Task or {}) do
+                    if string.find(txt, enemy, 1, true) and (not best or #enemy > #best) then
+                        best = enemy
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    -- The highest quest your level allows among this sea's givers, the nearest
+    -- giver on a tie. Boss tiers are left out: one kill on a long respawn.
+    local function pick(quests, npcs, level, from)
+        local best
+        for _, npc in pairs(npcs) do
+            local tiers = npc.InternalQuestName and quests[npc.InternalQuestName]
+            if type(tiers) == "table" and npc.Position then
+                for tier, t in ipairs(tiers) do
+                    local enemy, n = next(t.Task or {})
+                    local lv = t.LevelReq or 0
+                    local key = npc.InternalQuestName .. "/" .. tier
+                    if enemy and n > 1 and lv <= level and os.clock() >= (refused[key] or 0) then
+                        local dist = from and (npc.Position - from).Magnitude or 0
+                        if not best or lv > best.lv or (lv == best.lv and dist < best.dist) then
+                            best = { id = npc.InternalQuestName, tier = tier, lv = lv, enemy = enemy,
+                                need = n, pos = npc.Position, dist = dist, giver = npc.NPCName, key = key }
+                        end
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    -- What to fight: the running quest, or the one to take. -> nil: nothing to
+    -- go on (the circuit then falls back on the species for your level).
+    function Q.want()
+        if blind and os.clock() < blindUntil then return { enemy = blind, running = true } end
+        local quests, npcs = gameData()
+        if not quests then Q.note = "the game's quest data cannot be read" return nil end
+        local txt = tracker()
+        local enemy = txt and enemyIn(quests, txt)
+        if enemy then
+            Q.note = string.format("%s  ·  %d done", txt, Q.done)
+            return { enemy = enemy, running = true }
+        end
+        if not npcs or next(npcs) == nil then Q.note = "no quest giver known in this sea" return nil end
+        local level = playerLevel()
+        if not level then Q.note = "your level cannot be read" return nil end
+        local _, r = parts()
+        local w = pick(quests, npcs, level, r and r.Position)
+        if not w then Q.note = "no quest for level " .. level .. " here" end
+        return w
+    end
+
+    function Q.take(w)
+        local cf = commF()
+        if not cf then Q.note = "no CommF_ remote" return false end
+        local myEpoch = epoch
+        releasePile()
+        -- A tracker here is no quest of this list (an elite's, a story's).
+        if tracker() then
+            pcall(function() cf:InvokeServer("AbandonQuest") end)
+            task.wait(0.4)
+        end
+        setState("QUEST")
+        say(string.format("to %s for the %s quest", tostring(w.giver), w.enemy))
+        flyTo(w.pos + Vector3.new(0, 3, 0))
+        if stale(myEpoch) then return false end
+        local ok, r = pcall(function() return cf:InvokeServer("StartQuest", w.id, w.tier) end)
+        if ok and r == 0 then
+            gone, blind = 0, nil
+            for _ = 1, 15 do
+                if tracker() then break end
+                task.wait(0.2)
+            end
+            if not tracker() then
+                -- Asking again would reset the count: fight it for a while.
+                blind, blindUntil = w.enemy, os.clock() + HOLD
+                Q.note = "taken, but its tracker cannot be read: " .. w.enemy
+            else
+                Q.note = string.format("%s x%d  ·  %d done", w.enemy, w.need, Q.done)
+            end
+            print(string.format("[BFF] quest: %s x%d from %s (%s %d, level %d)", w.enemy, w.need,
+                tostring(w.giver), w.id, w.tier, w.lv))
+            return true
+        end
+        refused[w.key] = (r == 2) and math.huge or (os.clock() + RETRY)
+        local why = (not ok and tostring(r)) or (r == 1 and "the server said error")
+            or (r == 2 and "done already") or (type(r) == "number" and ("needs level " .. r))
+            or ("answered " .. tostring(r))
+        Q.note = string.format("%s %d refused: %s", w.id, w.tier, why)
+        print("[BFF] quest: " .. Q.note)
+        return false
+    end
+
+    -- Its tracker gone, on two looks in a row: a UI that blinks must not end a
+    -- quest, because the next one asked would replace a running count.
+    function Q.finished()
+        if blind then
+            if os.clock() < blindUntil then return false end
+            blind = nil
+            Q.done += 1
+            return true
+        end
+        local now = os.clock()
+        if now - lookAt < 0.5 then return false end
+        lookAt = now
+        if tracker() then gone = 0 return false end
+        gone += 1
+        if gone < 2 then return false end
+        gone = 0
+        Q.done += 1
+        return true
+    end
+end
+-- (end of quests)
+
 P.circuitNote = ""
 local function circuit()
+    -- One species: the quest's, wherever the level table files it.
+    if CFG.Quests then
+        local w = P.quest.want()
+        if w then
+            local row = rowOf(w.enemy)
+            P.circuitSkipped, P.circuitNote = {}, ""
+            return { { name = w.enemy, quest = w,
+                spot = row and row[4] or (BOSS[w.enemy] and BOSS[w.enemy].spot) or nil } }
+        end
+    end
     local names = CFG.Targets
     if #names == 0 then
         local row = levelRow()
@@ -5397,6 +5580,12 @@ local function fight(cur, names)
                 -- fresh: its own spawn spot, and a new no-damage clock.
                 homePos[m], pileJoin[m], lastDest[m] = nil, nil, nil
             end
+        end
+
+        if cur.quest and P.quest.finished() then
+            if pileStart then recordPile(now - pileStart) end
+            attacking = false
+            return "done"
         end
 
         if now - pileScanAt > 0.1 then refreshPile() end
@@ -11653,6 +11842,13 @@ local function step()
     local cur = list[circuitIdx]
     activeName = cur.name
 
+    -- Quests by your level: none running, the giver first. Refused: the next
+    -- look picks another.
+    if cur.quest and not cur.quest.running then
+        P.quest.take(cur.quest)
+        return
+    end
+
     -- A BOSS is one enemy on a long respawn. While it is not up: the rest of
     -- the circuit, or -- when nothing else on the circuit can be fought (it
     -- is alone, or every other one is a boss that is not up either) -- wait
@@ -11715,7 +11911,10 @@ local function step()
     end
 
     local why = fight(cur, names)
-    if why == "empty" and BOSS[cur.name] then
+    if why == "done" then
+        releasePile()
+        say("quest done  -  the next one")
+    elseif why == "empty" and BOSS[cur.name] then
         -- Down (someone else's kill, or it left): the next step sees it is not
         -- up and does the rest of the circuit, or waits for it. Still listed
         -- as parked while you stand at it for 10 s: that entry is not believed
@@ -17022,6 +17221,13 @@ local function buildUI()
             return s
         end)
         modeSwitch(v, "circuit")
+        switchRow(v, "Take quests by my level",
+            "For a new account: this sea's best quest, one after another. Your list below waits",
+            function() return CFG.Quests end,
+            function(x) CFG.Quests = x end)
+        readout(v, function()
+            return "quest     " .. (CFG.Quests and tostring(P.quest.note) or "off")
+        end)
         heading2(v, "the circuit  ·  tap to add, # = order")
         local box = chooser(v, 230)
         local signature = nil
@@ -19312,6 +19518,7 @@ function P.start()
     for k in pairs(stats) do stats[k] = 0 end
     stats.startedAt = os.clock()
     activeName, countedDead, circuitIdx = nil, {}, 1
+    P.quest.reset()
     releasePile()
     table.clear(pileWatch)
     lockCF, lastWritten, flying = nil, nil, false

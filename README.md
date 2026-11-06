@@ -672,6 +672,20 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Quests by your level, in the Circuit - first test (2026-11-07, build 2026-11-07.2)
+
+Asked: "in the circuit, add quest taking back, for a new account, first to third sea, level by level, only for simply grinding. Whatever is simpler."
+- **Where**: Circuit farm page, the switch `Take quests by my level`, off by default. On: the best quest your level allows in this sea, flown to its giver, its species killed, the next one. Your Targets list waits. Off: the circuit is what it was.
+- **Why it is small**: the old engine (tag `quest-engine-2026-09-28`, about 1,300 lines) stayed gone. Its table was already out of date (Hydra's quests moved to `VenomCrewQuest`), so the quests now come from the game itself: `RS.Quests` for ids, levels and enemies, the guide's `NPCList` for this sea's givers. That is what makes every sea work with no sea logic.
+- **StartQuest** is asked at the giver and answers for itself: 0 yes, 1 error, 2 done already, or the level it needs. A refused quest waits 60 s and the next best is taken. Nothing clicks the game's dialog: `getconnections` is the call an executor can crash on.
+- **Boss tiers are skipped**: one kill on a long respawn. A running quest is never asked again, because that resets its count.
+- **What it does not do**: it does not cross to the next sea (that is the game's own story quests), and it does not spend your stat points.
+
+1. New account: Circuit farm, switch on, Start. The log should say `[BFF] quest: Trainee x5 from ...` or `Bandit x5`, and the Circuit page shows the running quest.
+2. `no quest giver known in this sea` on that page: send it. The guide's list is the one part only a real game can prove.
+3. Any `[BFF] quest: ... refused` line: send it.
+4. Watch a level where the quest changes, and any quest on an island you can only reach through a door (Underwater City, the Ghost Ship, Submerged Island).
+
 ## Light mode: Fast Mode on, camera shake and music off, in every server - first test (2026-11-07, build 2026-11-07.1)
 
 Asked: "normally in a server I always stop the background music, stop the camera shake, and go to Fast Mode. Can the script do that automatically?"

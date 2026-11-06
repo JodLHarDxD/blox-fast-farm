@@ -365,7 +365,8 @@ local NEW_OK = { MirageJob = true,
     HalloweenDoors = true, HalloweenBoss = true,
     HalloweenReturn = true, HalloweenTour = true,
     HalloweenWatch = true,                    -- 2026-10-31: record what you smash by hand
-    LightMode = true }                        -- 2026-11-07: Fast Mode on, shake and music off, every server
+    LightMode = true,                         -- 2026-11-07: Fast Mode on, shake and music off, every server
+    Quests = true }                           -- 2026-11-07: quests by your level, on the Circuit page
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
 end

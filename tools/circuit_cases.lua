@@ -30,4 +30,19 @@ CFG.Targets = { "Stone", "Pirate Millionaire" }
 l = circuit()
 check("order kept", #l == 2 and l[1].name == "Stone" and l[2].name == "Pirate Millionaire")
 
+SEA = 1
+CFG.Targets = { "Stone" }
+CFG.Quests = true
+P.quest = { want = function() return { enemy = "Pirate Millionaire", id = "PiratePortQuest" } end }
+l = circuit()
+check("quests: the quest's species alone, your list waits, whatever sea the table files it in",
+    #l == 1 and l[1].name == "Pirate Millionaire" and l[1].quest ~= nil and l[1].spot ~= nil)
+SEA = 3
+P.quest = { want = function() return nil end }
+l = circuit()
+check("quests: nothing to go on, back to your list", #l == 1 and l[1].name == "Stone" and l[1].quest == nil)
+CFG.Quests = false
+l = circuit()
+check("quests off: want is never asked", #l == 1 and l[1].quest == nil)
+
 print(all and "ALL PASS" or "SOME FAILED")
