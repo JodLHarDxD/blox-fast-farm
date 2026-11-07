@@ -506,7 +506,7 @@ pass(61)
 N.tick()
 local keys = {}
 for _, x in ipairs(items()) do table.insert(keys, x.key) end
-check("order: moon, mirage, prehistoric, elite, server", table.concat(keys, ",") == "moon,mirage,prehistoric,elite,server",
+check("order: moon, mirage, prehistoric, elite, fruit, server", table.concat(keys, ",") == "moon,mirage,prehistoric,elite,fruit,server",
     table.concat(keys, ","))
 it = item("moon")
 -- 61 s after 10:00 = 11:01: dusk 6.98 h away, the full moon 30.98 h
@@ -598,5 +598,105 @@ check("mins: whole minutes for the crawl", N.mins(29) == "under a minute" and N.
     and N.mins(3720) == "1 h 02 min", N.mins(29) .. " / " .. N.mins(90) .. " / " .. N.mins(3720))
 check("clockText", N.clockText(12.0333) == "12:02" and N.clockText(23.999) == "00:00",
     N.clockText(12.0333) .. " " .. N.clockText(23.999))
+
+-- ---------------------------------------------------------------- YOU PICK THE NEWS
+-- (user, 2026-11-07: "tick marks which news I wanna know ... If I select one
+-- only about fruit, it gonna show only about the fruits.")
+local TOPICS = { fruit = { "fruit" }, moon = { "moon" }, mirage = { "mirage" }, prehistoric = { "prehistoric" },
+    kitsune = { "kitsune" }, frozen = { "frozen" }, elite = { "boss:Diablo" }, raid = { "boss:Dough King" },
+    server = { "server" } }
+local function only(...)
+    for t in pairs(TOPICS) do CFG.NewsShow[t] = false end
+    for _, t in ipairs({ ... }) do CFG.NewsShow[t] = true end
+end
+local function addFruit()
+    local f = inst("Rocket Fruit", "Tool", { attrs = { OriginalName = "Rocket-Rocket" } })
+    f.kids.Handle = inst("Handle", "Part")
+    WS_KIDS["Rocket Fruit"] = f
+end
+-- A server with everything up at once.
+local function busy()
+    fresh()
+    LIGHT.attrs.MoonPhase = 5
+    MAP.kids.MysticIsland = inst("MysticIsland", "Model")
+    MAP.kids.PrehistoricIsland = inst("PrehistoricIsland", "Model")
+    MAP.kids.KitsuneIsland = inst("KitsuneIsland", "Model")
+    MAP.kids.FrozenDimension = inst("FrozenDimension", "Model")
+    BOSSES.Diablo = { pos = Vector3.new(0, 0, 0), where = "here" }
+    BOSSES["Dough King"] = { pos = Vector3.new(0, 0, 0), where = "here" }
+    addFruit()
+    N.tick()
+end
+local function keysNow()
+    local out = {}
+    for _, it in ipairs(items()) do table.insert(out, it.key) end
+    return out
+end
+
+busy()
+check("nothing unticked: all of it, as before", #keysNow() >= 9, table.concat(keysNow(), " "))
+for topic, want in pairs(TOPICS) do
+    busy()
+    only(topic)
+    local got = keysNow()
+    check("only " .. topic .. " ticked: only that shown", #got == 1 and got[1] == want[1], table.concat(got, " "))
+    busy()
+    only()
+    for t in pairs(TOPICS) do CFG.NewsShow[t] = (t ~= topic) end
+    check(topic .. " unticked: gone, the rest stay", item(want[1]) == nil and #keysNow() >= 8, table.concat(keysNow(), " "))
+end
+busy()
+only()
+check("nothing ticked: nothing shown", #keysNow() == 0, table.concat(keysNow(), " "))
+
+fresh()
+N.tick()
+local nf = item("fruit")
+check("no fruit on the map: said so (fruit ticked alone must not leave the strip empty)",
+    nf and nf.title == "NO FRUIT ON THE MAP" and nf.tone == "dim", nf and nf.title)
+fresh({ sea = 2 })
+only("fruit")
+N.tick()
+check("...in the Second Sea too", #keysNow() == 1 and item("fruit").title == "NO FRUIT ON THE MAP", table.concat(keysNow(), " "))
+addFruit()
+N.tick()
+check("...and the moment one lies there, named", has(item("fruit").body, "Rocket Fruit") and item("fruit").title == "FRUIT ON THE MAP")
+
+fresh()
+N.cake = { left = 5 }
+only("raid")
+check("Cake Prince counts as a raid boss", #keysNow() == 1 and keysNow()[1] == "cake", table.concat(keysNow(), " "))
+only("elite")
+check("'no elite' counts as elites, Cake Prince does not", #keysNow() == 1 and keysNow()[1] == "elite", table.concat(keysNow(), " "))
+
+fresh({ at = 15 })
+N.tick()
+CLOCK += 100
+only("fruit")
+local cw, ct, ctone = N.chip(CLOCK)
+check("moon unticked: the chip says no day, night or clock", cw == "NEWS" and ct == "" and ctone == "dim",
+    tostring(cw) .. " " .. tostring(ct) .. " " .. tostring(ctone))
+fresh()
+only("fruit")
+check("...before the first look too", (N.chip(CLOCK)) == "NEWS")
+
+fresh()
+N.tick()
+CLOCK += 100
+only("fruit")
+local wasBreak = N.breakAt
+BOSSES.Diablo = { pos = Vector3.new(0, 0, 0), where = "here" }
+N.tick()
+check("an unticked elite comes: no BREAKING, the crawl does not start over",
+    N.breakAt == wasBreak and (N.chip(CLOCK)) ~= "BREAKING", tostring(N.chip(CLOCK)))
+check("...still in the console", printed("DIABLO IS UP"))
+CFG.NewsShow.elite = true
+check("...read all the same: tick it and it is there, marked as just happened",
+    item("boss:Diablo") ~= nil and item("boss:Diablo").breaking == true)
+CFG.NewsShow.elite = false
+CLOCK += 100
+addFruit()
+N.tick()
+check("a ticked fruit comes: BREAKING", N.breakAt == CLOCK and (N.chip(CLOCK)) == "BREAKING", tostring(N.chip(CLOCK)))
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

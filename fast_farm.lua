@@ -664,12 +664,17 @@ local CFG = {
     PvpSpeed           = true,
     PvpSpeedTo         = 112.5,  -- Mink V3 + Kitsune 3 tails + Pilot Helmet
 
+    -- WHICH NEWS THE STRIP SHOWS (user, 2026-11-07): one tick each, on the
+    -- Breaking news page. Only what is shown: the news is read all the same.
+    NewsShow           = { fruit = true, moon = true, mirage = true, prehistoric = true, kitsune = true,
+        frozen = true, elite = true, raid = true, server = true },
+
     Debug              = false,
 }
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.3" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.4" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -15514,6 +15519,20 @@ do
         local RAID = { "Dough King", "Cake Prince", "rip_indra True Form", "Soul Reaper" }
         for _, d in ipairs(ISLES) do N.isles[d.key] = { up = false } end
 
+        -- YOUR TICKS (user, 2026-11-07: "If I select one only about fruit, it
+        -- gonna show only about the fruits"). Is this headline or event's key
+        -- ticked? Most keys are their own topic; a boss is an elite or a raid
+        -- boss, Cake Prince's count a raid boss. A topic the file has no word
+        -- on is shown.
+        local IS_RAID = {}
+        for _, n in ipairs(RAID) do IS_RAID[n] = true end
+        function N.wants(key)
+            local boss = string.match(key, "^boss:(.+)$")
+            local topic = (boss and (IS_RAID[boss] and "raid" or "elite"))
+                or ((key == "cake") and "raid") or key
+            return CFG.NewsShow[topic] ~= false
+        end
+
         -- What was learned about the clock and the moon (bff_sky.json).
         local cal: { [string]: any } = { flipAt = 12, succ = {}, flips = 0 }
         N.cal = cal
@@ -15728,7 +15747,7 @@ do
         local function breaking(key, text, now)
             table.insert(N.events, { key = key, text = text, at = now })
             if #N.events > 16 then table.remove(N.events, 1) end
-            N.breakAt = now
+            if N.wants(key) then N.breakAt = now end     -- unticked: no BREAKING, the crawl goes on
             print("[BFF] news: " .. text)
         end
 
@@ -15831,7 +15850,9 @@ do
             now = now or os.clock()
             local out, s = {}, N.sky
             local function add(key, tone, title, body)
-                table.insert(out, { key = key, tone = tone, title = title, body = body })
+                if N.wants(key) then
+                    table.insert(out, { key = key, tone = tone, title = title, body = body })
+                end
             end
             if s then
                 if not s.phase then
@@ -15916,6 +15937,8 @@ do
                 for i = 1, math.min(3, #N.fruits) do names[i] = N.fruits[i] end
                 add("fruit", "up", "FRUIT ON THE MAP", table.concat(names, ", ")
                     .. ((#N.fruits > 3) and (" +" .. (#N.fruits - 3)) or ""))
+            else
+                add("fruit", "dim", "NO FRUIT ON THE MAP", "")
             end
             add("server", "dim", "SERVER", string.format("%d/%d players · you joined %s ago",
                 #Players:GetPlayers(), Players.MaxPlayers, mins(workspace.DistributedGameTime)))
@@ -15938,10 +15961,12 @@ do
 
         -- The chip: word, time (m:ss), tone. BREAKING for 8 s after news,
         -- else the full moon's time left / the day's time to it, else the
-        -- day or night number and the time to the next dusk or dawn.
+        -- day or night number and the time to the next dusk or dawn. Moon
+        -- unticked: none of that, the chip just says NEWS.
         function N.chip(now)
             now = now or os.clock()
             if N.breakAt and now - N.breakAt < 8 then return "BREAKING", "", "breaking" end
+            if not N.wants("moon") then return "NEWS", "", "dim" end
             local s = N.sky
             if not s then return "SKY", "", "dim" end
             if s.full then return s.blue and "BLUE MOON" or "FULL MOON", dur(s.edge), "full" end
@@ -16130,6 +16155,8 @@ local function buildUI()
                 if it.breaking then t = '<font color="#E85C4E"><b>BREAKING</b></font>  ' .. t end
                 table.insert(bits, t)
             end
+            -- Nothing ticked, or only what this sea does not have.
+            if #bits == 0 then bits[1] = '<font color="#9A958D">nothing to show  ·  Home, Breaking news</font>' end
             return table.concat(bits, SEP) .. SEP
         end
 
@@ -16223,7 +16250,7 @@ local function buildUI()
         volcano = "Volcano event", seafight = "Fighting at sea",
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
-        stats = "Stats & debug",
+        stats = "Stats & debug", news = "Breaking news",
     }
 
     local function show(name, back)
@@ -19450,6 +19477,17 @@ local function buildUI()
             function() return CFG.LightMode end,
             function(x) CFG.LightMode = x end)
         readout(v, function() return "light     " .. tostring(P.light.note) end)
+        heading2(v, "the news strip")
+        navRow(v, "Breaking news", function()
+            local on, total, one = 0, 0, nil
+            for k, x in pairs(CFG.NewsShow) do
+                total += 1
+                if x ~= false then on, one = on + 1, k end
+            end
+            if on == total then return "everything" end
+            if on == 0 then return "nothing" end
+            return (on == 1) and (one .. " only") or (on .. " of " .. total)
+        end, "news")
         heading2(v, "by hand")
         actionRow(v, "Hop now", nil, function() P.hopNow() end)
         actionRow(v, "Forget the servers looked at", nil, function()
@@ -19467,6 +19505,33 @@ local function buildUI()
             caption(v, "Your settings, the servers already looked at and these "
                 .. "counts go with you. Without queue_on_teleport, the README's "
                 .. "three-line loader in the executor's autoexec folder does the same.")
+        end)
+    end
+
+    -- =====================================================
+    -- BREAKING NEWS: which news the strip shows
+    -- =====================================================
+    do
+        local v = makeView("news")
+        gap(v, 8)
+        heading2(v, "show in the strip")
+        local items = {}
+        for _, t in ipairs({
+            { "fruit", "Fruits" }, { "moon", "Moon, day and night" }, { "mirage", "Mirage Island" },
+            { "prehistoric", "Prehistoric Island" }, { "kitsune", "Kitsune Island" },
+            { "frozen", "Frozen Dimension" }, { "elite", "Elite pirates" },
+            { "raid", "Raid bosses, Cake Prince" }, { "server", "Server: players, time here" },
+        }) do
+            table.insert(items, { t[2], "",
+                function() return CFG.NewsShow[t[1]] ~= false end,
+                function(x) CFG.NewsShow[t[1]] = x and true or false end })
+        end
+        ticks(v, items)
+        fold(v, "How it works", function(v)
+            caption(v, "Only what is ticked is shown or says BREAKING. The hunts do not change: "
+                .. "the news is read all the same, so a tick shows its news at once. Moon "
+                .. "unticked takes the day, night and clock off the chip too. With Lock my "
+                .. "settings on, your ticks stay after a reload.")
         end)
     end
 

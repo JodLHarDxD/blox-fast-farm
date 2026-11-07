@@ -130,14 +130,14 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 30 pages ----------
+    -- ---------- 31 pages ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
-        "servers", "stats" }
+        "servers", "stats", "news" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "30 pages, got " .. n)
+    check(n == #EXPECT, "31 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -366,9 +366,18 @@ local NEW_OK = { MirageJob = true,
     HalloweenReturn = true, HalloweenTour = true,
     HalloweenWatch = true,                    -- 2026-10-31: record what you smash by hand
     LightMode = true,                         -- 2026-11-07: Fast Mode on, shake and music off, every server
-    Quests = true }                           -- 2026-11-07: quests by your level, on the Circuit page
+    Quests = true,                            -- 2026-11-07: quests by your level, on the Circuit page
+    -- 2026-11-07: which news the strip shows, one tick each.
+    ["NewsShow.fruit"] = true, ["NewsShow.moon"] = true, ["NewsShow.mirage"] = true,
+    ["NewsShow.prehistoric"] = true, ["NewsShow.kitsune"] = true, ["NewsShow.frozen"] = true,
+    ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true }
 for _, k in ipairs(keys) do
     check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
+end
+
+-- Every news topic has its tick.
+for k in pairs(CFG_REAL.NewsShow) do
+    check(have["NewsShow." .. k], "the news topic " .. k .. " has a tick")
 end
 
 -- ... and from ONE page. The modes are the exception: each mode page's switch

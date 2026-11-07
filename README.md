@@ -673,6 +673,15 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Breaking news: tick what you want - first test (2026-11-07, build 2026-11-07.4)
+
+Servers & team -> Breaking news: one tick for fruits, moon, each island, elites, raid bosses, the server line.
+
+1. Untick everything but Fruits: the strip says only `FRUIT ON THE MAP: ...` or `NO FRUIT ON THE MAP`, and the chip says `NEWS`, no day or clock.
+2. An elite comes up while unticked: no BREAKING, the crawl does not start over; `[BFF] news:` still prints in the console.
+3. Tick it back: its news is there at once. The hunts never change with the ticks.
+4. With Lock my settings on, reload: your ticks are still there.
+
 ## No chairs while a mode runs - first test (2026-11-07, build 2026-11-07.3)
 
 The Café (Second Sea) and the Mansion (Third Sea) are the only places with chairs.

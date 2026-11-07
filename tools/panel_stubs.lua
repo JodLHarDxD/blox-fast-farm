@@ -157,7 +157,7 @@ local function logWrite(path)
     WRITES[path][CTRL] = true
 end
 local NESTED = { AutoKeys = true, SeaEvFight = true, SeaEvKeys = true, SeaEvWeapons = true,
-    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true }
+    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true }
 local function proxy(real, prefix)
     return setmetatable({}, {
         __index = function(_, k)

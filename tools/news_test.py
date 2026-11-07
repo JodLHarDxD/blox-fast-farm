@@ -15,6 +15,7 @@ wrapped in a function so a case can build it again (a new server).
 usage: python tools/news_test.py [path-to-luau.exe]
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -48,4 +49,8 @@ with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)
 print(r.stdout + r.stderr)
-sys.exit(0 if "ALL PASS" in r.stdout else 1)
+# Nothing is hidden until you untick it: every news topic starts ticked.
+m = re.search(r"NewsShow\s*=\s*\{(.*?)\}", src, re.S)
+ticked = m is not None and "true" in m.group(1) and "false" not in m.group(1)
+print(("PASS " if ticked else "FAIL ") + "every news topic starts ticked")
+sys.exit(0 if "ALL PASS" in r.stdout and ticked else 1)
