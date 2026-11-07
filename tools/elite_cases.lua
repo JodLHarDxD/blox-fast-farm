@@ -129,6 +129,32 @@ check("minimum price: a cheap spawn is left", pickFruit({ spawnCheap }, 1000000,
 check("price unknown: taken only when the minimum is 0", pickFruit({ unknown }, 0, false) == unknown
     and pickFruit({ unknown }, 1, false) == nil)
 check("nothing lying: nil", pickFruit({}, 0, true) == nil)
+-- THE FRUIT MENU (user, 2026-11-07): Take beats the limit, Skip beats it the other way.
+do
+    local buddha = { orig = "Buddha-Buddha", price = 1200000 }
+    local portal = { orig = "Portal-Portal", price = 1900000 }
+    local dough = { orig = "Dough-Dough", price = 2800000 }
+    local kitsune = { orig = "Kitsune-Kitsune", price = 8000000 }
+    local marks = { ["Buddha-Buddha"] = "take", ["Kitsune-Kitsune"] = "skip" }
+    local function menu(o) return marks[o] end
+    check("menu: Buddha under the limit, marked Take: taken", pickFruit({ buddha }, 2800000, false, false, menu) == buddha)
+    check("menu: an unmarked one under it: left", pickFruit({ portal }, 2800000, false, false, menu) == nil)
+    check("menu: an unmarked one over it: taken", pickFruit({ dough }, 2800000, false, false, menu) == dough)
+    check("menu: Kitsune over the limit, marked Skip: left", pickFruit({ kitsune }, 2800000, false, false, menu) == nil)
+    check("menu: Skip holds with limit 0 too", pickFruit({ kitsune }, 0, false, false, menu) == nil)
+    check("menu: a skipped dearer one does not hide what you want",
+        pickFruit({ kitsune, dough }, 2800000, false, false, menu) == dough)
+    check("menu: dearest first among what passes", pickFruit({ buddha, dough }, 2800000, false, false, menu) == dough)
+    check("menu: no marks, the old rule", pickFruit({ buddha }, 2800000, false, false, nil) == nil)
+    local traded = { orig = "Buddha-Buddha", price = 1200000, dropper = "x", dropperNear = true }
+    check("menu: Take never reaches into a trade", pickFruit({ traded }, 0, true, false, menu) == nil)
+    local droppedB = { orig = "Buddha-Buddha", price = 1200000, dropper = "x" }
+    check("menu: Take keeps your player-drops switch", pickFruit({ droppedB }, 0, false, false, menu) == nil
+        and pickFruit({ droppedB }, 2800000, true, false, menu) == droppedB)
+    local mystery = { orig = nil, price = nil }
+    check("menu: an unnamed spawn is still the unknown switch's", pickFruit({ mystery }, 2800000, false, true, menu) == mystery
+        and pickFruit({ mystery }, 2800000, false, false, menu) == nil)
+end
 -- A SPAWN whose fruit cannot be read on the ground (2026-10-12): gone for with
 -- the switch on, whatever the minimum - after every known one that passes.
 local mystery     = { name = "Fruit " }                      -- orig nil, no dropper

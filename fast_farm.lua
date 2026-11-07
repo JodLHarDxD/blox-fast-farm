@@ -280,6 +280,11 @@ local CFG = {
     -- are mostly trades (dropped and picked up within a second): off =
     -- server spawns only.
     FruitMinPrice      = 0,
+    -- THE FRUIT MENU (user, 2026-11-07: "a standard limit, then except these
+    -- fruits ... both ... it's like a menu card"): [fruit] = "take" (taken
+    -- under the limit too), "skip" (never, over it or not); no mark = the
+    -- limit decides.
+    FruitMenu          = {},
     FruitPlayerDrops   = false,
     -- A spawn whose fruit cannot be read on the ground ("Fruit ", no mesh
     -- name, its look not learned yet): on = gone for whatever the minimum
@@ -674,7 +679,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.4" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.5" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1045,17 +1050,27 @@ P.TRADE_VALUES = {
     Flame = 250e3, Spike = 180e3, Smoke = 100e3, Bomb = 80e3, Spring = 60e3, Blade = 50e3,
     Spin = 7.5e3, Rocket = 5e3,
 }
+-- "Buddha-Buddha" -> "Buddha": its name on this list and on your fruit menu;
+-- nil = a fruit the list does not know (newer than it).
+do
+    local byNorm = {}
+    for name in pairs(P.TRADE_VALUES) do byNorm[norm(name)] = name end
+    function P.fruitKey(orig)
+        if orig == nil then return nil end
+        local want = norm(P.fruitBase(orig))
+        if string.find(want, "dragon", 1, true) then return "Dragon" end
+        return byNorm[want] or byNorm[RENAMED[want] or ""]
+    end
+end
 -- -> its trade value; nil = a fruit the list does not know (newer than it).
 function P.tradeValue(orig)
-    if orig == nil then return nil end
-    local want = norm(P.fruitBase(orig))
-    if string.find(want, "dragon", 1, true) then return P.TRADE_VALUES.Dragon end
-    for _, alt in ipairs({ want, RENAMED[want] }) do
-        for name, v in pairs(P.TRADE_VALUES) do
-            if norm(name) == alt then return v end
-        end
-    end
-    return nil
+    local k = P.fruitKey(orig)
+    return k and P.TRADE_VALUES[k] or nil
+end
+-- Your mark on the fruit menu: "take", "skip", or nil (the limit decides).
+function P.fruitChoice(orig)
+    local k = P.fruitKey(orig)
+    return k and CFG.FruitMenu[k] or nil
 end
 -- Too good to lose (CFG.FruitKeepValue): worth at least `min` - a fruit the
 -- list does not know counts too, a new one is dear until shown otherwise.
@@ -1232,19 +1247,25 @@ function P.looksLearn(store, keys, orig)
     end
     return changed
 end
--- The fruit these keys name: EVERY key seen before, and every one that
--- names a fruit names the same. One key never seen = nil (a new fruit
--- sharing a glow mesh with a known one must not take its name).
+-- The fruit these keys name: every key that names a fruit names the same, and
+-- they are at least 60% of the keys not shared. Every key had to be known once:
+-- one mesh never read lost a fruit picked many times (user, 2026-11-07, "the
+-- script will be locked about its information forever"). One shared glow on
+-- a new fruit is still too few to take its name.
 function P.looksName(store, keys)
     local name
+    local known, unseen = 0, 0
     for _, k in ipairs(keys or {}) do
         local v = store[k]
-        if v == nil then return nil end
-        if type(v) == "string" then
+        if v == nil then
+            unseen += 1
+        elseif type(v) == "string" then
             if name and name ~= v then return nil end
             name = v
+            known += 1
         end
     end
+    if known * 5 < (known + unseen) * 3 then return nil end
     return name
 end
 do
@@ -1261,6 +1282,27 @@ function P.looksTeach(c, orig)
     if P.looksLearn(P.FRUIT_LOOKS, keys, orig) then P.looksSave() end
 end
 P.fruitCatalog = P.fruitCatalog or {}         -- [orig] = price, the game's list (the fruit hunt reads it)
+-- Fruits on the trade list with no look learned: a spawn of one has no name
+-- until it is picked up once. Sorted: the panel's line holds still.
+function P.looksMissing()
+    local have, out = {}, {}
+    for _, o in pairs(P.FRUIT_LOOKS) do
+        local k = type(o) == "string" and P.fruitKey(o)
+        if k then have[k] = true end
+    end
+    for n in pairs(P.TRADE_VALUES) do
+        if not have[n] then table.insert(out, n) end
+    end
+    table.sort(out)
+    return out
+end
+-- A fruit menu row's line: its Beli price, and what happens to it.
+function P.menuWords(price, limit, choice)
+    local what = (choice == "take" and "always taken") or (choice == "skip" and "never taken")
+        or (not price and "no price yet")
+        or ((price >= (limit or 0)) and "taken") or "under your limit"
+    return price and ("$" .. P.valueWords(price) .. "  ·  " .. what) or what
+end
 
 function P.groundFruit(c)
     if not (c and (c:IsA("Tool") or c:IsA("Model"))) then return nil end
@@ -6474,13 +6516,16 @@ do
         -- known counts as 0: it passes only when the minimum is 0 - except a
         -- SERVER SPAWN whose fruit cannot be read on the ground (orig nil)
         -- with unknownOk: it might be anything, so it is gone for, after
-        -- every known one that passes (2026-10-12).
-        local function pickFruit(list, minPrice, allowDrops, unknownOk)
+        -- every known one that passes (2026-10-12). choice (orig) = your mark
+        -- on the fruit menu: "take" passes under the minimum, "skip" never
+        -- passes; neither touches the drop rule above.
+        local function pickFruit(list, minPrice, allowDrops, unknownOk, choice)
             local best, bestScore
             for _, f in ipairs(list) do
-                local ok = (not f.dropper) or (allowDrops and not f.dropperNear)
+                local mark = (choice and f.orig) and choice(f.orig) or nil
+                local ok = mark ~= "skip" and ((not f.dropper) or (allowDrops and not f.dropperNear))
                 local mystery = unknownOk and not f.dropper and f.orig == nil
-                if ok and (mystery or (f.price or 0) >= (minPrice or 0)) then
+                if ok and (mystery or mark == "take" or (f.price or 0) >= (minPrice or 0)) then
                     local score = mystery and -1 or (f.price or 0)
                     if not best or score > bestScore then best, bestScore = f, score end
                 end
@@ -7155,6 +7200,7 @@ do
                 end
             end
         end
+        P.looksFromBag = looksFromBag
 
         local function fruitsLying()
             local out, now = {}, os.clock()
@@ -7194,7 +7240,7 @@ do
         local function fruitWanted()
             if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
             local list = fruitsLying()
-            local f = pickFruit(list, CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn)
+            local f = pickFruit(list, CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn, P.fruitChoice)
             if not f then
                 -- Why it moves on, with what it left (a cheap one, one not named).
                 local left = {}
@@ -15819,6 +15865,8 @@ do
                     end)
                 end
             end
+            -- What you carry teaches its look with no hunt on (it asks every 15 s).
+            if P.looksFromBag then pcall(P.looksFromBag) end
             -- Every fruit lying here - the game's spawns too (P.groundFruit;
             -- 2026-10-12: only players' drops were ever seen). Something named
             -- a fruit that is NOT taken is written down once (P.fruitShape).
@@ -16250,7 +16298,7 @@ local function buildUI()
         volcano = "Volcano event", seafight = "Fighting at sea",
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
-        stats = "Stats & debug", news = "Breaking news",
+        stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu",
     }
 
     local function show(name, back)
@@ -17606,9 +17654,13 @@ local function buildUI()
         end)
         modeSwitch(v, "fruit")
         heading2(v, "which fruits")
-        sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
-            function() return CFG.FruitMinPrice end,
-            function(x) CFG.FruitMinPrice = x end, " Beli")
+        navRow(v, "Fruit menu", function()
+            local take, skip = 0, 0
+            for _, c in pairs(CFG.FruitMenu) do
+                if c == "take" then take += 1 elseif c == "skip" then skip += 1 end
+            end
+            return string.format("%s+  ·  %d take  ·  %d skip", P.valueWords(CFG.FruitMinPrice), take, skip)
+        end, "fruitmenu")
         switchRow(v, "Include fruits players dropped",
             "Off: server spawns only - drops are mostly trades",
             function() return CFG.FruitPlayerDrops end,
@@ -17665,8 +17717,6 @@ local function buildUI()
                 .. "fruit - before 2026-10-12 only players' drops were). The first "
                 .. "time a fruit of a new shape is seen, the console and "
                 .. "workspace/bff_fruit_seen.txt say what it is made of.")
-            caption(v, "The game's own price. 0 = any fruit. 1000000 and up = "
-                .. "Legendary and Mythical. The dearest one lying here goes first.")
             caption(v, "The whole server's fruits are seen from anywhere. A player "
                 .. "standing by their drop is trading it: never taken, even with "
                 .. "player drops on.")
@@ -17684,6 +17734,99 @@ local function buildUI()
                 .. "this account (rip_indra / Tyrant of the Skies) is never planned again; "
                 .. "one that does not take you is left 5 min; Home that does not move you "
                 .. "from outside a safe zone is then used only from inside one.")
+        end)
+    end
+
+    -- =====================================================
+    -- THE FRUIT MENU (user, 2026-11-07): your limit, then every fruit. Take
+    -- beats the limit one way, Skip the other; no mark, the limit decides.
+    -- =====================================================
+    do
+        local v = makeView("fruitmenu")
+        gap(v, 8)
+        heading2(v, "your limit")
+        sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
+            function() return CFG.FruitMinPrice end,
+            function(x) CFG.FruitMinPrice = x end, " Beli")
+        readout(v, function()
+            local miss = P.looksMissing()
+            local total = 0
+            for _ in pairs(P.TRADE_VALUES) do total += 1 end
+            return string.format("known     %d of %d fruits, kept for good", total - #miss, total)
+                .. ((#miss > 0) and ("\nnot seen  " .. table.concat(miss, ", ")) or "")
+        end)
+        heading2(v, "except these")
+        local names = {}
+        for n in pairs(P.TRADE_VALUES) do table.insert(names, n) end
+        table.sort(names, function(a, b)
+            local x, y = P.TRADE_VALUES[a], P.TRADE_VALUES[b]
+            if x ~= y then return x > y end
+            return a < b
+        end)
+        local rows = {}
+        local function paint()
+            -- The prices come from the game; the hunt may not have asked yet.
+            if P.fruitPrice and next(P.fruitCatalog or {}) == nil then task.spawn(P.fruitPrice) end
+            local priced = {}
+            for o, p in pairs(P.fruitCatalog or {}) do
+                local k = P.fruitKey(o)
+                if k and p > (priced[k] or 0) then priced[k] = p end
+            end
+            for n, r in pairs(rows) do
+                local c = CFG.FruitMenu[n]
+                r.sub.Text = P.menuWords(priced[n], CFG.FruitMinPrice, c)
+                r.take.BackgroundColor3 = (c == "take") and C.live or C.raised
+                r.take.TextColor3 = (c == "take") and C.base or C.second
+                r.skip.BackgroundColor3 = (c == "skip") and C.stop or C.raised
+                r.skip.TextColor3 = (c == "skip") and C.text or C.second
+            end
+        end
+        for _, n in ipairs(names) do
+            local f = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -150, 0, 20), Position = UDim2.fromOffset(20, 6),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                TextColor3 = C.text, Text = n, Parent = f,
+            })
+            local sub = mk("TextLabel", {
+                Size = UDim2.new(1, -150, 0, 16), Position = UDim2.fromOffset(20, 26),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                TextColor3 = C.third, Text = "", Parent = f,
+            })
+            local function chip(word, text, x)
+                local b = mk("TextButton", {
+                    Size = UDim2.fromOffset(52, 30), Position = UDim2.new(1, x, 0.5, -15),
+                    BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Text = text, Parent = f,
+                })
+                corner(b, 8)
+                -- A second tap takes the mark off: the limit decides again.
+                b.Activated:Connect(function()
+                    if CFG.FruitMenu[n] == word then CFG.FruitMenu[n] = nil else CFG.FruitMenu[n] = word end
+                    paint()
+                end)
+                return b
+            end
+            rows[n] = { sub = sub, take = chip("take", "Take", -130), skip = chip("skip", "Skip", -72) }
+        end
+        addLive(paint)
+        paint()
+        fold(v, "How it works", function(v)
+            caption(v, "The limit is the game's own Beli price. 0 = any fruit. Take: taken even "
+                .. "under the limit. Skip: never taken, even over it. No mark: the limit "
+                .. "decides. A second tap takes a mark off. The dearest one lying here goes first.")
+            caption(v, "This needs the fruit's name. A player's drop says it. A game spawn is "
+                .. "named from its look, and every fruit you pick up, carry or see dropped "
+                .. "teaches that look for good (workspace/bff_fruit_looks.json, every account).")
+            caption(v, "A spawn with no name yet is the Fruits page's \"A spawn I cannot name: "
+                .. "take it\": on, it is picked up once and its look is kept - even a fruit you "
+                .. "marked Skip, the first time, because nothing can tell yet which fruit it is.")
         end)
     end
 

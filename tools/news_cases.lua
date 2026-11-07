@@ -699,4 +699,54 @@ addFruit()
 N.tick()
 check("a ticked fruit comes: BREAKING", N.breakAt == CLOCK and (N.chip(CLOCK)) == "BREAKING", tostring(N.chip(CLOCK)))
 
+-- ---------------------------------------------------------------- THE FRUIT MENU
+-- (user, 2026-11-07: a limit, and "except these" both ways - "it's like a menu card".)
+do
+    fresh()
+    check("menu name: a fruit's own, renamed ones, Dragon's kinds",
+        P.fruitKey("Buddha-Buddha") == "Buddha" and P.fruitKey("T-Rex-T-Rex") == "T-Rex"
+        and P.fruitKey("Rumble-Rumble") == "Lightning" and P.fruitKey("Leopard-Leopard") == "Tiger"
+        and P.fruitKey("Bird-Bird: Falcon") == "Eagle" and P.fruitKey("Dragon-Dragon") == "Dragon"
+        and P.fruitKey("Dragon (East)-Dragon (East)") == "Dragon",
+        tostring(P.fruitKey("Rumble-Rumble")))
+    check("menu name: a fruit newer than the list has none", P.fruitKey("Newone-Newone") == nil and P.fruitKey(nil) == nil)
+    check("trade values read as before", P.tradeValue("Buddha-Buddha") == 10e6 and P.tradeValue("Rumble-Rumble") == 20e6
+        and P.tradeValue("Dragon-Dragon") == 2.97e9 and P.tradeValue("Newone-Newone") == nil and P.tradeValue(nil) == nil)
+    CFG.FruitMenu.Buddha, CFG.FruitMenu.Rocket = "take", "skip"
+    check("your marks are read by the fruit, whatever its long name",
+        P.fruitChoice("Buddha-Buddha") == "take" and P.fruitChoice("Rocket-Rocket") == "skip")
+    check("no mark, a new fruit, no name: nothing", P.fruitChoice("Ice-Ice") == nil
+        and P.fruitChoice("Newone-Newone") == nil and P.fruitChoice(nil) == nil)
+
+    check("words: over your limit", P.menuWords(3e6, 2.8e6, nil) == "$3M  ·  taken", P.menuWords(3e6, 2.8e6, nil))
+    check("words: exactly your limit counts", P.menuWords(2.8e6, 2.8e6, nil) == "$2.8M  ·  taken")
+    check("words: under it", P.menuWords(1.2e6, 2.8e6, nil) == "$1.2M  ·  under your limit")
+    check("words: Take beats the limit", P.menuWords(1.2e6, 2.8e6, "take") == "$1.2M  ·  always taken")
+    check("words: Skip beats the limit", P.menuWords(3e6, 2.8e6, "skip") == "$3M  ·  never taken")
+    check("words: prices not read yet", P.menuWords(nil, 2.8e6, nil) == "no price yet", P.menuWords(nil, 2.8e6, nil))
+    check("words: your mark shows with no price too", P.menuWords(nil, 2.8e6, "take") == "always taken")
+
+    local store = {}
+    P.looksLearn(store, { "m1", "m2", "m3", "m4" }, "Buddha-Buddha")
+    P.looksLearn(store, { "m9", "t9" }, "Spin-Spin")
+    check("one new mesh on a known fruit: still named (4 of 5 keys)",
+        P.looksName(store, { "m1", "m2", "m3", "m4", "m5" }) == "Buddha-Buddha")
+    check("half the keys new: not named", P.looksName(store, { "m1", "m8" }) == nil)
+    check("one shared key on a new fruit: not named", P.looksName(store, { "m9", "n1", "n2", "n3" }) == nil)
+    check("two fruits in one look: not named", P.looksName(store, { "m1", "m2", "m3", "m9" }) == nil)
+    check("nothing read yet: not named", P.looksName(store, {}) == nil)
+
+    P.FRUIT_LOOKS = { m1 = "Buddha-Buddha", m2 = false, m3 = "Rumble-Rumble" }
+    local miss = table.concat(P.looksMissing(), " ")
+    check("not seen yet: no look learned", has(miss, "Dragon") and has(miss, "Kitsune"), miss)
+    check("...a learned one is not listed, a renamed one counts", not has(miss, "Buddha") and not has(miss, "Lightning"), miss)
+    check("...sorted, so the panel line holds still", P.looksMissing()[1] == "Blade", P.looksMissing()[1])
+
+    fresh()
+    local bag = 0
+    P.looksFromBag = function() bag += 1 end
+    N.tick()
+    check("a fruit you carry teaches its look with no hunt on (the news looks every second)", bag == 1, bag)
+end
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

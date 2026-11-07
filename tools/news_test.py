@@ -53,4 +53,7 @@ print(r.stdout + r.stderr)
 m = re.search(r"NewsShow\s*=\s*\{(.*?)\}", src, re.S)
 ticked = m is not None and "true" in m.group(1) and "false" not in m.group(1)
 print(("PASS " if ticked else "FAIL ") + "every news topic starts ticked")
-sys.exit(0 if "ALL PASS" in r.stdout and ticked else 1)
+# The menu is only as good as its wiring: the hunt must hand it to pickFruit.
+menu = "CFG.FruitUnknownSpawn, P.fruitChoice)" in src and "P.looksFromBag = looksFromBag" in src
+print(("PASS " if menu else "FAIL ") + "the fruit hunt reads your menu")
+sys.exit(0 if "ALL PASS" in r.stdout and ticked and menu else 1)

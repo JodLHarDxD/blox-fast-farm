@@ -122,7 +122,7 @@ function Players:GetPlayers()
 end
 
 local P
-local CFG = { NewsShow = {} }       -- nothing unticked: a topic not listed is shown
+local CFG = { NewsShow = {}, FruitMenu = {} }       -- nothing unticked: a topic not listed is shown
 -- The real fruit finder (cut from fast_farm.lua by news_test.py), put on every fresh P.
 local INSTALL_FRUITS
 local function mySea() return SEA end
@@ -168,7 +168,7 @@ local function reset(o)
     PLAYERS_N = 7
     workspace.DistributedGameTime = 600
     PRINTED = {}
-    CFG.NewsShow = {}
+    CFG.NewsShow, CFG.FruitMenu = {}, {}
     P = { ELITES = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" } }
     if INSTALL_FRUITS then INSTALL_FRUITS() end
 end

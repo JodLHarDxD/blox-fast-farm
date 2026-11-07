@@ -673,6 +673,16 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## The fruit menu - first test (2026-11-07, build 2026-11-07.5)
+
+Modes -> Fruits -> Fruit menu: your limit (the game's Beli price, moved here from the Fruits page), then every fruit with Take and Skip. Take = taken under the limit too. Skip = never, over it or not. No mark = the limit decides. A second tap takes a mark off.
+
+1. The rows show `$1.2M  ·  under your limit`, `$3M  ·  taken`. Prices come from the game the first time the page opens (`no price yet` for a moment).
+2. Limit 2.8M, Buddha on Take, one fruit over the limit on Skip: in a server with both lying, the hunt takes Buddha, leaves the other.
+3. `known  36 of 42` and the `not seen` line: every fruit you pick up, carry, or see dropped leaves that list for good (`bff_fruit_looks.json`, every account).
+4. A fruit on `not seen` that spawns: with "A spawn I cannot name: take it" on, it is taken once and named from then on - even one marked Skip, that first time.
+5. Console `read as X on the ground, it was Y`: a look named the wrong fruit. Tell me the line.
+
 ## Breaking news: tick what you want - first test (2026-11-07, build 2026-11-07.4)
 
 Servers & team -> Breaking news: one tick for fruits, moon, each island, elites, raid bosses, the server line.

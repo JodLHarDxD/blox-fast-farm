@@ -157,7 +157,7 @@ local function logWrite(path)
     WRITES[path][CTRL] = true
 end
 local NESTED = { AutoKeys = true, SeaEvFight = true, SeaEvKeys = true, SeaEvWeapons = true,
-    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true }
+    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true, FruitMenu = true }
 local function proxy(real, prefix)
     return setmetatable({}, {
         __index = function(_, k)
@@ -258,6 +258,11 @@ function P.reloadWay() return "-" end
 function P.teamSave() end
 -- The fruit history and the market's values (fast_farm's main chunk).
 P.fruitLog = {}
+P.TRADE_VALUES = { Dragon = 2.97e9, Buddha = 10e6, Rocket = 5e3 }
+P.fruitCatalog = { ["Buddha-Buddha"] = 1200000 }
+function P.fruitKey(orig) return string.match(tostring(orig), "^(.-)%-") end
+function P.looksMissing() return { "Dragon" } end
+function P.menuWords(price, limit, choice) return tostring(price) .. " " .. tostring(limit) .. " " .. tostring(choice) end
 function P.fruitLogSummary() return {} end
 function P.fruitLogLines() return {} end
 function P.fruitLogClear() end

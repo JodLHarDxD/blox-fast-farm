@@ -130,14 +130,14 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 31 pages ----------
+    -- ---------- 32 pages ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
-        "servers", "stats", "news" }
+        "servers", "stats", "news", "fruitmenu" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "31 pages, got " .. n)
+    check(n == #EXPECT, "32 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -218,6 +218,15 @@ if RUN == "full" then
     goHome() livePass()
     check(string.find(tostring(button("home", "Start").Text), "No mode", 1, true) ~= nil,
         "hero with no mode: Start  ·  No mode")
+
+    -- ---------- the fruit menu: Take, Skip, a second tap takes it off ----------
+    table.clear(CFG_REAL.FruitMenu)
+    tap("fruitmenu", "Take")
+    check(CFG_REAL.FruitMenu.Dragon == "take", "Take marks the fruit take: " .. tostring(CFG_REAL.FruitMenu.Dragon))
+    tap("fruitmenu", "Skip")
+    check(CFG_REAL.FruitMenu.Dragon == "skip", "Skip over Take: one mark, the last")
+    tap("fruitmenu", "Skip")
+    check(CFG_REAL.FruitMenu.Dragon == nil, "a second tap takes the mark off")
 
     -- ---------- the Mirage: one row, its page picks the job ----------
     table.clear(CALLS)
@@ -372,7 +381,13 @@ local NEW_OK = { MirageJob = true,
     ["NewsShow.prehistoric"] = true, ["NewsShow.kitsune"] = true, ["NewsShow.frozen"] = true,
     ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true }
 for _, k in ipairs(keys) do
-    check(old[k] or NEW_OK[k], "a key the old panel never changed: CFG." .. k)
+    -- 2026-11-07: the fruit menu, a mark per fruit.
+    check(old[k] or NEW_OK[k] or string.match(k, "^FruitMenu%."), "a key the old panel never changed: CFG." .. k)
+end
+
+-- The fruit menu: every fruit on it can be marked.
+for n in pairs(P.TRADE_VALUES) do
+    check(have["FruitMenu." .. n], "the fruit menu has a row for " .. n)
 end
 
 -- Every news topic has its tick.
