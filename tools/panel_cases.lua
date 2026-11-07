@@ -130,14 +130,14 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 32 pages ----------
+    -- ---------- 33 pages (2026-11-08: Trades) ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
-        "servers", "stats", "news", "fruitmenu" }
+        "servers", "stats", "news", "fruitmenu", "trades" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "32 pages, got " .. n)
+    check(n == #EXPECT, "33 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -379,7 +379,8 @@ local NEW_OK = { MirageJob = true,
     -- 2026-11-07: which news the strip shows, one tick each.
     ["NewsShow.fruit"] = true, ["NewsShow.moon"] = true, ["NewsShow.mirage"] = true,
     ["NewsShow.prehistoric"] = true, ["NewsShow.kitsune"] = true, ["NewsShow.frozen"] = true,
-    ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true }
+    ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true,
+    ["NewsShow.trades"] = true }                -- 2026-11-08: your trades, left and back at
 for _, k in ipairs(keys) do
     -- 2026-11-07: the fruit menu, a mark per fruit.
     check(old[k] or NEW_OK[k] or string.match(k, "^FruitMenu%."), "a key the old panel never changed: CFG." .. k)

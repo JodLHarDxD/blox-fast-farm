@@ -672,14 +672,14 @@ local CFG = {
     -- WHICH NEWS THE STRIP SHOWS (user, 2026-11-07): one tick each, on the
     -- Breaking news page. Only what is shown: the news is read all the same.
     NewsShow           = { fruit = true, moon = true, mirage = true, prehistoric = true, kitsune = true,
-        frozen = true, elite = true, raid = true, server = true },
+        frozen = true, elite = true, raid = true, server = true, trades = true },
 
     Debug              = false,
 }
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.5" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-08.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -15796,6 +15796,7 @@ do
             if N.wants(key) then N.breakAt = now end     -- unticked: no BREAKING, the crawl goes on
             print("[BFF] news: " .. text)
         end
+        N.breaking = breaking                            -- your trades (TRADES) say theirs too
 
         -- The game's answer to "CakePrinceSpawner", true (a question).
         local function cakeNote(r)
@@ -15901,6 +15902,12 @@ do
                 if N.wants(key) then
                     table.insert(out, { key = key, tone = tone, title = title, body = body })
                 end
+            end
+            -- Your trades first (TRADES, user 2026-11-08): left, and when they come back.
+            local tr = (P :: any).trades
+            if tr then
+                local okT, h = pcall(tr.headline)
+                if okT and h then add("trades", h.tone, h.title, h.body) end
             end
             if s then
                 if not s.phase then
@@ -16014,7 +16021,15 @@ do
         function N.chip(now)
             now = now or os.clock()
             if N.breakAt and now - N.breakAt < 8 then return "BREAKING", "", "breaking" end
-            if not N.wants("moon") then return "NEWS", "", "dim" end
+            if not N.wants("moon") then
+                -- No moon on it: your trades, when they are ticked and known.
+                local tr = (P :: any).trades
+                if tr and N.wants("trades") then
+                    local okT, w, t, tone = pcall(tr.chip)
+                    if okT and w then return w, t, tone end
+                end
+                return "NEWS", "", "dim"
+            end
             local s = N.sky
             if not s then return "SKY", "", "dim" end
             if s.full then return s.blue and "BLUE MOON" or "FULL MOON", dur(s.edge), "full" end
@@ -16298,7 +16313,7 @@ local function buildUI()
         volcano = "Volcano event", seafight = "Fighting at sea",
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
-        stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu",
+        stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu", trades = "Trades",
     }
 
     local function show(name, back)
@@ -17661,6 +17676,7 @@ local function buildUI()
             end
             return string.format("%s+  ·  %d take  ·  %d skip", P.valueWords(CFG.FruitMinPrice), take, skip)
         end, "fruitmenu")
+        navRow(v, "Trades", function() return P.trades.short() end, "trades")
         switchRow(v, "Include fruits players dropped",
             "Off: server spawns only - drops are mostly trades",
             function() return CFG.FruitPlayerDrops end,
@@ -17860,6 +17876,45 @@ local function buildUI()
             caption(v, "Empties the history for good - the file too "
                 .. "(workspace/bff_fruit_log_<your id>.json).")
             actionRow(v, "Clear the fruit history", nil, function() P.fruitLogClear() end)
+        end)
+    end
+
+    -- =====================================================
+    -- TRADES (P.trades): how many are left, when they come back
+    -- =====================================================
+    do
+        local v = makeView("trades")
+        gap(v, 6)
+        readout(v, function() return P.trades.report() end)
+        heading2(v, "the rule")
+        readout(v, function() return P.trades.rules() end)
+        heading2(v, "newest first")
+        readout(v, function()
+            local s = P.trades.lines(30)
+            return (#s > 0) and table.concat(s, "\n") or "none yet"
+        end)
+        fold(v, "Clear it", function(v)
+            caption(v, "Forgets every trade seen on this account - the file too "
+                .. "(workspace/bff_trades_<your id>.json).")
+            actionRow(v, "Forget the trades", nil, function() P.trades.clear() end)
+        end)
+        fold(v, "How it works", function(v)
+            caption(v, "After every trade that goes through, the game says \"Trade completed (2/5)\". "
+                .. "That count is the game's own: the script reads it (and the trade itself) and "
+                .. "never sends anything.")
+            caption(v, "When they come back is a rule. The wiki's \"5 a day, new day 11:59 PM UTC+8\" "
+                .. "is wrong: jodl_37's own trades disprove it. Four rules fit all of them; the first "
+                .. "one still standing is shown, and each count the game says rules out any rule "
+                .. "that counted more than the game did.")
+            caption(v, "Trades made while the script was not loaded are counted from the game's next "
+                .. "count; until then a time reads \"by\": the latest it can be.")
+        end)
+        fold(v, "Details", function(v)
+            caption(v, "Everything the game said about trades, newest first.")
+            readout(v, function()
+                local s = P.trades.noteLines()
+                return (#s > 0) and table.concat(s, "\n") or "nothing about trades yet"
+            end)
         end)
     end
 
@@ -19664,6 +19719,7 @@ local function buildUI()
             { "prehistoric", "Prehistoric Island" }, { "kitsune", "Kitsune Island" },
             { "frozen", "Frozen Dimension" }, { "elite", "Elite pirates" },
             { "raid", "Raid bosses, Cake Prince" }, { "server", "Server: players, time here" },
+            { "trades", "Your trades: left, back at" },
         }) do
             table.insert(items, { t[2], "",
                 function() return CFG.NewsShow[t[1]] ~= false end,
@@ -22534,6 +22590,515 @@ end
 -- (end of race)
 
 -- =========================================================
+-- TRADES
+-- =========================================================
+-- User, 2026-11-08: "the script should be able to tell when I will be out of
+-- trade cooldown, how many trades I have left before cooldown" - read in
+-- Blox Fruits, not on Eldorado.
+--   THE COUNT  the game says it after every trade that goes through:
+--              "Trade completed (2/5). Check your Inventory." (jodl_37's
+--              screenshots, 30 and 31 Oct). Taken as it comes: Remotes.CommE
+--              "Notify" (where a public trading bot looked for it) and any new
+--              label in your PlayerGui that says it. Only listened to:
+--              nothing is hooked, nothing is sent.
+--   A TRADE    Remotes.TradeEvent "leave" while State.Type is "Processing" =
+--              it went through (the same bot: start, update_state,
+--              countdown_cancel, leave). Offer[side].Items = what each gave.
+--   THE CLOCK  NOT the wiki's "5 a day, a new day at 11:59 PM UTC+8":
+--              jodl_37 traded 30 Oct 23:38 and 23:54 IST and the game said
+--              (1/5) at 16:24 on 31 Oct - the same UTC+8 day. No 24 h rule fits
+--              his 29 trades 30 Oct - 7 Nov either. Four rules do (RULES). The
+--              first one still standing is shown; a count the game says rules
+--              out every rule that counted MORE than the game. Counting fewer
+--              proves nothing: the trades made while this script was not
+--              loaded are trades no rule can see.
+-- Kept per account in workspace/bff_trades_<UserId>.json: the trades seen
+-- and the counts the game said. Shown in the news strip (TRADES), on
+-- Fruits -> Trades, and in the console / Roblox log as "[BFF] trades: ...".
+-- Only P.trades leaves the block (the main chunk is at Luau's 200 registers).
+do
+    local function build()
+        local HttpService = game:GetService("HttpService")
+        local H = 3600
+        local T: { [string]: any } = { list = {}, out = {}, miss = {}, notes = {}, cap = 5, clock = os.time }
+        P.trades = T
+        T.file = "bff_trades_" .. tostring(player.UserId) .. ".json"
+        -- cycle = `span` from the first trade of a cycle, then all five back;
+        -- roll  = each trade's slot back `span` after it;
+        -- day   = a new day `at` seconds past 00:00 UTC.
+        local RULES = {
+            { key = "cycle8", kind = "cycle", span = 8 * H, words = "5 per 8 h from the first trade of a cycle" },
+            { key = "roll8", kind = "roll", span = 8 * H, words = "each trade back 8 h after it" },
+            { key = "day", kind = "day", at = 0, words = "a new day at 00:00 UTC (05:30 in India)" },
+            { key = "cycle12", kind = "cycle", span = 12 * H, words = "5 per 12 h from the first trade of a cycle" },
+        }
+        T.RULES = RULES
+
+        -- Rule r at time `at`, counting trades 1..upTo (all when nil) of the
+        -- list (oldest first) -> how many count, and when that next changes:
+        -- the window's end (cycle, day) or the oldest one's way back (roll).
+        local function count(r, list, at, upTo)
+            local n, back = 0, nil
+            local last = upTo or #list
+            if r.kind == "cycle" then
+                local start
+                for i = 1, last do
+                    local t = list[i].t
+                    if t > at then break end
+                    if not start or t >= start + r.span then start, n = t, 0 end
+                    n += 1
+                end
+                if start and at < start + r.span then back = start + r.span else n = 0 end
+            elseif r.kind == "roll" then
+                for i = 1, last do
+                    local t = list[i].t
+                    if t <= at and t > at - r.span then
+                        n += 1
+                        back = back or (t + r.span)     -- the oldest still counted
+                    end
+                end
+            else
+                local day = (at - r.at) // 86400
+                for i = 1, last do
+                    local t = list[i].t
+                    if t <= at and (t - r.at) // 86400 == day then n += 1 end
+                end
+                if n > 0 then back = (day + 1) * 86400 + r.at end
+            end
+            return n, back
+        end
+        T.count = count
+
+        -- The game said n after trade i: every rule that counted more is out.
+        -- One that counted less needs trades the script never saw: added up
+        -- in T.miss, and the rule needing the fewest is the one shown.
+        local function judge(i, quiet)
+            local tr = T.list[i]
+            for _, r in ipairs(RULES) do
+                if not T.out[r.key] then
+                    local n = count(r, T.list, tr.t, i)
+                    if n > tr.n then
+                        T.out[r.key] = { at = tr.t, said = tr.n, counted = n }
+                        if not quiet then
+                            print(string.format("[BFF] trades: ruled out \"%s\" - the game said %d/%d at %s, it counted %d",
+                                r.words, tr.n, T.cap, os.date("%d %b %H:%M", tr.t), n))
+                        end
+                    else
+                        T.miss[r.key] = (T.miss[r.key] or 0) + (tr.n - n)
+                    end
+                end
+            end
+        end
+        local function rejudge()
+            T.out, T.miss = {}, {}
+            for i, tr in ipairs(T.list) do
+                if tr.n then judge(i, true) end
+            end
+        end
+
+        -- Rule r now: { used, left, back, latest }. The game's last count still
+        -- in force adds the trades it counted that the list does not have
+        -- (made while the script was not loaded); then `back` is only the
+        -- latest it can be (latest = true).
+        local function under(r, now)
+            local list = T.list
+            local used, back = count(r, list, now)
+            local latest = false
+            for i = #list, 1, -1 do
+                local tr = list[i]
+                if tr.n then
+                    local had, b = count(r, list, tr.t, i)
+                    local live = (r.kind == "roll") and (now < tr.t + r.span) or (b ~= nil and now < b)
+                    if tr.n > had and live then
+                        used += tr.n - had
+                        latest = r.kind ~= "day"            -- a day ends when it ends
+                        -- the unseen ones came before the count: back by then
+                        local by = (r.kind == "roll") and (tr.t + r.span) or b
+                        back = (back and by) and math.min(back, by) or by or back
+                    end
+                    break
+                end
+            end
+            used = math.min(T.cap, used)
+            return { used = used, left = T.cap - used, back = back, latest = latest }
+        end
+
+        -- Every rule still standing, the shown one first: the one needing the
+        -- fewest unseen trades to match the game, then the order of RULES.
+        function T.status(now)
+            now = now or T.clock()
+            local fits = {}
+            for i, r in ipairs(RULES) do
+                if not T.out[r.key] then table.insert(fits, { rule = r, i = i, s = under(r, now) }) end
+            end
+            table.sort(fits, function(a, b)
+                local ma, mb = T.miss[a.rule.key] or 0, T.miss[b.rule.key] or 0
+                if ma ~= mb then return ma < mb end
+                return a.i < b.i
+            end)
+            return fits
+        end
+
+        -- 1 h 05 min / 12 min / under a minute
+        local function mins(s)
+            local m = math.floor(math.max(0, s) / 60 + 0.5)
+            if m < 1 then return "under a minute" end
+            if m >= 60 then return string.format("%d h %02d min", m // 60, m % 60) end
+            return m .. " min"
+        end
+        -- 1:05:09 / 12:04 (the chip's clock)
+        local function hms(s)
+            s = math.max(0, math.floor(s + 0.5))
+            if s >= 3600 then return string.format("%d:%02d:%02d", s // 3600, (s % 3600) // 60, s % 60) end
+            return string.format("%d:%02d", s // 60, s % 60)
+        end
+        local function at(t) return os.date("%H:%M", t) end
+        T.mins = mins
+
+        -- What rule r's state means, in words (the strip and the page).
+        local function words(r, s, now)
+            local by = s.latest and "by " or ""
+            if s.left <= 0 then
+                return s.back and string.format("back %s%s, in %s", by, at(s.back), mins(s.back - now)) or "back: not known"
+            end
+            if s.used == 0 then return "none used" end
+            if not s.back then return s.used .. " used" end
+            if r.kind == "roll" then
+                return string.format("%d used, the next back %s%s", s.used, by, at(s.back))
+            end
+            return string.format("%d used, all %d back %s%s (in %s)", s.used, T.cap, by, at(s.back), mins(s.back - now))
+        end
+        T.words = words
+
+        -- The strip's headline: { tone, title, body }.
+        function T.headline(now)
+            now = now or T.clock()
+            if #T.list == 0 then
+                return { tone = "dim", title = "TRADES",
+                    body = "none seen on this account yet · the game says its count after your next trade" }
+            end
+            local fits = T.status(now)
+            if #fits == 0 then
+                return { tone = "dim", title = "TRADES",
+                    body = "no rule I know fits what the game said · Fruits, Trades" }
+            end
+            local f = fits[1]
+            local s = f.s
+            local body = words(f.rule, s, now)
+            -- Rules that still fit and answer otherwise: said, until the game decides.
+            for k = 2, #fits do
+                local o = fits[k]
+                if o.s.left ~= s.left then
+                    body ..= string.format(" · not sure yet: if %s, %d left", o.rule.words, o.s.left)
+                    break
+                end
+            end
+            return { tone = (s.left > 0) and "up" or "full",
+                title = string.format("TRADES %d/%d LEFT", math.max(0, s.left), T.cap), body = body }
+        end
+
+        -- The chip, when the moon is not on it: word, clock, tone.
+        function T.chip(now)
+            now = now or T.clock()
+            if #T.list == 0 then return nil end
+            local f = T.status(now)[1]
+            if not f then return nil end
+            if f.s.left > 0 then return "TRADES", string.format("%d/%d", f.s.left, T.cap), "day" end
+            return "NO TRADE", f.s.back and hms(f.s.back - now) or "?", "full"
+        end
+
+        -- The navigation row's few words.
+        function T.short(now)
+            now = now or T.clock()
+            if #T.list == 0 then return "none seen yet" end
+            local f = T.status(now)[1]
+            if not f then return "rule not known" end
+            if f.s.left > 0 then return string.format("%d/%d left", f.s.left, T.cap) end
+            return f.s.back and ("back " .. at(f.s.back)) or "0 left"
+        end
+
+        -- THE FILE --------------------------------------------------------
+        local function save()
+            if not writefile then return end
+            local list = {}
+            for i = math.max(1, #T.list - 299), #T.list do list[#list + 1] = T.list[i] end
+            local ok, s = pcall(function()
+                return HttpService:JSONEncode({ v = 1, cap = T.cap, list = list, notes = T.notes })
+            end)
+            if ok then pcall(writefile, T.file, s) end
+        end
+        local function load()
+            if not (isfile and readfile) then return end
+            local okF, has = pcall(isfile, T.file)
+            if not okF or not has then return end
+            local ok, s = pcall(readfile, T.file)
+            if not ok or type(s) ~= "string" then return end
+            local ok2, d = pcall(function() return HttpService:JSONDecode(s) end)
+            if not ok2 or type(d) ~= "table" then return end
+            T.cap = tonumber(d.cap) or T.cap
+            local list = {}
+            for _, tr in ipairs(type(d.list) == "table" and d.list or {}) do
+                local t = type(tr) == "table" and tonumber(tr.t)
+                if t then
+                    table.insert(list, { t = t, n = tonumber(tr.n), with = tr.with, gave = tr.gave, got = tr.got, src = tr.src })
+                end
+            end
+            table.sort(list, function(a, b) return a.t < b.t end)
+            T.list = list
+            T.notes = type(d.notes) == "table" and d.notes or {}
+            rejudge()
+        end
+        T.save, T.load = save, load
+
+        local function say(now)
+            local f = T.status(now)[1]
+            if f then
+                print(string.format("[BFF] trades: %d of %d left - %s (rule: %s)", math.max(0, f.s.left), T.cap,
+                    words(f.rule, f.s, now), f.rule.words))
+            end
+        end
+
+        -- THE EVENTS -------------------------------------------------------
+        -- A trade went through (TradeEvent). The count message may come
+        -- before or after it: within 15 s the two are one trade.
+        function T.done(with, gave, got)
+            local now = T.clock()
+            local last = T.list[#T.list]
+            if last and last.src == "said" and not last.with and now - last.t < 15 then
+                last.with, last.gave, last.got, last.src = with, gave, got, "both"
+            else
+                table.insert(T.list, { t = now, with = with, gave = gave, got = got, src = "event" })
+            end
+            save()
+            local f = T.status(now)[1]
+            local text = string.format("TRADE DONE%s · %s", with and (" with " .. tostring(with)) or "",
+                f and (math.max(0, f.s.left) .. "/" .. T.cap .. " left") or "count not known")
+            if P.news and P.news.breaking then pcall(P.news.breaking, "trades", text, os.clock()) end
+            say(now)
+        end
+
+        -- The game said its count: n of cap used.
+        function T.said(n, cap)
+            local now = T.clock()
+            T.cap = cap or T.cap
+            local last = T.list[#T.list]
+            -- The same count by the other way (its text a little different): one trade.
+            if last and last.n == n and now - last.t < 15 then return end
+            if last and not last.n and now - last.t < 15 then
+                last.n = n
+                if last.src == "event" then last.src = "both" end
+            else
+                table.insert(T.list, { t = now, n = n, src = "said" })
+            end
+            judge(#T.list)
+            save()
+            say(now)
+        end
+
+        -- Any text from the game that mentions a trade: written down; the
+        -- count read off it. The same text by both ways is one.
+        function T.notice(raw)
+            if type(raw) ~= "string" then return end
+            local text = string.gsub(raw, "<[^>]->", "")              -- rich text tags off
+            local low = string.lower(text)
+            if #text > 200 or not string.find(low, "trade", 1, true) then return end
+            -- A message, not a title ("TREASURE TRADE"): a number in it, or what a limit says.
+            if not (string.find(low, "%d") or string.find(low, "limit", 1, true) or string.find(low, "cooldown", 1, true)
+                or string.find(low, "wait", 1, true) or string.find(low, "complete", 1, true)) then return end
+            local now = T.clock()
+            if T.lastNote == text and now - (T.lastNoteAt or 0) < 5 then return end
+            T.lastNote, T.lastNoteAt = text, now
+            table.insert(T.notes, { t = now, text = text })
+            while #T.notes > 12 do table.remove(T.notes, 1) end
+            print("[BFF] trades: the game says: " .. (string.gsub(text, "%s+", " ")))
+            local n, cap = string.match(low, "completed%s*%((%d+)%s*/%s*(%d+)%)")
+            if n then T.said(tonumber(n), tonumber(cap)) else save() end
+        end
+
+        -- Offer[side].Items -> "Portal x2, Buddha" (the game's names when it
+        -- sends them, else its item id).
+        local function items(offer)
+            local out = {}
+            local its = type(offer) == "table" and offer.Items
+            if type(its) ~= "table" then return nil end
+            for _, it in pairs(its) do
+                if type(it) == "table" then
+                    local name = it.Name or it.ItemName or ("#" .. tostring(it.ItemId))
+                    local n = tonumber(it.Amount) or 1
+                    table.insert(out, n > 1 and (tostring(name) .. " x" .. n) or tostring(name))
+                end
+            end
+            return #out > 0 and table.concat(out, ", ") or nil
+        end
+        T.items = items
+
+        -- The trade as the game last sent it, then whether it went through.
+        local cur: { [string]: any } = {}
+        function T.tradeEvent(ev, st)
+            if type(st) ~= "table" then return end
+            local traders = type(st.Trader) == "table" and st.Trader or {}
+            local mine
+            for k = 1, 2 do
+                if tonumber(traders[k]) == player.UserId then mine = k end
+            end
+            if mine then
+                local other = traders[3 - mine]
+                local p = tonumber(other) and Players:GetPlayerByUserId(tonumber(other))
+                cur.with = p and p.Name or (other and tostring(other)) or cur.with
+                local offer = type(st.Offer) == "table" and st.Offer or {}
+                cur.gave = items(offer[mine]) or cur.gave
+                cur.got = items(offer[3 - mine]) or cur.got
+            end
+            if ev == "leave" then
+                local state = type(st.State) == "table" and st.State.Type
+                if state == "Processing" then T.done(cur.with, cur.gave, cur.got) end
+                cur = {}
+            end
+        end
+
+        local conns = {}
+        -- From load: the trade remote, the game's notices, new labels.
+        function T.listen()
+            local rem = RS:WaitForChild("Remotes", 60)
+            if not rem or _G.BFF ~= P then return end
+            local te = rem:WaitForChild("TradeEvent", 30)
+            if te then
+                table.insert(conns, te.OnClientEvent:Connect(function(ev, st)
+                    if _G.BFF == P then pcall(T.tradeEvent, ev, st) end
+                end))
+            end
+            local ce = rem:FindFirstChild("CommE")
+            if ce then
+                table.insert(conns, ce.OnClientEvent:Connect(function(...)
+                    if _G.BFF ~= P then return end
+                    for i = 1, select("#", ...) do
+                        local a = select(i, ...)
+                        if type(a) == "string" then pcall(T.notice, a) end
+                    end
+                end))
+            end
+            local pg = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 30)
+            if pg then
+                table.insert(conns, pg.DescendantAdded:Connect(function(o)
+                    if _G.BFF ~= P or not (o:IsA("TextLabel") or o:IsA("TextButton")) then return end
+                    -- Not this panel's own words, not the chat: only the game's.
+                    if o:FindFirstAncestor("BFFHUD") or o:FindFirstAncestor("Chat") then return end
+                    local function look() pcall(function() T.notice(o.Text) end) end
+                    task.defer(look)
+                    task.delay(0.5, look)
+                end))
+            end
+            T.note = string.format("listening: TradeEvent %s, CommE %s, labels %s",
+                te and "yes" or "no", ce and "yes" or "no", pg and "yes" or "no")
+            print("[BFF] trades: " .. T.note)
+        end
+        function T.unlisten()
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            table.clear(conns)
+        end
+
+        -- Once a second: the moment trades come back is said once (a rule
+        -- ruled out changes the count too: that is not trades coming back).
+        local lastLeft, lastRule
+        function T.tick()
+            local now = T.clock()
+            local f = T.status(now)[1]
+            if not f or #T.list == 0 then return end
+            if f.rule.key ~= lastRule then lastRule, lastLeft = f.rule.key, nil end
+            if lastLeft and f.s.left > lastLeft then
+                print(string.format("[BFF] trades: back - %d of %d left", f.s.left, T.cap))
+                if P.news and P.news.breaking then
+                    pcall(P.news.breaking, "trades", string.format("TRADES BACK · %d/%d left", f.s.left, T.cap), os.clock())
+                end
+            end
+            lastLeft = f.s.left
+        end
+
+        -- THE PAGE ---------------------------------------------------------
+        function T.report(now)
+            now = now or T.clock()
+            if #T.list == 0 then
+                return "now       none seen on this account yet\n"
+                    .. "          the game says its count after your next trade"
+            end
+            local fits = T.status(now)
+            local lines = {}
+            local f = fits[1]
+            if f then
+                table.insert(lines, string.format("now       %d of %d left", math.max(0, f.s.left), T.cap))
+                table.insert(lines, "          " .. words(f.rule, f.s, now))
+                for k = 2, #fits do
+                    local o = fits[k]
+                    if o.s.left ~= f.s.left or o.s.back ~= f.s.back then
+                        table.insert(lines, string.format("if        %s: %d left, %s", o.rule.words,
+                            math.max(0, o.s.left), words(o.rule, o.s, now)))
+                    end
+                end
+            else
+                table.insert(lines, "now       no rule I know fits what the game said")
+            end
+            for i = #T.list, 1, -1 do
+                local tr = T.list[i]
+                if tr.n then
+                    table.insert(lines, string.format("the game  said %d/%d at %s", tr.n, T.cap, os.date("%d %b %H:%M", tr.t)))
+                    break
+                end
+            end
+            table.insert(lines, tostring(T.note or "listening: not yet"))
+            return table.concat(lines, "\n")
+        end
+        function T.rules()
+            local lines = {}
+            for k, f in ipairs(T.status()) do
+                local m = T.miss[f.rule.key] or 0
+                table.insert(lines, string.format("%s %s%s", (k == 1) and "shown  " or "fits   ", f.rule.words,
+                    (m > 0) and string.format("\n        only with %d trade%s the script never saw", m, (m == 1) and "" or "s") or ""))
+            end
+            for _, r in ipairs(RULES) do
+                local o = T.out[r.key]
+                if o then
+                    table.insert(lines, string.format("out     %s\n        the game said %d/%d at %s, it counted %d",
+                        r.words, o.said, T.cap, os.date("%d %b %H:%M", o.at), o.counted))
+                end
+            end
+            table.insert(lines, "out     5 a day, a new day at 11:59 PM UTC+8 (the wiki)\n"
+                .. "        jodl_37: (1/5) on 31 Oct after 2 trades the same UTC+8 day")
+            return table.concat(lines, "\n")
+        end
+        function T.lines(max)
+            local out = {}
+            for i = #T.list, math.max(1, #T.list - (max or 30) + 1), -1 do
+                local tr = T.list[i]
+                table.insert(out, string.format("%s  %s%s%s", os.date("%d %b %H:%M", tr.t),
+                    tr.n and (tr.n .. "/" .. T.cap) or "-  ",
+                    tr.with and ("  with " .. tostring(tr.with)) or "",
+                    tr.gave and ("  gave " .. tostring(tr.gave)) or ""))
+            end
+            return out
+        end
+        function T.noteLines()
+            local out = {}
+            for i = #T.notes, 1, -1 do
+                local n = T.notes[i]
+                table.insert(out, os.date("%d %b %H:%M", tonumber(n.t) or 0) .. "  " .. (string.gsub(tostring(n.text), "%s+", " ")))
+            end
+            return out
+        end
+        function T.clear()
+            T.list, T.notes, T.out, T.miss = {}, {}, {}, {}
+            lastLeft, lastRule = nil, nil
+            save()
+            print("[BFF] trades: forgotten (the file too)")
+        end
+
+        load()
+        if #T.list > 0 then say(T.clock()) end
+    end
+    build()
+end
+-- (end of trades)
+
+-- =========================================================
 -- SETTINGS LOCK
 -- =========================================================
 -- User, 2026-10-14: "if I customize a setting and lock it, I want it to stay
@@ -22710,6 +23275,15 @@ task.spawn(function()
         pcall(P.news.tick)
         task.wait(1)
     end
+end)
+-- Your trades (TRADES): listened to from load, farm running or not.
+task.spawn(function()
+    pcall(P.trades.listen)
+    while _G.BFF == P do
+        pcall(P.trades.tick)
+        task.wait(1)
+    end
+    pcall(P.trades.unlisten)
 end)
 -- Race V3 / V4 (RACE): watched from load; fired only while a mode runs or PvP is on.
 task.spawn(function()
