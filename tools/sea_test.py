@@ -37,9 +37,11 @@ def cut(start, end):
 
 
 sea = cut("-- SEA HUNT\n", "-- MAIN LOOP\n")
+# The one way out of a seat lives in BODY; the wheel uses the real one.
+leave = cut("    function P.leaveSeat(h)\n", "    function P.seatGuard()\n")
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
-    f.write(read("sea_stubs.lua") + "local function SECTION()\n" + sea + "\nend\n" + read("sea_cases.lua"))
+    f.write(read("sea_stubs.lua") + leave + "local function SECTION()\n" + sea + "\nend\n" + read("sea_cases.lua"))
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)

@@ -29,4 +29,16 @@ with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)
 print(r.stdout + r.stderr)
-sys.exit(0 if "ALL PASS" in r.stdout else 1)
+# NO CHAIRS is only as good as its wiring: the guard must run every frame a mode
+# runs, ahead of the lock's write, and Stop must hand the chairs back.
+start = src[src.index("function P.start()"):src.index("function P.stop(why)")]
+stop = src[src.index("function P.stop(why)"):src.index("function P.stats()")]
+wired = [
+    ("P.start's Heartbeat runs the guard", "pcall(P.seatGuard)" in start),
+    ("...before the body lock writes", "pcall(P.seatGuard)" in start and "pcall(bodyHeartbeat)" in start
+        and start.index("pcall(P.seatGuard)") < start.index("pcall(bodyHeartbeat)")),
+    ("P.stop gives the chairs back", "pcall(P.seatsBack)" in stop),
+]
+for name, ok in wired:
+    print(("PASS " if ok else "FAIL ") + name)
+sys.exit(0 if "ALL PASS" in r.stdout and all(ok for _, ok in wired) else 1)

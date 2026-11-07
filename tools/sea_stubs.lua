@@ -160,6 +160,8 @@ local CFG = {
 }
 local SET_HUNT = {}
 local P = { running = true, elite = { note = "", why = nil }, heldAt = {} }
+P.seatsOn = {}           -- seats handed back to the game before boarding (NO CHAIRS)
+function P.seatOn(seat) table.insert(P.seatsOn, seat) end
 function P.setHunt(x) table.insert(SET_HUNT, x) P.handsOff = false end
 local STOPPED = 0
 function P.stop() STOPPED += 1 end

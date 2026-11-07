@@ -131,6 +131,7 @@ other games, and never switches a team you are on.
 | Lock | your body is written every frame to a spot over the pile: **"High, over the pile" (up to 150) counted from the HIGHEST living enemy in it** (one the magnet does not own stays up on its ledge, and you still stay that far over it). **"Always stay above them" (on by default): never down to the close spot** — every attack is fired from that height, and the remote hit reaches that far (a 60 reach at 60 up used to name nobody). Off: close beside the pile for key presses and fighting-style / sword skills. A Kitsune lunge is undone the same frame. |
 | Noclip | every part stops colliding before each physics step while running. The body is always held, so it never falls through anything. |
 | **Water is rock, every mode** | (user, 2026-10-11, after the Legendary Sword hunt flew them under Kingdom of Rose into the sea: water damage, death.) Noclip means the raised sea slab cannot hold your body, so the line is in every write: **the body is never put lower than the sea's top + 4** - the hover lock (asked and every frame), every frame of a flight, an instant hop. A goal under the water is reached ON it; a body the game throws under the water is lifted onto it. Only over the sea slab (`WaterBase-Plane`'s footprint) and not in the deep sea - Submerged Island keeps its own floor. A flight still goes straight through an island's ground (noclip) - but never under the sea. |
+| **No chairs, every mode** | (user, 2026-11-07: the chairs at the Café and the Mansion caught the body on its way through - seated there and at the NPC at once.) Noclip stops collisions, not touches. Every frame a mode runs, seated anywhere but the wheel a sea hunt is at = up the same frame (Space, then the weld off), and that chair is switched off on your client until Stop. Idle and PvP: never touched, you can sit. |
 | Travel | under 150 studs: one jump. Further: a straight flight at 330 studs/s (slider). "Pulled back" on Travel & boat counts server corrections. Submerged Island: the Tiki submarine. |
 | M1 with | Attack page, top: **which weapon swings M1 in every fight** (farm, golems, Blaze Ember quests). Auto (default): **your sword first**, then a fighting style, fruit, gun; or tap one - **your pick always swings**, even with its own M1 switch off. (The bug it fixes, 2026-10-05: the M1 weapon was the FIRST in the weapon list with M1 on - fighting styles are listed before swords and the first run switches M1 on for what you hold - so a picked Hallow Scythe lost to the fighting style.) The sword that swings is never swapped out by the rotation. |
 | Every weapon you carry | Attack page switch, **off by default** (it was for the volcano; two M1s do that now - Hallow Scythe on the golems, Skull Guitar on the vents). On: no setup - M1 as picked above, Z / X / C of every weapon you carry. Off: the per-weapon choices below it. |
@@ -671,6 +672,18 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 1. When it happens: send the `[BFF] loot: the Dragon Egg gave a FRUIT` line and the `[BFF] fruit: ... STORED - confirmed` line.
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
+
+## No chairs while a mode runs - first test (2026-11-07, build 2026-11-07.3)
+
+The Café (Second Sea) and the Mansion (Third Sea) are the only places with chairs.
+
+1. The panel's title says 2026-11-07.3.
+2. Sit on a chair by hand, then Start any mode: you get up at once, the mode goes on, and the console says `[BFF] seat: got up from ...`.
+3. Same at the other place, in its own sea.
+4. Stop, walk into the same chair: you sit (Stop gives the chairs back). PvP on: you sit too.
+5. A sea hunt: you stay at the wheel; off the boat for a fight and back on it still works.
+6. `caught 2` or more for one chair in the log: switching it off does not stop the touch, and only the getting up is doing the work. Tell me the line.
+7. After getting up, enemies still take your hits. If not, the server kept you on the chair: stand next to an alt, or say what you saw.
 
 ## Quests by your level, in the Circuit - first test (2026-11-07, build 2026-11-07.2)
 

@@ -669,7 +669,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-07.3" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1601,6 +1601,72 @@ local function restoreBody()
     table.clear(savedCollide)
     local _, _, h = parts()
     if h then pcall(function() h.AutoRotate = true end) end
+end
+
+-- NO CHAIRS (user, 2026-11-07: "anything that is totally automated, it should
+-- not be able to sit"). A cafe chair catches a body that passes through it -
+-- noclip stops collisions, not Touched - and its SeatWeld then holds the body:
+-- on your screen the lock has you at the NPC, the chair has you where it
+-- stands. No route round the chairs: getting up is the whole fix, every mode
+-- gets it at once, and the cafe stays usable. Every frame a mode runs (never
+-- idle, never PvP: P.start and P.pvpSet exclude each other), seated anywhere
+-- but the wheel a sea hunt is at = out, the same frame.
+-- NOT Humanoid state Seated off: the weld forms anyway (DevForum), and the
+-- boats need the state. NOT Seat.Disabled: disabling an occupied seat can stop
+-- the character sitting anywhere afterwards - the wheel included.
+do
+    local off = {}                      -- [seat] = times it caught you this run
+    local toldSeat, toldAt = nil, -1e9
+
+    -- The one way out of a seat: Space, as a player gets up, then the two
+    -- writes the wheel has always used.
+    function P.leaveSeat(h)
+        local seat = h.SeatPart
+        if not seat then return end
+        pcall(function() h.Jump = true end)
+        pcall(function() h.Sit = false end)
+        for _, w in ipairs(seat:GetChildren()) do
+            if w.Name == "SeatWeld" then pcall(function() w:Destroy() end) end
+        end
+    end
+
+    function P.seatGuard()
+        if not P.running then return end
+        local _, _, h = parts()
+        local seat = h and h.SeatPart
+        if not seat then return end
+        local S = P.sea
+        if S and ((S.driving and seat == S.seat) or seat == S.boarding) then return end
+        P.leaveSeat(h)
+        -- The chair off on your client, so one you hover over cannot catch you
+        -- every few seconds. Unproven alone: "caught 2" in the log = it does
+        -- not stop the touch, and only the getting up above is doing the work.
+        off[seat] = (off[seat] or 0) + 1
+        pcall(function() seat.CanTouch = false end)
+        local now = os.clock()
+        if seat ~= toldSeat or now - toldAt > 5 then
+            toldSeat, toldAt = seat, now
+            local ok, where = pcall(function() return seat:GetFullName() end)
+            print(string.format("[BFF] seat: got up from %s (caught %d)",
+                ok and tostring(where) or tostring(seat.Name), off[seat]))
+        end
+    end
+
+    -- One seat back, before the script itself sits in it (a boat's wheel).
+    function P.seatOn(seat)
+        if off[seat] then
+            off[seat] = nil
+            pcall(function() seat.CanTouch = true end)
+        end
+    end
+
+    -- Stop: every chair works again - idle and PvP are yours.
+    function P.seatsBack()
+        for seat in pairs(off) do
+            pcall(function() seat.CanTouch = true end)
+        end
+        table.clear(off)
+    end
 end
 
 -- Hold at pos, turned (yaw only) to face lookAt if given.
@@ -8937,12 +9003,7 @@ do
             S.driving = false
             local _, r, h = parts()
             local sat = h and h.SeatPart ~= nil
-            if sat then
-                pcall(function() h.Sit = false end)
-                for _, w in ipairs(h.SeatPart:GetChildren()) do
-                    if w.Name == "SeatWeld" then pcall(function() w:Destroy() end) end
-                end
-            end
+            if sat then P.leaveSeat(h) end
             if was or sat then
                 flying = false
                 if r then
@@ -8954,7 +9015,7 @@ do
         end
         S.stopDrive = stopDrive
 
-        local function sit(seat, myEpoch)
+        local function sitDown(seat, myEpoch)
             local _, r, h = parts()
             if not (r and h) then return false end
             flying = true            -- the lock lets go: the seat holds you now
@@ -8972,6 +9033,15 @@ do
             lastWritten = r.Position
             lockAt(r.Position)
             return false
+        end
+        -- NO CHAIRS (BODY): the one seat the script asks for. Never yields
+        -- between here and S.driving, so the guard sees one or the other.
+        local function sit(seat, myEpoch)
+            S.boarding = seat
+            P.seatOn(seat)
+            local ok = sitDown(seat, myEpoch)
+            S.boarding = nil
+            return ok
         end
 
         -- To the back dealer, and buy. The boat you asked for, then two others.
@@ -19543,6 +19613,7 @@ function P.start()
 
     track(RunService.Stepped:Connect(function() pcall(bodyStepped) end))
     track(RunService.Heartbeat:Connect(function(dt)
+        pcall(P.seatGuard)
         pcall(bodyHeartbeat)
         pcall(magnetTick)
         if P.running and os.clock() < aimUntil then
@@ -19613,6 +19684,7 @@ function P.stop(why)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     table.clear(conns)
     pcall(restoreBody)
+    pcall(P.seatsBack)
     setState("IDLE")
     say("stopped")
     print(string.format("[BFF] stopped. kills=%d piles=%d", stats.kills, stats.piles))

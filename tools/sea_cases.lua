@@ -152,7 +152,11 @@ local function makeBoat(pos, yaw)
     local seat = b:add(inst("VehicleSeat", "VehicleSeat"))
     seat.CFrame = cf(pos, yaw)
     seat.Position = pos
-    function seat:Sit(h) h.SeatPart = self self.sat = (self.sat or 0) + 1 end
+    function seat:Sit(h)
+        h.SeatPart = self
+        self.sat = (self.sat or 0) + 1
+        self.boardingAtSit = S.boarding      -- what the chair guard could read then
+    end
     return b, seat
 end
 local boat, seat = makeBoat(vec(-30000, 5, 400), math.pi / 2)    -- facing west
@@ -240,6 +244,9 @@ check("no boat: to the back dealer, BuyBoat \"Beast Hunter\"", ok == true and BU
 check("bought: at the WHEEL, not on the harpoon's seat", HUM.SeatPart == NEW_SEAT and HUM.SeatPart ~= NEW_BOAT.hook)
 check("bought: in the seat, the wheel on, the body lock let go", HUM.SeatPart == NEW_SEAT and S.driving and flying == true
     and S.everDriven, tostring(S.driving) .. " " .. tostring(flying))
+check("NO CHAIRS: while it sits you there the guard is told this seat is asked for", NEW_SEAT.boardingAtSit == NEW_SEAT)
+check("...the seat handed back first, in case the guard ever switched it off", P.seatsOn[#P.seatsOn] == NEW_SEAT)
+check("...and the word gone once seated: driving takes over", S.boarding == nil and S.driving == true)
 check("sailing: the note says meters and danger", string.find(S.note, "m from Tiki", 1, true) ~= nil, S.note)
 check("the boat's collisions are off", NEW_SEAT.CanCollide == false)
 DANGER_TEXT = "6"
