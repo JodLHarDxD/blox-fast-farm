@@ -135,4 +135,72 @@ check("a stored name read either way ('Dragon Fruit' / 'Dragon-Dragon')",
     P.storedCount({ ["Dragon Fruit"] = 1, ["Dragon-Dragon"] = 2, ["Spin-Spin"] = 4 }, "Dragon-Dragon") == 3
     and P.storedCount(nil, "Dragon-Dragon") == nil)
 
+-- PROVEN BY THE COUNT (user, 2026-11-08: a Tiger the history called stored
+-- was never in his storage): every store, not only P.fruitSecure.
+local function inBag(name, orig)
+    local t = tool(name, { OriginalName = orig }, true)
+    BACKPACK.kids, CHAR.kids = { t }, {}
+    t.Parent = BACKPACK
+    return t
+end
+STORAGE, STORAGE_LAGS, STORE_OK, STORE_FULL = { ["Tiger-Tiger"] = 2 }, false, {}, {}
+local okT, oT, whyT, proofT, n1T, n0T = storeTool(inBag("Tiger Fruit", "Tiger-Tiger"), nil)
+check("a store counted: ok, proof 'counted', 3 (was 2)", okT and proofT == "counted" and n1T == 3 and n0T == 2,
+    tostring(proofT) .. " " .. tostring(n1T) .. " " .. tostring(n0T))
+STORAGE_LAGS = true
+t0 = CLOCK
+okT, oT, whyT, proofT = storeTool(inBag("Tiger Fruit", "Tiger-Tiger"), nil)
+check("it left your hands, the count never rose: proof 'missing' after 5 s, said why", okT and proofT == "missing"
+    and CLOCK - t0 >= 5 and whyT == "it left your hands but your storage count did not go up", tostring(proofT) .. " " .. tostring(whyT))
+STORAGE, STORAGE_LAGS = nil, false
+okT, oT, whyT, proofT = storeTool(inBag("Tiger Fruit", "Tiger-Tiger"), nil)
+check("the count not readable: proof 'unread' (never 'counted')", okT and proofT == "unread", tostring(proofT))
+STORAGE = {}
+okT, oT, whyT, proofT, n1T, n0T = storeTool(inBag("Tiger Fruit", "Tiger-Tiger"), nil)
+check("your first stored fruit (nothing stored before): counted, 1 (was 0)", proofT == "counted" and n1T == 1 and n0T == 0,
+    tostring(proofT))
+
+-- Before a hop: a store the count never shows is VANISHED, never "stored before a hop".
+STORED, PRINTED, LOGSET = {}, {}, {}
+CFG.FruitStoreOnHop = true
+STORAGE, STORAGE_LAGS = { ["Tiger-Tiger"] = 2 }, true
+inBag("Tiger Fruit", "Tiger-Tiger")
+P.storeBeforeHop()
+check("before a hop, the count never rose: logged vanished, said VANISHED", LOGSET[1] == "Tiger-Tiger vanished"
+    and said("did NOT go up: VANISHED"), LOGSET[1])
+STORAGE_LAGS = false
+STORAGE = nil
+STORED, PRINTED, LOGSET = {}, {}, {}
+inBag("Tiger Fruit", "Tiger-Tiger")
+P.storeBeforeHop()
+check("before a hop, the count not readable: logged unconfirmed, said NOT confirmed", LOGSET[1] == "Tiger-Tiger unconfirmed"
+    and said("NOT confirmed"), LOGSET[1])
+STORAGE = { ["Tiger-Tiger"] = 1 }
+STORED, PRINTED, LOGSET = {}, {}, {}
+inBag("Tiger Fruit", "Tiger-Tiger")
+P.storeBeforeHop()
+check("before a hop, counted: stored before a hop, 'confirmed: your storage has 2'", LOGSET[1] == "Tiger-Tiger hopstored"
+    and said("confirmed: your storage has 2"), LOGSET[1])
+
+-- A slot freed for a fruit too good to lose: the same proof.
+STORED, PRINTED, LOGSET = {}, {}, {}
+STORAGE, STORAGE_LAGS = { ["Dough-Dough"] = 1 }, true
+bag({ tool("Dough Fruit", { OriginalName = "Dough-Dough" }, true) })
+left = keepersLeft(true)
+check("a slot 'freed' but the count never rose: not held any more, logged vanished", #left == 0
+    and LOGSET[1] == "Dough-Dough vanished" and said("VANISHED"), LOGSET[1])
+STORAGE_LAGS = false
+
+-- P.fruitSecure logs what was proven.
+LOGADD = {}
+STORAGE, STORAGE_LAGS = { ["Dragon-Dragon"] = 1 }, true
+P.fruitSecure(dragonIn(BACKPACK), "volcano")
+check("fruitSecure, never counted: logged vanished, not stored", LOGADD[1] and LOGADD[1].state == "vanished",
+    LOGADD[1] and LOGADD[1].state)
+STORAGE, STORAGE_LAGS = nil, false
+LOGADD = {}
+P.fruitSecure(dragonIn(BACKPACK), "volcano")
+check("fruitSecure, count not readable: logged unconfirmed", LOGADD[1] and LOGADD[1].state == "unconfirmed",
+    LOGADD[1] and LOGADD[1].state)
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

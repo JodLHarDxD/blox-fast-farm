@@ -24,6 +24,13 @@ reset() CFG.HuntKind = "fruit" KEEP = true HOLD = true FRUIT = KITSUNE
 check("the chalice AND a kept fruit: the chalice's stop first", run() == "chalice")
 reset() CFG.HuntKind = "fruit" FRUIT = KITSUNE
 check("no kept fruit: the hunt as before", run() == "grab Kitsune-Kitsune")
+-- READY FIRST (user, 2026-11-08: a T-Rex he could not take while the game still loaded)
+reset() CFG.HuntKind = "fruit" FRUIT = KITSUNE LOADING = true
+check("fruit hunt, the game still loading: waits - no grab, no hop", run() == "wait: loading")
+reset() CFG.HuntKind = "fruit" LOADING = true E.lookStart = NOW - 60
+check("...even with nothing here and the look long over: no hop while it loads", run() == "wait: loading")
+reset() CFG.HuntKind = "elite" FRUIT = KITSUNE LOADING = true ELITE_BUSY = true
+check("...only the fruit hunt waits for it (the elite hunt as before)", run() == "elite")
 
 -- ONE HUNT AT A TIME: the one switched on, nothing else, whatever is lying about
 reset() CFG.HuntKind = "elite" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true

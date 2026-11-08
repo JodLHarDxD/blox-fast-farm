@@ -679,7 +679,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-08.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-08.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1105,6 +1105,12 @@ P.FRUIT_STATES = {
     notstored = "not stored - no slot", slot = "stored once a slot was free",
     hopstored = "stored before a hop", gone = "left the backpack - traded / stored by you",
     lost = "LOST - left behind at a hop",
+    -- 2026-11-08 (a Tiger the history called stored was not in the user's
+    -- storage): a store is only "stored" when the game's storage count went
+    -- up. It left your hands, the count did not rise = VANISHED; the count
+    -- not readable = not confirmed.
+    unconfirmed = "NOT CONFIRMED - storage count not readable",
+    vanished = "VANISHED - left your hands, never counted",
 }
 P.fruitLogFile = "bff_fruit_log_" .. tostring(player.UserId) .. ".json"
 P.fruitLog = {}
@@ -1302,6 +1308,70 @@ function P.menuWords(price, limit, choice)
         or (not price and "no price yet")
         or ((price >= (limit or 0)) and "taken") or "under your limit"
     return price and ("$" .. P.valueWords(price) .. "  ·  " .. what) or what
+end
+
+-- THE FRUIT NEWS (user, 2026-11-08: "the important fruits I wanna know
+-- before, and the unimportant fruits I don't even need to know" - 8 fruits
+-- lying, Eagle, Flame, Rocket, Rubber... said first, a T-Rex server spawn
+-- lost behind them). Of the fruits lying, ONLY the ones you care about:
+-- Take on your fruit menu, a Mythical (the game's own price 2.5M Beli and
+-- up - Gravity is the cheapest), or your limit and over (CFG.FruitMinPrice,
+-- when above 0); Skip never. No price read yet: the market's list decides
+-- (10M and up, or a fruit newer than the list). A server spawn not named
+-- yet might be anything: said too.
+P.MYTHICAL_PRICE = 2.5e6
+function P.fruitMatters(f, limit, choice)
+    if f.orig == nil then return not f.dropper end
+    local mark = choice and choice(f.orig) or nil
+    if mark == "skip" then return false end
+    if mark == "take" then return true end
+    local p = tonumber(f.price)
+    if not p then
+        local v = P.tradeValue(f.orig)
+        return v == nil or v >= 10e6
+    end
+    if p >= P.MYTHICAL_PRICE then return true end
+    limit = tonumber(limit) or 0
+    return limit > 0 and p >= limit
+end
+-- -> the ones you care about, DEAREST FIRST (the market's trade value; the
+-- game's price for a fruit the list does not know; one not named yet
+-- last), a server spawn before a player's drop of the same worth; and how
+-- many others lie here, not said.
+function P.fruitNews(list, limit, choice)
+    local keep, hidden = {}, 0
+    for _, f in ipairs(list) do
+        if P.fruitMatters(f, limit, choice) then
+            local v = f.orig and (P.tradeValue(f.orig) or tonumber(f.price) or 0) or -1
+            table.insert(keep, { f = f, v = v })
+        else
+            hidden += 1
+        end
+    end
+    table.sort(keep, function(a, b)
+        if a.v ~= b.v then return a.v > b.v end
+        local sa, sb = not a.f.dropper, not b.f.dropper
+        if sa ~= sb then return sa end
+        return tostring(a.f.name) < tostring(b.f.name)
+    end)
+    local out = {}
+    for i, k in ipairs(keep) do out[i] = k.f end
+    return out, hidden
+end
+-- "T-Rex 20M (server spawn, Hydra Island)", "Dough 30M (dropped, Mansion)".
+function P.fruitNewsWords(f)
+    local where = (f.dropper and "dropped" or "server spawn") .. (f.isle and (", " .. f.isle) or "")
+    if not f.orig then return "a fruit not named yet (" .. where .. ")" end
+    local v = P.tradeValue(f.orig)
+    local worth = v and P.valueWords(v) or (f.price and ("$" .. P.valueWords(f.price))) or "?"
+    return string.format("%s %s (%s)", P.fruitKey(f.orig) or P.fruitBase(f.orig), worth, where)
+end
+-- One fruit lying, the same one however often the game makes it again (it
+-- streams out and back in as a new instance: the same Ice Fruit was news
+-- every 15 s for 10 min, 2026-11-08 logs): its name and its 16-stud square.
+function P.fruitSpot(f)
+    local p = f.pos
+    return tostring(f.orig or f.name) .. "@" .. (p and (math.floor(p.X / 16) .. "," .. math.floor(p.Z / 16)) or "?")
 end
 
 function P.groundFruit(c)
@@ -7237,6 +7307,46 @@ do
         end
         P.fruitWords = fruitWords
 
+        -- READY FIRST (user, 2026-11-08: "the moment I enter a server ... it
+        -- went there ... I didn't load the game properly, so I was not able
+        -- to pick the fruit" - "first it should check my fruits, then start
+        -- doing"): in a fresh server the fruit hunt waits until the game is
+        -- loaded, your character stands, your data is in (your level), and
+        -- it has read what you have - the fruits you carry, your storage.
+        -- 30 s at most, then it goes and says so. true = still waiting.
+        function P.fruitWait()
+            local e = E :: any                         -- its fields are new here
+            if e.fruitReady then return false end
+            local now = os.clock()
+            e.fruitReadyFrom = e.fruitReadyFrom or now
+            local waited = now - e.fruitReadyFrom
+            local _, r = parts()
+            local loaded = game:IsLoaded() and r ~= nil and (playerLevel() or 0) > 0
+            if loaded then e.fruitLoadedAt = e.fruitLoadedAt or now end
+            local stored, src
+            if loaded and now >= (e.fruitInvAt or 0) then
+                e.fruitInvAt = now + 2
+                local sf = (P :: any).storedFruits
+                if sf then stored, src = sf() end
+            end
+            -- An empty storage reads as nothing: 4 s loaded is enough then.
+            local done = stored ~= nil or (loaded and now - e.fruitLoadedAt >= 4) or waited >= 30
+            if not done then
+                e.note = string.format("waiting for the game to load before any fruit  %.0fs  (%s)", waited,
+                    loaded and "reading your fruits" or "game, character, your data")
+                say(e.note)
+                return true
+            end
+            e.fruitReady = true
+            local total = 0
+            for _, c in pairs(stored or {}) do total += tonumber(c) or 0 end
+            e.fruitInv = { carried = P.carriedFruits(), stored = stored and total or nil }
+            print(string.format("[BFF] fruit: ready after %.0fs%s - you carry %d fruit%s, your storage %s", waited,
+                loaded and "" or " (NOT loaded - going anyway)", e.fruitInv.carried, (e.fruitInv.carried == 1) and "" or "s",
+                stored and string.format("holds %d (%s)", total, tostring(src)) or "was not read"))
+            return false
+        end
+
         local function fruitWanted()
             if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
             local list = fruitsLying()
@@ -7256,14 +7366,37 @@ do
         -- answers (its own Store dialogue, decompiled v4623): a number = your
         -- storage is full (that number = how many of EACH fruit it holds),
         -- nil / false = failed.
+        -- PROVEN BY THE COUNT (user, 2026-11-08: a Tiger the history called
+        -- stored was never in his storage - "stored" meant only that it left
+        -- his backpack): -> ok (it left your backpack and hand), its name,
+        -- why not, and the proof: "counted" (the game's own count of it in
+        -- your storage went up: n1, was n0), "missing" (it left your hands
+        -- and the count did NOT rise in 5 s - it vanished), "unread" (the
+        -- count cannot be read here - not confirmed).
         local function storeTool(got, origHint)
             local bp = player:FindFirstChild("Backpack")
             local orig = got:GetAttribute("OriginalName")
             orig = (type(orig) == "string" and orig) or origHint or P.fruitOrig(got.Name) or got.Name
+            local sf = (P :: any).storedFruits
+            local n0 = sf and P.storedCount((sf()), orig)
             local cf = commF()
             local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
             task.wait(0.6)
-            if not (got.Parent == player.Character or got.Parent == bp) then return true, orig end
+            if not (got.Parent == player.Character or got.Parent == bp) then
+                local read, t0 = n0 ~= nil, os.clock()
+                while sf do
+                    local n1 = P.storedCount((sf()), orig)
+                    if n1 then
+                        read = true
+                        -- No fruit stored at all reads as nothing: then 0 before.
+                        if n1 > (n0 or 0) then return true, orig, nil, "counted", n1, n0 or 0 end
+                    end
+                    if os.clock() - t0 >= 5 then break end
+                    task.wait(0.5)
+                end
+                return true, orig, read and "it left your hands but your storage count did not go up" or nil,
+                    read and "missing" or "unread", nil, n0
+            end
             if ok and type(res) == "number" then
                 return false, orig, string.format("storage full - it holds %d of each fruit", res)
             end
@@ -7281,10 +7414,14 @@ do
             local bp = player:FindFirstChild("Backpack")
             for _, t in ipairs(bp and bp:GetChildren() or {}) do
                 if P.isPhysicalFruit(t) then
-                    local ok, orig, why = storeTool(t, nil)
-                    print(string.format("[BFF] hop: %s %s%s", ok and "stored" or "could NOT store", tostring(orig),
-                        ok and " before leaving (a fruit in the backpack is lost on a hop)" or (" (" .. tostring(why) .. ") - it goes with this server")))
-                    P.fruitLogSet(orig, ok and "hopstored" or "lost", { backpack = true, notstored = true })
+                    local ok, orig, why, proof, n1 = storeTool(t, nil)
+                    local words = (not ok) and (" (" .. tostring(why) .. ") - it goes with this server")
+                        or (proof == "counted") and string.format(" before leaving - confirmed: your storage has %d", n1)
+                        or (proof == "missing") and " - it left your backpack but your storage count did NOT go up: VANISHED"
+                        or " before leaving - your storage count is not readable here: NOT confirmed"
+                    print(string.format("[BFF] hop: %s %s%s", ok and "stored" or "could NOT store", tostring(orig), words))
+                    P.fruitLogSet(orig, (not ok) and "lost" or (proof == "counted") and "hopstored"
+                        or (proof == "missing") and "vanished" or "unconfirmed", { backpack = true, notstored = true })
                 end
             end
         end
@@ -7304,9 +7441,17 @@ do
                         o = (type(o) == "string" and o) or P.fruitOrig(t.Name) or t.Name
                         if P.isKeeper(o, CFG.FruitKeepValue) then
                             if hum and t.Parent == player.Character then pcall(function() hum:UnequipTools() end) end
-                            if tryStore and storeTool(t, o) then
-                                P.fruitLogSet(o, "slot", { held = true, notstored = true, backpack = true })
-                                print("[BFF] fruit: " .. tostring(o) .. " stored - a slot was free")
+                            local stored, proof = false, nil
+                            if tryStore then
+                                local okS, _, _, pr = storeTool(t, o)
+                                stored, proof = okS, pr
+                            end
+                            if stored then
+                                local st = (proof == "counted") and "slot" or (proof == "missing") and "vanished" or "unconfirmed"
+                                P.fruitLogSet(o, st, { held = true, notstored = true, backpack = true })
+                                print("[BFF] fruit: " .. tostring(o) .. ((st == "slot") and " stored - a slot was free (confirmed by the count)"
+                                    or (st == "vanished") and " left your backpack but your storage count did NOT go up: VANISHED"
+                                    or " left your backpack for storage - the count is not readable here: NOT confirmed"))
                             else
                                 table.insert(left, { tool = t, orig = o, value = P.tradeValue(o) })
                             end
@@ -7335,38 +7480,30 @@ do
         end
         P.storedCount = storedCount
         function P.fruitSecure(t, from)
-            local sf = (P :: any).storedFruits
             local o = t:GetAttribute("OriginalName")
             o = (type(o) == "string" and o) or P.fruitOrig(t.Name) or t.Name
-            local n0 = sf and storedCount((sf()), o)
             local _, _, hum = parts()
             if hum and t.Parent == player.Character then
                 pcall(function() hum:UnequipTools() end)
                 task.wait(0.1)
             end
-            local ok, orig, why = storeTool(t, o)
+            local ok, orig, why, proof, n1, n0 = storeTool(t, o)
             local value = P.tradeValue(orig)
             local words
             if not ok then
                 words = string.format("%s (%s) NOT stored - %s - it is still with you", orig, P.valueWords(value), tostring(why))
+            elseif proof == "counted" then
+                words = string.format("%s (%s) STORED - confirmed: your storage has %d (was %d)", orig, P.valueWords(value),
+                    n1, n0)
             else
-                local n1, t0 = nil, os.clock()
-                repeat
-                    n1 = sf and storedCount((sf()), orig)
-                    if n1 and n1 > (n0 or 0) then break end
-                    task.wait(0.5)
-                until os.clock() - t0 > 5
-                if n1 and n1 > (n0 or 0) then
-                    words = string.format("%s (%s) STORED - confirmed: your storage has %d%s", orig, P.valueWords(value),
-                        n1, n0 and string.format(" (was %d)", n0) or "")
-                else
-                    words = string.format("%s (%s) left your backpack for storage - the storage count %s", orig,
-                        P.valueWords(value), (n1 or n0) and "did not show it yet" or "is not readable here")
-                end
+                words = string.format("%s (%s) left your backpack for storage - the storage count %s", orig,
+                    P.valueWords(value), (proof == "missing") and "did not show it yet (5 s): VANISHED, not yours"
+                    or "is not readable here: UNPROVEN")
             end
             print("[BFF] fruit: " .. words)
             P.fruitLogAdd({ orig = orig, value = value, server = E.tally.joins, from = from,
-                state = ok and "stored" or "held" })
+                state = (not ok) and "held" or (proof == "counted") and "stored" or (proof == "missing") and "vanished"
+                    or "unconfirmed" })
             return ok, orig, words
         end
         -- "Control (120M), Dough (30M)".
@@ -7384,9 +7521,34 @@ do
         -- BACKPACK, where the raid loop spends a carried fruit first; with
         -- CFG.FruitStore on it is stored instead (StoreFruit, the name the game
         -- gave it). Before a hop the backpack is stored (P.storeBeforeHop).
+        -- Every physical fruit you carry, backpack and hand: the count a
+        -- pickup must raise.
+        function P.carriedFruits()
+            local n = 0
+            for _, src in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
+                for _, t in ipairs(src and src:GetChildren() or {}) do
+                    if P.isPhysicalFruit(t) then n += 1 end
+                end
+            end
+            return n
+        end
+
+        -- PROVEN, NOT ASSUMED (user, 2026-11-08: "it should confirm properly
+        -- that the fruit is inside the inventory ... then do the server hop"):
+        -- what you carry is counted before; a pickup counts only when that
+        -- fruit is still yours a second later and the count rose; a store
+        -- only when your storage count rose (storeTool). It vanished = said
+        -- and logged VANISHED, never picked. The pickup is tried for 20 s (a
+        -- T-Rex he stood on could not be taken while the game still loaded).
         local function grabFruit(f, myEpoch)
             local h = f.handle or f.tool:FindFirstChild("Handle")
             if not (h and h.Parent) then E.fruitSkip[f.tool] = os.clock() + 30 return end
+            local carried0 = P.carriedFruits()
+            -- The world round it streamed in while you fly there.
+            if workspace.StreamingEnabled then
+                local at = h.Position
+                task.spawn(function() pcall(function() player:RequestStreamAroundAsync(at, 3) end) end)
+            end
             E.fruitNote = string.format("going for %s  (%s%s)", fruitWords(f),
                 f.dropper and ("dropped by " .. tostring(f.dropper)) or "server spawn",
                 (f.how == "mesh name" or f.how == "look learned") and (", named by its " .. f.how) or "")
@@ -7402,7 +7564,7 @@ do
             -- Still lying = its Handle still in what lies on the ground (a
             -- spawn's Model may hold the Tool that comes to you).
             local function lying() return f.tool.Parent == workspace and h:IsDescendantOf(f.tool) end
-            while os.clock() - t0 < 6 and not stale(myEpoch) and lying() do
+            while os.clock() - t0 < 20 and not stale(myEpoch) and lying() do
                 local _, r = parts()
                 if r then
                     lockAt(h.Position)
@@ -7418,7 +7580,14 @@ do
             local mine = got and player.Character and (got:IsDescendantOf(player.Character) or (bp and got:IsDescendantOf(bp)))
             if lying() then
                 E.fruitSkip[f.tool] = os.clock() + 60
-                E.fruitNote = f.name .. ": could not pick it up - left for a minute"
+                E.fruitNote = f.name .. ": could not pick it up in 20 s - left for a minute"
+                -- What stood in the way, for the next fix.
+                pcall(function()
+                    print(string.format("[BFF] fruit: could NOT pick up %s - its handle CanTouch=%s CanCollide=%s"
+                        .. " Anchored=%s touch=%s, WaitForHandle=%s, you %d studs off", f.name, tostring(h.CanTouch),
+                        tostring(h.CanCollide), tostring(h.Anchored), h:FindFirstChildWhichIsA("TouchTransmitter") and "yes" or "NO",
+                        tostring(f.tool:GetAttribute("WaitForHandle")), math.floor(((select(2, parts()) or h).Position - h.Position).Magnitude)))
+                end)
             elseif not mine then
                 E.fruitNote = f.name .. ": someone else took it first"
             else
@@ -7430,6 +7599,17 @@ do
                 -- Its name as the game gave it to you (a spawn read as unknown on the ground).
                 local tag = got:GetAttribute("OriginalName")
                 local orig = (type(tag) == "string" and tag) or f.orig or P.fruitOrig(got.Name) or got.Name
+                -- Still yours a second later? (put away first: a click with it held eats it)
+                task.wait(1)
+                if not (got.Parent == player.Character or got.Parent == bp) then
+                    E.fruitNote = orig .. ": picked up, then it VANISHED from your backpack within 1 s - not yours"
+                    print("[BFF] fruit: " .. E.fruitNote)
+                    P.fruitLogAdd({ orig = orig, value = P.tradeValue(orig), server = E.tally.joins,
+                        from = f.dropper and "drop" or "spawn", isle = f.isle, state = "vanished" })
+                    E.note = E.fruitNote
+                    say(E.fruitNote)
+                    return
+                end
                 if not f.orig then print("[BFF] fruit: the unknown spawn was " .. tostring(orig) .. " (" .. got.Name .. ")") end
                 if type(tag) == "string" then
                     -- Its true name teaches the look it had on the ground.
@@ -7447,17 +7627,31 @@ do
                 local keep = P.isKeeper(orig, CFG.FruitKeepValue)
                 local st
                 if not (CFG.FruitStore or keep) then
-                    E.tally.fruits += 1
-                    st = "backpack"
-                    E.fruitNote = "IN YOUR BACKPACK " .. orig .. priced .. " - not stored (for raid chips)"
-                    notify("Fruit picked up: " .. orig)
+                    local n = P.carriedFruits()
+                    if n > carried0 then
+                        E.tally.fruits += 1
+                        st = "backpack"
+                        E.fruitNote = string.format("IN YOUR BACKPACK %s%s - confirmed: you carry %d fruits (was %d)"
+                            .. " - not stored (for raid chips)", orig, priced, n, carried0)
+                        notify("Fruit picked up: " .. orig)
+                    else
+                        st = "unconfirmed"
+                        E.fruitNote = string.format("%s%s came to you, but you carry %d fruits as before - NOT confirmed",
+                            orig, priced, n)
+                    end
                 else
-                    local ok, _, why = storeTool(got, orig)
-                    if ok then
+                    local ok, _, why, proof, n1, n0 = storeTool(got, orig)
+                    if ok and proof == "counted" then
                         E.tally.fruits += 1
                         st = "stored"
-                        E.fruitNote = "STORED " .. orig .. priced
+                        E.fruitNote = string.format("STORED %s%s - confirmed: your storage has %d (was %d)", orig, priced, n1, n0)
                         notify("Fruit stored: " .. orig)
+                    elseif ok then
+                        st = (proof == "missing") and "vanished" or "unconfirmed"
+                        E.fruitNote = orig .. priced .. ((st == "vanished")
+                            and " left your backpack for storage but your storage count did NOT go up: VANISHED"
+                            or " left your backpack for storage - the count is not readable here: NOT confirmed")
+                        if st == "vanished" then notify(P.fruitBase(orig) .. " VANISHED - not in your storage") end
                     elseif keep then
                         st = "held"
                         E.fruitNote = "NO SLOT for " .. orig .. priced .. " (" .. tostring(why)
@@ -8373,6 +8567,12 @@ do
 
             -- ONLY the hunt you switched on.
             if kind == "fruit" then
+                -- The game loaded and your fruits read first (P.fruitWait).
+                if P.fruitWait() then
+                    setState("LOOK")
+                    task.wait(0.25)
+                    return
+                end
                 local f = fruitWanted()
                 if f then
                     grabFruit(f, myEpoch)
@@ -15809,7 +16009,7 @@ do
         N.cakeNote = cakeNote
 
         local first, cakeAt = true, -1e9
-        local fruitSeen = setmetatable({}, { __mode = "k" })
+        local fruitSeen = {}                             -- [P.fruitSpot] = true: said once
         -- One look at everything. Once a second, from load.
         function N.tick()
             local now = os.clock()
@@ -15871,24 +16071,32 @@ do
             -- Every fruit lying here - the game's spawns too (P.groundFruit;
             -- 2026-10-12: only players' drops were ever seen). Something named
             -- a fruit that is NOT taken is written down once (P.fruitShape).
+            -- Only the fruits you care about make news, dearest first
+            -- (P.fruitNews, user 2026-11-08); each one once, by its spot.
             local fr = {}
+            local cat = P.fruitCatalog or {}
             for _, ch in ipairs(workspace:GetChildren()) do
                 local g = P.groundFruit(ch)
                 if g then
-                    local whose = ch:GetAttribute("DroppedBy") and "" or "  (server spawn)"
-                    local isle = P.isleOf(g.handle.Position)
-                    local line = g.name .. whose .. (isle and ("  at " .. isle) or "")
-                    table.insert(fr, line)
+                    local pos = g.handle.Position
+                    table.insert(fr, { orig = g.orig, name = g.name, dropper = ch:GetAttribute("DroppedBy"),
+                        isle = P.isleOf(pos), pos = pos, price = g.orig and cat[g.orig] or nil })
                     P.fruitShape(ch)
-                    if not fruitSeen[ch] then
-                        fruitSeen[ch] = true
-                        breaking("fruit", "FRUIT ON THE MAP: " .. line, now)
-                    end
                 elseif string.find(ch.Name, "Fruit", 1, true) and not Players:FindFirstChild(ch.Name) then
                     P.fruitShape(ch, "not read as a fruit")
                 end
             end
-            N.fruits = fr
+            -- The game's prices, to tell a Mythical (asked at most every 5 min).
+            if #fr > 0 and P.fruitPrice then task.spawn(P.fruitPrice) end
+            local shown, hidden = P.fruitNews(fr, CFG.FruitMinPrice, P.fruitChoice)
+            for _, f in ipairs(shown) do
+                local spot = P.fruitSpot(f)
+                if not fruitSeen[spot] then
+                    fruitSeen[spot] = true
+                    breaking("fruit", "FRUIT ON THE MAP: " .. P.fruitNewsWords(f), now)
+                end
+            end
+            N.fruits, N.fruitsHidden = shown, hidden
             first = false
         end
 
@@ -15908,6 +16116,15 @@ do
             if tr then
                 local okT, h = pcall(tr.headline)
                 if okT and h then add("trades", h.tone, h.title, h.body) end
+            end
+            -- The fruits you care about next, dearest first (user, 2026-11-08:
+            -- "the important fruits I wanna know before"); the rest are not news.
+            local fruits = N.fruits or {}
+            if #fruits > 0 then
+                local names = {}
+                for i = 1, math.min(3, #fruits) do names[i] = P.fruitNewsWords(fruits[i]) end
+                add("fruit", "up", "FRUIT ON THE MAP", table.concat(names, " · ")
+                    .. ((#fruits > 3) and (" +" .. (#fruits - 3)) or ""))
             end
             if s then
                 if not s.phase then
@@ -15987,13 +16204,8 @@ do
                     elseif ck.ready then add("cake", "up", "CAKE PRINCE", "ready - the portal can open") end
                 end
             end
-            if #N.fruits > 0 then
-                local names = {}
-                for i = 1, math.min(3, #N.fruits) do names[i] = N.fruits[i] end
-                add("fruit", "up", "FRUIT ON THE MAP", table.concat(names, ", ")
-                    .. ((#N.fruits > 3) and (" +" .. (#N.fruits - 3)) or ""))
-            else
-                add("fruit", "dim", "NO FRUIT ON THE MAP", "")
+            if #fruits == 0 then
+                add("fruit", "dim", ((N.fruitsHidden or 0) > 0) and "NO FRUIT WORTH IT" or "NO FRUIT ON THE MAP", "")
             end
             add("server", "dim", "SERVER", string.format("%d/%d players · you joined %s ago",
                 #Players:GetPlayers(), Players.MaxPlayers, mins(workspace.DistributedGameTime)))

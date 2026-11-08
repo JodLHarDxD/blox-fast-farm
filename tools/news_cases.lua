@@ -352,19 +352,101 @@ check("the panel closed: not asked", CAKE_CALLS == 2)
 check("an answer with no number and no portal: nothing shown", N.cakeNote("hmm") == nil and N.cakeNote(nil) == nil)
 
 -- ---------------------------------------------------------------- FRUIT ON THE MAP
+-- ONLY THE FRUITS YOU CARE ABOUT, DEAREST FIRST (user, 2026-11-08: "the
+-- important fruits I wanna know before, and the unimportant fruits I don't
+-- even need to know"; Eagle, Flame, Rocket, Rubber said, a T-Rex spawn lost).
+local function lying(name, orig, o)
+    o = o or {}
+    local f = inst(name, o.class or "Tool", { attrs = { OriginalName = orig, DroppedBy = o.by } })
+    f.kids.Handle = inst("Handle", "Part", { pos = o.pos })
+    WS_KIDS[o.key or name] = f
+    return f
+end
+local function said()
+    local t = {}
+    for _, f in ipairs(N.fruits) do table.insert(t, P.fruitNewsWords(f)) end
+    return table.concat(t, " | ")
+end
 fresh()
-local fr = inst("Rocket Fruit", "Tool", { attrs = { OriginalName = "Rocket-Rocket" } })
-fr.kids.Handle = inst("Handle", "Part")
-WS_KIDS["Rocket Fruit"] = fr
+local fr = lying("Rocket Fruit", "Rocket-Rocket", { by = "someone" })
 N.tick()
-check("a fruit lying on the map: breaking, and named", printed("FRUIT ON THE MAP: Rocket Fruit") and item("fruit")
-    and has(item("fruit").body, "Rocket Fruit"))
+check("a cheap fruit lying (Rocket, 5K, dropped): no breaking, not named, 'NO FRUIT WORTH IT'",
+    not printed("FRUIT ON THE MAP") and #N.fruits == 0 and item("fruit").title == "NO FRUIT WORTH IT"
+    and item("fruit").tone == "dim" and not has(item("fruit").body, "Rocket"), item("fruit").title)
 local sword = inst("Sword", "Tool")
 sword.kids.Handle = inst("Handle", "Part")
 WS_KIDS.Sword = sword
 pass(1)
 N.tick()
-check("a tool that is no fruit (no OriginalName): ignored", #N.fruits == 1, #N.fruits)
+check("a tool that is no fruit (no OriginalName): ignored", N.fruitsHidden == 1, N.fruitsHidden)
+-- The user's server: 8 junk fruits, a T-Rex spawn among them.
+fresh()
+for i, n in ipairs({ "Eagle", "Flame", "Rocket", "Rubber", "Sand", "Ice", "Diamond", "Blade" }) do
+    lying(n .. " Fruit", n .. "-" .. n, { by = "p" .. i, key = n })
+end
+lying("T-Rex Fruit", "T-Rex-T-Rex")
+N.tick()
+check("8 junk fruits and a T-Rex spawn: only the T-Rex, said first and alone", said() == "T-Rex 20M (server spawn)"
+    and N.fruitsHidden == 8 and has(item("fruit").body, "T-Rex 20M (server spawn)") and not has(item("fruit").body, "Eagle"), said())
+check("...breaking for the T-Rex, never for the junk", printed("FRUIT ON THE MAP: T-Rex 20M (server spawn)")
+    and not printed("FRUIT ON THE MAP: Eagle") and not printed("FRUIT ON THE MAP: Rocket"))
+pass(61)
+N.tick()
+check("...the fruits you care about lead the strip, a minute later too (not BREAKING any more)",
+    select(2, item("fruit")) == 1 and not item("fruit").breaking and #items() > 3, select(2, item("fruit")))
+-- The user's example: dearest first, whatever order they lie in.
+fresh()
+for _, n in ipairs({ "Dough", "Portal", "Tiger", "Yeti", "Kitsune", "Dragon", "Eagle", "Rubber" }) do lying(n .. " Fruit", n .. "-" .. n) end
+N.tick()
+check("Dragon, Kitsune, Tiger, Yeti, Dough, Portal - by value; Eagle, Rubber not at all",
+    said() == "Dragon 2.97B (server spawn) | Kitsune 570M (server spawn) | Tiger 100M (server spawn) | Yeti 90M (server spawn)"
+    .. " | Dough 30M (server spawn) | Portal 10M (server spawn)", said())
+check("...the strip names the 3 dearest, +3",
+    has(item("fruit").body, "Dragon 2.97B (server spawn) · Kitsune 570M (server spawn) · Tiger 100M (server spawn) +3"),
+    item("fruit").body)
+-- Your limit and your menu (the hunt's own rules), and the game's price.
+fresh()
+P.fruitCatalog = { ["T-Rex-T-Rex"] = 2.7e6, ["Buddha-Buddha"] = 1.2e6, ["Spider-Spider"] = 1.5e6, ["Dough-Dough"] = 2.8e6,
+    ["Love-Love"] = 1.3e6, ["Portal-Portal"] = 1.9e6 }
+CFG.FruitMinPrice = 2.8e6
+CFG.FruitMenu = { Spider = "take", Dough = "skip" }
+for _, n in ipairs({ "T-Rex", "Buddha", "Spider", "Dough", "Love", "Portal" }) do lying(n .. " Fruit", n .. "-" .. n) end
+N.tick()
+check("limit 2.8M: T-Rex (2.7M, a Mythical) and Spider (Take) said; Buddha, Love, Portal (under it), Dough (Skip) not",
+    said() == "T-Rex 20M (server spawn) | Spider 1.5M (server spawn)" and N.fruitsHidden == 4, said())
+CFG.FruitMinPrice = 1.25e6
+pass(1)
+N.tick()
+check("limit 1.25M: Portal (1.9M) and Love (1.3M) join, by value", said()
+    == "T-Rex 20M (server spawn) | Portal 10M (server spawn) | Love 1.5M (server spawn) | Spider 1.5M (server spawn)", said())
+CFG.FruitMinPrice, CFG.FruitMenu = nil, {}
+-- A server spawn before a player's drop of the same worth; one not named yet is said, last.
+fresh()
+lying("Gravity Fruit", "Gravity-Gravity", { by = "trader" })
+lying("Pain Fruit", "Pain-Pain")
+lying("Fruit ", nil, { class = "Model" })
+N.tick()
+check("same worth (10M): the spawn first; a spawn not named yet last",
+    said() == "Pain 10M (server spawn) | Gravity 10M (dropped) | a fruit not named yet (server spawn)", said())
+-- The same fruit made again by the game (it streams out and back in): news once.
+fresh()
+lying("Kitsune Fruit", "Kitsune-Kitsune", { pos = Vector3.new(100, 5, 100) })
+N.tick()
+WS_KIDS["Kitsune Fruit"] = nil
+pass(1)
+N.tick()
+lying("Kitsune Fruit", "Kitsune-Kitsune", { pos = Vector3.new(101, 6, 99) })
+pass(1)
+N.tick()
+local times = 0
+for _, l in ipairs(PRINTED) do if string.find(l, "FRUIT ON THE MAP: Kitsune", 1, true) then times += 1 end end
+check("the same Kitsune made again (a new instance, same spot): breaking once", times == 1, times)
+lying("Kitsune Fruit", "Kitsune-Kitsune", { pos = Vector3.new(900, 5, 100), key = "k2" })
+pass(1)
+N.tick()
+times = 0
+for _, l in ipairs(PRINTED) do if string.find(l, "FRUIT ON THE MAP: Kitsune", 1, true) then times += 1 end end
+check("...a second Kitsune elsewhere: its own news", times == 2, times)
 
 -- THE GAME'S OWN SPAWNS (2026-10-12: only players' drops were ever seen -
 -- the finder asked for a Tool with OriginalName). The public hubs' rule:
@@ -392,17 +474,18 @@ do
     Players.NAMES.FruitLord99 = {}
     local noHandle = inst("Fruit Crate", "Model")                  -- named a fruit, nothing to touch
     WS_KIDS["Fruit Crate"] = noHandle
+    CFG.FruitMenu = { Ice = "take" }                               -- Ice is cheap: shown by Take
     N.tick()
-    local list = table.concat(N.fruits, " | ")
+    local list = said()
     check("a SPAWNED Tool with no OriginalName: on the map, a server spawn",
-        has(list, "Dough Fruit  (server spawn)"), list)
-    check("a spawned MODEL ('Fruit ', a Handle): on the map", has(list, "Fruit   (server spawn)"), list)
-    check("a Model holding the fruit's Tool: on the map", has(list, "Ice Fruit  (server spawn)"), list)
+        has(list, "Dough 30M (server spawn)"), list)
+    check("a spawned MODEL ('Fruit ', a Handle): on the map", has(list, "a fruit not named yet (server spawn)"), list)
+    check("a Model holding the fruit's Tool: on the map", has(list, "Ice 550K (server spawn)"), list)
     check("a player called FruitLord99: never a fruit", not has(list, "FruitLord99"), list)
     check("which fruit a spawn is: read off its name ('Dough-Dough'); 'Fruit ' = unknown (nil)",
         P.groundFruit(spawnTool).orig == "Dough-Dough" and P.groundFruit(spawnModel).orig == nil
         and P.groundFruit(fr).orig == "Rocket-Rocket")
-    check("breaking news for a spawn says so", printed("FRUIT ON THE MAP: Dough Fruit  (server spawn)"))
+    check("breaking news for a spawn says so", printed("FRUIT ON THE MAP: Dough 30M (server spawn)"))
     check("named a fruit but not read as one: written down once, for the next fix",
         printed("[BFF] fruit seen (SPAWN - not read as a fruit): Name=\"Fruit Crate\""))
     local seen = 0
@@ -492,7 +575,7 @@ do
     WS_KIDS["Fruit "] = spawnOf({ inst("Meshes/dragon_12", "MeshPart", { mesh = 111 }) }, Vector3.new(5600, 1000, -300))
     N.tick()
     check("the news names the spawn and its island",
-        printed("FRUIT ON THE MAP: Dragon Fruit  (server spawn)  at Hydra Island"), table.concat(PRINTED, " | "))
+        printed("FRUIT ON THE MAP: Dragon 2.97B (server spawn, Hydra Island)"), table.concat(PRINTED, " | "))
     WS_KIDS["Fruit "] = nil
 end
 check("a spawn's shape log says what is inside its Fruit model (mesh names and ids)",
@@ -610,9 +693,9 @@ local function only(...)
     for _, t in ipairs({ ... }) do CFG.NewsShow[t] = true end
 end
 local function addFruit()
-    local f = inst("Rocket Fruit", "Tool", { attrs = { OriginalName = "Rocket-Rocket" } })
+    local f = inst("Kitsune Fruit", "Tool", { attrs = { OriginalName = "Kitsune-Kitsune" } })
     f.kids.Handle = inst("Handle", "Part")
-    WS_KIDS["Rocket Fruit"] = f
+    WS_KIDS["Kitsune Fruit"] = f
 end
 -- A server with everything up at once.
 local function busy()
@@ -660,7 +743,7 @@ N.tick()
 check("...in the Second Sea too", #keysNow() == 1 and item("fruit").title == "NO FRUIT ON THE MAP", table.concat(keysNow(), " "))
 addFruit()
 N.tick()
-check("...and the moment one lies there, named", has(item("fruit").body, "Rocket Fruit") and item("fruit").title == "FRUIT ON THE MAP")
+check("...and the moment one lies there, named", has(item("fruit").body, "Kitsune 570M") and item("fruit").title == "FRUIT ON THE MAP")
 
 fresh()
 N.cake = { left = 5 }

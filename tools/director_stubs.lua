@@ -4,11 +4,14 @@ local os = { clock = function() return NOW end, time = function() return NOW end
 local task = { wait = function() end }
 local epoch = 0
 local CFG, E, LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY, FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP
+-- LOADING = the game not loaded / your fruits not read yet (P.fruitWait).
+local LOADING
 local function reset()
     CFG = { Hunt = true, HuntKind = "elite", HuntHop = true }
     E = { chalice = false, used = false, lookStart = NOW - 10, note = "", why = nil }
     LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY = {}, false, nil, nil, false, false
     FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP = false, nil, nil, false
+    LOADING = false
 end
 reset()
 local function log(s) table.insert(LOG, s) end
@@ -31,5 +34,6 @@ local function hop(why, keep) log("hop: " .. tostring(why) .. (keep and (" +" ..
 local function say() end
 local function setState() end
 -- The sea hunts' own step (SEA HUNT): logged with its kind; true = busy.
-local P = { sea = { huntStep = function(_, kind) log("sea " .. tostring(kind)) return true end } }
+local P = { sea = { huntStep = function(_, kind) log("sea " .. tostring(kind)) return true end },
+    fruitWait = function() if LOADING then log("wait: loading") end return LOADING end }
 local huntStep
