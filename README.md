@@ -105,6 +105,7 @@ every function this script can use: `queue_on_teleport` (the hop carry-over),
 | The loader above, saved | `D:\Velocity\Scripts\fast_farm.lua` |
 | Hop files, `fruit_probe.txt` | `D:\Velocity\Workspace` |
 | `autoexec_team.lua` (team at every join) | `D:\Velocity\AutoExec\bff_team.lua` |
+| `autoexec_resume.lua` (the farm back after a crash) | `D:\Velocity\AutoExec\bff_resume.lua` |
 | Installers | `D:\scripting` (.NET 9 Desktop, Bloxstrap); Velocity's archive is `D:\Velocity.7z` |
 
 No autoexec loader is needed: Velocity has `queue_on_teleport`. Servers &
@@ -120,6 +121,18 @@ top only until that file exists; "Pick my team on join" off = it asks nothing) u
 you are on a team, then hides the team screen; the console says
 `[BFF] autoexec team: on Pirates`. It never loads the farm, does nothing in
 other games, and never switches a team you are on.
+
+AFTER A CRASH (2026-11-10: Velocity 1.6.0 crashes Roblox every few joins, kept
+on because the script is needed): the launcher's Live Guard
+(`D:\RobloxPinned\Roblox-Velocity.ps1 -Guard`) sees a new crash dump with no
+game left, reads the crashed session's log, and -- if fast_farm was loaded in
+Blox Fruits -- opens Velocity (if closed) and Blox Fruits again, leaving
+`bff_crash_resume.json` in the workspace (`at`, `start` = the farm was
+running). `autoexec_resume.lua` picks that note up once, within 5 minutes, in
+the server you stay in (it waits out the start place's forward to your sea),
+loads fast_farm and presses Start if the farm was running; the console says
+`[BFF] crash resume: fast_farm reloaded, farm started again`. No note, a stale
+one, or another game: nothing. Six relaunches an hour at most.
 
 ## What each part does
 
@@ -891,6 +904,7 @@ python tools/gun_test.py                         # a gun's M1, real code: the on
 python tools/team_test.py                        # the team pick, real code: SetTeam until on a team, the screen's button never fired, Marines when picked, never a switch, off = nothing, the kept pick (bff_team_<UserId>.json) read at load and written by the panel
 python tools/berry_test.py                       # the berry pick, real code: a real hold first (a game refusing the instant fire still gets picked), fireproximityprompt as the fallback, ~15 s then left a minute, taken by another = out at once, a stop = out at once
 python tools/autoexec_test.py                    # autoexec_team.lua, real file: Pirates at every join, the kept pick (Marines / off) over TEAM, other games untouched, never a switch, a minute at most, place read after load, call errors survived
+python tools/resume_test.py                      # autoexec_resume.lua, real file: the Guard's crash note loads fast_farm once (used up before the load), Start only if the farm was running and not already, stale / missing / broken note or another game = nothing, waits out the start place's forward, a pass between HttpGet and the print, download / compile / Start failures survived
 python tools/leash_test.py                       # checkPutBack: pull limit measured (contrast rule), random mode's in-place escalation
 python tools/magnet_test.py                      # the magnet's frame, real code: frozen while held (again if undone), each keeps its own ring spot through deaths / reorders
 python tools/flower_test.py                      # the Fire Flower hunt, real code: the flower found, held like a player (fire fallback), stuck / gone / picked, the clock from the first kill, 3-min no-kill exit, Third Sea, hop off stays, camps in turn
