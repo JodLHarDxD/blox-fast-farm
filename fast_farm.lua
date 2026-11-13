@@ -306,6 +306,13 @@ local CFG = {
     -- shortest path" - Tiki to Hydra = Tiki pad, Castle, Hydra pad, not a
     -- 22k flight). Off = only the fruit hunt routes (FruitPortals).
     TravelRoutes       = true,
+    -- A DOOR ASKED FROM WHERE YOU STAND (2026-11-13): the game's doors (the
+    -- Castle's Mansion and Hydra portals, the Cursed Ship's door) answer a
+    -- question - "requestEntrance" - with the spot to go to. On = that
+    -- question is asked from wherever you are first (no flight to the door);
+    -- a server that does not answer from there = flown to the door and
+    -- asked there, and the far ask left 6 h. Off = always at the door.
+    TravelFar          = true,
     -- WHERE A PICKED FRUIT GOES (user, 2026-10-12: "collect the fruits in the
     -- backpack, don't store them - the fruit hunt is for raid chips"). Off =
     -- kept in your backpack (the raid loop spends a carried fruit first); on
@@ -315,6 +322,16 @@ local CFG = {
     -- on = every one is stored just before a hop (the raid loop can still
     -- load it back for a chip). Off = it is left behind.
     FruitStoreOnHop    = true,
+    -- YOUR STORAGE IS FULL OF IT (2026-11-13): with "store at once" on, a
+    -- fruit you already hold as many of as your storage takes (the game's
+    -- FruitCap - 3 with two Fruit Storage passes) cannot be stored: on = it
+    -- is left where it lies, and the hunt says so. One too good to lose is
+    -- still taken and held safe. Off = taken anyway.
+    FruitSkipFull      = true,
+    -- A SPAWN STILL LOADING (2026-11-13): its parts are still streaming in,
+    -- so it has no name yet. The hunt waits this many seconds for it to be
+    -- named before it decides (take / leave / "unknown spawn").
+    FruitLoadWait      = 8,
     -- A FRUIT TOO GOOD TO LOSE (user, 2026-10-25: a Control and a second
     -- Dough picked with no storage slot free - a hop would have left them
     -- behind). Worth at least this on the TRADING MARKET (P.TRADE_VALUES, a
@@ -363,6 +380,8 @@ local CFG = {
     -- at every Harvest Moon (XX:00, 10 min) the Halloween doors knocked.
     HalloweenPumpkins  = true,
     HalloweenRareFirst = true,       -- a rare pumpkin (the Cursed Pumpkin Seed) first, from anywhere
+    -- (user, 2026-11-13: "I want the Cursed Pumpkin Seeds - only that pumpkin")
+    HalloweenRareOnly  = false,      -- ONLY the rare one: the ordinary pumpkins are left; none here = the next server
     HalloweenDoors     = true,       -- knock at the Harvest Moon; the game's teleport there accepted
     HalloweenBoss      = true,       -- a hellfire door: through its portal to the Hell Rider
     HalloweenReturn    = true,       -- the moon over: the game's teleport back accepted
@@ -574,6 +593,12 @@ local CFG = {
     -- With the chalice in your backpack or hand there is no hop at all,
     -- whatever this says.
     HuntHop            = true,
+    -- THE GOD'S CHALICE HOLDS YOU (user, 2026-11-13: "I don't need the God's
+    -- Chalice any more - at least a button"). On = as before: with it in
+    -- your backpack or hand no hunt goes on and no hop is made (leaving or
+    -- dying loses it). Off = it is ignored: the hunt goes on, hops and all -
+    -- and a chalice you carry is LOST at the next hop.
+    ChaliceGuard       = true,
     HopOrder           = "fewest",   -- "fewest" (players first) | "most" | "random"
     -- (user, 2026-10-23) PvP mode on: every hop goes to the busiest servers
     -- (most players first), whatever HopOrder says - the hunts keep theirs.
@@ -679,7 +704,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-08.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-13.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -1374,6 +1399,57 @@ function P.fruitSpot(f)
     return tostring(f.orig or f.name) .. "@" .. (p and (math.floor(p.X / 16) .. "," .. math.floor(p.Z / 16)) or "?")
 end
 
+-- STILL ARRIVING (user, 2026-11-13: "it does not recognise the Shadow fruit
+-- though I took it many times - some fruits it knows, some it does not").
+-- The logs of that day: a spawn is first seen with the game's own attributes
+-- ExpectedDescendants (= 123 for the Shadow) / ExpectedDescendantsNames -
+-- its parts are still streaming in (the game's Util.WaitForExpectedDescendants
+-- waits on exactly these and clears them when all are there). Read then, a
+-- big fruit has no mesh yet: no name, and with "unknown spawn" on it was
+-- gone for whatever it was - the small ones (Spin: 3 meshes) were complete
+-- and named. true = not all there yet: nothing is decided on it.
+function P.fruitLoading(c)
+    local ok, exp = pcall(function() return c:GetAttribute("ExpectedDescendants") end)
+    exp = ok and tonumber(exp) or nil
+    if not exp then return false end
+    local okN, n = pcall(function() return #c:GetDescendants() end)
+    return not (okN and n >= exp)
+end
+-- The first of `list` (fruitsLying) not named because it is still arriving,
+-- and waited for less than maxWait since first seen (seen: [tool] = when);
+-- nil = nothing to wait for. -> the fruit, the seconds left.
+function P.fruitHold(list, now, seen, maxWait)
+    maxWait = tonumber(maxWait) or 8
+    for _, f in ipairs(list) do
+        if f.loading and f.orig == nil and f.tool ~= nil then
+            seen[f.tool] = seen[f.tool] or now
+            local left = maxWait - (now - seen[f.tool])
+            if left > 0 then return f, left end
+        end
+    end
+    return nil, 0
+end
+-- YOUR STORAGE IS FULL OF IT (user, 2026-11-13: "I can store 3 of the same
+-- fruit - one I can store is stored at once; one I cannot, it should say").
+-- cap = player.Data.FruitCap (how many of EACH fruit your storage holds),
+-- else the number the game's own "storage full" answer gave. A fruit you
+-- already hold that many of cannot be stored: it is left where it lies -
+-- except one too good to lose (CFG.FruitKeepValue), which is still taken
+-- and held safe. -> true + how many you have + the cap.
+function P.fruitFull(orig, stock, cap, countFn)
+    cap = tonumber(cap)
+    if not (orig and type(stock) == "table" and cap and cap > 0 and countFn) then return false end
+    local n = tonumber(countFn(stock, orig)) or 0
+    return n >= cap, n, cap
+end
+function P.fruitCapNow()
+    local ok, v = pcall(function() return player.Data.FruitCap.Value end)
+    v = ok and tonumber(v) or nil
+    if v and v > 0 then return v, "the game's FruitCap" end
+    if P.fruitCapSeen then return P.fruitCapSeen, "the game's 'storage full' answer" end
+    return nil, "not read"
+end
+
 function P.groundFruit(c)
     if not (c and (c:IsA("Tool") or c:IsA("Model"))) then return nil end
     local name = tostring(c.Name)
@@ -1386,11 +1462,12 @@ function P.groundFruit(c)
         h = t and t:FindFirstChild("Handle")
     end
     if not (h and h:IsA("BasePart")) then return nil end
-    local how, looks = nil, nil
+    local how, looks, loading = nil, nil, false
     if type(orig) == "string" then
         how = "tag"
         P.looksTeach(c, orig)                                  -- a known fruit teaches its look
     else
+        loading = P.fruitLoading(c)
         orig = P.fruitOrig(name)
         if orig then
             how = "name"
@@ -1403,12 +1480,14 @@ function P.groundFruit(c)
                 orig = P.looksName(P.FRUIT_LOOKS, looks)
                 how = orig and "look learned" or nil
             end
+            -- Not one mesh to read yet: arriving, whatever its attributes say.
+            if not orig and #looks == 0 then loading = true end
         end
     end
     -- A spawn read from its look shows its fruit's name, not "Fruit ".
     local label = (orig and not P.fruitOrig(name) and not c:GetAttribute("OriginalName"))
         and (P.fruitBase(orig) .. " Fruit") or name
-    return { orig = orig, name = label, handle = h, tool = c, how = how, looks = looks }
+    return { orig = orig, name = label, handle = h, tool = c, how = how, looks = looks, loading = loading and orig == nil }
 end
 
 -- WHERE (user, 2026-10-24: "which island is it on?"): the nearest of the
@@ -1967,79 +2046,52 @@ local function flatFace(pos, dir)
     return CFrame.lookAt(pos, pos + flat)
 end
 
--- PORTALS (user, 2026-10-24: "if it is an island I can teleport to, go
--- through the portals rather than flying long distance"). The game's portals
--- all call CommF_("requestEntrance", <the entrance>), and the public hubs
--- (2022-26) call it from ANYWHERE in the sea when a goal is far: it puts you
--- at that entrance. The Mansion and Hydra Island open once rip_indra is
--- beaten - a portal that does not move you within 4 s is left for 10 min.
-local PORTALS = {
+-- DOORS AND PADS, KNOWN BEFORE THEY ARE SEEN (user, 2026-11-13: "Floating
+-- Turtle to the Haunted Castle it flies straight - it does not know the map";
+-- "the Cursed Ship: it flies the far ocean, it should use the ship's door").
+-- Two kinds of teleport in the game's own client (decompiled v4623):
+--   pad   a Model tagged "BoatCastleTeleporter" (the Castle on the Sea <->
+--         Tiki Outpost): stood in, the server asked "InitiateTeleport".
+--   door  the older ones (PlayerScripts.AnimateEntrance): the Castle's
+--         Mansion and Hydra portals, the Cursed Ship's door, Flamingo's room,
+--         the Sky gate, the whirlpool. Touched, the client asks
+--         CommF_("requestEntrance", <where the other side puts you>) and the
+--         server ANSWERS with a Vector3 - the CLIENT then writes itself there.
+--         (Until 2026-11-13 the answer was thrown away here and the script
+--         waited to be moved: "the game did not move you", every time.)
+-- Each link's two ends: at = where that end puts you (the spot the game
+-- sends for the ride TO it - the coordinates the public hubs use), path =
+-- its part under workspace.Map (stood in once it has streamed in), need =
+-- what the game asks for it. A pad's out = where its ride ends.
+P.ROUTE_SEEDS = {
     [1] = {
-        { name = "the Sky Islands",     pos = Vector3.new(-4607.82275, 872.54248, -1667.55688) },
-        { name = "the Upper Skylands",  pos = Vector3.new(-7894.6176757813, 5547.1416015625, -380.29119873047) },
-        { name = "Fishman Island",      pos = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875) },
-        { name = "the whirlpool",       pos = Vector3.new(3864.6884765625, 6.7369503974915, -1926.2140197754) },
+        { kind = "door", name = "the Sky gate",
+            a = { at = Vector3.new(-4607.82275, 872.54248, -1667.55688), path = { "Sky", "Entrance" } },
+            b = { at = Vector3.new(-7894.6176757813, 5547.1416015625, -380.29119873047), path = { "SkyArea2", "Exit" } } },
+        { kind = "door", name = "the whirlpool",
+            a = { at = Vector3.new(3864.6884765625, 6.7369503974915, -1926.2140197754), path = { "TeleportSpawn", "Entrance" } },
+            b = { at = Vector3.new(61163.8515625, 11.6796875, 1819.7841796875), path = { "TeleportSpawn", "Exit" } } },
     },
     [2] = {
-        { name = "the Kingdom of Rose (upstairs)", pos = Vector3.new(-288.46, 306.13, 597.99) },
-        { name = "the Kingdom of Rose (door)",     pos = Vector3.new(2284.912109375, 15.152034759521, 905.48291015625) },
-        { name = "the Cursed Ship",     pos = Vector3.new(923.21252441406, 126.9760055542, 32852.83203125) },
-        { name = "the Cursed Ship's way out", pos = Vector3.new(-6508.5581054688, 89.034996032715, -132.83953857422) },
+        { kind = "door", name = "the Cursed Ship's door", need = "level1000",
+            a = { at = Vector3.new(-6508.5581054688, 89.034996032715, -132.83953857422), path = { "GhostShip", "Teleport" } },
+            b = { at = Vector3.new(923.21252441406, 126.9760055542, 32852.83203125), path = { "GhostShipInterior", "Teleport" } } },
+        { kind = "door", name = "Flamingo's door", need = "flamingo",
+            a = { at = Vector3.new(-288.46, 306.13, 597.99), path = { "Dressrosa", "FlamingoEntrance" } },
+            b = { at = Vector3.new(2284.912109375, 15.152034759521, 905.48291015625), path = { "Dressrosa", "FlamingoExit" } } },
     },
     [3] = {
-        { name = "the Castle on the Sea", pos = Vector3.new(-5072.08984375, 314.5412902832, -3151.1098632812) },
-        { name = "the Mansion",           pos = Vector3.new(-12471.169921875, 374.94024658203, -7551.677734375) },
-        { name = "Hydra Island",          pos = Vector3.new(5661.5322265625, 1013.0907592773, -334.96499633789) },
+        { kind = "door", name = "the Mansion portal", need = "indra",
+            a = { at = Vector3.new(-5072.08984375, 314.5412902832, -3151.1098632812), path = { "Boat Castle", "MapTeleportA", "Hitbox" } },
+            b = { at = Vector3.new(-12471.169921875, 374.94024658203, -7551.677734375), path = { "Turtle", "MapTeleportB", "Hitbox" } } },
+        { kind = "door", name = "the Hydra portal", need = "indra",
+            a = { at = Vector3.new(-5072.08984375, 314.5412902832, -3151.1098632812), path = { "Boat Castle", "MapTeleportB", "Hitbox" } },
+            b = { at = Vector3.new(5661.5322265625, 1013.0907592773, -334.96499633789), path = { "Waterfall", "MapTeleportA", "Hitbox" } } },
+        { kind = "pad", name = "MapTeleportC",
+            a = { at = Vector3.new(-5097, 319, -3178), out = Vector3.new(-16813, 62, 305) },
+            b = { at = Vector3.new(-16799, 84, 291), out = Vector3.new(-5085, 318, -3156) } },
     },
 }
-P.PORTALS = PORTALS
-local PORTAL_SECS = 3        -- the jump itself, and the island streaming in
-local PORTAL_GAIN = 5        -- worth it only when it saves this much flying
--- The portal that gets you to `goal` soonest, and the seconds it saves over
--- flying straight; nil = fly. `bad[name]` = a time before which that one is
--- not tried.
-function P.portalPick(from, goal, list, speed, bad, now)
-    speed = math.max(tonumber(speed) or 330, 50)
-    local direct = (goal - from).Magnitude / speed
-    local best, bestT
-    for _, p in ipairs(list or {}) do
-        if not (bad and bad[p.name] and now < bad[p.name]) then
-            local t = PORTAL_SECS + (goal - p.pos).Magnitude / speed
-            if not bestT or t < bestT then best, bestT = p, t end
-        end
-    end
-    if best and direct - bestT >= PORTAL_GAIN then return best, direct - bestT end
-    return nil, 0
-end
-P.portalBad = {}
-P.lastPortal = "none yet"
--- Through the best portal, if one beats flying. -> true = you are there now.
-local function portalLeg(goal, myEpoch)
-    local _, r = parts()
-    local list = PORTALS[mySea() or 0]
-    if not (r and list) then return false end
-    local p, saves = P.portalPick(r.Position, goal, list, CFG.TravelSpeed, P.portalBad, os.clock())
-    local cf = p and commF()
-    if not cf then return false end
-    say(string.format("through the portal to %s (saves ~%.0f s of flying)", p.name, saves))
-    task.spawn(function() pcall(function() cf:InvokeServer("requestEntrance", p.pos) end) end)
-    local t0 = os.clock()
-    while os.clock() - t0 < 4 and not stale(myEpoch) do
-        task.wait(0.1)
-        local _, r2 = parts()
-        if r2 and (r2.Position - p.pos).Magnitude < 300 then
-            P.lastPortal = string.format("%s - taken, saved ~%.0f s", p.name, saves)
-            print("[BFF] portal: " .. P.lastPortal)
-            task.wait(0.3)
-            return true
-        end
-    end
-    if stale(myEpoch) then return false end
-    P.portalBad[p.name] = os.clock() + 600
-    P.lastPortal = p.name .. " - the game did not move you (not open on this account?), flying instead"
-    print("[BFF] portal: " .. P.lastPortal)
-    return false
-end
 
 local flyTo       -- declared here: the submarine leg calls it recursively
 
@@ -2083,8 +2135,8 @@ flyTo = function(goal, opts)
     if gy and goal.Y < gy then goal = Vector3.new(goal.X, gy, goal.Z) end
 
     local dist = (goal - r.Position).Magnitude
-    -- A long way: the cheapest route first - the Home button, the Third Sea's
-    -- pads (ROUTES); the First and Second Sea's entrances as before (PORTALS).
+    -- A long way: the cheapest route first - the Home button, the pads and the
+    -- doors of this sea (ROUTES).
     -- Every trip unless it says portal = false (the boat, the sea hunts,
     -- raids) or CFG.TravelRoutes is off; never inside a route's own legs
     -- (P.inRoute - the flight into a pad is part of the plan already).
@@ -2100,7 +2152,6 @@ flyTo = function(goal, opts)
             PA.inRoute = false
             if ok then moved = res else print("[BFF] route: " .. tostring(res)) end
         end
-        if not moved and mySea() ~= 3 then moved = portalLeg(goal, myEpoch) end
         if moved then
             local _, r3 = parts()
             if not r3 then return false end
@@ -2202,26 +2253,40 @@ P.flyTo = function(pos) return flyTo(pos) end
 --         client puts you at the partner's Pivot and asks the server (Net RF
 --         BoatCastleTeleporters "InitiateTeleport", the pad); "GetInfo" says
 --         isUnlocked (rip_indra / Tyrant of the Skies). Only standing in the
---         Hitbox works (user) - requestEntrance from anywhere no longer does.
--- A pad far away is streamed out: every pad seen, where its ride really
--- ended, your Home's landing spot and the measured seconds are kept in
--- workspace/bff_routes.json.
+--   DOORS the older teleports of every sea (P.ROUTE_SEEDS): the Castle's
+--         Mansion and Hydra portals, the Cursed Ship's door, the Sky gate...
+--         Touched, the game's client asks CommF_("requestEntrance", <the
+--         other side>) and writes ITSELF to the Vector3 the server answers.
+--         Asked from where you stand first (CFG.TravelFar - no flight to
+--         the door at all, if the server answers from there); else flown
+--         into, touched, asked there.
+-- EVERY verdict the game gave is dated, none is for ever (2026-11-13: one
+-- "Home did nothing outside a safe zone" was kept for good - Home was never
+-- planned again, Floating Turtle -> Haunted Castle flew straight): Home
+-- outside a safe zone is tried again after 10 min, a far ask after 6 h, a
+-- link that did not take you after 5 min.
+-- A link far away is streamed out: every one is known from the start (the
+-- seeds); where it really stands, where its ride really ended, your Home's
+-- landing spot and the measured seconds are kept in workspace/bff_routes.json.
 
 -- THE PLAN (pure). net = { home = { pos, secs } | nil, pads = { { id, name,
--- hit, out, secs } } } - out = where its ride puts you. -> the steps
--- ({ kind = "home" } / { kind = "portal", pad = p }, in order), the plan's
--- seconds, a straight flight's seconds. The flight after the last step is
--- the caller's.
+-- hit, out, secs, far, farSecs } } } - out = where its ride puts you; far =
+-- a door the server lets you ask from where you stand (no flight to it).
+-- -> the steps ({ kind = "home" } / { kind = "portal", pad = p, far = true |
+-- nil }, in order), the plan's seconds, a straight flight's seconds. The
+-- flight after the last step is the caller's.
 function P.routePlan(from, goal, net, speed)
     speed = math.max(tonumber(speed) or 330, 50)
     local function fly(a, b) return (a - b).Magnitude / speed end
     local V = { { pos = from }, { pos = goal, goal = true } }
     if net.home then table.insert(V, { pos = net.home.pos, home = true }) end
+    local fars = {}
     for _, p in ipairs(net.pads or {}) do
         if p.out then
             local exitV = { pos = p.out }
             table.insert(V, exitV)
             table.insert(V, { pos = p.hit, pad = p, exit = exitV })
+            if p.far then table.insert(fars, { pad = p, exit = exitV }) end
         end
     end
     local index = {}
@@ -2244,6 +2309,10 @@ function P.routePlan(from, goal, net, speed)
         end
         -- Standing in a pad: its ride.
         if vu.pad then relax(index[vu.exit], vu.pad.secs or 2.5, { kind = "portal", pad = vu.pad }) end
+        -- A far door: asked from wherever you are.
+        for _, f in ipairs(fars) do
+            relax(index[f.exit], f.pad.farSecs or 1.5, { kind = "portal", pad = f.pad, far = true })
+        end
         for j, vj in ipairs(V) do
             if j ~= u then
                 if vj.home then
@@ -2268,11 +2337,17 @@ do
         local HttpService = game:GetService("HttpService")
         local CS = game:GetService("CollectionService")
         local FILE = "bff_routes.json"
+        local HOME_OUT_SECS = 600     -- "Home did nothing outside a safe zone" is believed this long, then tried again
+        local FAR_NO_SECS = 6 * 3600  -- "a door cannot be asked from afar" is believed this long (proven at a door)
         local R = {
-            pads = {},          -- [id] = { name, hit, pivot, landed (where its ride ended) }; .model while loaded
+            pads = {},          -- [id] = { name, kind, sea, hit, pivot, landed, ask, need, path }; .model while loaded
             homes = {},         -- ["<UserId>:<sea>:<Home Point>"] = where the Home button landed you
-            homeSecs = 6, portalSecs = 2.5,
-            homeOutside = nil,  -- Home from outside a safe zone: true = worked, false = did not, nil = not tried
+            homeSecs = 6, portalSecs = 2.5, farSecs = 1.5,
+            homeOutside = nil,  -- Home from outside a safe zone worked once: true (said on the panel)
+            homeOutNo = nil,    -- os.time() it last did NOT work from outside one (believed HOME_OUT_SECS)
+            farYes = nil, farNo = nil,   -- os.time() a far ask last worked / was proven refused
+            farBad = 0,         -- a far ask: not planned before this os.clock() (this server)
+            farMiss = false,    -- a far ask failed in this server (a door ridden after it proves "no")
             bad = {},           -- [pad id] = os.clock() before which it is not planned
             homeBad = 0,        -- the Home button: not planned before this os.clock()
             locked = {},        -- [pad name] = true: not unlocked on this account (GetInfo)
@@ -2286,14 +2361,17 @@ do
             if not writefile then return end
             local pads, homes = {}, {}
             for id, p in pairs(R.pads) do
-                pads[id] = { name = p.name, hit = tab(p.hit), pivot = tab(p.pivot), landed = tab(p.landed) }
+                pads[id] = { name = p.name, sea = p.sea, hit = tab(p.hit), pivot = tab(p.pivot), landed = tab(p.landed) }
             end
             for k, v in pairs(R.homes) do homes[k] = tab(v) end
             pcall(function()
-                writefile(FILE, HttpService:JSONEncode({ v = 1, pads = pads, homes = homes,
-                    homeSecs = R.homeSecs, portalSecs = R.portalSecs, homeOutside = R.homeOutside }))
+                writefile(FILE, HttpService:JSONEncode({ v = 2, pads = pads, homes = homes,
+                    homeSecs = R.homeSecs, portalSecs = R.portalSecs, farSecs = R.farSecs,
+                    homeOutside = R.homeOutside == true or nil, homeOutNo = R.homeOutNo,
+                    farYes = R.farYes, farNo = R.farNo }))
             end)
         end
+        R.save = save
         pcall(function()
             local t = HttpService:JSONDecode(readfile(FILE))
             if type(t) ~= "table" then return end
@@ -2301,28 +2379,85 @@ do
                 if type(p) == "table" and type(p.name) == "string" and vec(p.hit) then
                     local landed = vec(p.landed)
                     if landed and (landed - vec(p.hit)).Magnitude < 300 then landed = nil end   -- a ride to itself: not one
-                    R.pads[id] = { name = p.name, hit = vec(p.hit), pivot = vec(p.pivot), landed = landed }
+                    -- Before 2026-11-13 only the Third Sea's tagged pads were kept.
+                    R.pads[id] = { name = p.name, kind = "pad", sea = tonumber(p.sea) or 3,
+                        hit = vec(p.hit), pivot = vec(p.pivot), landed = landed }
                 end
             end
             for k, v in pairs(type(t.homes) == "table" and t.homes or {}) do R.homes[k] = vec(v) end
             R.homeSecs = tonumber(t.homeSecs) or R.homeSecs
             R.portalSecs = tonumber(t.portalSecs) or R.portalSecs
-            if type(t.homeOutside) == "boolean" then R.homeOutside = t.homeOutside end
+            R.farSecs = tonumber(t.farSecs) or R.farSecs
+            -- A kept "false" (the old file) was for ever: one bad try and Home
+            -- was never planned outside a safe zone again. Only a dated one counts.
+            if t.homeOutside == true then R.homeOutside = true end
+            R.homeOutNo = tonumber(t.homeOutNo)
+            R.farYes, R.farNo = tonumber(t.farYes), tonumber(t.farNo)
         end)
 
-        -- Every pad loaded now, kept (a far one is streamed out).
+        -- THE SEEDS (P.ROUTE_SEEDS): every door and pad the game has, known
+        -- before it streams in. One you have ridden or seen (the file) keeps
+        -- what was measured; the seed gives its kind, what to ask, where its
+        -- part is.
+        local function seedEnd(sea, link, me, other)
+            local found
+            for _, p in pairs(R.pads) do
+                if p.sea == sea and (p.name == link.name) and (p.hit - me.at).Magnitude < 150 then found = p end
+            end
+            if not found then
+                found = { name = link.name, sea = sea, hit = me.at }
+                R.pads[string.format("%s@%d,%d", link.name, math.floor(me.at.X), math.floor(me.at.Z))] = found
+            end
+            found.kind = link.kind
+            found.need = link.need
+            found.path = me.path
+            if link.kind == "door" then
+                found.ask = other.at
+            elseif not found.landed then
+                found.landed = me.out
+            end
+        end
+        for sea, links in pairs(P.ROUTE_SEEDS or {}) do
+            for _, link in ipairs(links) do
+                seedEnd(sea, link, link.a, link.b)
+                seedEnd(sea, link, link.b, link.a)
+            end
+        end
+
+        -- A door's own part, once it has streamed in (workspace.Map.<path>).
+        local function partAt(path)
+            local at = workspace:FindFirstChild("Map")
+            for _, n in ipairs(path or {}) do
+                at = at and at:FindFirstChild(n)
+            end
+            if at and at:IsA("BasePart") then return at end
+            return nil
+        end
+
+        -- Every pad loaded now, kept (a far one is streamed out); every door
+        -- of this sea whose part is loaded: stood in where it really is.
         function R.scan()
-            local ok, list = pcall(function() return CS:GetTagged("BoatCastleTeleporter") end)
-            if not ok or type(list) ~= "table" then return end
+            local sea = mySea()
             local changed, seen = false, {}
-            for _, m in ipairs(list) do
+            local ok, list = pcall(function() return CS:GetTagged("BoatCastleTeleporter") end)
+            for _, m in ipairs((ok and type(list) == "table") and list or {}) do
                 local hb = m:IsA("Model") and m:FindFirstChild("Hitbox")
                 if hb and hb:IsA("BasePart") then
-                    local id = string.format("%s@%d,%d", m.Name, math.floor(hb.Position.X), math.floor(hb.Position.Z))
-                    local p = R.pads[id]
+                    local id, p
+                    for id2, q in pairs(R.pads) do
+                        if q.kind ~= "door" and q.name == m.Name and (q.sea or 3) == (sea or 3)
+                            and (q.hit - hb.Position).Magnitude < 150 then
+                            id, p = id2, q
+                        end
+                    end
                     if not p then
-                        p = { name = m.Name, hit = hb.Position }
+                        id = string.format("%s@%d,%d", m.Name, math.floor(hb.Position.X), math.floor(hb.Position.Z))
+                        p = { name = m.Name, kind = "pad", sea = sea or 3, hit = hb.Position }
                         R.pads[id] = p
+                        changed = true
+                    end
+                    if (p.hit - hb.Position).Magnitude > 1 then
+                        p.hit = hb.Position
                         changed = true
                     end
                     p.model = m
@@ -2331,6 +2466,20 @@ do
                     if typeof(piv) == "CFrame" and not (p.pivot and (p.pivot - piv.Position).Magnitude < 1) then
                         p.pivot = piv.Position
                         changed = true
+                    end
+                end
+            end
+            for id, p in pairs(R.pads) do
+                if p.kind == "door" and p.sea == sea then
+                    local okP, part = pcall(partAt, p.path)
+                    part = okP and part or nil
+                    p.model = part
+                    if part then
+                        seen[id] = true
+                        if (p.hit - part.Position).Magnitude > 1 then
+                            p.hit = part.Position
+                            changed = true
+                        end
                     end
                 end
             end
@@ -2363,34 +2512,88 @@ do
             return R.homes[homeKey(name)] or pos, name
         end
 
-        -- The graph's edges as they stand: pads not refused, not locked, whose
-        -- ride's end is known (where it ended last time, else the partner's
-        -- Pivot, else the partner's own spot); the Home button when your Home is
-        -- in this sea and allowed from here.
+        -- WHAT THE GAME ASKS FOR A DOOR (AnimateEntrance: GetUnlockables ->
+        -- its table, your level): read every 5 min. -> true, false, or nil =
+        -- not readable (tried anyway - the server judges).
+        local unlocks = { at = -1e9, t = nil }
+        function R.needOk(need)
+            if not need then return true end
+            if need == "level1000" then
+                local lvl = playerLevel()
+                if lvl and lvl > 0 then return lvl >= 1000 end
+                return nil
+            end
+            if os.clock() - unlocks.at > 300 then
+                unlocks.at = os.clock()
+                local cf = commF()
+                local ok, t = pcall(function() return cf and cf:InvokeServer("GetUnlockables") end)
+                unlocks.t = (ok and type(t) == "table") and t or nil
+            end
+            local t = unlocks.t
+            if not t then return nil end
+            if need == "indra" then return t.DefeatedIndraTrueForm == true end
+            if need == "flamingo" then return t.FlamingoAccess == true end
+            return nil
+        end
+
+        -- A FAR ASK (CFG.TravelFar): the door's question from where you stand.
+        -- Off, refused in this server (10 min), or proven refused at a door
+        -- (6 h) = not planned.
+        function R.farOn()
+            if CFG.TravelFar == false then return false end
+            if os.clock() < R.farBad then return false end
+            if R.farNo and os.time() - R.farNo < FAR_NO_SECS then return false end
+            return true
+        end
+
+        -- Why Home is not in the graph (nil = it is).
+        function R.homeWhy(inSafe)
+            if CFG.TravelHome == false then return "Home button off" end
+            local hp, name = R.homeAt()
+            if not name then return "no Home Point set" end
+            if not hp then return "Home Point in another sea" end
+            if os.clock() < R.homeBad then return "Home did nothing a moment ago" end
+            if not inSafe and R.homeOutNo and os.time() - R.homeOutNo < HOME_OUT_SECS then
+                return string.format("Home did nothing outside a safe zone %d min ago (tried again after %d)",
+                    math.floor((os.time() - R.homeOutNo) / 60), HOME_OUT_SECS / 60)
+            end
+            return nil
+        end
+
+        -- The graph's edges as they stand, this sea's only: links not refused,
+        -- not locked, whose ride's end is known (where it ended last time; a
+        -- door: where it is asked to; a pad: its partner's Pivot, else the
+        -- partner's own spot); the Home button when your Home is in this sea
+        -- and allowed from here.
         function R.net(inSafe)
             local now = os.clock()
+            local sea = mySea()
+            local far = R.farOn()
             local net = { pads = {} }
             for id, p in pairs(R.pads) do
-                if not (R.bad[id] and now < R.bad[id]) and not R.locked[p.name] then
+                if (p.sea or 3) == sea and not (R.bad[id] and now < R.bad[id]) and not R.locked[p.name]
+                    and R.needOk(p.need) ~= false then
                     local out = p.landed
+                    if not out and p.kind == "door" then out = p.ask end
                     if not out then
                         for id2, q in pairs(R.pads) do
-                            if id2 ~= id and q.name == p.name then out = q.pivot or q.hit end
+                            if id2 ~= id and q.name == p.name and (q.sea or 3) == sea then out = q.pivot or q.hit end
                         end
                     end
                     if out then
-                        table.insert(net.pads, { id = id, name = p.name, hit = p.hit, out = out, secs = R.portalSecs })
+                        table.insert(net.pads, { id = id, name = p.name, kind = p.kind, hit = p.hit, out = out,
+                            secs = R.portalSecs, far = (p.kind == "door" and far) or nil, farSecs = R.farSecs })
                     end
                 end
             end
-            local hp = CFG.TravelHome ~= false and R.homeAt()
-            if hp and now >= R.homeBad and not (R.homeOutside == false and not inSafe) then
-                net.home = { pos = hp, secs = R.homeSecs }
+            if not R.homeWhy(inSafe) then
+                net.home = { pos = (R.homeAt()), secs = R.homeSecs }
             end
             return net
         end
 
-        -- THE HOME BUTTON. -> true = you are at your Home.
+        -- THE HOME BUTTON. -> true = you are at your Home. What the server
+        -- answers is said (the next log tells why a Home did nothing).
         function R.goHome(myEpoch)
             local hp, name = R.homeAt()
             local _, r = parts()
@@ -2400,96 +2603,191 @@ do
             local from, t0 = r.Position, os.clock()
             local inSafe = player:GetAttribute("InSafeZone") == true
             say("the Home button - to " .. name)
-            task.spawn(function() pcall(function() cf:InvokeServer("TeleportToSpawn") end) end)
-            while os.clock() - t0 < 15 and not stale(myEpoch) do
+            local answered, ans = false, nil
+            task.spawn(function()
+                local ok, res = pcall(function() return cf:InvokeServer("TeleportToSpawn") end)
+                answered, ans = true, ok and res or ("error: " .. tostring(res))
+            end)
+            local limit = math.max(8, R.homeSecs + 3.5)
+            while os.clock() - t0 < limit and not stale(myEpoch) do
                 task.wait(0.2)
                 local _, r2 = parts()
                 if r2 and ((r2.Position - hp).Magnitude < 400 or (r2.Position - from).Magnitude > 1500) then
                     R.homeSecs = R.homeSecs * 0.7 + (os.clock() - t0) * 0.3
                     R.homes[homeKey(name)] = r2.Position
-                    if not inSafe then R.homeOutside = true end
+                    if not inSafe then R.homeOutside, R.homeOutNo = true, nil end
                     save()
-                    print(string.format("[BFF] route: Home - at %s in %.1f s", name, os.clock() - t0))
+                    print(string.format("[BFF] route: Home - at %s in %.1f s%s", name, os.clock() - t0,
+                        inSafe and "" or " (from outside a safe zone)"))
                     return true
                 end
             end
             if stale(myEpoch) then return false end
             R.homeBad = os.clock() + 120
             if not inSafe then
-                R.homeOutside = false
+                R.homeOutNo = os.time()
                 save()
             end
-            print("[BFF] route: the Home button did not move you" .. (inSafe and "" or " (outside a safe zone)"))
+            print(string.format("[BFF] route: the Home button did not move you%s - the server answered %s",
+                inSafe and "" or string.format(" (outside a safe zone - tried again in %d min)", HOME_OUT_SECS / 60),
+                answered and (typeof(ans) .. " " .. tostring(ans)) or "nothing yet"))
             return false
         end
 
-        -- THROUGH A PAD: flown into its Hitbox and touched there - the game's own
+        -- Out of a ride: still where it put you 0.6 s later (a server that
+        -- pulls you back = refused). -> where you are, or nil.
+        local function held(at)
+            if not at then return nil end
+            task.wait(0.6)
+            local _, r3 = parts()
+            if r3 and (r3.Position - at).Magnitude < 200 then return r3.Position end
+            return nil
+        end
+
+        -- A DOOR'S QUESTION (AnimateEntrance.requestEntrance): the server is
+        -- asked for the other side; a Vector3 back = go there - the game's
+        -- client writes it, so it is written here. -> where you are now (moved
+        -- and held), or nil; and what the server said, in words.
+        local function askDoor(L, myEpoch)
+            local cf = commF()
+            local _, r = parts()
+            if not (cf and r and L.ask) then return nil, "no remote" end
+            local from = r.Position
+            local answered, ans = false, nil
+            task.spawn(function()
+                local ok, res = pcall(function() return cf:InvokeServer("requestEntrance", L.ask) end)
+                answered, ans = true, ok and res or ("error: " .. tostring(res))
+            end)
+            local t0 = os.clock()
+            while not answered and os.clock() - t0 < 4 and not stale(myEpoch) do task.wait(0.1) end
+            if stale(myEpoch) then return nil, "stopped" end
+            local words = answered and (typeof(ans) .. " " .. tostring(ans)) or "nothing in 4 s"
+            local _, r2 = parts()
+            if not r2 then return nil, words end
+            if typeof(ans) == "Vector3" then
+                pcall(function() r2.CFrame = CFrame.new(ans) end)
+                lockAt(ans)
+            end
+            task.wait(0.2)
+            local _, r3 = parts()
+            local moved = r3 and (r3.Position - from).Magnitude > 300 and r3.Position or nil
+            return held(moved), words
+        end
+
+        -- THROUGH A LINK. far = the door asked from where you stand (the plan
+        -- says so); else flown into it and touched there - the game's own
         -- handler takes it; nothing after 2.5 s = what that handler does, done
-        -- here (out at the partner's Pivot, InitiateTeleport). Kept only if you
-        -- are still there 0.6 s later (a server that pulls you back = refused).
-        function R.ride(p, myEpoch)
-            flyTo(p.hit + Vector3.new(0, 2, 0))
+        -- here (a pad: out at the partner's Pivot, InitiateTeleport; a door:
+        -- its question, the answer written). Kept only if you are still there
+        -- 0.6 s later.
+        function R.ride(p, myEpoch, far)
+            local L = R.pads[p.id]
+            if not L then return false end
+            local t0 = os.clock()
+            if far then
+                local _, r0 = parts()
+                local off = r0 and (r0.Position - L.hit).Magnitude or 0
+                local at, words = askDoor(L, myEpoch)
+                if at then
+                    L.landed = at
+                    R.farSecs = R.farSecs * 0.7 + (os.clock() - t0) * 0.3
+                    R.farYes, R.farNo = os.time(), nil
+                    save()
+                    print(string.format("[BFF] route: %s asked from %.0f studs off - through in %.1f s (the server: %s)",
+                        L.name, off, os.clock() - t0, words))
+                    return true
+                end
+                if stale(myEpoch) then return false end
+                R.farBad, R.farMiss = os.clock() + 600, true
+                print(string.format("[BFF] route: %s asked from %.0f studs off - not taken (the server: %s) - to the door itself",
+                    L.name, off, words))
+                return false
+            end
+            flyTo(L.hit + Vector3.new(0, 2, 0))
             if stale(myEpoch) then return false end
             R.scan()
-            local live = R.pads[p.id] and R.pads[p.id].model
-            local hb = live and live.Parent and live:FindFirstChild("Hitbox")
-            if not hb then
-                R.bad[p.id] = os.clock() + 600
-                return false
-            end
-            local rf = netRemote("RF", "BoatCastleTeleporters")
-            if rf and R.locked[p.name] == nil then
-                local ok, info = pcall(function() return rf:InvokeServer("GetInfo", p.name) end)
-                if ok and type(info) == "table" and info.isUnlocked == false then R.locked[p.name] = true end
-            end
-            if R.locked[p.name] then
-                print("[BFF] route: the " .. p.name .. " pad is not unlocked on this account")
-                return false
+            local live = L.model
+            if live and not live.Parent then live = nil end
+            local hb = live
+            if L.kind ~= "door" then
+                hb = live and live:FindFirstChild("Hitbox")
+                if not hb then
+                    R.bad[p.id] = os.clock() + 600
+                    return false
+                end
+                local rf0 = netRemote("RF", "BoatCastleTeleporters")
+                if rf0 and R.locked[L.name] == nil then
+                    local ok, info = pcall(function() return rf0:InvokeServer("GetInfo", L.name) end)
+                    if ok and type(info) == "table" and info.isUnlocked == false then R.locked[L.name] = true end
+                end
+                if R.locked[L.name] then
+                    print("[BFF] route: the " .. L.name .. " pad is not unlocked on this account")
+                    return false
+                end
             end
             local _, r = parts()
             if not r then return false end
-            -- Away = from the pad itself: a flight that fell short of it, then
+            -- Away = from the link itself: a flight that fell short of it, then
             -- the lock's jump onto it, is not a ride (bff_routes.json had the
             -- Castle's pad "landing" on itself).
-            local from, t0 = hb.Position, os.clock()
+            local from = hb and hb.Position or L.hit
             local function away()
                 local _, r2 = parts()
                 return r2 and (r2.Position - from).Magnitude > 300 and r2.Position or nil
             end
-            lockAt(hb.Position)
-            if firetouchinterest then
+            -- A door seen for the first time stands a little off its seed: into it.
+            if hb and (r.Position - hb.Position).Magnitude > 6 then
+                flyTo(hb.Position + Vector3.new(0, 2, 0))
+                if stale(myEpoch) then return false end
+            end
+            lockAt(from)
+            if firetouchinterest and hb then
                 pcall(firetouchinterest, r, hb, 0)
                 pcall(firetouchinterest, r, hb, 1)
             end
-            while os.clock() - t0 < 2.5 and not stale(myEpoch) and not away() do task.wait(0.1) end
-            if not away() and not stale(myEpoch) and rf then
-                local out = p.out
-                pcall(function()
-                    for id2, q in pairs(R.pads) do
-                        local piv = id2 ~= p.id and q.name == p.name and q.model and q.model:GetAttribute("Pivot")
-                        if typeof(piv) == "CFrame" then out = piv.Position end
+            t0 = os.clock()
+            -- (no part found to touch = nothing to wait for: asked at once)
+            while hb and os.clock() - t0 < 2.5 and not stale(myEpoch) and not away() do task.wait(0.1) end
+            local at, words = nil, "its touch"
+            if away() then
+                at = held(away())
+            elseif not stale(myEpoch) then
+                if L.kind == "door" then
+                    at, words = askDoor(L, myEpoch)
+                else
+                    local rf = netRemote("RF", "BoatCastleTeleporters")
+                    if rf then
+                        local out = p.out
+                        pcall(function()
+                            for id2, q in pairs(R.pads) do
+                                local piv = id2 ~= p.id and q.name == L.name and q.model and q.model:GetAttribute("Pivot")
+                                if typeof(piv) == "CFrame" then out = piv.Position end
+                            end
+                        end)
+                        pcall(function()
+                            r.CFrame = CFrame.new(out)
+                            if rf:InvokeServer("InitiateTeleport", live) then r.CFrame = CFrame.new(out) end
+                        end)
+                        task.wait(0.5)
+                        words = "InitiateTeleport"
+                        at = held(away())
                     end
-                end)
-                pcall(function()
-                    r.CFrame = CFrame.new(out)
-                    if rf:InvokeServer("InitiateTeleport", live) then r.CFrame = CFrame.new(out) end
-                end)
-                task.wait(0.5)
-            end
-            local at = away()
-            if at then
-                task.wait(0.6)
-                local _, r3 = parts()
-                if r3 and (r3.Position - at).Magnitude < 200 then
-                    R.pads[p.id].landed = r3.Position
-                    R.portalSecs = R.portalSecs * 0.7 + (os.clock() - t0) * 0.3
-                    save()
-                    print(string.format("[BFF] route: through the %s pad in %.1f s", p.name, os.clock() - t0))
-                    return true
                 end
             end
+            if at then
+                L.landed = at
+                R.portalSecs = R.portalSecs * 0.7 + (os.clock() - t0) * 0.3
+                -- A door that works AT the door after a far ask failed here:
+                -- the far ask is refused, not the door (kept 6 h).
+                if L.kind == "door" and R.farMiss then R.farNo, R.farMiss = os.time(), false end
+                save()
+                print(string.format("[BFF] route: through %s in %.1f s (%s)", L.name, os.clock() - t0, words))
+                return true
+            end
+            if stale(myEpoch) then return false end
             R.bad[p.id] = os.clock() + 300
-            print("[BFF] route: the " .. p.name .. " pad did not take you - left 5 min")
+            print(string.format("[BFF] route: %s did not take you (%s%s) - left 5 min", L.name, words,
+                (L.kind == "door" and not hb) and ", its part not found here" or ""))
             return false
         end
 
@@ -2500,7 +2798,8 @@ do
                     table.insert(w, "Home")
                 else
                     local isle = P.isleOf and P.isleOf(s.pad.out)
-                    table.insert(w, s.pad.name .. " pad" .. (isle and (" to " .. isle) or ""))
+                    table.insert(w, s.pad.name .. ((s.pad.kind == "door") and "" or " pad")
+                        .. (s.far and " (asked from here)" or "") .. (isle and (" to " .. isle) or ""))
                 end
             end
             return string.format("%s, then fly  ·  ~%.0f s, straight %.0f s", table.concat(w, " -> "), secs, direct)
@@ -2509,18 +2808,25 @@ do
         -- A LONG TRIP (every flyTo over 1500 unless portal = false): the
         -- cheapest route's teleports, in order - a step that fails is left out
         -- and the route planned again; a plan done is planned again from where
-        -- it put you (the Castle's other pads stream in there). Three plans at
-        -- most. -> true = a teleport moved you (the flight goes on from there).
+        -- it put you (the Castle's other links stream in there). Four plans at
+        -- most. A straight flight says why (the next log tells what was
+        -- missing). -> true = a teleport moved you (the flight goes on from
+        -- there).
         function R.go(goal, myEpoch)
             local any = false
-            for _ = 1, 3 do
+            for _ = 1, 4 do
                 R.scan()
                 local _, r = parts()
                 if not r or stale(myEpoch) then return any end
                 local inSafe = player:GetAttribute("InSafeZone") == true
-                local steps, secs, direct = P.routePlan(r.Position, goal, R.net(inSafe), CFG.TravelSpeed)
+                local net = R.net(inSafe)
+                local steps, secs, direct = P.routePlan(r.Position, goal, net, CFG.TravelSpeed)
                 if #steps == 0 or secs > direct - 3 then
-                    if not any then R.last = string.format("straight flight, %.0f s", direct) end
+                    if not any then
+                        R.last = string.format("straight flight, %.0f s  (%d links known here%s)", direct, #net.pads,
+                            net.home and ", Home in the plan" or (", " .. tostring(R.homeWhy(inSafe))))
+                        print("[BFF] route: " .. R.last)
+                    end
                     return any
                 end
                 R.last = stepWords(steps, secs, direct)
@@ -2529,7 +2835,7 @@ do
                 for _, s in ipairs(steps) do
                     if stale(myEpoch) then return any end
                     local ok
-                    if s.kind == "home" then ok = R.goHome(myEpoch) else ok = R.ride(s.pad, myEpoch) end
+                    if s.kind == "home" then ok = R.goHome(myEpoch) else ok = R.ride(s.pad, myEpoch, s.far) end
                     if not ok then break end
                     any = true
                 end
@@ -2540,16 +2846,21 @@ do
 
         -- The panel's line.
         function R.words()
-            local n, known = 0, 0
+            local n, known, sea = 0, 0, mySea()
             for _, p in pairs(R.pads) do
-                n += 1
-                if p.landed then known += 1 end
+                if (p.sea or 3) == sea then
+                    n += 1
+                    if p.landed then known += 1 end
+                end
             end
             local hp, name = R.homeAt()
-            return string.format("route     %s\nhome      %s%s  ·  pads %d known, %d ridden",
+            local inSafe = player:GetAttribute("InSafeZone") == true
+            local why = name and hp and R.homeWhy(inSafe) or nil
+            return string.format("route     %s\nhome      %s%s  ·  links here %d, %d ridden  ·  far ask %s",
                 tostring(R.last),
                 name and (name .. (hp and "" or " (another sea - not used here)")) or "no Home Point set",
-                (R.homeOutside == false) and "  ·  Home only from a safe zone" or "", n, known)
+                why and ("  ·  " .. why) or "", n, known,
+                (CFG.TravelFar == false) and "off" or (R.farOn() and (R.farYes and "works" or "not tried yet") or "refused"))
         end
     end
     build()
@@ -6701,7 +7012,10 @@ do
         local HttpService     = game:GetService("HttpService")
         local TeleportService = game:GetService("TeleportService")
 
+        -- The chalice on you, while you want it kept (CFG.ChaliceGuard): off =
+        -- never "held", so nothing stops for it and a hop takes you away from it.
         local function holdingChalice()
+            if CFG.ChaliceGuard == false then return false end
             return findTool(CHALICE) ~= nil
         end
         P.holdingChalice = holdingChalice
@@ -7291,7 +7605,7 @@ do
                     P.fruitShape(c)
                     table.insert(out, { tool = c, orig = g.orig, name = g.name, price = g.orig and priceOf(g.orig) or nil,
                         dropper = dropper, dropperNear = near, pos = h.Position, handle = h,
-                        how = g.how, looks = g.looks, isle = P.isleOf(h.Position) })
+                        how = g.how, looks = g.looks, loading = g.loading, isle = P.isleOf(h.Position) })
                 end
             end
             return out
@@ -7302,7 +7616,7 @@ do
         local function fruitWords(f)
             local p = f.price
             local price = p and ((p >= 1e6) and string.format("$%.1fM", p / 1e6) or ("$" .. tostring(p)))
-                or (f.orig and "$?" or "not named yet")
+                or (f.orig and "$?" or (f.loading and "still loading" or "not named yet"))
             return string.format("%s %s%s", f.orig and f.name or "a spawn", price, f.isle and (" at " .. f.isle) or "")
         end
         P.fruitWords = fruitWords
@@ -7328,6 +7642,7 @@ do
                 e.fruitInvAt = now + 2
                 local sf = (P :: any).storedFruits
                 if sf then stored, src = sf() end
+                if stored then e.fruitStock, e.fruitStockDirty = stored, false end
             end
             -- An empty storage reads as nothing: 4 s loaded is enough then.
             local done = stored ~= nil or (loaded and now - e.fruitLoadedAt >= 4) or waited >= 30
@@ -7347,14 +7662,55 @@ do
             return false
         end
 
+        -- -> the fruit to go for; or nil, true = one here is still loading
+        -- (nothing decided yet - P.fruitHold); or nil = none worth it.
         local function fruitWanted()
             if not (CFG.Hunt and CFG.HuntKind == "fruit") then return nil end
+            local e = E :: any                         -- its fields are new here
             local list = fruitsLying()
-            local f = pickFruit(list, CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn, P.fruitChoice)
+            e.fruitSeen = e.fruitSeen or setmetatable({}, { __mode = "k" })
+            local waitFor, secs = P.fruitHold(list, os.clock(), e.fruitSeen, CFG.FruitLoadWait)
+            if waitFor then
+                e.fruitHoldNote = string.format("a fruit%s is still loading - named before anything is decided  (%.0fs)",
+                    waitFor.isle and (" at " .. waitFor.isle) or "", secs)
+                return nil, true
+            end
+            -- Full of it = left where it lies (P.fruitFull). Only when a fruit
+            -- is stored at once; your storage is read again after any store.
+            local take, full = list, {}
+            if CFG.FruitSkipFull ~= false and CFG.FruitStore then
+                if (e.fruitStock == nil or e.fruitStockDirty) and os.clock() >= (e.fruitStockAt or 0) then
+                    e.fruitStockAt = os.clock() + 5
+                    local sf = (P :: any).storedFruits
+                    local stock = sf and (sf())
+                    if stock then e.fruitStock, e.fruitStockDirty = stock, false end
+                end
+                local cap = P.fruitCapNow()
+                e.fullSaid = e.fullSaid or setmetatable({}, { __mode = "k" })
+                take = {}
+                for _, f in ipairs(list) do
+                    local isFull, n = false, 0
+                    if f.orig and not P.isKeeper(f.orig, CFG.FruitKeepValue) then
+                        isFull, n = P.fruitFull(f.orig, e.fruitStock, cap, P.storedCount)
+                    end
+                    if isFull then
+                        local w = string.format("%s: your storage is full of it (%d/%d)", P.fruitBase(f.orig), n, cap)
+                        table.insert(full, w)
+                        if not e.fullSaid[f.tool] then
+                            e.fullSaid[f.tool] = true
+                            print("[BFF] fruit: left where it lies - " .. w)
+                        end
+                    else
+                        table.insert(take, f)
+                    end
+                end
+            end
+            local f = pickFruit(take, CFG.FruitMinPrice, CFG.FruitPlayerDrops, CFG.FruitUnknownSpawn, P.fruitChoice)
             if not f then
-                -- Why it moves on, with what it left (a cheap one, one not named).
+                -- Why it moves on, with what it left (a cheap one, one not named, one you are full of).
                 local left = {}
-                for i = 1, math.min(3, #list) do left[i] = fruitWords(list[i]) end
+                for i = 1, math.min(3, #take) do left[i] = fruitWords(take[i]) end
+                for i = 1, math.min(2, #full) do table.insert(left, full[i]) end
                 E.fruitWhy = "no fruit worth it here" .. ((#left > 0) and (" (" .. table.concat(left, "; ") .. ")") or "")
             end
             return f
@@ -7381,6 +7737,7 @@ do
             local n0 = sf and P.storedCount((sf()), orig)
             local cf = commF()
             local ok, res = pcall(function() return cf and cf:InvokeServer("StoreFruit", orig, got) end)
+            E.fruitStockDirty = true                -- your storage is read again before the next fruit
             task.wait(0.6)
             if not (got.Parent == player.Character or got.Parent == bp) then
                 local read, t0 = n0 ~= nil, os.clock()
@@ -7398,6 +7755,7 @@ do
                     read and "missing" or "unread", nil, n0
             end
             if ok and type(res) == "number" then
+                P.fruitCapSeen = res               -- the game's own number: how many of each it holds
                 return false, orig, string.format("storage full - it holds %d of each fruit", res)
             end
             return false, orig, tostring(ok and res or "error")
@@ -7559,6 +7917,35 @@ do
             -- The game's portals when they beat flying (user, 2026-10-24).
             flyTo(h.Position, { portal = CFG.FruitPortals })
             if stale(myEpoch) then return end
+            -- NAMED NOW that you stand by it (it was not when you set off - an
+            -- "unknown spawn"): one you do not take - under your limit, marked
+            -- Skip, your storage full of it - is left there, not picked up.
+            if not f.orig and f.tool.Parent == workspace then
+                local g2 = P.groundFruit(f.tool)
+                if g2 and g2.orig then
+                    f.orig, f.name, f.how, f.looks = g2.orig, g2.name, g2.how, g2.looks
+                    f.price = priceOf(g2.orig)
+                    local isFull = CFG.FruitSkipFull ~= false and CFG.FruitStore
+                        and not P.isKeeper(f.orig, CFG.FruitKeepValue)
+                        and P.fruitFull(f.orig, (E :: any).fruitStock, (P.fruitCapNow()), P.storedCount)
+                    if isFull or not pickFruit({ f }, CFG.FruitMinPrice, CFG.FruitPlayerDrops, false, P.fruitChoice) then
+                        E.fruitSkip[f.tool] = os.clock() + 600
+                        E.fruitNote = string.format("the unknown spawn is %s - %s - left there", fruitWords(f),
+                            isFull and "your storage is full of it" or "not one you take")
+                        print("[BFF] fruit: " .. E.fruitNote)
+                        E.note = E.fruitNote
+                        say(E.fruitNote)
+                        return
+                    end
+                    print("[BFF] fruit: the unknown spawn is " .. fruitWords(f) .. " - named once it had loaded")
+                end
+            end
+            -- Its look as it is NOW, all of it (at first sight it may have had
+            -- no mesh yet): what its true name teaches after the pickup.
+            do
+                local okL, now = pcall(P.fruitLooks, f.tool)
+                if okL and type(now) == "table" and #now > #(f.looks or {}) then f.looks = now end
+            end
             local bp = player:FindFirstChild("Backpack")
             local t0 = os.clock()
             -- Still lying = its Handle still in what lies on the ground (a
@@ -8573,9 +8960,17 @@ do
                     task.wait(0.25)
                     return
                 end
-                local f = fruitWanted()
+                local f, loading = fruitWanted()
                 if f then
                     grabFruit(f, myEpoch)
+                    return
+                end
+                -- A fruit here still loading: no hop, no flight, until it is named.
+                if loading then
+                    E.note = (E :: any).fruitHoldNote or "a fruit here is still loading"
+                    say(E.note)
+                    setState("LOOK")
+                    task.wait(0.25)
                     return
                 end
                 E.why = E.fruitWhy or "no fruit worth it here"
@@ -12420,12 +12815,14 @@ do
         -- true. The one to smash: a rare one first, from ANY distance (the seed;
         -- the Bits stop at 1000), else the nearest within `within`.
         -- c = { pos, rare }.
-        local function pickPumpkin(list, from, within, rareFirst)
+        -- rareOnly (CFG.HalloweenRareOnly): an ordinary one is never the answer.
+        local function pickPumpkin(list, from, within, rareFirst, rareOnly)
             local best, bd, br = nil, math.huge, false
+            if rareOnly then rareFirst = true end
             for _, c in ipairs(list) do
                 local d = (c.pos - from).Magnitude
                 local rare = rareFirst and c.rare == true
-                if rare or d <= (within or math.huge) then
+                if (rare or d <= (within or math.huge)) and (rare or not rareOnly) then
                     if (rare and not br) or (rare == br and d < bd) then best, bd, br = c, d, rare end
                 end
             end
@@ -12715,7 +13112,7 @@ do
         end
 
         local function nearestPumpkin(list, from, within)
-            return pickPumpkin(list, from, within, CFG.HalloweenRareFirst ~= false)
+            return pickPumpkin(list, from, within, CFG.HalloweenRareFirst ~= false, CFG.HalloweenRareOnly == true)
         end
 
         local function doorList()
@@ -12788,12 +13185,22 @@ do
                         else M.tally.tricks += 1 end
                         print(string.format("[BFF] halloween: door opened - %s (%s)", tostring(evName), k))
                     end
-                    if eventKind(evName) == "boss" then M.portalDoor, M.portalAt = inst, os.clock() end
+                    if eventKind(evName) == "boss" then M.portalDoor, M.portalAt, M.portalEvent = inst, os.clock(), evName end
                 elseif kind == "EventFinished" then
                     if M.door and M.door.inst == inst then M.door.done = true end
                 elseif kind == "BossTeleportSound" then
                     M.domain = { since = os.clock(), seen = os.clock() }
-                    print("[BFF] halloween: through the portal - the Hell Rider's domain")
+                    -- Which boss door (the "Boss Fight" door = the Werewolf, a
+                    -- hellfire door = the Hell Rider), and the game's own
+                    -- marks for them in this server - for a boss-only hunt.
+                    local tags = ""
+                    pcall(function()
+                        local cs = game:GetService("CollectionService")
+                        tags = string.format("  ·  tagged WerewolfBossDoor %d, HellfireBossDoor %d",
+                            #cs:GetTagged("WerewolfBossDoor"), #cs:GetTagged("HellfireBossDoor"))
+                    end)
+                    print("[BFF] halloween: through the portal - the boss's domain (door event: "
+                        .. tostring(M.portalEvent or "?") .. ")" .. tags)
                 elseif kind == "PromptEventTeleport" then
                     if mineNow and CFG.HalloweenDoors ~= false then
                         M.tpTried[os.date("!%Y%m%d%H")] = true
@@ -13581,8 +13988,10 @@ do
                 task.wait(0.5)
                 return true
             end
-            local _, total, has = M.census()
+            local by, total, has = M.census()
             M.why = (not has) and "no PumpkinHunt in this server"
+                or (CFG.HalloweenRareOnly == true and CFG.HalloweenPumpkins ~= false)
+                    and string.format("no rare pumpkin here (%d ordinary left alone)", tonumber(by.Idle) or 0)
                 or string.format("every pumpkin here is smashed (%d)", total)
             if CFG.HalloweenTour == false then
                 -- Stay: they come back.
@@ -17840,7 +18249,8 @@ local function buildUI()
             caption(v, "Diablo, Deandre, Urban - last hit, God's Chalice.")
             caption(v, "The God's Chalice ends the hunt in the server it came in: "
                 .. "no hop there, ever - leaving or dying with it loses it. You are "
-                .. "held 300 up; Stop gives the character back.")
+                .. "held 300 up; Stop gives the character back. Servers & team has "
+                .. "its switch: off = the chalice is ignored, and lost at the next hop.")
             caption(v, "After a join: this long for an elite to show before leaving. "
                 .. "When the Elite Hunter says none is up, 3 s is enough.")
             caption(v, "Asked from where you stand. If that gets no answer, once per "
@@ -17873,6 +18283,11 @@ local function buildUI()
             local n = 0
             for _ in pairs(P.FRUIT_LOOKS or {}) do n += 1 end
             table.insert(lines, string.format("looks     %d learned", n))
+            do
+                local cap, how = P.fruitCapNow()
+                table.insert(lines, cap and string.format("storage   holds %d of each fruit (%s)", cap, how)
+                    or "storage   its size is not read yet")
+            end
             if P.route then table.insert(lines, P.route.words()) end
             table.insert(lines, string.format("keep safe %s  ·  history %d fruits",
                 ((CFG.FruitKeepValue or 0) > 0) and ("worth " .. P.valueWords(CFG.FruitKeepValue) .. "+ on the market") or "off",
@@ -17894,12 +18309,12 @@ local function buildUI()
             function() return CFG.FruitPlayerDrops end,
             function(x) CFG.FruitPlayerDrops = x end)
         switchRow(v, "A spawn I cannot name: take it",
-            "Off: a spawn is gone for once its fruit is read (its mesh, or a look learned from drops) and its price passes",
+            "Off: a spawn is gone for once its fruit is read (its mesh, or a look learned from drops) and its price passes. A spawn still loading is waited for (8 s) either way",
             function() return CFG.FruitUnknownSpawn end,
             function(x) CFG.FruitUnknownSpawn = x end)
         heading2(v, "the way there")
         switchRow(v, "Shortest route on a long trip",
-            "The Third Sea's portal pads (Castle on the Sea <-> Mansion, Hydra, Tiki), stood in like a player",
+            "The portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship's, the Sky gate) when they beat flying",
             function() return CFG.FruitPortals end,
             function(x) CFG.FruitPortals = x end)
         switchRow(v, "Use the Home button",
@@ -17915,6 +18330,10 @@ local function buildUI()
             "A fruit in the backpack is lost when you leave the server",
             function() return CFG.FruitStoreOnHop end,
             function(x) CFG.FruitStoreOnHop = x end)
+        switchRow(v, "Leave a fruit my storage is full of",
+            "With \"Store it at once\" on: a fruit you already hold as many of as your storage takes cannot be stored - it is left, and said. One too good to lose is still taken",
+            function() return CFG.FruitSkipFull ~= false end,
+            function(x) CFG.FruitSkipFull = x end)
         heading2(v, "too good to lose - trade value")
         radio(v, 205, {
             { 0,         "Off",            "a fruit with no slot is left at a hop" },
@@ -18408,11 +18827,15 @@ local function buildUI()
             function() return CFG.HalloweenRareFirst ~= false end,
             function(x) CFG.HalloweenRareFirst = x end)
         hairline(v)
+        switchRow(v, "ONLY the rare pumpkin", "The ordinary ones are left alone. None here: the next server - with \"Nothing left: the next server\" on",
+            function() return CFG.HalloweenRareOnly == true end,
+            function(x) CFG.HalloweenRareOnly = x end)
+        hairline(v)
         switchRow(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
             function() return CFG.HalloweenDoors ~= false end,
             function(x) CFG.HalloweenDoors = x end)
         hairline(v)
-        switchRow(v, "Hell Rider", "A hellfire door: through its portal and fight",
+        switchRow(v, "Boss doors (Werewolf, Hell Rider)", "A boss door's portal: through it and fight",
             function() return CFG.HalloweenBoss ~= false end,
             function(x) CFG.HalloweenBoss = x end)
         hairline(v)
@@ -18420,7 +18843,7 @@ local function buildUI()
             function() return CFG.HalloweenReturn ~= false end,
             function(x) CFG.HalloweenReturn = x end)
         hairline(v)
-        switchRow(v, "All smashed: the next server", "Off: wait here for them to come back",
+        switchRow(v, "Nothing left: the next server", "Off: wait here for them to come back",
             function() return CFG.HalloweenTour ~= false end,
             function(x) CFG.HalloweenTour = x end)
         heading2(v, "find out")
@@ -19788,9 +20211,13 @@ local function buildUI()
             function() return CFG.InstantHop end,
             function(x) CFG.InstantHop = x end, " studs")
         switchRow(v, "Shortest route on every long trip",
-            "The Home button and the portal pads (Castle on the Sea <-> Mansion, Hydra, Tiki) when they beat flying - not on the boat, the sea hunts or raids",
+            "The Home button, the portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship, the Sky gate) when they beat flying - not on the boat, the sea hunts or raids",
             function() return CFG.TravelRoutes end,
             function(x) CFG.TravelRoutes = x end)
+        switchRow(v, "Ask a far door from where I stand",
+            "A portal's question sent from wherever you are - no flight to it. A server that does not answer from there: flown to the door, and this left 6 hours",
+            function() return CFG.TravelFar ~= false end,
+            function(x) CFG.TravelFar = x end)
         readout(v, function() return P.route and P.route.words() or "route     -" end)
         heading2(v, "the boat")
         sliderRow(v, "Boat speed", 250, 350, 5,
@@ -19862,6 +20289,14 @@ local function buildUI()
             "Off: wait in this one",
             function() return CFG.HuntHop end,
             function(x) CFG.HuntHop = x end)
+        switchRow(v, "The God's Chalice stops every hop",
+            "On: with a chalice on you no hunt and no hop (leaving loses it). Off: it is ignored - the hunt hops on and the chalice is lost",
+            function() return CFG.ChaliceGuard ~= false end,
+            function(x)
+                CFG.ChaliceGuard = x
+                -- Off: this server's "the chalice came here" is forgotten too.
+                if not x and P.elite then P.elite.chalice = false end
+            end)
         radio(v, 122, {
             { "fewest", "Fewest players first", "fewer hunters" },
             { "most",   "Most players first",   "PvP" },

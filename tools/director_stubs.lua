@@ -6,12 +6,15 @@ local epoch = 0
 local CFG, E, LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY, FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP
 -- LOADING = the game not loaded / your fruits not read yet (P.fruitWait).
 local LOADING
+-- FRUIT_LOADING = a spawn here still streaming in (fruitWanted's second answer).
+local FRUIT_LOADING = false
 local function reset()
     CFG = { Hunt = true, HuntKind = "elite", HuntHop = true }
     E = { chalice = false, used = false, lookStart = NOW - 10, note = "", why = nil }
     LOG, HOLD, FRUIT, BERRY, ELITE_BUSY, RECIPE_BUSY = {}, false, nil, nil, false, false
     FLOWER_BUSY, FLOWER_WHY, FLOWER_KEEP, KEEP = false, nil, nil, false
     LOADING = false
+    FRUIT_LOADING = false
 end
 reset()
 local function log(s) table.insert(LOG, s) end
@@ -22,7 +25,7 @@ local function keepHold() if KEEP then log("keep hold") end return KEEP end
 local function lookAgain() E.lookStart = NOW end
 local function readProgress() end
 local function berryCounts() end
-local function fruitWanted() return FRUIT end
+local function fruitWanted() return FRUIT, FRUIT_LOADING end
 local function grabFruit(f) log("grab " .. f.orig) end
 local function berryWanted() return BERRY end
 local function grabBerry(b) log("berry " .. b.names[1]) end

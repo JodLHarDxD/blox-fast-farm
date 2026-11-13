@@ -370,6 +370,10 @@ local NEW_OK = { MirageJob = true,
     FruitKeepValue = true,                    -- 2026-10-25: a fruit too good to lose, held safe
     TravelHome = true,                        -- 2026-10-25: the Home button on a long trip (ROUTES)
     TravelRoutes = true,                      -- 2026-10-31: every long trip routed (Travel & boat)
+    TravelFar = true,                         -- 2026-11-13: a door asked from where you stand (Travel & boat)
+    FruitSkipFull = true,                     -- 2026-11-13: a fruit your storage is full of is left (Fruits)
+    ChaliceGuard = true,                      -- 2026-11-13: the God's Chalice stops every hop (Servers & team)
+    HalloweenRareOnly = true,                 -- 2026-11-13: only the rare (seed) pumpkin (Halloween)
     HalloweenPumpkins = true, HalloweenRareFirst = true,  -- 2026-10-31: the Halloween hunt's page
     HalloweenDoors = true, HalloweenBoss = true,
     HalloweenReturn = true, HalloweenTour = true,

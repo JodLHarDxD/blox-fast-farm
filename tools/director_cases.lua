@@ -78,6 +78,16 @@ check("flower picked: hop, this server kept away 600 s longer", got == "flower |
 reset() CFG.HuntKind = "berry" CFG.HuntHop = false
 check("hop off: wait here", run() == "" and E.note:find("waiting", 1, true))
 
+-- A SPAWN STILL LOADING (2026-11-13: the Shadow, 123 parts, read before one
+-- mesh had arrived): no grab, and above all NO HOP away from it.
+reset() CFG.HuntKind = "fruit" FRUIT_LOADING = true
+got = run()
+check("fruit hunt, a spawn still loading: held - no grab, no hop", got == "", got)
+check("...and it says so", string.find(tostring(E.note), "still loading", 1, true) ~= nil, E.note)
+reset() CFG.HuntKind = "fruit"
+got = run()
+check("...nothing loading, nothing worth it: hop as before", got == "hop: no fruit worth it here", got)
+
 -- SEA TRAVEL (user, 2026-10-10): the sea step with its kind, nothing else, never a hop
 reset() CFG.HuntKind = "sail" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
 got = run()

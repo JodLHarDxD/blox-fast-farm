@@ -581,6 +581,43 @@ end
 check("a spawn's shape log says what is inside its Fruit model (mesh names and ids)",
     printed("inside Fruit: Meshes/dragon_12:MeshPart m=rbxassetid://111"))
 
+-- STILL ARRIVING (2026-11-13: "it does not recognise the Shadow though I took
+-- it many times"). The game marks a spawn whose parts are still streaming in
+-- with ExpectedDescendants; read then it has no mesh, so no name.
+do
+    fresh()
+    local store = P.FRUIT_LOOKS
+    P.looksLearn(store, { "m9001", "m9002", "m9003" }, "Shadow-Shadow")
+    local s = spawnOf({ inst("RootPart", "Part"), inst("wing.L", "Bone") })
+    s.attrs.ExpectedDescendants = 123
+    local g = P.groundFruit(s)
+    check("the Shadow at first sight (123 parts expected, none of its meshes here): no name, and LOADING",
+        g ~= nil and g.orig == nil and g.loading == true, g and tostring(g.orig) .. " " .. tostring(g.loading))
+    -- one of its meshes has arrived: its look already names it
+    s.kids.Fruit.kids["Cube.013"] = inst("Cube.013", "MeshPart", { mesh = 9001 })
+    g = P.groundFruit(s)
+    check("...one mesh in: named by it, no longer loading for the hunt", g.orig == "Shadow-Shadow" and g.loading == false,
+        tostring(g.orig))
+    -- all of it arrived, the game cleared its mark
+    s.kids.Fruit.kids["Cube.016"] = inst("Cube.016", "MeshPart", { mesh = 9002 })
+    s.attrs.ExpectedDescendants = nil
+    g = P.groundFruit(s)
+    check("...all in: the Shadow, by its look", g.orig == "Shadow-Shadow" and g.how == "look learned" and g.loading == false)
+    -- a fruit never learned, complete: unknown, NOT loading (nothing to wait for)
+    local new = spawnOf({ inst("Blob", "MeshPart", { mesh = 7777 }) })
+    g = P.groundFruit(new)
+    check("a complete spawn whose look was never learned: unknown, not loading", g.orig == nil and g.loading == false)
+    -- no mark from the game, but not one mesh yet: nothing to name it by = loading
+    local bare = spawnOf({ inst("RootPart", "Part") })
+    g = P.groundFruit(bare)
+    check("no mesh at all yet (whatever its marks say): loading", g.orig == nil and g.loading == true)
+    -- a player's drop carries its name: never loading
+    local d = dropOf("Spin-Spin", {})
+    d.attrs.ExpectedDescendants = 50
+    g = P.groundFruit(d)
+    check("a drop with its name on it: never loading", g.orig == "Spin-Spin" and g.loading == false)
+end
+
 -- ---------------------------------------------------------------- THE ORDER, AND BREAKING
 fresh({ at = 10 })
 LIGHT.attrs.MoonPhase = 3

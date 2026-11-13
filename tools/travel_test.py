@@ -3,8 +3,8 @@ script goes through the portals and the shortest path"), the real flyTo cut
 out of fast_farm.lua every run and run in luau.exe: a long trip with no
 options is routed; portal = false never; CFG.TravelRoutes off = only a trip
 that asks; a short one never; a flight inside a route (into a pad) is not
-routed again; a route that errors is said and the trip goes on; the First /
-Second Sea's requestEntrance leg still tried there, not in the Third.
+routed again; a route that errors is said and the trip goes on; every sea
+is routed the same way (the old requestEntrance leg is gone).
 
 usage: python tools/travel_test.py [path-to-luau.exe]
 """

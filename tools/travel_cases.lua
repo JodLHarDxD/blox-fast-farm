@@ -9,7 +9,7 @@ local TIKI = v3(-16000, 20, 600)
 local HYDRA = v3(5300, 1000, 100)
 local function reset()
     POS, SEA, epoch = TIKI, 3, 0
-    ROUTES, NESTED, BOOM, MOVE_TO, LEGS, SAID = {}, false, false, nil, 0, {}
+    ROUTES, NESTED, BOOM, MOVE_TO, SAID = {}, false, false, nil, {}
     CFG.TravelRoutes = true
     P.inRoute = false
     stats.flights, stats.hops = 0, 0
@@ -65,14 +65,12 @@ flyTo(HYDRA)
 check("moved next to the goal: an instant hop the rest, no flight", stats.flights == 0 and stats.hops == 1,
     string.format("flights %d hops %d", stats.flights, stats.hops))
 
--- The Third Sea has no requestEntrance leg; the First / Second still try it.
-reset()
-flyTo(HYDRA)
-check("Third Sea, route did nothing: no requestEntrance leg", LEGS == 0, LEGS)
+-- Every sea the same way: ROUTES knows the First and Second Sea's doors too
+-- (2026-11-13 - the old requestEntrance leg threw the server's answer away).
 reset()
 SEA = 2
 flyTo(HYDRA)
-check("Second Sea, route did nothing: the portal leg tried", LEGS == 1, LEGS)
+check("Second Sea: routed by ROUTES like the Third (the Cursed Ship's door is a link)", #ROUTES == 1, #ROUTES)
 
 -- Under the sea: never routed (the submarine's way).
 reset()

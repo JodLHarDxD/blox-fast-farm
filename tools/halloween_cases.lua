@@ -28,6 +28,13 @@ check("pick: rare-first off = the nearest", pick and pick.id == "near", pick and
 pick = t.pickPumpkin({ mid, farRare }, Vector3.new(0, 0, 0), 100, true)
 check("pick: a limit holds the ordinary ones, not the rare one", pick and pick.id == "rare", pick and pick.id)
 check("pick: nothing within the limit = nil", t.pickPumpkin({ mid }, Vector3.new(0, 0, 0), 100, true) == nil)
+-- ONLY THE RARE ONE (user, 2026-11-13: "I want the seeds - only that pumpkin")
+pick = t.pickPumpkin({ near, farRare, mid }, Vector3.new(0, 0, 0), nil, true, true)
+check("rare only: the rare one, from any distance", pick and pick.id == "rare", pick and pick.id)
+check("rare only: no rare one here = nil, however near an ordinary one is",
+    t.pickPumpkin({ near, mid }, Vector3.new(0, 0, 0), nil, true, true) == nil)
+check("rare only holds with rare-first off too", t.pickPumpkin({ near }, Vector3.new(0, 0, 0), nil, false, true) == nil
+    and (t.pickPumpkin({ near, farRare }, Vector3.new(0, 0, 0), nil, false, true) or {}).id == "rare")
 
 local from = Vector3.new(0, 0, 0)
 local doorsL = {
@@ -132,6 +139,28 @@ rare5:Destroy()
 M.step(1)
 check("rare: then the ordinary one", near5:GetAttribute("PumpkinState") == "Smashed")
 near5:Destroy()
+
+-- ---------------------------------------------------------------- 5c. ONLY THE RARE ONE
+CFG.HalloweenRareOnly = true
+local near6 = pumpkin(Vector3.new(ROOT.Position.X + 20, 10, 0))
+local rare6, rareBody6 = pumpkin(Vector3.new(ROOT.Position.X + 2500, 10, 0), { rare = true })
+local rareTally = M.tally.rare
+check("rare only: busy on the rare one", M.step(1) == true and M.tally.rare == rareTally + 1
+    and (ROOT.Position - rareBody6.Position).Magnitude < 8, M.tally.rare)
+rare6:Destroy()
+local rh6 = LOG.rh
+local r6 = M.step(1)
+check("rare only: the ordinary one next to you is left alone", near6:GetAttribute("PumpkinState") == "Idle" and LOG.rh == rh6,
+    tostring(near6:GetAttribute("PumpkinState")))
+check("rare only: no rare one left = false (the director takes the next server)", r6 == false, tostring(r6))
+check("rare only: why says so, and how many ordinary ones it left", type(M.why) == "string"
+    and string.find(M.why, "no rare pumpkin here (1 ordinary left alone)", 1, true) ~= nil, M.why)
+CFG.HalloweenTour = false
+check("rare only, 'next server' off: waits here for one", M.step(1) == true
+    and string.find(STATUS.line, "waiting", 1, true) ~= nil and near6:GetAttribute("PumpkinState") == "Idle", STATUS.line)
+CFG.HalloweenTour = true
+CFG.HalloweenRareOnly = false
+near6:Destroy()
 
 -- ---------------------------------------------------------------- 6. SEA FLOOR, ALREADY SMASHED
 local gray = pumpkin(Vector3.new(ROOT.Position.X + 30, 10, 0), { color = { R = 0.5, G = 0.5, B = 0.5 } })

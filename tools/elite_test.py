@@ -15,8 +15,12 @@ run in luau.exe:
   director  huntStep(): the chalice stops everything, in every hunt; ONLY
          the hunt switched on runs; nothing for it here = hop (a moment
          after a join first); hop off = wait
-  portal P.portalPick(): the game's portal that lands nearest, only when it
-         saves 5 s+ over flying; one that refused is left till its time
+  fruitwant  fruitWanted(): a spawn still loading (ExpectedDescendants) is
+         held for, 8 s at most, never gone for as "unknown" - the user's
+         Shadow; one your storage is full of (FruitCap) is left and said,
+         unless too good to lose; storage read again after a store
+  chalice  holdingChalice(): the chalice holds you unless its switch
+         (CFG.ChaliceGuard, Servers & team) is off
 
 usage: python tools/elite_test.py [path-to-luau.exe]
 """
@@ -52,7 +56,29 @@ join = cut("-- One join. Returns only if", "-- THE HOP.")
 recipe = cut("-- AURA RECIPES: the Barista Cousin (Second", "P.cousinOffer = cousinOffer")
 sword = cut("-- THE LEGENDARY SWORD DEALER (user", "P.swordOffer = swordOffer")
 store = cut("        -- StoreFruit for a physical fruit you carry", "        -- Fly onto it, touch it, never left")
-portal = cut("-- PORTALS (user, 2026-10-24", "P.portalBad = {}")
+
+fruitwant = cut("        -- -> the fruit to go for; or nil, true = one here is still loading", "        P.fruitWanted = fruitWanted")
+fruitrules = cut("-- STILL ARRIVING (user, 2026-11-13", "function P.groundFruit(c)")
+chalice = cut("        -- The chalice on you, while you want it kept", "        P.holdingChalice = holdingChalice")
+chalice_world = """
+local CFG = {}
+local CHALICE = "God's Chalice"
+local HAVE = true
+local function findTool(n) return (HAVE and n == CHALICE) and {} or nil end
+"""
+chalice_cases = """
+local all = true
+local function check(name, cond) print((cond and "PASS " or "FAIL ") .. name) if not cond then all = false end end
+check("the chalice on you, the switch never touched: held (no hop)", holdingChalice() == true)
+CFG.ChaliceGuard = true
+check("...switch on: held", holdingChalice() == true)
+CFG.ChaliceGuard = false
+check("the switch OFF (the chalice is ignored): not held - the hunt hops on", holdingChalice() == false)
+CFG.ChaliceGuard = true
+HAVE = false
+check("no chalice on you: not held", holdingChalice() == false)
+print(all and "ALL PASS" or "SOME FAILED")
+"""
 
 runs = [
     ("pure", read("elite_stubs.lua") + pure + read("elite_cases.lua")),
@@ -64,7 +90,9 @@ runs = [
     ("sword", read("elite_stubs.lua") + pure + read("sword_stubs.lua") + sword + read("sword_cases.lua")),
     ("director", read("director_stubs.lua") + director + read("director_cases.lua")),
     ("store", read("store_stubs.lua") + store + read("store_cases.lua")),
-    ("portal", read("portal_stubs.lua") + portal + read("portal_cases.lua")),
+    ("fruitwant", read("elite_stubs.lua") + pure + read("fruitwant_stubs.lua") + fruitrules + fruitwant
+        + read("fruitwant_cases.lua")),
+    ("chalice", chalice_world + chalice + chalice_cases),
 ]
 ok = True
 for name, code in runs:

@@ -20,7 +20,9 @@ local function typeof(x)
 end
 
 local P = {}
-local CFG = { TravelSpeed = 300, TravelHome = true }
+local CFG = { TravelSpeed = 300, TravelHome = true, TravelFar = true }
+local LEVEL = 2600
+local function playerLevel() return LEVEL end
 local NOW = 1000
 local os = { clock = function() return NOW end, time = function() return NOW end }
 local epoch = 0
@@ -85,6 +87,35 @@ local workspace = { _WorldOrigin = { PlayerSpawns = {
     end,
 } } }
 
+-- the doors (the older teleports): their parts under workspace.Map, there
+-- only while you are within MAP_STREAM of them (nil = always).
+local MAP_PARTS, MAP_STREAM = {}, nil
+local function node(path)
+    local n = { path = path }
+    function n:FindFirstChild(name)
+        local child = (self.path == "") and name or (self.path .. "/" .. name)
+        local part, deeper = MAP_PARTS[child], false
+        for k in pairs(MAP_PARTS) do
+            if string.sub(k, 1, #child + 1) == child .. "/" then deeper = true end
+        end
+        if part then
+            if MAP_STREAM and (part.Position - POS).Magnitude > MAP_STREAM then return nil end
+            return part
+        end
+        return deeper and node(child) or nil
+    end
+    function n:IsA() return false end
+    return n
+end
+local function doorPart(path, x, y, z)
+    local p = { Position = v3(x, y, z), Parent = workspace, door = path }
+    function p:IsA(c) return c == "BasePart" or c == "Part" end
+    function p:FindFirstChild() return nil end
+    MAP_PARTS[path] = p
+    return p
+end
+function workspace:FindFirstChild(n) return n == "Map" and node("") or nil end
+
 -- the pads
 local TAGGED = {}
 local function pad(name, x, y, z, px, py, pz)
@@ -119,11 +150,40 @@ local function partnerPivot(m)
     end
     return nil
 end
+-- The doors' server: DOORS = { { entry = where its part stands, ask = what
+-- the client sends for it } }. FAR_OK = it answers from anywhere; DOOR_OK =
+-- it answers when you stand within 60 of the door; DOOR_PULL = it answers,
+-- then pulls you back; SERVER_MOVES = it moves you itself and answers
+-- nothing (the old servers). UNLOCKS = what GetUnlockables says.
+local DOORS, FAR_OK, DOOR_OK, DOOR_PULL, SERVER_MOVES = {}, false, true, false, false
+local UNLOCKS = { DefeatedIndraTrueForm = true, FlamingoAccess = true }
+local HOME_ANSWER = nil
 local function commF()
-    return { InvokeServer = function(_, what)
+    return { InvokeServer = function(_, what, arg)
         table.insert(CALLS, what)
-        if what == "TeleportToSpawn" and HOME_WORKS then
-            HOME_AT, HOME_LAND = NOW + HOME_DELAY, SPAWNS[SPAWN_NAME] + v3(0, 5, 0)
+        if what == "TeleportToSpawn" then
+            if HOME_WORKS then HOME_AT, HOME_LAND = NOW + HOME_DELAY, SPAWNS[SPAWN_NAME] + v3(0, 5, 0) end
+            return HOME_ANSWER
+        end
+        if what == "GetUnlockables" then return UNLOCKS end
+        if what == "requestEntrance" then
+            -- Two doors may be asked for the same spot (both the Mansion's
+            -- and Hydra's lead to the Castle): near = at any of them.
+            local known, near = false, false
+            for _, d in ipairs(DOORS) do
+                if (d.ask - arg).Magnitude < 1 then
+                    known = true
+                    if (POS - d.entry).Magnitude < 60 then near = true end
+                end
+            end
+            if not known then return nil end
+            table.insert(CALLS, near and "ask at the door" or "ask from afar")
+            if FAR_OK or (DOOR_OK and near) then
+                if DOOR_PULL then PULL_TO = { at = NOW + 0.3, pos = POS } end
+                if SERVER_MOVES then POS = arg return nil end
+                return arg
+            end
+            return nil
         end
         return nil
     end }
@@ -139,9 +199,19 @@ local RF = { InvokeServer = function(_, what, arg)
 end }
 local function netRemote(kind, name) return (kind == "RF" and name == "BoatCastleTeleporters") and RF or nil end
 local TOUCHES = 0
+local DOOR_TOUCH_WORKS = false
 local function firetouchinterest(_, hb, state)
     if state ~= 0 then return end
     TOUCHES += 1
+    if hb.door then
+        -- a door's own handler: the question, the answer written
+        if DOOR_TOUCH_WORKS then
+            for _, d in ipairs(DOORS) do
+                if (d.entry - hb.Position).Magnitude < 1 then POS = d.ask end
+            end
+        end
+        return
+    end
     if TOUCH_WORKS then
         local p = partnerPivot(hb.Parent)
         if p then POS = p end

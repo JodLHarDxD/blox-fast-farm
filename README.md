@@ -686,6 +686,36 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Routes through every portal and door, Home again, fruits named once loaded - first test (2026-11-13, build 2026-11-13.1)
+
+**Routes (user: "Floating Turtle to the Haunted Castle it flies straight"; "the Cursed Ship: it flies the far ocean, it should use the door").** Three causes, all read from your own files and logs before any change:
+- Your `bff_routes.json` held `homeOutside: false`: one Home press that did nothing, kept for good. Home was never planned outside a safe zone again. Every such verdict now has a date: Home is tried again after 10 minutes.
+- The Castle's Mansion and Hydra portals were never known. They are the game's older doors, not the tagged pads. Only the Tiki pad had ever been learned.
+- A door answers with the spot to go to, and the game's own client then moves itself there. The script threw that answer away and waited to be moved: `the game did not move you`, every time.
+
+Now every portal and door is known from the start, in every sea: Castle on the Sea <-> Mansion, Hydra, Tiki; the Cursed Ship's door; Flamingo's door; the Sky gate; the whirlpool. What to look for in the console:
+- `[BFF] route: Home -> ..., then fly  ·  ~38 s, straight 46 s` on a long trip.
+- `[BFF] route: the Mansion portal asked from 9000 studs off - through in 0.9 s (the server: Vector3 ...)` = the door answered from where you stood. No flight to it at all.
+- `... not taken (the server: nil ...) - to the door itself`, then `through the Mansion portal in 1.2 s (its touch)` = the server wants you at the door. The far ask is then left for 6 hours.
+- `[BFF] route: straight flight, 12 s  (6 links known here, Home in the plan)` = nothing beat flying, and why.
+- Second Sea, something inside the Cursed Ship: `through the Cursed Ship's door`.
+
+**Please send the `[BFF] route:` lines of one session.** They say what the server answers. That is the one thing no file could tell me.
+
+New switch, Travel & boat: **Ask a far door from where I stand** (on).
+
+**Fruits (user: "it does not recognise the Shadow though I took it many times").** Your log of 13 Nov shows the Shadow first seen with the game's own mark `ExpectedDescendants=123`: its parts were still arriving, no mesh to read yet. With "A spawn I cannot name: take it" on, it was gone for at once. Small fruits (Spin: 3 meshes) were complete and named. That is why some were known and some not.
+- A spawn still loading is waited for, 8 seconds at most: `a fruit at Colosseum is still loading - named before anything is decided`. No hop and no flight until it has a name.
+- A spawn that still had no name when you set off is named when you reach it. One you do not take is left there: `the unknown spawn is Spin $7500 - not one you take - left there`.
+- **Storage.** Your storage size is read from the game (`storage   holds 3 of each fruit` on the Fruits page). With "Store it at once" on, a fruit is stored the moment it is picked up, proven by the count. A fruit you already hold 3 of cannot be stored, so it is left where it lies: `[BFF] fruit: left where it lies - Shadow: your storage is full of it (3/3)`. One too good to lose (20M and up) is still taken and held safe. Switch: **Leave a fruit my storage is full of** (on).
+
+**God's Chalice.** Servers & team: **The God's Chalice stops every hop** (on, as before). Off = the chalice is ignored, the hunt hops on, and a chalice you carry is lost at the next hop.
+
+**Halloween.** New switch: **ONLY the rare pumpkin**. The ordinary ones are left alone. None here = the next server, with "Nothing left: the next server" on (yours was off: turn it on). What a rare smash summons is still fought.
+The boss doors (the Werewolf's "Boss Fight" door, the Hell Rider's hellfire door) are taken as before when one opens in your server. The line now names the door: `through the portal - the boss's domain (door event: Boss Fight)  ·  tagged WerewolfBossDoor 1`. There is no way to see from outside which servers have the Werewolf up, so no hop goes only to those.
+
+Not run in game yet. Tests: route 3 runs (plan, live, doors on your real file), fruit choice, loading, rare-only, chalice. 41 suites pass, 24 of 25 planted breaks caught (the 25th changed nothing).
+
 ## Fruit news: only what you care about. Pickups proven by the count - first test (2026-11-08, build 2026-11-08.2)
 
 **News (user: "the important fruits I wanna know before, and the unimportant fruits I don't even need to know").** One server had Eagle, Flame, Rocket, Rubber +5, and a T-Rex spawn was never seen. Now only the fruits you care about make news:

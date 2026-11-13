@@ -11,6 +11,8 @@ local HYDRA_TOWN = v3(5300, 1000, 100)
 local function reset()
     R.pads, R.homes, R.bad, R.locked = {}, {}, {}, {}
     R.homeSecs, R.portalSecs, R.homeOutside, R.homeBad = 6, 2.5, nil, 0
+    R.homeOutNo, R.farYes, R.farNo, R.farBad, R.farMiss, R.farSecs = nil, nil, nil, 0, false, 1.5
+    HOME_ANSWER = nil
     TAGGED = { CASTLE_HYDRA, CASTLE_MANSION, CASTLE_TIKI, HYDRA, MANSION, TIKI }
     POS, SAFE, SEA, SPAWN_NAME = SEA_OF_TEARS, false, 3, "Castle on the Sea"
     HOME_WORKS, HOME_DELAY, HOME_AT, PULL_TO = true, 5, nil, nil
@@ -86,12 +88,29 @@ check("already Home: true, nothing pressed", R.goHome(0) == true and #CALLS == 0
 -- the Home button does nothing from outside a safe zone
 reset()
 HOME_WORKS = false
+local tHome = NOW
 check("Home did not move you: false", R.goHome(0) == false)
-check("...gave up after 15 s", NOW >= 1015)
-check("...remembered: only from a safe zone now", R.homeOutside == false)
+check("...gave up after its countdown and a little (9.5 s, not 15)", NOW - tHome >= 9 and NOW - tHome < 11, NOW - tHome)
+check("...remembered WITH ITS DATE: not from outside a safe zone for now", R.homeOutNo ~= nil
+    and math.abs(R.homeOutNo - NOW) < 1, R.homeOutNo)
+check("...kept in the file with that date", FILES["bff_routes.json"].homeOutNo == R.homeOutNo
+    and FILES["bff_routes.json"].homeOutside == nil)
 NOW += 200
-check("...out at sea: not planned", R.net(false).home == nil)
+check("...3 min later, out at sea: not planned", R.net(false).home == nil)
 check("...in a safe zone: planned", R.net(true).home ~= nil)
+check("...and it says why", string.find(tostring(R.homeWhy(false)), "outside a safe zone", 1, true) ~= nil, R.homeWhy(false))
+-- THE USER'S BUG (2026-11-13): that verdict was for ever - Floating Turtle
+-- -> Haunted Castle flew straight for days. It lasts 10 min.
+NOW += 420
+check("...10 min later, out at sea: planned again (no verdict is for ever)", R.net(false).home ~= nil)
+HOME_WORKS = true
+check("...and this time it takes you", R.goHome(0) == true and R.homeOutNo == nil and R.homeOutside == true)
+-- what the server answered is said
+reset()
+HOME_WORKS, HOME_ANSWER = false, "You are in combat"
+R.goHome(0)
+check("Home did nothing: the server's answer is in the log", string.find(table.concat(SAID, "|"), "You are in combat", 1, true) ~= nil,
+    table.concat(SAID, "|"))
 reset()
 HOME_WORKS, SAFE = false, true
 R.goHome(0)
@@ -210,6 +229,6 @@ reset()
 R.scan()
 local w = R.words()
 check("panel: the Home Point and the pads known", string.find(w, "home      Castle on the Sea", 1, true)
-    and string.find(w, "pads 6 known", 1, true), w)
+    and string.find(w, "links here 6", 1, true), w)
 
 realPrint(all and "ALL PASS" or "SOME FAILED")

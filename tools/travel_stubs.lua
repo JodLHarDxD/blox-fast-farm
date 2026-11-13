@@ -41,10 +41,6 @@ local flying, lastWritten = false, nil
 local moveEnabled = false
 local RunService = { Heartbeat = { Wait = function() return 0.03 end } }
 
--- The First and Second Sea's entrances.
-local LEGS = 0
-local function portalLeg() LEGS += 1 return false end
-
 -- ROUTES: records each long trip handed to it. NESTED = it flies inside
 -- (as R.ride does, to a pad); BOOM = it errors; MOVE_TO = where it puts you.
 local ROUTES, NESTED, BOOM, MOVE_TO = {}, false, false, nil
