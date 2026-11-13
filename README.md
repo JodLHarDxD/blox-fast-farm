@@ -686,6 +686,18 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Halloween: a door's conversation finished by itself - first test (2026-11-13, build 2026-11-13.2)
+
+**User: "many conversations - you have to tap or select an option to end it, otherwise you cannot go on to another."** No probe was needed: the dump of 7 Nov holds every door event's script. They all talk through the game's one dialogue window and wait on it. The script now drives that window like your taps:
+- a plain line is tapped through
+- of a choice, the **safe** option is picked (your pick): the candy, "Nevermind", "can you spare any?". Never rob, roll, play, teleport or pay Candy Corn.
+- what jumps out is fought, as before
+
+Each pick is in the console: `[BFF] halloween: door talk - picked "Just the candy, please"  (of: One free roll! | Just the candy, please)`.
+If the game's dialogue cannot be driven on your client, one line says so (`cannot drive the game's dialogue here (...)`) and the game's own timeouts end the talk as before. **Send that line if you see it.**
+Not covered: the mini-games that are not a conversation (Ghost Chase, Mystery Hall's questions). Those still end on the game's own timer.
+Switch: Halloween -> **Finish a door's conversation** (on). Not run in game yet.
+
 ## Routes through every portal and door, Home again, fruits named once loaded - first test (2026-11-13, build 2026-11-13.1)
 
 **Routes (user: "Floating Turtle to the Haunted Castle it flies straight"; "the Cursed Ship: it flies the far ocean, it should use the door").** Three causes, all read from your own files and logs before any change:

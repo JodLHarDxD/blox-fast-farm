@@ -28,6 +28,51 @@ check("pick: rare-first off = the nearest", pick and pick.id == "near", pick and
 pick = t.pickPumpkin({ mid, farRare }, Vector3.new(0, 0, 0), 100, true)
 check("pick: a limit holds the ordinary ones, not the rare one", pick and pick.id == "rare", pick and pick.id)
 check("pick: nothing within the limit = nil", t.pickPumpkin({ mid }, Vector3.new(0, 0, 0), 100, true) == nil)
+-- A DOOR'S CONVERSATION: the safe option (the labels are the game's own, from the dump)
+local function picked(labels) return labels[t.talkPick(labels)] end
+check("talk: the Fruit Dealer - beg, never rob", picked({ "Give me those fruits!", "Wow, you're rich. Can you spare any?" })
+    == "Wow, you're rich. Can you spare any?")
+check("talk: Free Roll - the candy, not the roll", picked({ "One free roll!", "Just the candy, please" }) == "Just the candy, please")
+check("talk: Tarot - Nevermind, not the game", picked({ "Play matching!", "Nevermind" }) == "Nevermind")
+check("talk: never pays Candy Corn", picked({ "Offer some Candy Corn", "T-T-Trick or Treat..!" }) == "T-T-Trick or Treat..!")
+check("talk: never the teleport", picked({ "Teleport", "Trick or Treat!" }) == "Trick or Treat!")
+check("talk: the Gravedigger - not more power", picked({ "Focus more power!", "Uh... sure, I'll take one?" }) == "Uh... sure, I'll take one?")
+check("talk: nothing safe or risky to tell apart: the first", picked({ "Oni (Left)", "Celestial (Right)" }) == "Oni (Left)")
+check("talk: one option: it", picked({ "TRICK OR TREAT!" }) == "TRICK OR TREAT!")
+check("talk: no option: nothing", t.talkPick({}) == nil)
+-- the window driven: a line tapped, a choice picked, at a tapping pace
+do
+    local log = {}
+    local page = { _options = {} }
+    local DC = { Active = true, advance = function() table.insert(log, "advance") end,
+        select = function(o) table.insert(log, "select " .. o._text) end,
+        getActiveDialogue = function() return { getCurrent = function() return page end } end }
+    M.dc, M.talkPage, M.talkAt = DC, nil, nil
+    check("talk: a new line is shown a moment first", t.talk() == false and #log == 0)
+    T += 1
+    check("talk: then tapped", t.talk() == true and log[1] == "advance")
+    check("talk: not twice in the same instant", t.talk() == false and #log == 1)
+    page = { _options = { { _text = "Give me those fruits!" }, { _text = "Can you spare any?" } } }
+    T += 1
+    t.talk()
+    T += 1
+    check("talk: a choice - the safe one selected", t.talk() == true and log[2] == "select Can you spare any?", log[2])
+    page = { _options = { { _text = "Just the candy, please", _locked = true }, { _text = "One free roll!" } } }
+    T += 1
+    t.talk()
+    T += 1
+    t.talk()
+    check("talk: a locked option is never picked", log[3] == "select One free roll!", log[3])
+    DC.Active = false
+    T += 2
+    check("talk: no window open: nothing", t.talk() == false and #log == 3)
+    DC.Active = true
+    CFG.HalloweenTalk = false
+    T += 2
+    check("talk: the switch off: the window is left alone", t.talk() == false and #log == 3)
+    CFG.HalloweenTalk = true
+    M.dc = nil
+end
 -- ONLY THE RARE ONE (user, 2026-11-13: "I want the seeds - only that pumpkin")
 pick = t.pickPumpkin({ near, farRare, mid }, Vector3.new(0, 0, 0), nil, true, true)
 check("rare only: the rare one, from any distance", pick and pick.id == "rare", pick and pick.id)

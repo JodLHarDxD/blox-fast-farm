@@ -374,6 +374,7 @@ local NEW_OK = { MirageJob = true,
     FruitSkipFull = true,                     -- 2026-11-13: a fruit your storage is full of is left (Fruits)
     ChaliceGuard = true,                      -- 2026-11-13: the God's Chalice stops every hop (Servers & team)
     HalloweenRareOnly = true,                 -- 2026-11-13: only the rare (seed) pumpkin (Halloween)
+    HalloweenTalk = true,                     -- 2026-11-13: a door's conversation finished (Halloween)
     HalloweenPumpkins = true, HalloweenRareFirst = true,  -- 2026-10-31: the Halloween hunt's page
     HalloweenDoors = true, HalloweenBoss = true,
     HalloweenReturn = true, HalloweenTour = true,

@@ -384,6 +384,8 @@ local CFG = {
     HalloweenRareOnly  = false,      -- ONLY the rare one: the ordinary pumpkins are left; none here = the next server
     HalloweenDoors     = true,       -- knock at the Harvest Moon; the game's teleport there accepted
     HalloweenBoss      = true,       -- a hellfire door: through its portal to the Hell Rider
+    -- (user, 2026-11-13: "many conversations - you have to tap or select an option to end it")
+    HalloweenTalk      = true,       -- a door's conversation: tapped through, the SAFE option picked
     HalloweenReturn    = true,       -- the moon over: the game's teleport back accepted
     HalloweenTour      = true,       -- every pumpkin here smashed: the next server (off = wait for them)
     HalloweenWatch     = false,      -- RECORD what you smash by hand (watch only - touches nothing)
@@ -704,7 +706,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-13.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-13.2" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -13834,6 +13836,83 @@ do
             return near or (dp and dp:IsA("BasePart") and dp.Position) or nil
         end
 
+        -- A DOOR'S CONVERSATION (user, 2026-11-13: "you have to tap or select
+        -- an option to continue or end the conversation, otherwise you cannot
+        -- go on to another"; his pick: SAFE - finish fast). Every door event
+        -- (the dump of 2026-11-07: Fruit Dealer, Tarot, Free Roll, Zer0, parlus
+        -- ...) talks through the game's one DialogueController and waits on it:
+        -- a line holds the event until tapped or timed out, a choice until
+        -- picked. So that one window is driven, as a player's taps:
+        --   a line        DialogueController.advance()
+        --   a choice      the SAFE option, DialogueController.select(option):
+        --                 the one that takes the sure thing and ends it
+        --                 ("Just the candy, please", "Nevermind", "can you
+        --                 spare any?") - never robbing, rolling, playing,
+        --                 teleporting or paying ("Give me those fruits!",
+        --                 "One free roll!", "Offer some Candy Corn").
+        -- The game's own event script then goes on by itself (its remotes,
+        -- its reward). talkPick is pure: labels -> the index to pick.
+        local TALK_AVOID = { "give me", "roll", "focus", "play", "teleport", "offer", "give to", "rob", "grab",
+            "fight", "accept", "bet", "gamble", "more" }
+        local TALK_SAFE = { "candy", "nevermind", "never mind", "spare", "trick or treat", "ignore", "sure",
+            "leave", "no thanks", "done", "decline", "bye", "just" }
+        local function talkPick(labels)
+            local best, bs = nil, -math.huge
+            for i, l in ipairs(labels) do
+                local low, s = string.lower(tostring(l)), 0
+                for _, w in ipairs(TALK_SAFE) do
+                    if string.find(low, w, 1, true) then s += 1 break end
+                end
+                for _, w in ipairs(TALK_AVOID) do
+                    if string.find(low, w, 1, true) then s -= 2 break end
+                end
+                if s > bs then best, bs = i, s end
+            end
+            return best
+        end
+        -- One look at the window. true = it tapped or picked.
+        local function talk()
+            if CFG.HalloweenTalk == false then return false end
+            local ok, did = pcall(function()
+                local DC = M.dc or require(RS:FindFirstChild("DialogueController"))
+                M.dc = DC
+                if not DC.Active then return false end
+                local dlg = DC.getActiveDialogue()
+                local cur = dlg and dlg:getCurrent()
+                if not cur then return false end
+                local now = os.clock()
+                -- Each page shown a moment first (the game's scripts start
+                -- their timers on it), then at a tapping pace.
+                if M.talkPage ~= cur then M.talkPage, M.talkSeen = cur, now end
+                if now - M.talkSeen < 0.7 or now - (M.talkAt or 0) < 0.5 then return false end
+                M.talkAt = now
+                local opts = cur._options or {}
+                if #opts == 0 then
+                    DC.advance()
+                    return true
+                end
+                local labels, open = {}, {}
+                for _, o in ipairs(opts) do
+                    if not o._locked then
+                        table.insert(open, o)
+                        table.insert(labels, tostring(o._text or ""))
+                    end
+                end
+                local i = talkPick(labels)
+                if not i then return false end
+                M.tally.talks = (M.tally.talks or 0) + 1
+                print(string.format("[BFF] halloween: door talk - picked \"%s\"  (of: %s)", labels[i], table.concat(labels, " | ")))
+                DC.select(open[i])
+                return true
+            end)
+            if not ok and not M.talkErr then
+                M.talkErr = true
+                print("[BFF] halloween: door talk - cannot drive the game's dialogue here (" .. tostring(did)
+                    .. ") - its own timeouts end it")
+            end
+            return ok and did == true
+        end
+
         -- ---------- one step ----------
         -- true = busy here; false = nothing here (M.why says why; the
         -- director takes the next server, or waits with hop off).
@@ -13881,6 +13960,10 @@ do
 
             -- 2. A door's event running: the treat, the portal, or its end.
             local moon = moonUp()
+            -- Its conversation tapped through (and for 20 s after its event
+            -- was last seen: a closing line outlives the event).
+            if M.door then M.doorSeen = now end
+            if now - (M.doorSeen or -1e9) < 20 then talk() end
             if M.door then
                 local d = M.door
                 if d.done or not (d.inst and d.inst.Parent) or now - d.at > DOOR_MAX then
@@ -14018,7 +14101,7 @@ do
         M._t = {
             pumpkinName = pumpkinName, pickDoor = pickDoor, soonestCool = soonestCool,
             idle = idle, variant = variant, pickPumpkin = pickPumpkin, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
-            kindDropped = kindDropped,
+            kindDropped = kindDropped, talkPick = talkPick, talk = talk,
         }
     end
     build()
@@ -18845,6 +18928,10 @@ local function buildUI()
         switchRow(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
             function() return CFG.HalloweenDoors ~= false end,
             function(x) CFG.HalloweenDoors = x end)
+        hairline(v)
+        switchRow(v, "Finish a door's conversation", "Lines tapped through; of its choices the safe one (the candy, \"Nevermind\") - never rob, roll, play or pay",
+            function() return CFG.HalloweenTalk ~= false end,
+            function(x) CFG.HalloweenTalk = x end)
         hairline(v)
         switchRow(v, "Boss doors (Werewolf, Hell Rider)", "A boss door's portal: through it and fight",
             function() return CFG.HalloweenBoss ~= false end,
