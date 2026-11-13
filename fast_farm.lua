@@ -1442,12 +1442,21 @@ function P.fruitFull(orig, stock, cap, countFn)
     local n = tonumber(countFn(stock, orig)) or 0
     return n >= cap, n, cap
 end
-function P.fruitCapNow()
+-- The size, most sure first: the number the game itself gave with a "storage
+-- full" (this server); else player.Data.FruitCap - never under what you
+-- demonstrably hold of one fruit (stock), should that value mean something
+-- else than read here. -> the cap, where it is from.
+function P.fruitCapNow(stock)
+    if P.fruitCapSeen then return P.fruitCapSeen, "the game's 'storage full' answer" end
     local ok, v = pcall(function() return player.Data.FruitCap.Value end)
     v = ok and tonumber(v) or nil
-    if v and v > 0 then return v, "the game's FruitCap" end
-    if P.fruitCapSeen then return P.fruitCapSeen, "the game's 'storage full' answer" end
-    return nil, "not read"
+    if not (v and v > 0) then return nil, "not read" end
+    local most = 0
+    for _, c in pairs(type(stock) == "table" and stock or {}) do
+        most = math.max(most, tonumber(c) or 0)
+    end
+    if most > v then return most, "what you hold of one fruit (FruitCap said less)" end
+    return v, "the game's FruitCap"
 end
 
 function P.groundFruit(c)
@@ -7656,9 +7665,11 @@ do
             local total = 0
             for _, c in pairs(stored or {}) do total += tonumber(c) or 0 end
             e.fruitInv = { carried = P.carriedFruits(), stored = stored and total or nil }
-            print(string.format("[BFF] fruit: ready after %.0fs%s - you carry %d fruit%s, your storage %s", waited,
+            local cap, capFrom = P.fruitCapNow(stored)
+            print(string.format("[BFF] fruit: ready after %.0fs%s - you carry %d fruit%s, your storage %s  ·  %s", waited,
                 loaded and "" or " (NOT loaded - going anyway)", e.fruitInv.carried, (e.fruitInv.carried == 1) and "" or "s",
-                stored and string.format("holds %d (%s)", total, tostring(src)) or "was not read"))
+                stored and string.format("holds %d (%s)", total, tostring(src)) or "was not read",
+                cap and string.format("%d of each fruit fit (%s)", cap, capFrom) or "its size per fruit not read"))
             return false
         end
 
@@ -7685,7 +7696,7 @@ do
                     local stock = sf and (sf())
                     if stock then e.fruitStock, e.fruitStockDirty = stock, false end
                 end
-                local cap = P.fruitCapNow()
+                local cap = P.fruitCapNow(e.fruitStock)
                 e.fullSaid = e.fullSaid or setmetatable({}, { __mode = "k" })
                 take = {}
                 for _, f in ipairs(list) do
@@ -7927,7 +7938,7 @@ do
                     f.price = priceOf(g2.orig)
                     local isFull = CFG.FruitSkipFull ~= false and CFG.FruitStore
                         and not P.isKeeper(f.orig, CFG.FruitKeepValue)
-                        and P.fruitFull(f.orig, (E :: any).fruitStock, (P.fruitCapNow()), P.storedCount)
+                        and P.fruitFull(f.orig, (E :: any).fruitStock, (P.fruitCapNow((E :: any).fruitStock)), P.storedCount)
                     if isFull or not pickFruit({ f }, CFG.FruitMinPrice, CFG.FruitPlayerDrops, false, P.fruitChoice) then
                         E.fruitSkip[f.tool] = os.clock() + 600
                         E.fruitNote = string.format("the unknown spawn is %s - %s - left there", fruitWords(f),
@@ -18284,7 +18295,7 @@ local function buildUI()
             for _ in pairs(P.FRUIT_LOOKS or {}) do n += 1 end
             table.insert(lines, string.format("looks     %d learned", n))
             do
-                local cap, how = P.fruitCapNow()
+                local cap, how = P.fruitCapNow(P.elite and (P.elite :: any).fruitStock)
                 table.insert(lines, cap and string.format("storage   holds %d of each fruit (%s)", cap, how)
                     or "storage   its size is not read yet")
             end

@@ -74,6 +74,23 @@ check("storage size not read: nothing is left for being full", fruitWanted() == 
 -- ...then the game's own "storage full" answer gave it
 P.fruitCapSeen = 3
 check("...the game's 'storage full' answer gave the size: left", fruitWanted() == nil)
+-- FruitCap read as LESS than what you hold of one fruit: it means something
+-- else than a size per fruit - what you hold is the floor
+fresh()
+CAP = 2
+LIST = { spawn("Shadow-Shadow", 2900000) }
+check("FruitCap says 2 but you hold 3 Shadows: the size is at least 3 (full: left)", fruitWanted() == nil
+    and (P.fruitCapNow(STOCK)) == 3, (P.fruitCapNow(STOCK)))
+STOCK = { ["Shadow-Shadow"] = 1, ["Spin-Spin"] = 3 }
+LIST = { spawn("Shadow-Shadow", 2900000) }
+E.fruitStockDirty = true
+NOW += 6
+check("...and a fruit you hold 1 of is taken under it", fruitWanted() == LIST[1])
+-- the game's own answer beats FruitCap
+fresh()
+CAP = 9
+P.fruitCapSeen = 3
+check("the game's 'storage full' number beats FruitCap", (P.fruitCapNow(STOCK)) == 3)
 -- storage not readable: nothing is left for it
 fresh()
 STOCK = nil
