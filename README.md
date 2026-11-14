@@ -686,6 +686,21 @@ Asked: "after the volcano event there is a chance of a physical Dragon fruit. St
 2. If you already have a Dragon in storage and your storage holds 1 of each: expect `storage full - it holds 1 of each fruit`, no respawn, no hop.
 3. Any `the storage count is not readable here` line: send it (the confirmation then rests on the fruit leaving your backpack only).
 
+## Halloween: what a door sends is killed, nothing else; the ghost chased; candy walked through - first test (2026-11-14, build 2026-11-14.1)
+
+From your log of 13 Nov and the dumped event scripts:
+- **"The Snow Yeti door: the snow bandits at the end are not killed."** The 2026 event puts no mark on what a door sends (the old `LocalEnemy` is in none of the 154 scripts), so nothing a door sent counted as yours.
+- **"It attacks the jungle pirates at Floating Turtle, the factory workers at the cafe."** The only rule left was "in the boss's domain everyone is yours". The game's portal sound switched that on for anyone's boss door, wherever you stood. Your log shows it at 18:08: the sound came again after you were back on the island.
+- **The door talk picked blind.** The log shows `picked "table: 0x..."`: the game keeps an option's text inside a table. The safe pick now reads the real label.
+
+Now:
+- **What your door sends** is known by its birth: it appeared after your door opened, right at the door, or near you and not one of the island's own species. All of it is fought, chased where it runs. First sight of each kind is in the console with whatever marks it carries: `[BFF] halloween: your door sent Snow Bandit - fought  (its marks: ...)`. **Send me that line**: a real mark would make this exact.
+- **The island's own NPCs** are left alone. The boss's domain counts only when the portal moved you, and ends the moment you are back.
+- **The ghost that steals your treat** (the "cloud": hit it 3 times) is followed and hit: `the ghost - hit 2 of 3`. If 15 s of swings do not count, one line says so; send it.
+- **Candy on the floor: walked through, not a magnet.** The game's own client hands a piece over when you stand within 7 studs of it, so walking through is certain. A claim sent from afar is the server's to refuse. Every piece's place is readable (a pumpkin's spill, the ghost's, the Great Pumpkin's 500): nearest first, `candy - 37 pieces picked up, 0 still lying`.
+
+Switches, Halloween page: **Chase the ghost**, **Collect candy on the floor** (both on). Not run in game yet. The Sweet Ride car is a conversation: the safe option is picked.
+
 ## Halloween: a door's conversation finished by itself - first test (2026-11-13, build 2026-11-13.2)
 
 **User: "many conversations - you have to tap or select an option to end it, otherwise you cannot go on to another."** No probe was needed: the dump of 7 Nov holds every door event's script. They all talk through the game's one dialogue window and wait on it. The script now drives that window like your taps:

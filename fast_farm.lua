@@ -386,6 +386,10 @@ local CFG = {
     HalloweenBoss      = true,       -- a hellfire door: through its portal to the Hell Rider
     -- (user, 2026-11-13: "many conversations - you have to tap or select an option to end it")
     HalloweenTalk      = true,       -- a door's conversation: tapped through, the SAFE option picked
+    -- (user, 2026-11-14: "the cloud runs around, hit it 3 times - my character stands still";
+    --  "a magnet, or go through all of the candies")
+    HalloweenChase     = true,       -- the ghost that stole your treat: followed and hit until it drops it
+    HalloweenCandy     = true,       -- candy lying on the floor: walked through, every piece
     HalloweenReturn    = true,       -- the moon over: the game's teleport back accepted
     HalloweenTour      = true,       -- every pumpkin here smashed: the next server (off = wait for them)
     HalloweenWatch     = false,      -- RECORD what you smash by hand (watch only - touches nothing)
@@ -706,7 +710,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-13.2" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-14.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -2617,7 +2621,8 @@ do
             local answered, ans = false, nil
             task.spawn(function()
                 local ok, res = pcall(function() return cf:InvokeServer("TeleportToSpawn") end)
-                answered, ans = true, ok and res or ("error: " .. tostring(res))
+                if ok then ans = res else ans = "error: " .. tostring(res) end
+                answered = true
             end)
             local limit = math.max(8, R.homeSecs + 3.5)
             while os.clock() - t0 < limit and not stale(myEpoch) do
@@ -2667,7 +2672,8 @@ do
             local answered, ans = false, nil
             task.spawn(function()
                 local ok, res = pcall(function() return cf:InvokeServer("requestEntrance", L.ask) end)
-                answered, ans = true, ok and res or ("error: " .. tostring(res))
+                if ok then ans = res else ans = "error: " .. tostring(res) end
+                answered = true
             end)
             local t0 = os.clock()
             while not answered and os.clock() - t0 < 4 and not stale(myEpoch) do task.wait(0.1) end
@@ -13153,13 +13159,88 @@ do
         -- Mine: what a door or a pumpkin sent at ME (attr LocalEnemy = my
         -- name), anything pumpkin-named, and in the Hell Rider's domain
         -- everyone there.
+        -- BORN OF YOUR DOOR (user, 2026-11-14: "the Snow Yeti door - 4 or 5
+        -- snow bandits spawn at the end, the script does not kill them";
+        -- "with Halloween mode it attacks the jungle pirates at Floating
+        -- Turtle, the factory workers at the cafe - it should not"). Both
+        -- from one fact: the 2026 event's scripts never set LocalEnemy (not
+        -- one of the 154 dumped scripts names it), so nothing a door sent was
+        -- "mine" - and the only rule left was "in the boss's domain everyone
+        -- is", which the game's BossTeleportSound switched on for ANYONE's
+        -- boss door, wherever you stood: the island's own NPCs.
+        -- Now, with no mark to read, an enemy is your door's by its BIRTH:
+        --   M.locals  every species alive round you while no door is open
+        --   ev.before every enemy alive the moment your door opened
+        --   born      appeared AFTER that and (right at the door, or near
+        --             you and not one of the island's own species)
+        -- Moved far by the event (the Yeti's room, a ride): what already
+        -- stands there on arrival is that place's own. Pure rule below.
+        local function bornRule(dMe, dDoor, isLocal, settling)
+            if settling then return false end
+            if dDoor <= 80 then return true end
+            return dMe <= 500 and not isLocal
+        end
+        M.locals, M.born = {}, setmetatable({}, { __mode = "k" })
+        local function eventWatch(r, now)
+            local ev = M.ev
+            if not ev then
+                if now - (M.localsAt or 0) > 1 then
+                    M.localsAt = now
+                    for _, e in ipairs(liveEnemies(nil)) do
+                        if (e.root.Position - r.Position).Magnitude < 1500 then M.locals[e.name] = true end
+                    end
+                end
+                return
+            end
+            if not ev.pos then
+                -- Opened this instant: everyone alive now was here before it.
+                ev.pos, ev.door = r.Position, r.Position
+                for _, e in ipairs(liveEnemies(nil)) do ev.before[e.model] = true end
+            end
+            if (r.Position - ev.pos).Magnitude > 1000 then
+                ev.pos, ev.door, ev.settle = r.Position, r.Position, now + 1.5
+            end
+            local busy = M.door ~= nil
+            for _, e in ipairs(liveEnemies(nil)) do
+                if M.born[e.model] then
+                    busy = true
+                elseif not ev.before[e.model] then
+                    if ev.settle and now < ev.settle then
+                        ev.before[e.model] = true
+                    elseif bornRule((e.root.Position - r.Position).Magnitude, (e.root.Position - ev.door).Magnitude,
+                        M.locals[e.name] == true, false) then
+                        M.born[e.model] = true
+                        busy = true
+                        if not ev.said[e.name] then
+                            ev.said[e.name] = true
+                            local at = {}
+                            pcall(function()
+                                for k, v in pairs(e.model:GetAttributes()) do table.insert(at, k .. "=" .. tostring(v)) end
+                            end)
+                            print(string.format("[BFF] halloween: your door sent %s - fought  (its marks: %s)", e.name,
+                                (#at > 0) and table.concat(at, ", ") or "none"))
+                        end
+                    end
+                end
+            end
+            if busy then ev.busy = now end
+            -- Over: no door event, nothing of it alive, for 25 s.
+            if now - ev.busy > 25 then M.ev = nil end
+        end
+        -- In the boss's domain: only while you are really there.
+        local function inDomain(r)
+            local d = M.domain
+            return d ~= nil and (d.at == nil or (r.Position - d.at).Magnitude < 2500)
+        end
         local function isMine(e)
             local ok, who = pcall(function() return e.model:GetAttribute("LocalEnemy") end)
             if ok and who == player.Name then return true end
+            if M.born[e.model] then return true end
             if pumpkinName(e.name) then return true end
             local low = string.lower(e.name)
             if string.find(low, "hell rider", 1, true) or string.find(low, "hellrider", 1, true) then return true end
-            return M.domain ~= nil
+            local _, r = parts()
+            return r ~= nil and inDomain(r)
         end
         local function mineBuild()
             local _, r = parts()
@@ -13193,6 +13274,8 @@ do
                     if who == player then
                         local k = eventKind(evName)
                         M.door = { inst = inst, event = evName, kind = k, at = os.clock() }
+                        -- What it sends is known by its birth (eventWatch).
+                        M.ev = { before = setmetatable({}, { __mode = "k" }), said = {}, busy = os.clock() }
                         if k == "treat" then M.tally.treats += 1
                         elseif k == "boss" then M.tally.bosses += 1
                         else M.tally.tricks += 1 end
@@ -13202,7 +13285,10 @@ do
                 elseif kind == "EventFinished" then
                     if M.door and M.door.inst == inst then M.door.done = true end
                 elseif kind == "BossTeleportSound" then
-                    M.domain = { since = os.clock(), seen = os.clock() }
+                    -- A boss portal took SOMEONE. You are in its domain only if
+                    -- you are moved far within the next seconds (the step checks).
+                    local _, rs = parts()
+                    M.bossSound = { at = os.clock(), from = rs and rs.Position or nil }
                     -- Which boss door (the "Boss Fight" door = the Werewolf, a
                     -- hellfire door = the Hell Rider), and the game's own
                     -- marks for them in this server - for a boss-only hunt.
@@ -13895,7 +13981,11 @@ do
                 for _, o in ipairs(opts) do
                     if not o._locked then
                         table.insert(open, o)
-                        table.insert(labels, tostring(o._text or ""))
+                        -- The game keeps an option's text as { text } (in game 2026-11-13:
+                        -- the labels printed as "table: 0x..." and the pick was blind).
+                        local t = o._text
+                        if type(t) == "table" then t = t[1] end
+                        table.insert(labels, tostring(t or ""))
                     end
                 end
                 local i = talkPick(labels)
@@ -13911,6 +14001,161 @@ do
                     .. ") - its own timeouts end it")
             end
             return ok and did == true
+        end
+
+        -- THE GHOST THAT STOLE YOUR TREAT (user, 2026-11-14: "the cloud runs
+        -- around, you hit it 3 times, it bursts and gives lots of candies - my
+        -- character stays stuck, does not chase it"). The Ghost Chase door
+        -- (dumped Events.Tricks.Ghost_Chase): the ghost is drawn by YOUR client
+        -- in workspace.GhostChase (nothing to touch or tag - the server judges
+        -- your swings against where it knows the ghost is), the door counts
+        -- them in GhostHits (3 needed), then its candy lies in the door's
+        -- GhostCandy_* attributes. So: beside the ghost every swing, a melee
+        -- in hand, a real M1 and the attack remote. true = it chased.
+        local function ghostAt()
+            local f = workspace:FindFirstChild("GhostChase")
+            local g = f and f:FindFirstChildWhichIsA("Model")
+            if not g then return nil end
+            local ok, p = pcall(function() return g:GetPivot().Position end)
+            return ok and p or nil
+        end
+        local function ghostHits()
+            local d = M.door
+            local ok, n = pcall(function() return d.inst:GetAttribute("GhostHits") end)
+            return ok and tonumber(n) or 0
+        end
+        local function chaseGhost(myEpoch)
+            if CFG.HalloweenChase == false then return false end
+            local at = ghostAt()
+            local _, r = parts()
+            if not (at and r) or (at - r.Position).Magnitude > 800 then return false end
+            releasePile()
+            setState("FIGHT")
+            local h0 = ghostHits()
+            M.ghost = M.ghost or { since = os.clock(), hits = h0 }
+            M.note = string.format("the ghost that stole your treat - chasing  (%d of 3 hits)", h0)
+            say(M.note)
+            local melee = meleeTool()
+            if melee then equip(melee) end
+            local ra = netRemote("RE", "RegisterAttack")
+            local t0 = os.clock()
+            while os.clock() - t0 < 1.5 and not stale(myEpoch) and huntOn() do
+                at = ghostAt()
+                local _, r2 = parts()
+                if not (at and r2) then break end
+                local out = Vector3.new(r2.Position.X - at.X, 0, r2.Position.Z - at.Z)
+                if out.Magnitude < 1 then out = Vector3.new(1, 0, 0) end
+                local stand = at + out.Unit * 3 + Vector3.new(0, 1, 0)
+                if (r2.Position - stand).Magnitude > 200 then
+                    flyTo(stand, { face = at, portal = false })
+                else
+                    lockAt(stand, at)
+                end
+                task.wait(0.05)
+                pressM1()
+                if ra then pcall(function() ra:FireServer(0) end) end
+                stats.m1 += 1
+                task.wait(SWING)
+            end
+            local h1 = ghostHits()
+            if h1 > M.ghost.hits then
+                M.ghost.hits = h1
+                print(string.format("[BFF] halloween: the ghost - hit %d of 3", h1))
+            elseif not M.ghost.said and os.clock() - M.ghost.since > 15 then
+                M.ghost.said = true
+                print(string.format("[BFF] halloween: the ghost - 15 s of swings beside it and the door still counts %d hits"
+                    .. " (GhostHits) - the swings are not what it counts", h1))
+            end
+            return true
+        end
+
+        -- THE CANDY ON THE FLOOR (user, 2026-11-14: "a magnet for the candies
+        -- - the Great Pumpkin spreads 500 all over the place - or my character
+        -- goes through all of them. Which is more possible?"). WALKED THROUGH:
+        -- the game's own client claims a piece when YOU stand within 7 studs
+        -- of it (CandySpillView: withinReach(you, piece.Rest, REACH.Pickup) ->
+        -- "CandySpillClaim"; the ghost's: 6 studs) - so being there is certain,
+        -- while a claim sent from afar is the server's to refuse. Where the
+        -- pieces lie is in the open: folders tagged "HalloweenCandySpill"
+        -- (attributes Candy_<n> / Chest_<..>, SpillOwner = whose) and your
+        -- door's GhostCandy_<id>; a piece claimed = its attribute gone. The
+        -- nearest first; one stood on 3 times and still there is left 30 s.
+        -- candyOf is pure-ish: an instance's pieces -> { { key, pos } }.
+        local CANDY_PRE = { "Candy_", "Chest_", "GhostCandy_" }
+        local function candyOf(inst, out)
+            local ok, attrs = pcall(function() return inst:GetAttributes() end)
+            if not ok or type(attrs) ~= "table" then return out end
+            for k, v in pairs(attrs) do
+                for _, pre in ipairs(CANDY_PRE) do
+                    if string.sub(k, 1, #pre) == pre then
+                        local pos = (typeof(v) == "Vector3" and v) or (typeof(v) == "CFrame" and v.Position) or nil
+                        if pos then
+                            table.insert(out, { key = tostring(inst.Name) .. "/" .. k, pos = pos })
+                        elseif not M.candyOdd then
+                            M.candyOdd = true
+                            print(string.format("[BFF] halloween: candy - %s is a %s (%s), not a place - cannot walk to it",
+                                k, typeof(v), tostring(v)))
+                        end
+                    end
+                end
+            end
+            return out
+        end
+        local function candySpots()
+            local out = {}
+            pcall(function()
+                for _, f in ipairs(game:GetService("CollectionService"):GetTagged("HalloweenCandySpill")) do
+                    local owner = f:GetAttribute("SpillOwner")
+                    if owner == nil or owner == player.UserId then candyOf(f, out) end
+                end
+            end)
+            if M.door and M.door.inst then candyOf(M.door.inst, out) end
+            return out
+        end
+        M.candySkip, M.candyTries = {}, {}
+        local function sweepCandy(myEpoch)
+            if CFG.HalloweenCandy == false then return false end
+            local _, r = parts()
+            if not r then return false end
+            local did, t0, n0 = false, os.clock(), nil
+            while os.clock() - t0 < 1.5 and not stale(myEpoch) and huntOn() do
+                local spots, now = candySpots(), os.clock()
+                n0 = n0 or #spots
+                local _, r2 = parts()
+                if not r2 then break end
+                local best, bd = nil, 800
+                for _, s in ipairs(spots) do
+                    if now >= (M.candySkip[s.key] or 0) then
+                        local d = (s.pos - r2.Position).Magnitude
+                        if d < bd then best, bd = s, d end
+                    end
+                end
+                if not best then break end
+                if not did then
+                    did = true
+                    releasePile()
+                    setState("CANDY")
+                    M.note = string.format("candy on the floor - %d pieces, walking through them", #spots)
+                    say(M.note)
+                end
+                local stand = best.pos + Vector3.new(0, 2, 0)
+                flyTo(stand, { portal = false, arrive = 2 })
+                lockAt(stand)
+                task.wait(0.15)                         -- the game's own client claims it (a frame is enough)
+                M.candyTries[best.key] = (M.candyTries[best.key] or 0) + 1
+                if M.candyTries[best.key] >= 3 then
+                    M.candySkip[best.key], M.candyTries[best.key] = os.clock() + 30, nil
+                end
+            end
+            if did then
+                local left = #candySpots()
+                local got = math.max(0, (n0 or 0) - left)
+                M.tally.candy = (M.tally.candy or 0) + got
+                if got > 0 then
+                    print(string.format("[BFF] halloween: candy - %d pieces picked up, %d still lying", got, left))
+                end
+            end
+            return did
         end
 
         -- ---------- one step ----------
@@ -13934,10 +14179,27 @@ do
             local _, r = parts()
             if not r then return true end
 
+            -- 0. Whose enemies are whose (eventWatch), and the boss's domain
+            -- only when the portal's sound was YOUR jump.
+            eventWatch(r, now)
+            if M.bossSound then
+                local b = M.bossSound
+                if b.from and (r.Position - b.from).Magnitude > 1000 then
+                    M.domain = { since = now, seen = now, at = r.Position }
+                    M.bossSound = nil
+                elseif now - b.at > 8 then
+                    M.bossSound = nil                   -- someone else's portal
+                end
+            end
+            if M.domain and not inDomain(r) then
+                M.domain = nil
+                print("[BFF] halloween: back from the boss's domain")
+            end
+
             -- 1. What came at me: fought first, where it stands.
             if #mineBuild() > 0 then
                 activeName = "Halloween"
-                M.note = M.domain and "the Hell Rider's domain - fighting" or "fighting what jumped out"
+                M.note = M.domain and "the boss's domain - fighting" or "fighting what your door sent"
                 say(M.note)
                 local k0 = stats.kills
                 fight({ name = "Halloween", build = mineBuild, breakIf = function() return not huntOn() end }, nil)
@@ -13945,6 +14207,10 @@ do
                 if M.domain then M.domain.seen = os.clock() end
                 return true
             end
+            -- 1b. The ghost that stole your treat: chased. 1c. Candy lying: walked through.
+            if chaseGhost(myEpoch) then return true end
+            M.ghost = nil
+            if sweepCandy(myEpoch) then return true end
             if M.domain then
                 if os.clock() - M.domain.seen > 25 then
                     M.domain = nil
@@ -14001,7 +14267,7 @@ do
                         -- Moved far in a blink = the game took you through.
                         local _, r2 = parts()
                         if r2 and (r2.Position - from).Magnitude > 1000 then
-                            M.domain = { since = os.clock(), seen = os.clock() }
+                            M.domain = { since = os.clock(), seen = os.clock(), at = r2.Position }
                             print("[BFF] halloween: taken through the portal (moved " .. math.floor((r2.Position - from).Magnitude) .. " studs)")
                         end
                     end
@@ -14101,7 +14367,8 @@ do
         M._t = {
             pumpkinName = pumpkinName, pickDoor = pickDoor, soonestCool = soonestCool,
             idle = idle, variant = variant, pickPumpkin = pickPumpkin, tokenIds = tokenIds, eventKind = eventKind, wayOrder = wayOrder,
-            kindDropped = kindDropped, talkPick = talkPick, talk = talk,
+            kindDropped = kindDropped, talkPick = talkPick, talk = talk, bornRule = bornRule, candyOf = candyOf,
+            isMine = isMine, eventWatch = eventWatch,
         }
     end
     build()
@@ -18928,6 +19195,14 @@ local function buildUI()
         switchRow(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
             function() return CFG.HalloweenDoors ~= false end,
             function(x) CFG.HalloweenDoors = x end)
+        hairline(v)
+        switchRow(v, "Chase the ghost", "The ghost that steals your treat: followed and hit until it drops the candy",
+            function() return CFG.HalloweenChase ~= false end,
+            function(x) CFG.HalloweenChase = x end)
+        hairline(v)
+        switchRow(v, "Collect candy on the floor", "Walked through, every piece (the game hands it over within 7 studs) - a pumpkin's, a ghost's, the Great Pumpkin's",
+            function() return CFG.HalloweenCandy ~= false end,
+            function(x) CFG.HalloweenCandy = x end)
         hairline(v)
         switchRow(v, "Finish a door's conversation", "Lines tapped through; of its choices the safe one (the candy, \"Nevermind\") - never rob, roll, play or pay",
             function() return CFG.HalloweenTalk ~= false end,

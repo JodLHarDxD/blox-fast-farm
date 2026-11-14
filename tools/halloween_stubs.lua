@@ -42,6 +42,13 @@ function task.spawn(fn, ...)
 end
 
 local V = {}
+-- What the script says to the console ([BFF] lines) is kept; the rest prints.
+local PRINTS = {}
+local realPrint = print
+local function print(x, ...)
+    if type(x) == "string" and string.sub(x, 1, 5) == "[BFF]" then table.insert(PRINTS, x) return end
+    realPrint(x, ...)
+end
 local function vec(x, y, z) return setmetatable({ X = x, Y = y, Z = z }, V) end
 V.__index = function(v, k)
     if k == "Magnitude" then return math.sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z) end

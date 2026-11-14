@@ -45,14 +45,15 @@ do
     local log = {}
     local page = { _options = {} }
     local DC = { Active = true, advance = function() table.insert(log, "advance") end,
-        select = function(o) table.insert(log, "select " .. o._text) end,
+        select = function(o) table.insert(log, "select " .. (type(o._text) == "table" and o._text[1] or o._text)) end,
         getActiveDialogue = function() return { getCurrent = function() return page end } end }
     M.dc, M.talkPage, M.talkAt = DC, nil, nil
     check("talk: a new line is shown a moment first", t.talk() == false and #log == 0)
     T += 1
     check("talk: then tapped", t.talk() == true and log[1] == "advance")
     check("talk: not twice in the same instant", t.talk() == false and #log == 1)
-    page = { _options = { { _text = "Give me those fruits!" }, { _text = "Can you spare any?" } } }
+    -- as the game keeps it: _text = { text } (in game 2026-11-13 the labels read "table: 0x...")
+    page = { _options = { { _text = { "Give me those fruits!" } }, { _text = { "Can you spare any?" } } } }
     T += 1
     t.talk()
     T += 1
@@ -295,6 +296,96 @@ local okP, errP = pcall(M.probe, "test")
 check("probe: runs without an error", okP, errP)
 check("probe: PumpkinHunt counted by state", type(LOG.files["bff_halloween_probe.txt"]) == "string"
     and string.find(LOG.files["bff_halloween_probe.txt"], "PUMPKINHUNT: found", 1, true) ~= nil)
+
+-- ---------------------------------------------------------------- WHOSE ENEMIES (2026-11-14)
+-- "the Snow Yeti door: the snow bandits at the end are not killed" and "it
+-- attacks the jungle pirates at Floating Turtle": no mark on what a door
+-- sends, so it is known by its birth.
+check("born: right at the door, whatever its species", t.bornRule(30, 30, true, false) == true)
+check("born: near you, not one of the island's own", t.bornRule(300, 300, false, false) == true)
+check("born: near you but the island's own species (a respawn): not yours", t.bornRule(300, 300, true, false) == false)
+check("born: far from you and the door: not yours", t.bornRule(600, 600, false, false) == false)
+check("born: just moved by the event (what stands there is that place's): not yours", t.bornRule(10, 10, false, true) == false)
+do
+    for _, m in ipairs(table.clone(ENEMIES.kids)) do m.hum.Health = 0 end
+    M.door, M.ev, M.domain, M.bossSound = nil, nil, nil, nil
+    CFG.HalloweenPumpkins, CFG.HalloweenDoors = false, false
+    local here = ROOT.Position
+    local pirate = enemy("Jungle Pirate", here + Vector3.new(60, 0, 0))
+    T += 2
+    M.step(1)
+    check("no door open: the island's own NPC is left alone", pirate.hum.Health == 100)
+    -- the Yeti door opens for me
+    local door = workspace:Add(new("Model", "HalloweenDoor"))
+    fireClient("DoorOpened", door, player, { Event = "Attack_YetiRoom" })
+    M.step(1)
+    check("the door open, nothing sent yet: still left alone", pirate.hum.Health == 100)
+    local bandit1 = enemy("Snow Bandit", here + Vector3.new(120, 0, 0))
+    local bandit2 = enemy("Snow Bandit", here + Vector3.new(140, 0, 40))
+    local respawn = enemy("Jungle Pirate", here + Vector3.new(200, 0, 0))
+    T += 0.5
+    M.step(1)
+    check("what the door sent (Snow Bandits, no mark on them): killed, all of them", bandit1.hum.Health == 0 and bandit2.hum.Health == 0,
+        bandit1.hum.Health .. " " .. bandit2.hum.Health)
+    check("...the island's own, and one of them respawned meanwhile: untouched", pirate.hum.Health == 100 and respawn.hum.Health == 100)
+    check("...said once, with its marks, for the log", string.find(table.concat(PRINTS, "|"), "your door sent Snow Bandit", 1, true) ~= nil)
+    -- the event over, the door closed: a late stranger 25 s after is nobody's
+    M.door = nil
+    T += 40
+    M.step(1)
+    local late = enemy("Sea Soldier", here + Vector3.new(100, 0, 0))
+    T += 1
+    M.step(1)
+    check("long after the door's event: a newcomer is not fought", late.hum.Health == 100)
+    late.hum.Health = 0
+
+    -- THE BOSS'S DOMAIN: someone else's portal sounds - nothing changes for you
+    fireClient("BossTeleportSound")
+    T += 1
+    M.step(1)
+    check("a boss portal sounded, you were not moved: NOT 'in the domain' (the island's NPCs were fought for this)",
+        M.domain == nil and pirate.hum.Health == 100)
+    T += 9
+    M.step(1)
+    check("...and it is forgotten", M.bossSound == nil and pirate.hum.Health == 100)
+    -- your own jump: in the domain, everyone there is yours
+    fireClient("BossTeleportSound")
+    ROOT.Position = here + Vector3.new(0, 0, 9000)
+    local minion = enemy("Hell Minion", ROOT.Position + Vector3.new(50, 0, 0))
+    T += 0.5
+    M.step(1)
+    check("moved 9000 studs with the sound: in the domain, what is there is fought", minion.hum.Health == 0)
+    -- back on the island: the domain is over at once
+    ROOT.Position = here
+    T += 0.5
+    M.step(1)
+    check("back on the island: the domain is over - the island's NPCs untouched", M.domain == nil and pirate.hum.Health == 100
+        and respawn.hum.Health == 100)
+    pirate.hum.Health, respawn.hum.Health = 0, 0
+    CFG.HalloweenPumpkins, CFG.HalloweenDoors = true, true
+    M.ev = nil
+end
+-- THE CANDY ON THE FLOOR: where the pieces lie, read from the game's own attributes
+do
+    local realTypeof = typeof
+    typeof = function(x)
+        if type(x) == "table" and x.X ~= nil and x.Z ~= nil then return "Vector3" end
+        return realTypeof(x)
+    end
+    local spill = { Name = "Spill7", GetAttributes = function()
+        return { Candy_1 = Vector3.new(10, 5, 0), Candy_2 = Vector3.new(30, 5, 0), Chest_Gold_1 = Vector3.new(50, 5, 0),
+            GhostCandy_a = Vector3.new(70, 5, 0), SpillOrigin = Vector3.new(0, 5, 0), SpillStarted = 12, Other = "x" }
+    end }
+    local out = t.candyOf(spill, {})
+    table.sort(out, function(a, b) return a.pos.X < b.pos.X end)
+    check("candy: every piece of a spill (candy, chest, the ghost's) - not its origin", #out == 4 and out[1].pos.X == 10
+        and out[4].pos.X == 70, #out)
+    check("candy: each piece has its own key", out[1].key == "Spill7/Candy_1", out[1] and out[1].key)
+    local odd = { Name = "Odd", GetAttributes = function() return { Candy_1 = "3,4,5" } end }
+    check("candy: a piece that is not a place is said, not walked to", #t.candyOf(odd, {}) == 0
+        and string.find(table.concat(PRINTS, "|"), "not a place", 1, true) ~= nil)
+    typeof = realTypeof
+end
 
 check("no error in any spawned task", #ERRORS == 0, ERRORS[1])
 if all then print("ALL PASS") end
