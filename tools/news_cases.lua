@@ -399,10 +399,10 @@ fresh()
 for _, n in ipairs({ "Dough", "Portal", "Tiger", "Yeti", "Kitsune", "Dragon", "Eagle", "Rubber" }) do lying(n .. " Fruit", n .. "-" .. n) end
 N.tick()
 check("Dragon, Kitsune, Tiger, Yeti, Dough, Portal - by value; Eagle, Rubber not at all",
-    said() == "Dragon 2.97B (server spawn) | Kitsune 570M (server spawn) | Tiger 100M (server spawn) | Yeti 90M (server spawn)"
+    said() == "Dragon 2.31B (server spawn) | Kitsune 450M (server spawn) | Tiger 80M (server spawn) | Yeti 70M (server spawn)"
     .. " | Dough 30M (server spawn) | Portal 10M (server spawn)", said())
 check("...the strip names the 3 dearest, +3",
-    has(item("fruit").body, "Dragon 2.97B (server spawn) · Kitsune 570M (server spawn) · Tiger 100M (server spawn) +3"),
+    has(item("fruit").body, "Dragon 2.31B (server spawn) · Kitsune 450M (server spawn) · Tiger 80M (server spawn) +3"),
     item("fruit").body)
 -- Your limit and your menu (the hunt's own rules), and the game's price.
 fresh()
@@ -575,7 +575,7 @@ do
     WS_KIDS["Fruit "] = spawnOf({ inst("Meshes/dragon_12", "MeshPart", { mesh = 111 }) }, Vector3.new(5600, 1000, -300))
     N.tick()
     check("the news names the spawn and its island",
-        printed("FRUIT ON THE MAP: Dragon 2.97B (server spawn, Hydra Island)"), table.concat(PRINTED, " | "))
+        printed("FRUIT ON THE MAP: Dragon 2.31B (server spawn, Hydra Island)"), table.concat(PRINTED, " | "))
     WS_KIDS["Fruit "] = nil
 end
 check("a spawn's shape log says what is inside its Fruit model (mesh names and ids)",
@@ -780,7 +780,7 @@ N.tick()
 check("...in the Second Sea too", #keysNow() == 1 and item("fruit").title == "NO FRUIT ON THE MAP", table.concat(keysNow(), " "))
 addFruit()
 N.tick()
-check("...and the moment one lies there, named", has(item("fruit").body, "Kitsune 570M") and item("fruit").title == "FRUIT ON THE MAP")
+check("...and the moment one lies there, named", has(item("fruit").body, "Kitsune 450M") and item("fruit").title == "FRUIT ON THE MAP")
 
 fresh()
 N.cake = { left = 5 }
@@ -831,7 +831,7 @@ do
         tostring(P.fruitKey("Rumble-Rumble")))
     check("menu name: a fruit newer than the list has none", P.fruitKey("Newone-Newone") == nil and P.fruitKey(nil) == nil)
     check("trade values read as before", P.tradeValue("Buddha-Buddha") == 10e6 and P.tradeValue("Rumble-Rumble") == 20e6
-        and P.tradeValue("Dragon-Dragon") == 2.97e9 and P.tradeValue("Newone-Newone") == nil and P.tradeValue(nil) == nil)
+        and P.tradeValue("Dragon-Dragon") == 2.31e9 and P.tradeValue("Newone-Newone") == nil and P.tradeValue(nil) == nil)
     CFG.FruitMenu.Buddha, CFG.FruitMenu.Rocket = "take", "skip"
     check("your marks are read by the fruit, whatever its long name",
         P.fruitChoice("Buddha-Buddha") == "take" and P.fruitChoice("Rocket-Rocket") == "skip")

@@ -7,15 +7,16 @@ local function check(name, cond, detail)
 end
 
 -- THE TRADING MARKET'S VALUE (a physical fruit's), by the game's own names
-check("Control: 120M", P.tradeValue("Control-Control") == 120e6, P.tradeValue("Control-Control"))
+check("Control: 90M", P.tradeValue("Control-Control") == 90e6, P.tradeValue("Control-Control"))
+check("Venom: 120M (bloxfruitsvalues, 2026-11-08)", P.tradeValue("Venom-Venom") == 120e6, P.tradeValue("Venom-Venom"))
 check("T-Rex: its dash kept", P.tradeValue("T-Rex-T-Rex") == 20e6, P.tradeValue("T-Rex-T-Rex"))
-check("Dragon: one fruit, East's (the lower)", P.tradeValue("Dragon-Dragon") == 2.97e9)
-check("Dragon under any name it may carry", P.tradeValue("Dragon (West)-Dragon (West)") == 2.97e9
-    and P.tradeValue("East Dragon") == 2.97e9)
+check("Dragon: one fruit, East's (the lower)", P.tradeValue("Dragon-Dragon") == 2.31e9)
+check("Dragon under any name it may carry", P.tradeValue("Dragon (West)-Dragon (West)") == 2.31e9
+    and P.tradeValue("East Dragon") == 2.31e9)
 check("an old name: Rumble = Lightning, Leopard = Tiger", P.tradeValue("Rumble-Rumble") == 20e6
-    and P.tradeValue("Leopard-Leopard") == 100e6)
+    and P.tradeValue("Leopard-Leopard") == 80e6)
 check("Bird: Falcon = Eagle", P.tradeValue("Bird-Bird: Falcon") == 800e3, P.tradeValue("Bird-Bird: Falcon"))
-check("Magnet (Update 30)", P.tradeValue("Magnet-Magnet") == 540e6)
+check("Magnet (Update 30)", P.tradeValue("Magnet-Magnet") == 310e6)
 check("a fruit the list does not know: nil", P.tradeValue("Moon-Moon") == nil)
 check("nothing: nil", P.tradeValue(nil) == nil)
 check("Buddha 10M - the market, not its 1.2M Beli", P.tradeValue("Buddha-Buddha") == 10e6)

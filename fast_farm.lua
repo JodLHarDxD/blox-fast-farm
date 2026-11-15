@@ -1065,15 +1065,20 @@ function P.fruitBase(orig)
     return string.match(orig, "^(.+)%-%1$") or orig
 end
 -- TRADE VALUE (user, 2026-10-25: "follow the trading market's value, not the
--- Beli the game asks"). A PHYSICAL fruit's value on the list every trader
--- uses - bloxfruitsvalues.com = fruityblox.com, mirrored by Traderie
--- (records of 2026-10-17 .. 22, Update 30) - never a permanent's or a skin's.
+-- Beli the game asks"). A PHYSICAL fruit's value - never a permanent's or a
+-- skin's. ONE SOURCE ONLY (user, 2026-11-15: "only Blox Fruits Values, the
+-- other lists are outdated" - fruityblox had Venom at 10M while it trades at
+-- 120M): bloxfruitsvalues.com/values, each fruit's regValue (records of
+-- 2026-11-02 .. 11, read 2026-11-15). This is the MARKET scale: it decides
+-- only "too good to lose" (CFG.FruitKeepValue) and the dearest-first order of
+-- the news. Picking a fruit up is the GAME's Beli price (CFG.FruitMinPrice,
+-- the dealer's GetFruits) - the two never mix.
 -- Keyed by the fruit's own name ("Control" of "Control-Control"). Dragon is
 -- one fruit in the game (West / East is picked once eaten): East's, the
 -- lower, counts.
 P.TRADE_VALUES = {
-    Dragon = 2.97e9, Kitsune = 570e6, Magnet = 540e6, Control = 120e6, Tiger = 100e6,
-    Yeti = 90e6, Gas = 60e6, Dough = 30e6, Venom = 25e6, Lightning = 20e6, ["T-Rex"] = 20e6,
+    Dragon = 2.31e9, Kitsune = 450e6, Magnet = 310e6, Venom = 120e6, Control = 90e6, Tiger = 80e6,
+    Yeti = 70e6, Gas = 60e6, Dough = 30e6, Lightning = 20e6, ["T-Rex"] = 20e6,
     Pain = 10e6, Gravity = 10e6, Mammoth = 10e6, Spirit = 10e6, Portal = 10e6, Buddha = 10e6,
     Shadow = 6.5e6, Blizzard = 5e6, Phoenix = 2.75e6, Creation = 2.5e6, Sound = 2.5e6,
     Spider = 1.5e6, Love = 1.5e6, Magma = 1.15e6, Quake = 1e6, Diamond = 1e6, Light = 800e3,
