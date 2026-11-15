@@ -51,6 +51,23 @@
 -- own resume, which does. tools/checks.py (yieldcheck) keeps this first.
 task.wait()
 
+-- ONLY IN BLOX FRUITS (user, 2026-11-15: two accounts open in Madium, and an
+-- execute - or a hop's queued reload - landed in Steal a Brainrot / Steal an
+-- Egg, whose anti-cheat caught it). Any other game: nothing runs, nothing is
+-- stopped. The game is the only check - every account runs it.
+do
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    local BLOX_FRUITS = {
+        [2753915549] = true, [85211729168715] = true,    -- First Sea
+        [4442272183] = true, [79091703265657] = true,    -- Second Sea
+        [7449423635] = true, [100117331123089] = true,   -- Third Sea
+    }
+    if not BLOX_FRUITS[game.PlaceId] then
+        print("[BFF] not Blox Fruits (place " .. tostring(game.PlaceId) .. ") - fast_farm NOT loaded")
+        return
+    end
+end
+
 -- "reload": a new copy replacing this one, not you stopping -- an elite hunt
 -- carried over a hop stays carried.
 if _G.BFF and _G.BFF.stop then pcall(_G.BFF.stop, "reload") end
