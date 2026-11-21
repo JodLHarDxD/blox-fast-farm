@@ -727,7 +727,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-14.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-21.1" }
 _G.BFF = P
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -7188,10 +7188,13 @@ do
             local q = queueFn()
             if not q then return end
             local url = _G.BFF_SOURCE or SOURCE_URL
+            -- Through the key gate the URL already has "?k=...", so the cache
+            -- buster joins with "&" there; the raw URL keeps "?" (2026-11-20).
+            local buster = string.find(url, "?", 1, true) and "&cb=" or "?cb="
             local code = "repeat task.wait() until game:IsLoaded()\n"
                 .. (carry and string.format("_G.BFF_CARRY = %q\n", carry) or "")
                 .. string.format("_G.BFF_SOURCE = %q\n", url)
-                .. string.format("pcall(function() loadstring(game:HttpGet(%q .. \"?cb=\" .. tostring(tick())))() end)\n", url)
+                .. string.format("pcall(function() loadstring(game:HttpGet(%q .. %q .. tostring(tick())))() end)\n", url, buster)
             if pcall(q, code) then E.queued = true end
         end
 
