@@ -79,4 +79,14 @@ check("broken note: nothing", w.ok and #GETS == 0, tostring(w.err))
 w = run({ place = SECOND, loaded = false, flag = { start = true } })
 check("loading: waits, then resumes", w.ok and #GETS == 1 and STARTS == 1, tostring(w.err))
 
+-- 15. this account has a key file: back through the key gate
+w = run({ place = SECOND, flag = { start = true }, uid = 42, keyFor = 42 })
+check("key file: through the gate", w.ok and string.find(GETS[1] or "", ".workers.dev/l?cb=", 1, true) ~= nil, GETS[1])
+check("key file: gate URL filled in", string.find(GETS[1] or "", "SUBDOMAIN", 1, true) == nil, GETS[1])
+check("key file: farm started", STARTS == 1, STARTS)
+
+-- 16. only ANOTHER account's key file on this PC: the raw file, as before
+w = run({ place = SECOND, flag = { start = true }, uid = 42, keyFor = 7 })
+check("other account's key: raw file", string.find(GETS[1] or "", "fast_farm.lua?cb=", 1, true) ~= nil, GETS[1])
+
 print(all and "ALL PASS" or "SOME FAILED")

@@ -11,6 +11,8 @@
 --   noDelfile  the executor has no delfile
 --   selfStart  the loaded copy starts by itself (a carried-over hunt)
 --   startFails _G.BFF.start errors
+--   uid        the account's UserId (default 42)
+--   keyFor     a key file (bff_key_<id>.txt) for this UserId is in the folder
 -- The file runs as RUN(game, task, print); its `return`s end RUN.
 local NOW = 1794290000
 local FILES, GETS, STARTS, CLOCK, GET_AT, PRINT_AT
@@ -59,6 +61,7 @@ local function mk(opts)
         FILES["bff_crash_resume.json"] = opts.raw
     end
     if opts.noDelfile then delfile = nil else delfile = function(n) FILES[n] = nil end end
+    if opts.keyFor then FILES["bff_key_" .. tostring(opts.keyFor) .. ".txt"] = "BFF-TEST" end
     local printed = {}
     local loaded = opts.loaded ~= false
     local game = { PlaceId = loaded and opts.place or 0 }
@@ -66,6 +69,7 @@ local function mk(opts)
     game.Loaded = { Wait = function() loaded = true game.PlaceId = opts.place end }
     function game:GetService(n)
         if n == "HttpService" then return HttpService end
+        if n == "Players" then return { LocalPlayer = { UserId = opts.uid or 42 } } end
         return nil
     end
     function game:HttpGet(u)

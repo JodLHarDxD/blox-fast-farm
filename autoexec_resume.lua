@@ -22,6 +22,10 @@ if not BLOX_FRUITS[game.PlaceId] then return end
 
 local FLAG = "bff_crash_resume.json"
 local SOURCE = "https://raw.githubusercontent.com/JodLHarDxD/blox-fast-farm/main/fast_farm.lua"
+-- The key gate (2026-11-20): an account with a key file comes back through
+-- the gate (its stage 1 reads the key from that file); without one, the raw
+-- file as before.
+local GATE = "https://bff-gate.farmgate-7q.workers.dev/l"
 if not (isfile and readfile) then return end
 local HttpService = game:GetService("HttpService")
 
@@ -47,8 +51,15 @@ if _G.BFF then return end             -- loaded already (by hand, or a hop's que
 -- Used up BEFORE the load: a crash during the load must not come back to it.
 if delfile then pcall(delfile, FLAG) else pcall(writefile, FLAG, "{}") end
 
-local url = _G.BFF_SOURCE or SOURCE
-local got, src = pcall(function() return game:HttpGet(url .. "?cb=" .. tostring(tick())) end)
+local url = _G.BFF_SOURCE
+if not url then
+    local keyed, has = pcall(function()
+        return isfile("bff_key_" .. tostring(game:GetService("Players").LocalPlayer.UserId) .. ".txt")
+    end)
+    url = (keyed and has) and GATE or SOURCE
+end
+local buster = string.find(url, "?", 1, true) and "&cb=" or "?cb="
+local got, src = pcall(function() return game:HttpGet(url .. buster .. tostring(tick())) end)
 -- A scheduler pass between HttpGet and the first print (Roblox 0.746 + Velocity:
 -- a print straight after HttpGet killed the client, 2026-11-06).
 task.wait()
