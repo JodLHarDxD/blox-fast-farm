@@ -18440,10 +18440,10 @@ local function buildUI()
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
             })
             local sub = label(card, {
-                Size = UDim2.new(1, -140, 0, 16), Position = UDim2.fromOffset(32, 27),
+                Size = UDim2.new(1, -140, 0, 26), Position = UDim2.fromOffset(32, 25),
                 Font = Enum.Font.Gotham, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+                TextColor3 = C.third, TextWrapped = true, Text = "",
             })
             local btn = mk("TextButton", {
                 Size = UDim2.fromOffset(88, 44), Position = UDim2.new(1, -96, 0, 4),
@@ -18474,12 +18474,23 @@ local function buildUI()
                     btn.Text = on and "Turn off" or "Turn on"
                 elseif on then
                     line.Text = "Your mode"
-                    sub.Text = "Start on Home runs it"
+                    if id == "pvp" then
+                        -- Off does not restart anything: the mode under PvP
+                        -- is yours again, and Start on Home runs it.
+                        local under = modeUnder()
+                        sub.Text = under == "none" and "Off: no mode is on. Pick one on Home."
+                            or ("Off: " .. modeName(under) .. " is yours again; Start runs it")
+                    else
+                        sub.Text = "Start on Home runs it"
+                    end
                     btn.Text = "In use"
                 else
                     line.Text = "Not your mode"
                     local now = modeNow()
                     sub.Text = now == "none" and "No mode is on" or (modeName(now) .. " is your mode now")
+                    if id == "pvp" and now ~= "none" then
+                        sub.Text = modeName(now) .. " is your mode now. On stops it while you fight."
+                    end
                     btn.Text = "Use this"
                 end
             end)
@@ -18992,40 +19003,6 @@ local function buildUI()
 
         return K
     end)()
-
-    -- What On will turn off, for the line under a mode's switch.
-    local function offList(id)
-        local now, under = modeNow(), modeUnder()
-        local t = {}
-        if now ~= id and now ~= "none" then table.insert(t, modeName(now)) end
-        local overlay = (now == "pvp" or now == "levi")
-        if overlay and id ~= "pvp" and id ~= "levi" and under ~= id and under ~= "none" then
-            table.insert(t, modeName(under))
-        end
-        return table.concat(t, " and ")
-    end
-
-    -- THE MODE'S OWN SWITCH, the first row of its page. The line under it
-    -- says what On will turn off - before you tap, not after.
-    local function modeSwitch(view, id)
-        switchRow(view, TITLES[id], function()
-            if modeNow() == id then
-                if id == "pvp" or id == "levi" then
-                    return "On, over " .. modeName(modeUnder()) .. " - Off brings it back"
-                end
-                return "On - one mode at a time"
-            end
-            if id == "pvp" then
-                return "The farm stops while you fight - Off brings " .. modeName(modeUnder()) .. " back"
-            end
-            if id == "levi" then
-                return "Only the Leviathan, over " .. modeName(modeUnder()) .. " - it starts the run"
-            end
-            local off = offList(id)
-            if off == "" then return "One mode at a time - nothing else is on" end
-            return "One mode at a time - On turns " .. off .. " off"
-        end, function() return modeNow() == id end, function(x) setMode(id, x) end)
-    end
 
     -- The Mode row on Home: the mode, green while it runs.
     local function modeValue()
@@ -20653,6 +20630,8 @@ local function buildUI()
     do
         local v = makeView("fruit")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "fruit")
         readout(v, function()
             local el = P.elite
             local lines = { "last      " .. tostring(el.fruitNote),
@@ -20682,7 +20661,6 @@ local function buildUI()
                 #(P.fruitLog or {})))
             return table.concat(lines, "\n")
         end)
-        modeSwitch(v, "fruit")
         heading2(v, "which fruits")
         navRow(v, "Fruit menu", function()
             local take, skip = 0, 0
@@ -20779,6 +20757,7 @@ local function buildUI()
     do
         local v = makeView("fruitmenu")
         gap(v, 8)
+        P.kit.pageTop(v, "owner")
         heading2(v, "your limit")
         sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
             function() return CFG.FruitMinPrice end,
@@ -20872,6 +20851,7 @@ local function buildUI()
     do
         local v = makeView("fruitlog")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
         readout(v, function()
             local log = P.fruitLog or {}
             local lines = { string.format("picked    %d fruits%s", #log,
@@ -20904,6 +20884,7 @@ local function buildUI()
     do
         local v = makeView("trades")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
         readout(v, function() return P.trades.report() end)
         heading2(v, "the rule")
         readout(v, function() return P.trades.rules() end)
@@ -20943,6 +20924,8 @@ local function buildUI()
     do
         local v = makeView("berry")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "berry")
         readout(v, function()
             local el = P.elite
             local lines = { "last      " .. tostring(el.berryNote),
@@ -20966,7 +20949,6 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
-        modeSwitch(v, "berry")
         heading2(v, "which berries")
         -- What each one makes at the Barista (recipes from the Barista Cousin).
         local BERRY_USE = {
@@ -21006,6 +20988,8 @@ local function buildUI()
     do
         local v = makeView("recipe")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "recipe")
         readout(v, function()
             local el = P.elite
             return table.concat({
@@ -21014,7 +20998,6 @@ local function buildUI()
                 string.format("learned   %d", el.tally.recipes or 0),
             }, "\n")
         end)
-        modeSwitch(v, "recipe")
         heading2(v, "which recipes")
         local items = {}
         for i, n in ipairs(P.RECIPES) do
@@ -21139,6 +21122,8 @@ local function buildUI()
     do
         local v = makeView("flower")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "flower")
         readout(v, function()
             local el = P.elite
             local lines = { "last      " .. tostring(el.flowerNote),
@@ -21158,7 +21143,6 @@ local function buildUI()
                 and ("lying now " .. #list) or "lying now none")
             return table.concat(lines, "\n")
         end)
-        modeSwitch(v, "flower")
         heading2(v, "leaving")
         sliderRow(v, "No flower after the first kill: leave at", 1, 5, 0.5,
             function() return CFG.FlowerGiveUp end,
@@ -21180,6 +21164,8 @@ local function buildUI()
     do
         local v = makeView("ember")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "ember")
         readout(v, function()
             local m = P.ember
             local lines = {
@@ -21196,7 +21182,6 @@ local function buildUI()
             if best then table.insert(lines, string.format("trees     best key %s (%d of %d)", best, m.learn[best].closed, m.learn[best].casts)) end
             return table.concat(lines, "\n")
         end)
-        modeSwitch(v, "ember")
         heading2(v, "the embers")
         sliderRow(v, "Stop when you have", 15, 99, 1,
             function() return CFG.EmberStopAt end,
@@ -21223,6 +21208,8 @@ local function buildUI()
     do
         local v = makeView("halloween")
         gap(v, 6)
+        P.kit.pageTop(v, "owner")
+        P.kit.modeStrip(v, "halloween")
         readout(v, function()
             local m = P.halloween
             local t = m.tally
@@ -21269,7 +21256,6 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
-        modeSwitch(v, "halloween")
         heading2(v, "what it does")
         switchRow(v, "Pumpkins", "Smashed with your fighting style; what jumps out is killed",
             function() return CFG.HalloweenPumpkins ~= false end,
@@ -25037,8 +25023,15 @@ local function buildUI()
     -- =====================================================
     do
         local v = makeView("news")
-        gap(v, 8)
-        heading2(v, "show in the strip")
+        gap(v, 6)
+        P.kit.sectionRight(v, "show in the strip", function()
+            local on, total = 0, 0
+            for _, x in pairs(CFG.NewsShow) do
+                total += 1
+                if x ~= false then on += 1 end
+            end
+            return on .. " of " .. total .. " shown"
+        end)
         local items = {}
         for _, t in ipairs({
             { "fruit", "Fruits" }, { "moon", "Moon, day and night" }, { "mirage", "Mirage Island" },
@@ -25065,9 +25058,11 @@ local function buildUI()
     -- =====================================================
     do
         local v = makeView("stats")
-        gap(v, 8)
+        gap(v, 6)
         -- SETTINGS LOCK (user, 2026-10-14): what you set stays after a reload.
-        heading2(v, "your settings")
+        P.kit.sectionRight(v, "your settings", function()
+            return ((P :: any).lock ~= nil and (P :: any).lock.on == true) and "locked" or "not locked"
+        end)
         switchRow(v, "Lock my settings", "On: everything you changed stays after a reload",
             function() return (P :: any).lock ~= nil and (P :: any).lock.on == true end,
             function(x) if (P :: any).lockSet then (P :: any).lockSet(x) end end)
@@ -25075,7 +25070,9 @@ local function buildUI()
             local k = (P :: any).lock
             return k and tostring(k.note) or "-"
         end)
-        heading2(v, "which setup is better")
+        P.kit.sectionRight(v, "which setup is better", function()
+            return #tried > 0 and (#tried .. " tried") or nil
+        end)
         readout(v, function()
             local lines = {}
             local m = meas
@@ -25103,7 +25100,7 @@ local function buildUI()
             .. "flights do not punish a setup. Run each a few minutes on the "
             .. "same camp.")
         actionRow(v, "Clear the tried list", nil, function() table.clear(tried) end)
-        heading2(v, "counters")
+        P.kit.sectionRight(v, "counters", function() return state end)
         readout(v, function()
             local mins = math.max((os.clock() - stats.startedAt) / 60, 1 / 60)
             return table.concat({

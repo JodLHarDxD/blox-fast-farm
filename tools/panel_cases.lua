@@ -177,7 +177,7 @@ if RUN == "full" then
 
     goHome() button("modes", "Haki berries").Activated:Fire() livePass()
     check(string.find(labelsOf(VIEWS.berry)[1] .. table.concat(labelsOf(VIEWS.berry), "|"),
-        "On turns Raid off", 1, true) ~= nil, "berry switch says it turns Raid off")
+        "Raid is your mode now", 1, true) ~= nil, "berry strip says Raid is your mode now")
     modePill("berry").Activated:Fire()
     check(called("setHunt true berry") and CFG_REAL.RaidMode == false, "berry on: the hunt, raid off")
     showModes()
@@ -189,6 +189,13 @@ if RUN == "full" then
     check(modePill("pvp") ~= nil and isStrip(modePill("pvp")), "PvP page: a mode strip")
     modePill("pvp").Activated:Fire()
     check(CFG_REAL.Pvp == true and CFG_REAL.Hunt == true, "PvP on top: berry hunt kept underneath")
+    livePass()
+    do
+        local words = table.concat(labelsOf(VIEWS.pvp), "|")
+        check(string.find(words, "Off: Haki berries is yours again; Start runs it", 1, true) ~= nil
+            and string.find(words, "brings", 1, true) == nil,
+            "PvP strip, on: Off makes the mode under it yours again, Start runs it (not 'brings back')")
+    end
     showModes()
     check(onRows() == "PvP", "PvP alone On: " .. onRows())
     -- Home's big button is PvP's Stop now.
