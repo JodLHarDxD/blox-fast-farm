@@ -1275,5 +1275,117 @@ do
     goHome()
 end
 
+-- ---------- R2 Task 9: Travel, Position, Magnet, Safety, Servers ----------
+do
+    local KEYS = { "Magnet", "PullAll", "MaxPull", "GrabMax", "PileSpread", "PullOthers", "LearnLeash",
+        "HeightMode", "StayHigh", "EscapeBelow", "ReturnAt", "AutoBuso", "AutoKen", "TravelSpeed", "InstantHop",
+        "SeaSpeed", "SeaSteer", "SeaSearchTo", "SeaTurnBack", "SeaLeg2", "HuntHop", "HopOrder", "AutoTeam", "Team",
+        "ChaliceGuard", "LightMode" }
+    local was = {}
+    for _, k in ipairs(KEYS) do was[k] = CFG_REAL[k] end
+    local function pillOf(page, label)
+        local found
+        each(VIEWS[page], function(k) if not found and isPill(k) and switchLabel(k) == label then found = k end end)
+        check(found ~= nil, "a \"" .. label .. "\" switch on " .. page)
+        return found or { Activated = { Fire = function() end } }
+    end
+    local function nth(page, text, n)
+        local list = {}
+        each(VIEWS[page], function(k)
+            if k.ClassName == "TextButton" and tostring(k.Text) == text then table.insert(list, k) end
+        end)
+        check(list[n] ~= nil, "button #" .. n .. " \"" .. text .. "\" on " .. page)
+        return list[n] or { Activated = { Fire = function() end } }
+    end
+    local function labelsHave(page, list, tag)
+        local lab = table.concat(labelsOf(VIEWS[page]), "|")
+        for _, l in ipairs(list) do check(string.find(lab, l, 1, true) ~= nil, tag .. ": keeps \"" .. l .. "\"") end
+    end
+    -- MAGNET: OFF + 1-5, step 3 = today
+    tap("magnet", "OFF")
+    check(CFG_REAL.Magnet == false, "magnet: dial OFF turns the magnet off")
+    tap("magnet", "1")
+    check(CFG_REAL.Magnet == true and CFG_REAL.PullAll == false and CFG_REAL.MaxPull == 150 and CFG_REAL.GrabMax == 8
+        and CFG_REAL.PileSpread == 1, "magnet: dial 1 = gentle")
+    tap("magnet", "5")
+    check(CFG_REAL.PullAll == true and CFG_REAL.MaxPull == 1000 and CFG_REAL.PileSpread == 4, "magnet: dial 5 = all")
+    tap("magnet", "3")
+    check(CFG_REAL.MaxPull == 300 and CFG_REAL.GrabMax == 30 and CFG_REAL.PileSpread == 3 and CFG_REAL.PullAll == true,
+        "magnet: dial 3 = today")
+    pillOf("magnet", "Pull other picked species too").Activated:Fire()
+    check(CFG_REAL.PullOthers == (not was.PullOthers), "magnet: species switch")
+    pillOf("magnet", "Learn how far each kind can go").Activated:Fire()
+    check(CFG_REAL.LearnLeash == (not was.LearnLeash), "magnet: learn switch")
+    labelsHave("magnet", { "Pull every one loaded", "Pull at most, from their spawn", "When that is off: within",
+        "Most in one pile", "Pile width", "This camp means within", "Put back after no damage for" }, "magnet")
+    check(button("magnet", "Clear the list") ~= nil and button("magnet", "Forget what it measured") ~= nil,
+        "magnet: Details keeps its two clears")
+    -- POSITION
+    tap("position", "ONE FIXED SPOT")
+    check(CFG_REAL.HeightMode == "fixed", "position: FIXED")
+    tap("position", "AUTO: HIGH OR CLOSE")
+    check(CFG_REAL.HeightMode == "auto", "position: AUTO")
+    pillOf("position", "Always stay above them").Activated:Fire()
+    check(CFG_REAL.StayHigh == (not was.StayHigh), "position: Always stay above them")
+    labelsHave("position", { "Auto: high, over the pile", "Auto: close, height", "Auto: close, out to the side",
+        "Fixed: height", "Fixed: out to the side" }, "position")
+    -- SAFETY: the two marks never cross
+    CFG_REAL.EscapeBelow, CFG_REAL.ReturnAt = 0.35, 0.40
+    nth("safety", "+", 1).Activated:Fire()
+    check(CFG_REAL.EscapeBelow == 0.4 and CFG_REAL.ReturnAt == 0.45, "safety: escape up pushes come-back up")
+    nth("safety", "-", 2).Activated:Fire()
+    check(CFG_REAL.ReturnAt == 0.4 and CFG_REAL.EscapeBelow == 0.35, "safety: come-back down pulls escape down")
+    CFG_REAL.AutoBuso, CFG_REAL.AutoKen = true, true
+    tap("safety", "Enhancement")
+    check(CFG_REAL.AutoBuso == false and CFG_REAL.AutoKen == true, "safety: J tile")
+    tap("safety", "Observation")
+    check(CFG_REAL.AutoKen == false, "safety: E tile")
+    labelsHave("safety", { "Check Observation every" }, "safety")
+    -- TRAVEL
+    nth("travel", "1", 1).Activated:Fire()
+    check(CFG_REAL.TravelSpeed == 250 and CFG_REAL.InstantHop == 100 and CFG_REAL.SeaSpeed == 250, "travel: speed 1")
+    nth("travel", "3", 1).Activated:Fire()
+    check(CFG_REAL.TravelSpeed == 330 and CFG_REAL.InstantHop == 150 and CFG_REAL.SeaSpeed == 300, "travel: speed 3 = today")
+    tap("travel", "I STEER: A D W S")
+    check(CFG_REAL.SeaSteer == "manual", "travel: I steer")
+    tap("travel", "AUTO: WEST, THEN NEW SERVER")
+    check(CFG_REAL.SeaSteer == "auto", "travel: Auto")
+    nth("travel", "1", 2).Activated:Fire()
+    check(CFG_REAL.SeaSearchTo == 6000 and CFG_REAL.SeaTurnBack == 60 and CFG_REAL.SeaLeg2 == 2000, "travel: look dial 1")
+    nth("travel", "5", 2).Activated:Fire()
+    check(CFG_REAL.SeaSearchTo == 17000 and CFG_REAL.SeaTurnBack == 120 and CFG_REAL.SeaLeg2 == 7000, "travel: look dial 5 = today")
+    labelsHave("travel", { "Fly speed", "One jump, no flight, under", "Boat speed", "Ask a far door from where I stand",
+        "Auto: out to", "Auto: then turn left", "Auto: and sail on", "Auto: a turn every", "Auto: a turn up to",
+        "I steer: turn speed (A / D)", "One compass meter", "Shortest way" }, "travel")
+    -- SERVERS
+    tap("servers", "MOST")
+    check(CFG_REAL.HuntHop == true and CFG_REAL.HopOrder == "most", "servers: most")
+    tap("servers", "ANY")
+    check(CFG_REAL.HopOrder == "random", "servers: any")
+    tap("servers", "STAY")
+    check(CFG_REAL.HuntHop == false, "servers: stay")
+    tap("servers", "FEWEST")
+    check(CFG_REAL.HuntHop == true and CFG_REAL.HopOrder == "fewest", "servers: fewest")
+    tap("servers", "MARINES")
+    check(CFG_REAL.AutoTeam == true and CFG_REAL.Team == "Marines", "servers: Marines")
+    tap("servers", "DON'T PICK")
+    check(CFG_REAL.AutoTeam == false, "servers: don't pick")
+    pillOf("servers", "Light mode").Activated:Fire()
+    check(CFG_REAL.LightMode == (not was.LightMode), "servers: Light mode")
+    pillOf("servers", "The God's Chalice stops every hop").Activated:Fire()
+    check((CFG_REAL.ChaliceGuard ~= false) == (was.ChaliceGuard == false), "servers: Chalice switch")
+    check(button("servers", "Breaking news") ~= nil, "servers: the news row")
+    labelsHave("servers", { "Try a server again after" }, "servers")
+    table.clear(CALLS)
+    tap("servers", "Hop now")
+    livePass()
+    check(not called("hopNow"), "servers: Hop now wants a second tap")
+    tap("servers", "Tap again: Hop now")
+    livePass()
+    check(called("hopNow"), "servers: the second tap hops")
+    for _, k in ipairs(KEYS) do CFG_REAL[k] = was[k] end
+    goHome()
+end
+
 print(string.format("%d passed, %d failed", pass, fail))
 if fail == 0 then print("ALL PASS") end

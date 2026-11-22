@@ -18862,6 +18862,134 @@ local function buildUI()
             return s
         end
 
+        -- NOTE LINE (R2 Task 9): a small grey line; text is a string or a
+        -- function that follows the CFG.
+        function K.noteLine(view, textOrFn)
+            local l = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                TextWrapped = true, Text = type(textOrFn) == "string" and textOrFn or "",
+                LayoutOrder = nextOrder(), Parent = view,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+                PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = l,
+            })
+            if type(textOrFn) == "function" then
+                addLive(function()
+                    local ok, t = pcall(textOrFn)
+                    l.Text = ok and tostring(t or "") or ""
+                end)
+            end
+            return l
+        end
+
+        -- SECTION WITH A WORD ON THE RIGHT: "GETTING OUT" ... "2 escapes".
+        function K.sectionRight(view, left, rightFn)
+            local head = slot(view, 34)
+            label(head, {
+                Size = UDim2.new(0.6, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
+                Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Text = string.upper(left),
+            })
+            local r = label(head, {
+                Size = UDim2.new(0.4, 0, 1, -6), Position = UDim2.new(0.6, -4, 0, 6),
+                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
+            })
+            if rightFn then
+                addLive(function()
+                    local ok, t = pcall(rightFn)
+                    r.Text = ok and tostring(t or "") or ""
+                end)
+            end
+            return head
+        end
+
+        -- STEPPER: label, - value +. fmt turns the value into text; dot is an
+        -- optional Color3 in front of the label.
+        function K.stepper(view, text, get, set, lo, hi, stp, fmt, dot)
+            local r = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 54), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = view,
+            })
+            local x0 = 20
+            if dot then
+                local d = mk("Frame", {
+                    Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(20, 23),
+                    BackgroundColor3 = dot, BorderSizePixel = 0, Parent = r,
+                })
+                corner(d, 4)
+                x0 = 38
+            end
+            label(r, {
+                Size = UDim2.new(1, -(x0 + 170), 1, 0), Position = UDim2.fromOffset(x0, 0),
+                Font = Enum.Font.GothamMedium, TextSize = F.label,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = text,
+            })
+            local function btn(x, txt)
+                local b = mk("TextButton", {
+                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 5),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.body, TextColor3 = C.text,
+                    Text = txt, Parent = r,
+                })
+                corner(b, 12)
+                pressable(b)
+                return b
+            end
+            local minus, plus = btn(-152, "-"), btn(-60, "+")
+            local val = label(r, {
+                Size = UDim2.fromOffset(48, 54), Position = UDim2.new(1, -104, 0, 0),
+                Font = Enum.Font.Code, TextSize = F.label, TextColor3 = C.text, Text = "",
+            })
+            local function show() val.Text = fmt(get()) end
+            local function nudge(d)
+                local x = (tonumber(get()) or 0) + d * stp
+                set(math.floor(math.clamp(x, lo, hi) * 100 + 0.5) / 100)
+                show()
+            end
+            minus.Activated:Connect(function() nudge(-1) end)
+            plus.Activated:Connect(function() nudge(1) end)
+            show()
+            addLive(show)
+            return r
+        end
+
+        -- CONFIRM ROW: a by-hand action that wants a second tap ("Tap again:
+        -- ..." in amber for 3 s, then it runs and says done).
+        function K.confirmRow(view, text, cb)
+            local AMBER = Color3.fromRGB(240, 166, 60)
+            local token = 0
+            local armed = false
+            local b
+            b = actionRow(view, text, nil, function()
+                token += 1
+                local mine = token
+                if not armed then
+                    armed = true
+                    b.Text = "Tap again: " .. text
+                    b.TextColor3 = AMBER
+                    task.delay(3, function()
+                        if token == mine and armed then
+                            armed = false
+                            b.Text, b.TextColor3 = text, C.ivory
+                        end
+                    end)
+                    return
+                end
+                armed = false
+                pcall(cb)
+                b.Text, b.TextColor3 = text .. "  -  done", C.live
+                task.delay(1.8, function()
+                    if token == mine then b.Text, b.TextColor3 = text, C.ivory end
+                end)
+            end)
+            return b
+        end
+
         return K
     end)()
 
@@ -24092,56 +24220,88 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- MAGNET
+    -- MAGNET. R2 Task 9 (board Magnet): a STRENGTH dial OFF + 1-5 over Magnet,
+    -- PullAll, MaxPull, GrabMax and PileSpread (step 3 = today); the two
+    -- species switches; Fine-tune with every exact value; Details.
     -- =====================================================
     do
         local v = makeView("magnet")
         gap(v, 6)
+        local function studs(n) return string.format("%d", n) end
+        local MAG = {
+            { "OFF", "OFF", { Magnet = false }, "No pulling. You fight them where they stand." },
+            { "1", "1  GENTLE", { Magnet = true, PullAll = false, MaxPull = 150, GrabMax = 8, PileSpread = 1 },
+                "Most 8 in a pile, from 150 studs, width 1." },
+            { "2", "2  CALM", { Magnet = true, PullAll = false, MaxPull = 200, GrabMax = 15, PileSpread = 2 },
+                "Most 15 in a pile, from 200 studs, width 2." },
+            { "3", "3  BALANCED", { Magnet = true, PullAll = true, MaxPull = 300, GrabMax = 30, PileSpread = 3 },
+                "Most 30, from 300 studs, width 3 (today's setting)." },
+            { "4", "4  STRONG", { Magnet = true, PullAll = true, MaxPull = 600, GrabMax = 30, PileSpread = 3 },
+                "Most 30, from 600 studs, width 3." },
+            { "5", "5  ALL", { Magnet = true, PullAll = true, MaxPull = 1000, GrabMax = 30, PileSpread = 4 },
+                "Most 30, from 1,000 studs, width 4." },
+        }
+        local STEPS = {}
+        for i, m in ipairs(MAG) do
+            table.insert(STEPS, { name = m[2], short = m[1], set = m[3], line = m[4], today = (i == 4) or nil })
+        end
+        P.kit.dial(v, "Strength", STEPS, "none")
+        P.kit.truthCard(v, function()
+            if not CFG.Magnet then return "Magnet off" end
+            if CFG.PullAll then
+                return CFG.MaxPull >= 1000 and "Every one loaded, the whole camp" or "Every one loaded, in one pile"
+            end
+            return "Piles of " .. tostring(CFG.GrabMax)
+        end, function()
+            if not CFG.Magnet then return "You fight them where they stand." end
+            if CFG.PullAll then
+                return "Pulls up to " .. studs(CFG.MaxPull) .. " studs from their spawn, " .. tostring(CFG.GrabMax)
+                    .. " at most. A wide camp is piled one side at a time."
+            end
+            return "Pulls from " .. studs(CFG.GrabRadius) .. " studs, " .. tostring(CFG.GrabMax) .. " at most in one pile."
+        end, "none")
         readout(v, function()
             return string.format("held %d   ·   staying put %d   ·   put back %d\n%s",
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
-        switchRow(v, "Magnet", "Pull the quest species into one pile and hold it",
-            function() return CFG.Magnet end,
-            function(x) CFG.Magnet = x end)
-        heading2(v, "the pile")
-        switchRow(v, "Pull every one loaded",
-            "Any distance - a new spawn joins the pile at once",
-            function() return CFG.PullAll end,
-            function(x) CFG.PullAll = x end)
-        readout(v, function()
-            if not CFG.PullAll then return "off: only ones spawned within the distance below" end
-            return P.pileReach and string.format("pile at the camp's middle  ·  farthest pull %.0f studs",
-                P.pileReach) or "pile at the camp's middle (found on the first pile)"
-        end)
-        sliderRow(v, "Pull at most, from their spawn", 50, 1000, 10,
-            function() return CFG.MaxPull end,
-            function(x) CFG.MaxPull = x end, " studs")
-        sliderRow(v, "When that is off: within", 50, 600, 10,
-            function() return CFG.GrabRadius end,
-            function(x) CFG.GrabRadius = x end, " studs")
-        sliderRow(v, "Most in one pile", 1, 30, 1,
-            function() return CFG.GrabMax end,
-            function(x) CFG.GrabMax = x end)
-        sliderRow(v, "Pile width", 0, 10, 0.5,
-            function() return CFG.PileSpread end,
-            function(x) CFG.PileSpread = x end, " studs")
-        heading2(v, "other species")
+        heading2(v, "also")
         switchRow(v, "Pull other picked species too",
-            "Only ones that spawn in this camp",
+            "Your circuit's other species in this camp join the pile",
             function() return CFG.PullOthers end,
             function(x) CFG.PullOthers = x end)
-        sliderRow(v, "This camp means within", 20, 300, 10,
-            function() return CFG.OthersRadius end,
-            function(x) CFG.OthersRadius = x end, " studs")
-        heading2(v, "keeping them hittable")
-        sliderRow(v, "Put back after no damage for", 1, 10, 0.5,
-            function() return CFG.PutBackAfter end,
-            function(x) CFG.PutBackAfter = x end, " s")
         switchRow(v, "Learn how far each kind can go",
             "Off by default: it only ever lowers the limit, and split camps",
             function() return CFG.LearnLeash end,
             function(x) CFG.LearnLeash = x end)
+        P.kit.fineTune(v, function(box)
+            switchRow(box, "Pull every one loaded",
+                "Any distance - a new spawn joins the pile at once",
+                function() return CFG.PullAll end,
+                function(x) CFG.PullAll = x end)
+            readout(box, function()
+                if not CFG.PullAll then return "off: only ones spawned within the distance below" end
+                return P.pileReach and string.format("pile at the camp's middle  ·  farthest pull %.0f studs",
+                    P.pileReach) or "pile at the camp's middle (found on the first pile)"
+            end)
+            sliderRow(box, "Pull at most, from their spawn", 50, 1000, 10,
+                function() return CFG.MaxPull end,
+                function(x) CFG.MaxPull = x end, " studs")
+            sliderRow(box, "When that is off: within", 50, 600, 10,
+                function() return CFG.GrabRadius end,
+                function(x) CFG.GrabRadius = x end, " studs")
+            sliderRow(box, "Most in one pile", 1, 30, 1,
+                function() return CFG.GrabMax end,
+                function(x) CFG.GrabMax = x end)
+            sliderRow(box, "Pile width", 0, 10, 0.5,
+                function() return CFG.PileSpread end,
+                function(x) CFG.PileSpread = x end, " studs")
+            sliderRow(box, "This camp means within", 20, 300, 10,
+                function() return CFG.OthersRadius end,
+                function(x) CFG.OthersRadius = x end, " studs")
+            sliderRow(box, "Put back after no damage for", 1, 10, 0.5,
+                function() return CFG.PutBackAfter end,
+                function(x) CFG.PutBackAfter = x end, " s")
+        end, 7)
         fold(v, "How it works", function(v)
             caption(v, "A camp wider than the limit is piled one side at a time: "
                 .. "the side nearest you, then the other when it is empty. A pile "
@@ -24190,11 +24350,31 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- POSITION
+    -- POSITION. R2 Task 9 (board Position): AUTO | FIXED, a truth card, the
+    -- "Always stay above them" switch, Fine-tune with the five distances.
     -- =====================================================
     do
         local v = makeView("position")
         gap(v, 6)
+        P.kit.segmented(v, "where you stand", {
+            { "auto", "Auto: high or close" }, { "fixed", "One fixed spot" },
+        }, function() return CFG.HeightMode end, function(x) CFG.HeightMode = x end)
+        P.kit.truthCard(v, function()
+            if CFG.HeightMode == "fixed" then
+                return "Always " .. tostring(CFG.HeightFixed) .. " up, "
+                    .. ((tonumber(CFG.SideFixed) or 0) == 0 and "right over them" or (tostring(CFG.SideFixed) .. " out"))
+            end
+            return "High over the pile, " .. tostring(CFG.HeightSafe) .. " up"
+        end, function()
+            if CFG.HeightMode == "fixed" then
+                return "The same spot every fight. Height counts from the highest enemy."
+            end
+            if CFG.StayHigh then
+                return "Always high: every attack from this height, never close."
+            end
+            return "High when your hits reach from there. Close (" .. tostring(CFG.HeightMelee) .. " up, "
+                .. tostring(CFG.MeleeDistance) .. " out) only when they must."
+        end, "none")
         readout(v, function()
             if CFG.HeightMode == "fixed" then
                 return string.format("fixed: %d up, %d out", CFG.HeightFixed, CFG.SideFixed)
@@ -24205,10 +24385,7 @@ local function buildUI()
             return string.format("now high: %d over the highest enemy%s", CFG.HeightSafe,
                 CFG.StayHigh and "  (always)" or "")
         end)
-        radio(v, 82, {
-            { "auto", "Auto - high or close" },
-            { "fixed", "One fixed spot" },
-        }, function() return CFG.HeightMode end, function(x) CFG.HeightMode = x end)
+        heading2(v, "also")
         switchRow(v, "Always stay above them",
             "Never comes down close - every attack from this height",
             function() return CFG.StayHigh end,
@@ -24217,23 +24394,23 @@ local function buildUI()
                 if x then setPose("safe") end
                 P.reprobe()             -- the M1 ways were found at the old height
             end)
-        heading2(v, "auto")
-        sliderRow(v, "High, over the pile", 5, 150, 1,
-            function() return CFG.HeightSafe end,
-            function(x) CFG.HeightSafe = x end, " studs")
-        sliderRow(v, "Close, height", 0, 10, 0.5,
-            function() return CFG.HeightMelee end,
-            function(x) CFG.HeightMelee = x end, " studs")
-        sliderRow(v, "Close, out to the side", 0, 15, 0.5,
-            function() return CFG.MeleeDistance end,
-            function(x) CFG.MeleeDistance = x end, " studs")
-        heading2(v, "fixed")
-        sliderRow(v, "Height", 0, 150, 1,
-            function() return CFG.HeightFixed end,
-            function(x) CFG.HeightFixed = x end, " studs")
-        sliderRow(v, "Out to the side", 0, 20, 1,
-            function() return CFG.SideFixed end,
-            function(x) CFG.SideFixed = x end, " studs")
+        P.kit.fineTune(v, function(box)
+            sliderRow(box, "Auto: high, over the pile", 5, 150, 1,
+                function() return CFG.HeightSafe end,
+                function(x) CFG.HeightSafe = x end, " studs")
+            sliderRow(box, "Auto: close, height", 0, 10, 0.5,
+                function() return CFG.HeightMelee end,
+                function(x) CFG.HeightMelee = x end, " studs")
+            sliderRow(box, "Auto: close, out to the side", 0, 15, 0.5,
+                function() return CFG.MeleeDistance end,
+                function(x) CFG.MeleeDistance = x end, " studs")
+            sliderRow(box, "Fixed: height", 0, 150, 1,
+                function() return CFG.HeightFixed end,
+                function(x) CFG.HeightFixed = x end, " studs")
+            sliderRow(box, "Fixed: out to the side", 0, 20, 1,
+                function() return CFG.SideFixed end,
+                function(x) CFG.SideFixed = x end, " studs")
+        end, 5)
         fold(v, "How it works", function(v)
             caption(v, "Auto: high over the pile whenever the hit reaches from "
                 .. "there (remote hit, fruit click, fruit skills) - out of their "
@@ -24247,11 +24424,184 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- SAFETY & HAKI
+    -- SAFETY & HAKI. R2 Task 9 (board Safety): a health bar with the escape
+    -- and come-back marks moved by two steppers, a truth card, J and E as two
+    -- big tiles, the check-every value in Fine-tune.
     -- =====================================================
     do
         local v = makeView("safety")
-        gap(v, 6)
+        local RED = Color3.fromRGB(232, 92, 78)
+        local GREEN = Color3.fromRGB(63, 208, 126)
+        local function pct(x) return math.floor((tonumber(x) or 0) * 100 + 0.5) end
+        gap(v, 4)
+        P.kit.sectionRight(v, "getting out  ·  every mode", function()
+            local n = stats.escapes or 0
+            if n == 0 then return "no escape yet" end
+            return n == 1 and "1 escape this run" or (n .. " escapes this run")
+        end)
+        -- the bar: red under the escape mark, green from the come-back mark
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 96), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = s })
+            local function tag(y, color, sub)
+                local h = mk("Frame", {
+                    Size = UDim2.fromOffset(112, 30), Position = UDim2.new(0, 0, 0, y),
+                    BackgroundTransparency = 1, Parent = s,
+                })
+                local a = mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 15), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                    TextSize = F.tiny, TextColor3 = color, Text = "", Parent = h,
+                })
+                local b = mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 15), BackgroundTransparency = 1,
+                    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = C.third, Text = sub, Parent = h,
+                })
+                return h, a, b
+            end
+            local oh, ol, osub = tag(2, RED, "fly 250 up")
+            local bh, bl, bsub = tag(66, GREEN, "back to the fight")
+            local bar = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 38),
+                BackgroundColor3 = C.raised, BorderSizePixel = 0, ClipsDescendants = true, Parent = s,
+            })
+            corner(bar, 7)
+            local redPart = mk("Frame", {
+                Size = UDim2.fromScale(0.35, 1), BackgroundColor3 = Color3.fromRGB(74, 36, 32),
+                BorderSizePixel = 0, Parent = bar,
+            })
+            local greenPart = mk("Frame", {
+                Size = UDim2.fromScale(0.2, 1), Position = UDim2.fromScale(0.8, 0),
+                BackgroundColor3 = Color3.fromRGB(31, 74, 51), BorderSizePixel = 0, Parent = bar,
+            })
+            local function mark(color)
+                return mk("Frame", {
+                    Size = UDim2.fromOffset(2, 28), Position = UDim2.fromOffset(0, 31),
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = s,
+                })
+            end
+            local om, bm = mark(RED), mark(GREEN)
+            local function place(h, a, b, p, y)
+                h.AnchorPoint = Vector2.new(p, 0)
+                h.Position = UDim2.new(p, 0, 0, y)
+                local al = p < 0.2 and Enum.TextXAlignment.Left
+                    or (p > 0.8 and Enum.TextXAlignment.Right or Enum.TextXAlignment.Center)
+                a.TextXAlignment, b.TextXAlignment = al, al
+            end
+            addLive(function()
+                local po = math.clamp(tonumber(CFG.EscapeBelow) or 0.35, 0, 1)
+                local pb = math.clamp(tonumber(CFG.ReturnAt) or 0.8, 0, 1)
+                redPart.Size = UDim2.fromScale(po, 1)
+                greenPart.Position, greenPart.Size = UDim2.fromScale(pb, 0), UDim2.fromScale(1 - pb, 1)
+                om.Position = UDim2.new(po, -1, 0, 31)
+                bm.Position = UDim2.new(pb, -1, 0, 31)
+                ol.Text, bl.Text = "OUT " .. pct(po) .. "%", "BACK " .. pct(pb) .. "%"
+                place(oh, ol, osub, po, 2)
+                place(bh, bl, bsub, pb, 66)
+            end)
+        end
+        -- the two marks never cross: "come back" stays at least 5 above "escape"
+        P.kit.stepper(v, "Escape below", function() return pct(CFG.EscapeBelow) end, function(x)
+            local o = math.clamp(x, 10, 80)
+            CFG.EscapeBelow = o / 100
+            if pct(CFG.ReturnAt) < o + 5 then CFG.ReturnAt = math.min(100, o + 5) / 100 end
+        end, 10, 80, 5, function(x) return tostring(math.floor(x + 0.5)) .. "%" end, RED)
+        P.kit.stepper(v, "Come back at", function() return pct(CFG.ReturnAt) end, function(x)
+            local b = math.clamp(x, 30, 100)
+            CFG.ReturnAt = b / 100
+            if pct(CFG.EscapeBelow) > b - 5 then CFG.EscapeBelow = math.max(10, b - 5) / 100 end
+        end, 30, 100, 5, function(x) return tostring(math.floor(x + 0.5)) .. "%" end, GREEN)
+        P.kit.truthCard(v, function()
+            return "Out under " .. pct(CFG.EscapeBelow) .. "%, back at " .. pct(CFG.ReturnAt) .. "%"
+        end, function()
+            local hk
+            if CFG.AutoBuso and CFG.AutoKen then hk = "J and E stay on."
+            elseif CFG.AutoBuso then hk = "J stays on; Observation is yours."
+            elseif CFG.AutoKen then hk = "E stays on; Enhancement is yours."
+            else hk = "No haki key is pressed: both are yours." end
+            return "Under " .. pct(CFG.EscapeBelow) .. "% you fly 250 up, out of reach, and wait there for "
+                .. pct(CFG.ReturnAt) .. "%, 40 s at most. Then back to the fight. " .. hk
+                .. "\nNot in PvP, at the boat wheel or on your Mirage moon turn."
+        end, "none")
+        caption(v, "There is no real god mode: health lives on the server. "
+            .. "Height, a pinned pile and Observation keep you alive. This gets you out.")
+        P.kit.sectionRight(v, "haki  ·  every mode", function() return "keep it on" end)
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 124), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local function tile(i, key, name, getOn, setOn, subFn)
+                local b = mk("TextButton", {
+                    Size = UDim2.new(0.5, -5, 0, 118), Position = UDim2.new((i - 1) * 0.5, (i - 1) * 5, 0, 0),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false, Text = "", Parent = s,
+                })
+                corner(b, 14)
+                local st = mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                local kb = mk("TextLabel", {
+                    Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(12, 12),
+                    BackgroundColor3 = C.base, BorderSizePixel = 0, Font = Enum.Font.Code,
+                    TextSize = F.label, TextColor3 = C.text, Text = key, Parent = b,
+                })
+                corner(kb, 8)
+                local track = mk("Frame", {
+                    Size = UDim2.fromOffset(40, 24), Position = UDim2.new(1, -52, 0, 15),
+                    BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = b,
+                })
+                corner(track, 12)
+                local knob = mk("Frame", {
+                    Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(3, 3),
+                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = track,
+                })
+                corner(knob, 9)
+                local nm = mk("TextLabel", {
+                    Size = UDim2.new(1, -24, 0, 20), Position = UDim2.fromOffset(12, 52),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
+                })
+                local dot = mk("Frame", {
+                    Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(12, 80),
+                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = b,
+                })
+                corner(dot, 3)
+                local state = mk("TextLabel", {
+                    Size = UDim2.new(1, -36, 0, 14), Position = UDim2.fromOffset(24, 76),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "", Parent = b,
+                })
+                local sub = mk("TextLabel", {
+                    Size = UDim2.new(1, -24, 0, 14), Position = UDim2.fromOffset(12, 94),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
+                })
+                pressable(b)
+                b.Activated:Connect(function() setOn(not getOn()) end)
+                addLive(function()
+                    local on = getOn() and true or false
+                    track.BackgroundColor3 = on and GREEN or C.hair
+                    knob.Position = UDim2.fromOffset(on and 19 or 3, 3)
+                    nm.TextColor3 = on and C.text or C.second
+                    kb.TextColor3 = on and C.text or C.third
+                    st.Color = on and C.raised or C.hair
+                    dot.BackgroundColor3 = on and GREEN or C.third
+                    state.Text = on and "on now" or "not kept"
+                    sub.Text = subFn(on)
+                end)
+            end
+            tile(1, "J", "Enhancement", function() return CFG.AutoBuso end,
+                function(x) CFG.AutoBuso = x end,
+                function(on) return on and "J when it drops" or "J is yours to press" end)
+            tile(2, "E", "Observation", function() return CFG.AutoKen end,
+                function(x) CFG.AutoKen = x end,
+                function(on)
+                    return on and string.format("checked every %g min", (CFG.KenEvery or 300) / 60)
+                        or "E is yours to press"
+                end)
+        end
         readout(v, function()
             local lines = {}
             table.insert(lines, CFG.AutoBuso
@@ -24268,98 +24618,292 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
-        heading2(v, "getting out")
-        sliderRow(v, "Escape below", 10, 80, 5,
-            function() return CFG.EscapeBelow * 100 end,
-            function(x) CFG.EscapeBelow = x / 100 end, "%")
-        sliderRow(v, "Come back at", 30, 100, 5,
-            function() return CFG.ReturnAt * 100 end,
-            function(x) CFG.ReturnAt = x / 100 end, "%")
-        readout(v, function() return "escapes this run  " .. stats.escapes end)
-        heading2(v, "haki")
-        switchRow(v, "Enhancement (J) - keep it on",
-            "Checked every pass; J when the character lacks it",
-            function() return CFG.AutoBuso end,
-            function(x) CFG.AutoBuso = x end)
-        switchRow(v, "Observation (E) - keep it on",
-            "After a death and on a timer; E only when it is off",
-            function() return CFG.AutoKen end,
-            function(x) CFG.AutoKen = x end)
-        sliderRow(v, "Check Observation every", 1, 15, 1,
-            function() return (CFG.KenEvery or 300) / 60 end,
-            function(x)
-                CFG.KenEvery = x * 60
-                kenNextAt = math.min(kenNextAt, os.clock() + CFG.KenEvery)
-            end, " min")
-        fold(v, "How it works", function(v)
-            caption(v, "There is no real god mode: health lives on the server. "
-                .. "What keeps you alive is hanging high over the pile, the pile "
-                .. "being pinned so nothing can walk to you, Observation, and "
-                .. "this: under the first number you fly 250 up and wait for the second.")
-        end)
+        caption(v, "A key is pressed only while its haki is off, so a press never turns one off. "
+            .. "In raids Observation stays off: the raid turns it off.")
+        P.kit.fineTune(v, function(box)
+            sliderRow(box, "Check Observation every", 1, 15, 1,
+                function() return (CFG.KenEvery or 300) / 60 end,
+                function(x)
+                    CFG.KenEvery = x * 60
+                    kenNextAt = math.min(kenNextAt, os.clock() + CFG.KenEvery)
+                end, " min")
+        end, "1 expert setting")
     end
 
     -- =====================================================
-    -- TRAVEL & BOAT: flying, the boat, searching the sea
+    -- TRAVEL & BOAT. R2 Task 9 (board Travel): one SPEED dial for flying and
+    -- the boat, the shortest-way switch, the sea search as a picture with
+    -- one width dial (or your own steering), Fine-tune with every number.
     -- =====================================================
     do
         local v = makeView("travel")
         gap(v, 6)
+        local function commas(n)
+            local s = tostring(math.floor(n))
+            local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+            return (out:gsub("^,", ""))
+        end
+        local SPEED = {
+            { "1  SAFE", 250, 100, 250 }, { "2  CALM", 300, 130, 250 }, { "3  NORMAL", 330, 150, 300 },
+            { "4  QUICK", 400, 200, 325 }, { "5  FAST", 500, 250, 350 },
+        }
+        local SSTEPS = {}
+        for i, s in ipairs(SPEED) do
+            table.insert(SSTEPS, {
+                name = s[1], set = { TravelSpeed = s[2], InstantHop = s[3], SeaSpeed = s[4] },
+                line = "Flies " .. s[2] .. " studs/s, the boat " .. s[4] .. ". Under " .. s[3]
+                    .. " studs: one jump, no flight" .. (i == 3 and " (today's setting)." or "."),
+                today = (i == 3) or nil,
+            })
+        end
+        P.kit.dial(v, "Speed  ·  every mode", SSTEPS, "none")
+        P.kit.truthCard(v, function()
+            return "Flies at " .. tostring(CFG.TravelSpeed) .. ", sails at " .. tostring(CFG.SeaSpeed)
+        end, function()
+            local f = tonumber(CFG.TravelSpeed) or 330
+            local feel
+            if f < 300 then feel = "Well under the public hubs' 330: the slowest, quietest way."
+            elseif f < 330 then feel = "A little under the public hubs' 330."
+            elseif f == 330 then feel = "The speed the public hubs fly at."
+            elseif f < 450 then feel = "Faster than the public hubs' 330: the server may pull you back."
+            else feel = "Far faster than the public hubs' 330: the server may pull you back often." end
+            return feel .. string.format(" This run: %d flights, pulled back %d times.", stats.flights, stats.pulledBack)
+        end, "none")
+        heading2(v, "the way there")
+        switchRow(v, "Shortest way",
+            "The Home button, the portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship, the Sky gate) when they beat flying - not on the boat, the sea hunts or raids",
+            function() return CFG.TravelRoutes end,
+            function(x) CFG.TravelRoutes = x end)
+        readout(v, function() return P.route and P.route.words() or "route     -" end)
+
+        -- the sea search
+        do
+            local head = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 16), Parent = head })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -150, 1, -6), Position = UDim2.fromOffset(0, 6), BackgroundTransparency = 1,
+                Font = Enum.Font.GothamMedium, TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = C.third, Text = "SEARCHING THE SEA", Parent = head,
+            })
+            local chips = mk("Frame", {
+                Size = UDim2.fromOffset(140, 20), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 8),
+                BackgroundTransparency = 1, Parent = head,
+            })
+            mk("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Right,
+                Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = chips,
+            })
+            P.kit.packChip(chips, "sea")
+            P.kit.packChip(chips, "prehistoric")
+        end
+        P.kit.noteLine(v, "How the boat looks for an island in Prehistoric, Mirage and Sea events. Sea travel always uses your keys.")
+        P.kit.segmented(v, nil, {
+            { "auto", "Auto: west, then new server" }, { "manual", "I steer: A D W S" },
+        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
+
+        local autoBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = autoBox })
+        local manBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = manBox })
+        addLive(function()
+            local a = CFG.SeaSteer == "auto"
+            autoBox.Visible, manBox.Visible = a, not a
+        end)
+
+        -- AUTO: the path drawn to scale (Tiki at the right, west is left)
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 160), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = autoBox,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, -8), BackgroundColor3 = C.row, BorderSizePixel = 0,
+                ClipsDescendants = true, Parent = s,
+            })
+            corner(box, 14)
+            local stage = mk("Frame", {
+                Size = UDim2.fromOffset(300, 150), AnchorPoint = Vector2.new(0.5, 0),
+                Position = UDim2.new(0.5, 0, 0, 0), BackgroundTransparency = 1, Parent = box,
+            })
+            local function text(w, str, color, align)
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 14), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                    TextSize = 10, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
+                    Text = str, Parent = stage,
+                })
+            end
+            local function dot(d, filled)
+                local f = mk("Frame", {
+                    Size = UDim2.fromOffset(d, d), BackgroundColor3 = filled and C.ivory or C.row,
+                    BorderSizePixel = 0, Parent = stage,
+                })
+                corner(f, d / 2)
+                if not filled then
+                    mk("UIStroke", { Color = C.ivory, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = f })
+                end
+                return f
+            end
+            local TX = 270                      -- Tiki, on the right
+            local west = text(60, "WEST", C.third)
+            west.Position = UDim2.fromOffset(10, 10)
+            mk("Frame", {
+                Size = UDim2.fromOffset(1, 110), Position = UDim2.fromOffset(TX - 38, 16),
+                BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = stage,
+            })
+            local dl = text(60, "Danger 6", C.third)
+            dl.Position = UDim2.fromOffset(TX - 34, 130)
+            local leg1 = mk("Frame", { Size = UDim2.fromOffset(10, 2), BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage })
+            local outL = text(100, "", C.second, Enum.TextXAlignment.Center)
+            local leg2 = mk("Frame", {
+                Size = UDim2.fromOffset(10, 2), AnchorPoint = Vector2.new(0, 0.5),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage,
+            })
+            local turnDot = dot(8, false)
+            local turnL = text(64, "", C.third)
+            local endDot = dot(12, false)
+            local endL = text(70, "new server", C.second)
+            local tiki = dot(8, true)
+            tiki.Position = UDim2.fromOffset(TX - 4, 36)
+            local tl = text(30, "Tiki", C.third)
+            tl.Position = UDim2.fromOffset(TX - 14, 50)
+            addLive(function()
+                local out = math.max(1000, tonumber(CFG.SeaSearchTo) or 17000)
+                local turn = tonumber(CFG.SeaTurnBack) or 120
+                local on = math.max(0, tonumber(CFG.SeaLeg2) or 0)
+                local S = 17000 / 246
+                local tx = math.max(8, TX - out / S)
+                local L = math.min(on / S, 170)
+                local phi = 180 - turn
+                local rad = math.rad(phi)
+                local ex, ey = tx + L * math.cos(rad), 40 + L * math.sin(rad)
+                leg1.Position = UDim2.fromOffset(math.floor(tx), 39)
+                leg1.Size = UDim2.fromOffset(math.max(1, math.floor(TX - tx)), 2)
+                outL.Position = UDim2.fromOffset(math.floor(tx + (TX - tx) / 2 - 50), 22)
+                outL.Text = "out to " .. commas(out) .. " m"
+                leg2.Position = UDim2.fromOffset(math.floor(tx), 40)
+                leg2.Size = UDim2.fromOffset(math.floor(L), 2)
+                leg2.Rotation = phi
+                leg2.Visible = L >= 1
+                turnDot.Position = UDim2.fromOffset(math.floor(tx - 4), 36)
+                turnL.Text = math.floor(turn) .. "° left"
+                turnL.TextXAlignment = turn <= 90 and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right
+                turnL.Position = UDim2.fromOffset(math.floor(turn <= 90 and tx + 8 or tx - 68), 47)
+                endDot.Position = UDim2.fromOffset(math.floor(ex - 6), math.floor(math.min(ey, 132) - 6))
+                endL.Position = UDim2.fromOffset(math.floor(math.min(ex + 10, 228)), math.floor(math.min(ey, 132) - 7))
+                endDot.Visible, endL.Visible = L >= 1, L >= 1
+            end)
+        end
+        P.kit.noteLine(autoBox, "Meters count from Tiki Outpost's back boat dealer. Danger 6 starts about 2,600 m out.")
+        local FAR = {
+            { "1  NEAR", 6000, 60, 2000 }, { "2  SHORT", 8000, 75, 2500 }, { "3  MIDDLE", 10500, 75, 3000 },
+            { "4  LONG", 14000, 100, 5000 }, { "5  FAR", 17000, 120, 7000 },
+        }
+        local FSTEPS = {}
+        for i, f in ipairs(FAR) do
+            table.insert(FSTEPS, {
+                name = f[1], set = { SeaSearchTo = f[2], SeaTurnBack = f[3], SeaLeg2 = f[4] },
+                line = "West to " .. commas(f[2]) .. " m, then " .. f[3] .. "° left for " .. commas(f[4])
+                    .. " m more. No island: the next server" .. (i == 5 and " (today's setting)." or "."),
+                today = (i == 5) or nil,
+            })
+        end
+        P.kit.dial(autoBox, "How far to look", FSTEPS, "sea")
+        P.kit.noteLine(autoBox, function()
+            local m = ((tonumber(CFG.SeaSearchTo) or 0) + (tonumber(CFG.SeaLeg2) or 0)) * (tonumber(CFG.SeaStudsPerM) or 10)
+                / math.max(1, tonumber(CFG.SeaSpeed) or 300) / 60
+            return string.format("About %d min at sea at %s studs/s. Sea events never change server: at the end they turn left again and sail on.",
+                math.floor(m + 0.5), tostring(CFG.SeaSpeed))
+        end)
+
+        -- I STEER
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = manBox,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = card })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "A D turn   ·   W go   ·   S stop", LayoutOrder = 1, Parent = card,
+            })
+            local r = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true, TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
+            })
+            addLive(function()
+                r.Text = "The boat goes where you point it at " .. tostring(CFG.SeaSpeed) .. " studs/s and turns "
+                    .. tostring(CFG.SeaTurnRate) .. "° a second. It never changes server by distance."
+            end)
+            gap(manBox, 8)
+        end
+
+        P.kit.fineTune(v, function(box)
+            sliderRow(box, "Fly speed", 100, 1000, 10,
+                function() return CFG.TravelSpeed end,
+                function(x) CFG.TravelSpeed = x end, " studs/s")
+            sliderRow(box, "One jump, no flight, under", 0, 400, 10,
+                function() return CFG.InstantHop end,
+                function(x) CFG.InstantHop = x end, " studs")
+            sliderRow(box, "Boat speed", 250, 350, 5,
+                function() return CFG.SeaSpeed end,
+                function(x) CFG.SeaSpeed = x end, " studs/s")
+            switchRow(box, "Ask a far door from where I stand",
+                "A portal's question sent from wherever you are - no flight to it. A server that does not answer from there: flown to the door, and this left 6 hours",
+                function() return CFG.TravelFar ~= false end,
+                function(x) CFG.TravelFar = x end)
+            sliderRow(box, "Auto: out to", 3000, 30000, 500,
+                function() return CFG.SeaSearchTo end,
+                function(x) CFG.SeaSearchTo = x end, " m")
+            sliderRow(box, "Auto: then turn left", 0, 180, 5,
+                function() return CFG.SeaTurnBack end,
+                function(x) CFG.SeaTurnBack = x end, " deg")
+            sliderRow(box, "Auto: and sail on", 0, 20000, 500,
+                function() return CFG.SeaLeg2 end,
+                function(x) CFG.SeaLeg2 = x end, " m")
+            sliderRow(box, "Auto: a turn every", 20, 180, 5,
+                function() return CFG.SeaTurnEvery end,
+                function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
+            sliderRow(box, "Auto: a turn up to", 0, 45, 1,
+                function() return CFG.SeaTurnMax end,
+                function(x) CFG.SeaTurnMax = x end, " deg")
+            sliderRow(box, "I steer: turn speed (A / D)", 20, 120, 5,
+                function() return CFG.SeaTurnRate end,
+                function(x) CFG.SeaTurnRate = x end, " deg/s")
+            sliderRow(box, "One compass meter", 5, 15, 0.5,
+                function() return CFG.SeaStudsPerM end,
+                function(x) CFG.SeaStudsPerM = x end, " studs")
+        end, 11)
         readout(v, function()
             return "last flight  " .. tostring(P.lastFlight)
                 .. string.format("\nflights %d   ·   instant hops %d   ·   pulled back %d",
                     stats.flights, stats.hops, stats.pulledBack)
         end)
-        heading2(v, "flying")
-        sliderRow(v, "Fly speed", 100, 1000, 10,
-            function() return CFG.TravelSpeed end,
-            function(x) CFG.TravelSpeed = x end, " studs/s")
-        sliderRow(v, "Instant under", 0, 400, 10,
-            function() return CFG.InstantHop end,
-            function(x) CFG.InstantHop = x end, " studs")
-        switchRow(v, "Shortest route on every long trip",
-            "The Home button, the portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship, the Sky gate) when they beat flying - not on the boat, the sea hunts or raids",
-            function() return CFG.TravelRoutes end,
-            function(x) CFG.TravelRoutes = x end)
-        switchRow(v, "Ask a far door from where I stand",
-            "A portal's question sent from wherever you are - no flight to it. A server that does not answer from there: flown to the door, and this left 6 hours",
-            function() return CFG.TravelFar ~= false end,
-            function(x) CFG.TravelFar = x end)
-        readout(v, function() return P.route and P.route.words() or "route     -" end)
-        heading2(v, "the boat")
-        sliderRow(v, "Boat speed", 250, 350, 5,
-            function() return CFG.SeaSpeed end,
-            function(x) CFG.SeaSpeed = x end, " studs/s")
-        sliderRow(v, "Turn speed (A / D)", 20, 120, 5,
-            function() return CFG.SeaTurnRate end,
-            function(x) CFG.SeaTurnRate = x end, " deg/s")
-        sliderRow(v, "One compass meter", 5, 15, 0.5,
-            function() return CFG.SeaStudsPerM end,
-            function(x) CFG.SeaStudsPerM = x end, " studs")
-        heading2(v, "searching the sea  ·  Prehistoric, Mirage, Sea events")
-        radio(v, 82, {
-            { "manual", "I steer (A/D, W go, S stop)", "" },
-            { "auto",   "Auto: west, next server at the edge", "" },
-        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
-        sliderRow(v, "Auto: out to", 3000, 30000, 500,
-            function() return CFG.SeaSearchTo end,
-            function(x) CFG.SeaSearchTo = x end, " m")
-        sliderRow(v, "Auto: then turn left", 0, 180, 5,
-            function() return CFG.SeaTurnBack end,
-            function(x) CFG.SeaTurnBack = x end, " deg")
-        sliderRow(v, "Auto: and sail on", 0, 20000, 500,
-            function() return CFG.SeaLeg2 end,
-            function(x) CFG.SeaLeg2 = x end, " m")
-        sliderRow(v, "Auto: a turn every", 20, 180, 5,
-            function() return CFG.SeaTurnEvery end,
-            function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
-        sliderRow(v, "Auto: a turn up to", 0, 45, 1,
-            function() return CFG.SeaTurnMax end,
-            function(x) CFG.SeaTurnMax = x end, " deg")
         fold(v, "How it works", function(v)
             caption(v, "The public hubs fly at 330. Faster and the server may "
-                .. "pull you back - the line at the top counts it.")
-            caption(v, "Closer than this is one jump, not a flight.")
+                .. "pull you back - the truth card counts it.")
+            caption(v, "Closer than the jump distance is one jump, not a flight.")
             caption(v, "Noclip is on for the whole run: no collisions, nothing to "
                 .. "get stuck on, and the body is held so it never falls.")
             caption(v, "Sail on 0 = the next server at the turn. I steer = no hop by distance. "
@@ -24374,28 +24918,56 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- SERVERS & TEAM
+    -- SERVERS & TEAM. R2 Task 9 (board Servers): when to hop (fewest / most
+    -- / any / stay), the team on join, a truth card, Chalice + Light mode,
+    -- the news row, by-hand actions with a second tap, Fine-tune.
     -- =====================================================
     do
         local v = makeView("servers")
         gap(v, 6)
-        readout(v, function()
-            local el = P.elite
-            local t = el.tally
-            local avg = (t.joins > 0) and string.format("%.0fs", t.joinSecs / t.joins) or "-"
-            return table.concat({
-                "now       " .. tostring(el.note),
-                string.format("joined    %d   ·   join %s   ·   failed joins %d", t.joins, avg, t.fails),
-                "servers   " .. tostring(el.lastList or "not read yet"),
-                "last join " .. tostring(el.lastJoin or "none yet"),
-                "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
-            }, "\n")
+        P.kit.segmented(v, "nothing here worth it", {
+            { "fewest", "Fewest" }, { "most", "Most" }, { "random", "Any" }, { "stay", "Stay" },
+        }, function()
+            if not CFG.HuntHop then return "stay" end
+            return CFG.HopOrder
+        end, function(x)
+            if x == "stay" then
+                CFG.HuntHop = false
+            else
+                CFG.HuntHop = true
+                CFG.HopOrder = x
+            end
         end)
-        heading2(v, "when nothing here is worth it")
-        switchRow(v, "Hop to the next server",
-            "Off: wait in this one",
-            function() return CFG.HuntHop end,
-            function(x) CFG.HuntHop = x end)
+        P.kit.segmented(v, "your team on join", {
+            { "Pirates", "Pirates" }, { "Marines", "Marines" }, { "none", "Don't pick" },
+        }, function()
+            if not CFG.AutoTeam then return "none" end
+            return CFG.Team
+        end, function(x)
+            if x == "none" then
+                CFG.AutoTeam = false
+            else
+                CFG.AutoTeam = true
+                CFG.Team = x
+            end
+            P.teamSave()
+        end)
+        P.kit.truthCard(v, function()
+            if not CFG.HuntHop then return "Stays in this server" end
+            if CFG.HopOrder == "most" then return "Next server, most players first" end
+            if CFG.HopOrder == "random" then return "Next server, any order" end
+            return "Next server, fewest players first"
+        end, function()
+            local hop
+            if not CFG.HuntHop then hop = "Never hops by itself."
+            elseif CFG.HopOrder == "most" then hop = "Busy servers first."
+            elseif CFG.HopOrder == "random" then hop = "Random pick."
+            else hop = "A server looked at is tried again after " .. tostring(CFG.HopRevisit) .. " min." end
+            local team = "Team not picked."
+            if CFG.AutoTeam then team = "Joins as " .. tostring(CFG.Team) .. "." end
+            return hop .. " " .. team
+        end, "none")
+        heading2(v, "also")
         switchRow(v, "The God's Chalice stops every hop",
             "On: with a chalice on you no hunt and no hop (leaving loses it). Off: it is ignored - the hunt hops on and the chalice is lost",
             function() return CFG.ChaliceGuard ~= false end,
@@ -24404,32 +24976,10 @@ local function buildUI()
                 -- Off: this server's "the chalice came here" is forgotten too.
                 if not x and P.elite then P.elite.chalice = false end
             end)
-        radio(v, 122, {
-            { "fewest", "Fewest players first", "fewer hunters" },
-            { "most",   "Most players first",   "PvP" },
-            { "random", "Any order",            "" },
-        }, function() return CFG.HopOrder end, function(x) CFG.HopOrder = x end)
-        sliderRow(v, "Try a server again after", 5, 60, 1,
-            function() return CFG.HopRevisit end,
-            function(x) CFG.HopRevisit = x end, " min")
-        heading2(v, "your team")
-        switchRow(v, "Pick my team on join",
-            "The Pirates / Marines screen every new server shows",
-            function() return CFG.AutoTeam end,
-            function(x) CFG.AutoTeam = x P.teamSave() end)
-        radio(v, 82, {
-            { "Pirates", "Pirates", "" },
-            { "Marines", "Marines", "" },
-        }, function() return CFG.Team end, function(x) CFG.Team = x P.teamSave() end)
-        readout(v, function() return "team      " .. tostring(P.teamNote) end)
-        readout(v, function() return P.reloadWay() end)
-        heading2(v, "lighter game")
         switchRow(v, "Light mode",
             "Fast Mode on, camera shake and music off, in every server",
             function() return CFG.LightMode end,
             function(x) CFG.LightMode = x end)
-        readout(v, function() return "light     " .. tostring(P.light.note) end)
-        heading2(v, "the news strip")
         navRow(v, "Breaking news", function()
             local on, total, one = 0, 0, nil
             for k, x in pairs(CFG.NewsShow) do
@@ -24441,16 +24991,38 @@ local function buildUI()
             return (on == 1) and (one .. " only") or (on .. " of " .. total)
         end, "news")
         heading2(v, "by hand")
-        actionRow(v, "Hop now", nil, function() P.hopNow() end)
-        actionRow(v, "Forget the servers looked at", nil, function()
+        P.kit.confirmRow(v, "Hop now", function() P.hopNow() end)
+        P.kit.confirmRow(v, "Forget the servers looked at", function()
             table.clear(P.elite.visited)
             P.elite.note = "servers looked at: forgotten"
         end)
-        actionRow(v, "Reset the hunt counts", nil, function()
+        P.kit.confirmRow(v, "Reset the hunt counts", function()
             local t = P.elite.tally
             for k in pairs(t) do t[k] = 0 end
             t.since = os.time()
             P.elite.note = "hunt counts reset"
+        end)
+        P.kit.fineTune(v, function(box)
+            sliderRow(box, "Try a server again after", 5, 60, 1,
+                function() return CFG.HopRevisit end,
+                function(x) CFG.HopRevisit = x end, " min")
+        end, "1 exact value")
+        fold(v, "Details", function(v)
+            readout(v, function()
+                local el = P.elite
+                local t = el.tally
+                local avg = (t.joins > 0) and string.format("%.0fs", t.joinSecs / t.joins) or "-"
+                return table.concat({
+                    "now       " .. tostring(el.note),
+                    string.format("joined    %d   ·   join %s   ·   failed joins %d", t.joins, avg, t.fails),
+                    "servers   " .. tostring(el.lastList or "not read yet"),
+                    "last join " .. tostring(el.lastJoin or "none yet"),
+                    "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
+                }, "\n")
+            end)
+            readout(v, function() return "team      " .. tostring(P.teamNote) end)
+            readout(v, function() return P.reloadWay() end)
+            readout(v, function() return "light     " .. tostring(P.light.note) end)
         end)
         fold(v, "How it works", function(v)
             caption(v, "One killed there is back 8 min 45 s later.")
