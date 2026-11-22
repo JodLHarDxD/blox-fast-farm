@@ -18,7 +18,9 @@ check("BOSSES = raid: elite and sword open", packState("elite", { raid = live },
     and packState("sword", { raid = live }, "buyer", NOW) == "open")
 check("mirage jobs are SEA", packState("gear", { sea = live }, "buyer", NOW) == "open"
     and packState("dealer", { farm = live }, "buyer", NOW) == "locked")
-check("owner tools hidden from a buyer", packState("fruit", { farm = live }, "buyer", NOW) == "hidden"
+check("fruits: a locked cover for a buyer, open with the fruits flag", packState("fruit", { farm = live }, "buyer", NOW) == "locked"
+    and packState("fruit", { fruits = 0 }, "friend", NOW) == "open" and PACKS.fruits.soon)
+check("owner tools hidden from a buyer", packState("berry", { farm = live }, "buyer", NOW) == "hidden"
     and packState("halloween", { events = live }, "trial", NOW) == "hidden")
 check("fruits flag shows owner tools", packState("berry", { fruits = 0 }, "friend", NOW) == "open")
 check("settings pages: free with any key", packState("attack", { farm = gone }, "buyer", NOW) == "open")

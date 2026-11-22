@@ -740,14 +740,17 @@ PACK_OF = {
     dealer = "sea", mchest = "sea", gear = "sea",          -- the Mirage jobs (CFG.HuntKind)
     prehistoric = "prehistoric", volcano = "prehistoric",
     pvp = "pvp",
+    fruit = "fruits",                                     -- sold later (R3); owner + friend flag today
 }
-OWNER_ONLY = { fruit = true, berry = true, recipe = true, flower = true, ember = true, halloween = true }
+OWNER_ONLY = { berry = true, recipe = true, flower = true, ember = true, halloween = true }
 PACKS = {
     farm = { name = "GRIND", price = "$0.99", line = "Circuit farm and Random: your level or your list" },
     raid = { name = "BOSSES + RAIDS", price = "$0.99", line = "Raids, Elite pirates, the Legendary sword dealer" },
     sea = { name = "SEA", price = "$1.49", line = "Sea travel, sea events, the Leviathan, Mirage" },
     prehistoric = { name = "PREHISTORIC", price = "$1.99", line = "The island, the volcano, bones and the egg" },
     pvp = { name = "PVP", price = "$1.99", line = "Aim, Ken and speed when you fight" },
+    fruits = { name = "FRUITS", price = "$14.99", soon = true,
+        line = "A fruit notifier for your server that also grabs it, while you farm" },
 }
 PACK_ORDER = { "farm", "raid", "sea", "prehistoric", "pvp" }
 function packState(id, ent, kind, now)
@@ -17392,7 +17395,7 @@ local function buildUI()
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
         stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu", trades = "Trades",
         cover_farm = "GRIND", cover_raid = "BOSSES + RAIDS", cover_sea = "SEA", cover_prehistoric = "PREHISTORIC",
-        cover_pvp = "PVP", key = "Key & packs",
+        cover_pvp = "PVP", cover_fruits = "FRUITS", key = "Key & packs",
     }
 
     local function show(name, back)
@@ -18455,14 +18458,18 @@ local function buildUI()
     -- LOCKED COVERS (Plan 2 R1): a pack you do not hold is shown, never hidden
     -- =====================================================
     do
-        for _, f in ipairs(PACK_ORDER) do
+        for _, f in ipairs({ "farm", "raid", "sea", "prehistoric", "pvp", "fruits" }) do
             local pk = PACKS[f]
             local v = makeView("cover_" .. f)
             gap(v, 6)
             heading2(v, pk.name .. "  ·  not on your key yet")
             caption(v, pk.line)
-            readout(v, function() return pk.price .. " / week     or EVERYTHING  $2.99 / week" end)
+            readout(v, function()
+                if pk.soon then return "coming soon     " .. pk.price .. " lifetime, not in EVERYTHING" end
+                return pk.price .. " / week     or EVERYTHING  $2.99 / week"
+            end)
             actionRow(v, "Copy store link", nil, function()
+                if pk.soon then say(pk.name .. " is not for sale yet - soon") return end
                 local s = _G.BFF_STORE
                 if s and setclipboard then
                     setclipboard(s)
