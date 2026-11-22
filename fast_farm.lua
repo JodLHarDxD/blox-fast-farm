@@ -18813,6 +18813,55 @@ local function buildUI()
             return box
         end
 
+        -- PAGE TOP (R2 Task 4): the pack's chip, small, above the mode strip.
+        function K.pageTop(view, pack)
+            local s = slot(view, 26)
+            local chip = K.packChip(s, pack)
+            chip.Position = UDim2.fromOffset(4, 4)
+            return s
+        end
+
+        -- CHIP GRID (R2 Task 5): a few big either/ors in `cols` columns, one
+        -- lit. items = { { value, label }, ... }; get() = the lit value (nil =
+        -- none lit); set(value). accent = a pack key or a Color3.
+        function K.chipGrid(view, items, cols, get, set, accent)
+            local _, _, acc = accentColors(accent)
+            local rows = math.ceil(#items / cols)
+            local s = slot(view, rows * 50 - 6)
+            local btns = {}
+            for i, it in ipairs(items) do
+                local c, r = (i - 1) % cols, (i - 1) // cols
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1 / cols, -6, 0, 44),
+                    Position = UDim2.new(c / cols, c * 6 / cols, 0, r * 50),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(it[2]), Parent = s,
+                })
+                corner(b, 10)
+                stroke(b, C.hair)
+                btns[i] = b
+            end
+            local function refresh()
+                local cur = get()
+                for i, b in ipairs(btns) do
+                    local on = cur ~= nil and items[i][1] == cur
+                    b.BackgroundColor3 = on and acc or C.row
+                    b.TextColor3 = on and C.base or C.second
+                end
+            end
+            for i, b in ipairs(btns) do
+                b.Activated:Connect(function()
+                    set(items[i][1])
+                    refresh()
+                end)
+            end
+            refresh()
+            addLive(refresh)
+            gap(view, 8)
+            return s
+        end
+
         return K
     end)()
 
@@ -20013,18 +20062,69 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- CIRCUIT FARM (the Targets page)
+    -- CIRCUIT FARM (the Targets page). R2 Task 4: BY MY LEVEL | MY LIST is
+    -- one explicit choice over CFG.Quests; the species chooser, the type-a-name
+    -- row and Clear the circuit are the list's, shown with it.
     -- =====================================================
     do
         local v = makeView("circuit")
         gap(v, 6)
-        readout(v, function()
+        P.kit.pageTop(v, "farm")
+        P.kit.modeStrip(v, "circuit")
+        local listBox
+        local function showList()
+            if listBox then listBox.Visible = CFG.Quests ~= true end
+        end
+        P.kit.segmented(v, "What to farm", {
+            { true, "By my level" }, { false, "My list" },
+        }, function() return CFG.Quests == true end, function(x)
+            CFG.Quests = x and true or false
+            showList()
+        end)
+        local function isBoss(name)
+            for _, rec in ipairs(P.bosses) do
+                for _, n in ipairs(rec.names) do if n == name then return true end end
+            end
+            return false
+        end
+        -- What really runs: the quest's species, or the list in its order.
+        P.kit.truthCard(v, function()
             local list = circuit()
-            if #list == 0 then return P.circuitNote end
+            if CFG.Quests then
+                return list[1] and ("Quest: " .. tostring(list[1].name)) or "Quests by your level"
+            end
+            if #CFG.Targets == 0 then return "Your list is empty" end
+            if #list == 0 then return "Nothing to farm here" end
             local bits = {}
             for i, t in ipairs(list) do table.insert(bits, i .. " " .. t.name) end
-            local s = table.concat(bits, "  >  ")
-            if #CFG.Targets == 0 then s = s .. "   (by level)" end
+            return table.concat(bits, "  >  ")
+        end, function()
+            local list = circuit()
+            if CFG.Quests then
+                local s = "Quest after quest, this sea's best one for your level. " .. tostring(P.quest.note)
+                if #CFG.Targets > 0 then
+                    s = s .. "\nYour list of " .. #CFG.Targets .. " rests: " .. table.concat(CFG.Targets, ", ")
+                        .. ". MY LIST farms it."
+                else
+                    s = s .. "\nYour list is empty. MY LIST lets you pick species and bosses."
+                end
+                return s
+            end
+            local s
+            if #CFG.Targets == 0 then
+                s = "Until you add one: " .. (list[1] and tostring(list[1].name) or "the species for your level")
+                    .. ", the species for your level, without a quest."
+            elseif #list == 0 then
+                s = tostring(P.circuitNote)
+            else
+                local nb = 0
+                for _, t in ipairs(list) do if isBoss(t.name) then nb += 1 end end
+                local ns = #list - nb
+                if #list == 1 and nb == 0 then s = "Alone: its camp empty, it waits there for the respawn."
+                elseif #list == 1 then s = "Alone: it waits at its spawn until it is up."
+                elseif ns == 0 then s = "Only bosses: the one that is up; none up, it waits at a spawn."
+                else s = "Camp empty or boss not up: the next one. After the last, back to 1." end
+            end
             if P.circuitSkipped and #P.circuitSkipped > 0 then
                 s = s .. "\nanother sea, skipped: " .. table.concat(P.circuitSkipped, ", ")
             end
@@ -20032,160 +20132,189 @@ local function buildUI()
                 if P.campNotes[t.name] then s = s .. "\n" .. P.campNotes[t.name] end
             end
             return s
-        end)
-        modeSwitch(v, "circuit")
-        switchRow(v, "Take quests by my level",
-            "For a new account: this sea's best quest, one after another. Your list below waits",
-            function() return CFG.Quests end,
-            function(x) CFG.Quests = x end)
-        readout(v, function()
-            return "quest     " .. (CFG.Quests and tostring(P.quest.note) or "off")
-        end)
-        heading2(v, "the circuit  ·  tap to add, # = order")
-        local box = chooser(v, 230)
-        local signature = nil
-        local function refresh()
-            local counts = P.nearbyNames()
-            local _, r = parts()
-            local here = r and r.Position
-            local sea = mySea()
-            local cand, seen = {}, {}
-            local function add(n)
-                if seen[n] then return end
-                seen[n] = true
-                local row = rowOf(n)
-                local d = (row and here) and (row[4] - here).Magnitude or 1e9
-                if counts[n] then d = math.min(d, 0) end
-                table.insert(cand, { name = n, d = d, far = row and here and (row[4] - here).Magnitude })
-            end
-            for _, n in ipairs(CFG.Targets) do add(n) end
-            for n in pairs(counts) do add(n) end
-            if here then
-                for _, row in ipairs(LEVELS) do
-                    if (not sea or seaOfLevel(row[1]) == sea) and (row[4] - here).Magnitude < 2500 then
-                        add(row[3])
-                    end
+        end, "farm")
+
+        -- The list: shown for MY LIST only.
+        listBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = listBox,
+        })
+        do
+            local v = listBox
+            heading2(v, "your list  ·  tap to add, # = order")
+            local box = chooser(v, 230)
+            local signature = nil
+            local function refresh()
+                if not v.Visible then return end
+                local counts = P.nearbyNames()
+                local _, r = parts()
+                local here = r and r.Position
+                local sea = mySea()
+                local cand, seen = {}, {}
+                local function add(n)
+                    if seen[n] then return end
+                    seen[n] = true
+                    local row = rowOf(n)
+                    local d = (row and here) and (row[4] - here).Magnitude or 1e9
+                    if counts[n] then d = math.min(d, 0) end
+                    table.insert(cand, { name = n, d = d, far = row and here and (row[4] - here).Magnitude })
                 end
-            end
-            local lr = levelRow()
-            if lr then add(lr[3]) end
-            -- The quest bosses of this sea, under the name the game has now.
-            local lv = playerLevel()
-            local bossTag = {}
-            for _, rec in ipairs(P.bosses) do
-                if not sea or seaOfLevel(rec.lv) == sea then
-                    -- Which of its names the game has now: looked up every 10 s.
-                    if #rec.names > 1 and os.clock() - (rec.shownAt or -99) > 10 then
-                        rec.shownAt, rec.shown = os.clock(), nil
-                        for _, n in ipairs(rec.names) do
-                            if counts[n] or bossWhere(n) or #gamePoints(n) > 0 then rec.shown = n break end
-                        end
-                    end
-                    local shown = rec.shown or rec.names[1]
-                    if counts[shown] == nil then
-                        for _, n in ipairs(rec.names) do if counts[n] then shown = n end end
-                    end
-                    local at, where = bossUp(shown)
-                    bossTag[shown] = "boss  ·  " .. ((where == "here" and "up, here")
-                        or (where == "parked" and "up") or "not spawned")
-                        .. ((lv and lv < rec.lv) and ("  ·  Lv " .. rec.lv .. " for the quest") or "")
-                    add(shown)
-                    for _, c in ipairs(cand) do
-                        if c.name == shown and not counts[shown] then
-                            c.d = at and (here and (at - here).Magnitude or 5e7) + 1e7 or 1e8
-                            c.far = at and here and (at - here).Magnitude or nil
+                for _, n in ipairs(CFG.Targets) do add(n) end
+                for n in pairs(counts) do add(n) end
+                if here then
+                    for _, row in ipairs(LEVELS) do
+                        if (not sea or seaOfLevel(row[1]) == sea) and (row[4] - here).Magnitude < 2500 then
+                            add(row[3])
                         end
                     end
                 end
-            end
+                local lr = levelRow()
+                if lr then add(lr[3]) end
+                -- The quest bosses of this sea, under the name the game has now.
+                local lv = playerLevel()
+                local bossTag = {}
+                for _, rec in ipairs(P.bosses) do
+                    if not sea or seaOfLevel(rec.lv) == sea then
+                        -- Which of its names the game has now: looked up every 10 s.
+                        if #rec.names > 1 and os.clock() - (rec.shownAt or -99) > 10 then
+                            rec.shownAt, rec.shown = os.clock(), nil
+                            for _, n in ipairs(rec.names) do
+                                if counts[n] or bossWhere(n) or #gamePoints(n) > 0 then rec.shown = n break end
+                            end
+                        end
+                        local shown = rec.shown or rec.names[1]
+                        if counts[shown] == nil then
+                            for _, n in ipairs(rec.names) do if counts[n] then shown = n end end
+                        end
+                        local at, where = bossUp(shown)
+                        bossTag[shown] = "boss  ·  " .. ((where == "here" and "up, here")
+                            or (where == "parked" and "up") or "not spawned")
+                            .. ((lv and lv < rec.lv) and ("  ·  Lv " .. rec.lv .. " for the quest") or "")
+                        add(shown)
+                        for _, c in ipairs(cand) do
+                            if c.name == shown and not counts[shown] then
+                                c.d = at and (here and (at - here).Magnitude or 5e7) + 1e7 or 1e8
+                                c.far = at and here and (at - here).Magnitude or nil
+                            end
+                        end
+                    end
+                end
 
-            local order = {}
-            for i, n in ipairs(CFG.Targets) do order[n] = i end
-            table.sort(cand, function(a, b)
-                local oa, ob = order[a.name], order[b.name]
-                if oa and ob then return oa < ob end
-                if oa or ob then return oa ~= nil end
-                if a.d ~= b.d then return a.d < b.d end
-                return a.name < b.name
-            end)
-
-            local sig = table.concat(CFG.Targets, ",") .. "|"
-            for _, c in ipairs(cand) do
-                sig = sig .. c.name .. (counts[c.name] or 0) .. (bossTag[c.name] or "") .. ","
-            end
-            if sig == signature then return end
-            signature = sig
-
-            for _, c in ipairs(box:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            for i, c in ipairs(cand) do
-                local o = order[c.name]
-                local n = counts[c.name]
-                local tag = (o and ("#" .. o .. "  ") or "")
-                    .. (bossTag[c.name] or (n and (n .. " alive")
-                        or (c.far and string.format("%.0f studs", c.far) or "not loaded")))
-                chooserRow(box, i, c.name, tag, o ~= nil, function()
-                    P.toggleTarget(c.name)
-                    signature = nil
-                    refresh()
+                local order = {}
+                for i, n in ipairs(CFG.Targets) do order[n] = i end
+                table.sort(cand, function(a, b)
+                    local oa, ob = order[a.name], order[b.name]
+                    if oa and ob then return oa < ob end
+                    if oa or ob then return oa ~= nil end
+                    if a.d ~= b.d then return a.d < b.d end
+                    return a.name < b.name
                 end)
+
+                local sig = table.concat(CFG.Targets, ",") .. "|"
+                for _, c in ipairs(cand) do
+                    sig = sig .. c.name .. (counts[c.name] or 0) .. (bossTag[c.name] or "") .. ","
+                end
+                if sig == signature then return end
+                signature = sig
+
+                for _, c in ipairs(box:GetChildren()) do
+                    if c:IsA("GuiObject") then c:Destroy() end
+                end
+                for i, c in ipairs(cand) do
+                    local o = order[c.name]
+                    local n = counts[c.name]
+                    local tag = (o and ("#" .. o .. "  ") or "")
+                        .. (bossTag[c.name] or (n and (n .. " alive")
+                            or (c.far and string.format("%.0f studs", c.far) or "not loaded")))
+                    chooserRow(box, i, c.name, tag, o ~= nil, function()
+                        P.toggleTarget(c.name)
+                        signature = nil
+                        refresh()
+                    end)
+                end
             end
+            refresh()
+            addLive(refresh)
+            actionRow(v, "Clear the circuit", nil, function()
+                P.clearTargets()
+                signature = nil
+            end)
+            heading2(v, "or type a name")
+            textRow(v, "Reborn Skeleton", function(val)
+                if #val == 0 then return end
+                P.toggleTarget(val)
+                signature = nil
+            end)
+            switchRow(v, "Bosses first",
+                "A boss on the circuit that is up goes before the rest",
+                function() return CFG.BossFirst end,
+                function(x) CFG.BossFirst = x end)
         end
-        refresh()
-        addLive(refresh)
-        actionRow(v, "Clear the circuit", nil, function()
-            P.clearTargets()
-            signature = nil
-        end)
-        heading2(v, "or type a name")
-        textRow(v, "Reborn Skeleton", function(val)
-            if #val == 0 then return end
-            P.toggleTarget(val)
-            signature = nil
-        end)
-        heading2(v, "bosses and respawns")
-        switchRow(v, "Bosses first",
-            "A boss on the circuit that is up goes before the rest",
-            function() return CFG.BossFirst end,
-            function(x) CFG.BossFirst = x end)
-        readout(v, function()
-            if not P.bossWaitSince then return "no boss wait" end
-            return string.format("waiting for a boss  %ds", math.floor(os.clock() - P.bossWaitSince))
-        end)
-        sliderRow(v, "One species alone: wait for it", 10, 120, 5,
-            function() return CFG.RespawnMax end,
-            function(x) CFG.RespawnMax = x end, " s")
-        fold(v, "How it works", function(v)
-            caption(v, "Tap to put a species on the circuit, tap again to take it "
-                .. "off. The number is the order it runs in. Nothing picked = the "
-                .. "species for your level, alone.")
-            caption(v, "A boss is found near you, or parked by the game far away. "
-                .. "Not up: the rest of the circuit, or, if it is alone, a wait over "
-                .. "its spawn for as long as it takes.")
-        end)
+        addLive(showList)
+        showList()
+        P.kit.fightsWith(v, "circuit")
+        P.kit.fineTune(v, function(v)
+            readout(v, function()
+                if not P.bossWaitSince then return "no boss wait" end
+                return string.format("waiting for a boss  %ds", math.floor(os.clock() - P.bossWaitSince))
+            end)
+            sliderRow(v, "One species alone: wait for the respawn", 10, 120, 5,
+                function() return CFG.RespawnMax end,
+                function(x) CFG.RespawnMax = x end, " s")
+        end, 1)
     end
 
     -- =====================================================
-    -- RANDOM
+    -- RANDOM. R2 Task 4: the area is a dial; Reaches is its exact value.
     -- =====================================================
     do
         local v = makeView("random")
         gap(v, 6)
-        readout(v, function() return tostring(P.randomNote) end)
-        modeSwitch(v, "random")
-        heading2(v, "the area")
-        sliderRow(v, "Reaches", 200, 2000, 50,
-            function() return CFG.RandomRadius end,
-            function(x) CFG.RandomRadius = x end, " studs")
-        fold(v, "How it works", function(v)
-            caption(v, "Any enemy near you, every one damaged - Castle on the Sea raid.")
-            caption(v, "Round you; at the Castle on the Sea, round the pirate raid's "
-                .. "area (at least 800). Only ones within their pull limit go in a "
-                .. "pile - a far one gets its own. One that takes no damage when "
-                .. "pulled is fought where it stands, from close if high does not "
-                .. "hurt it.")
-        end)
+        P.kit.pageTop(v, "farm")
+        P.kit.modeStrip(v, "random")
+        local STEPS = {
+            { name = "1  CLOSE", set = { RandomRadius = 300 },
+                line = "Reaches 300 studs round you." },
+            { name = "2  NEAR", set = { RandomRadius = 500 },
+                line = "Reaches 500 studs round you." },
+            { name = "3  BALANCED", set = { RandomRadius = 750 },
+                line = "Reaches 750 studs (today's setting).", today = true },
+            { name = "4  WIDE", set = { RandomRadius = 1200 },
+                line = "Reaches 1,200 studs round you." },
+            { name = "5  ALL", set = { RandomRadius = 2000 },
+                line = "Reaches 2,000 studs, the most." },
+        }
+        local REASON = {
+            "Only what is right next to you. Fewer kills, no long flights.",
+            "A small circle round you.",
+            "Every enemy near you gets hit. At the Castle on the Sea it covers the pirate raid (at least 800).",
+            "A wide sweep. More flying between piles.",
+            "The whole area. A far one gets its own pile.",
+        }
+        local function commas(n)
+            local s = tostring(math.floor(tonumber(n) or 0))
+            local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+            return (out:gsub("^,", ""))
+        end
+        P.kit.dial(v, "The area", STEPS, "farm")
+        P.kit.truthCard(v, function()
+            return "Anything within " .. commas(CFG.RandomRadius) .. " studs"
+        end, function()
+            local at = dialStepOf(STEPS, CFG)
+            return at and REASON[at] or "Every enemy near you gets hit."
+        end, "farm")
+        caption(v, "A far enemy that takes no damage when pulled is fought where it stands.")
+        P.kit.fightsWith(v, "random")
+        P.kit.fineTune(v, function(v)
+            readout(v, function() return tostring(P.randomNote) end)
+            sliderRow(v, "Reaches", 200, 2000, 50,
+                function() return CFG.RandomRadius end,
+                function(x) CFG.RandomRadius = x end, " studs")
+        end, 1)
     end
 
     -- =====================================================

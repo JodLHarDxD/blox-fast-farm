@@ -61,6 +61,10 @@ local function goHome()
     end
 end
 local function isPill(o) return o.ClassName == "TextButton" and o.Size and o.Size.X.Offset == 46 end
+-- R2: a page's mode strip (P.kit.modeStrip) has an 88 x 44 button in place of the pill.
+local function isStrip(o)
+    return o.ClassName == "TextButton" and o.Size and o.Size.X.Offset == 88 and o.Size.Y.Offset == 44
+end
 -- A switch's label: the row (the pill's side frame's parent), its first text.
 local function switchLabel(pill) return labelsOf(pill.Parent.Parent)[1] end
 local function controlLabel(o)
@@ -100,7 +104,7 @@ end
 local function modePill(page)
     local found
     each(VIEWS[page], function(k)
-        if not found and isPill(k) then found = k end
+        if not found and (isPill(k) or isStrip(k)) then found = k end
     end)
     return found
 end
@@ -410,8 +414,10 @@ if RUN == "full" then
         volcano = "Volcano event" }
     for page, title in pairs(MODES) do
         local p = modePill(page)
-        check(p and switchLabel(p) == title, page .. ": first switch is the mode's own ("
-            .. tostring(p and switchLabel(p)) .. ")")
+        -- A page on the R2 kit has its mode strip first (its button, not a pill).
+        local ok = p and (isStrip(p) or switchLabel(p) == title)
+        check(ok, page .. ": first switch is the mode's own ("
+            .. tostring(p and (isStrip(p) and "strip" or switchLabel(p))) .. ")")
     end
     for name, v in pairs(VIEWS) do
         local kids = {}
@@ -844,6 +850,38 @@ do
     check(N.has("modes", "NO KEY") and N.btn("modes", "Raid") ~= nil and N.btn("modes", "Mirage") ~= nil, "no key: every mode is a row")
     _G.BFF_ENT, _G.BFF_KIND, _G.BFF_STORE, _G.BFF_KEY = nil, nil, nil, nil
     setclipboard = nil
+end
+
+-- ---------- R2 Task 4: GRIND pages, Circuit and Random ----------
+do
+    local was = { q = CFG_REAL.Quests, r = CFG_REAL.RandomRadius }
+    for _, page in ipairs({ "circuit", "random" }) do
+        check(modePill(page) ~= nil and isStrip(modePill(page)), page .. ": a mode strip")
+        check(button(page, "Fights with") ~= nil, page .. ": a Fights with row")
+        check(button(page, "Fine-tune") ~= nil, page .. ": a Fine-tune button")
+    end
+    -- Circuit: BY MY LEVEL | MY LIST is one explicit choice over CFG.Quests
+    tap("circuit", "BY MY LEVEL")
+    check(CFG_REAL.Quests == true, "circuit: BY MY LEVEL -> Quests true")
+    tap("circuit", "MY LIST")
+    check(CFG_REAL.Quests == false, "circuit: MY LIST -> Quests false (the list never silently waits)")
+    check(button("circuit", "Clear the circuit") ~= nil, "circuit: Clear the circuit reachable")
+    local typed
+    each(VIEWS.circuit, function(k) if not typed and k.ClassName == "TextBox" then typed = k end end)
+    check(typed ~= nil, "circuit: the type-a-name row is there")
+    if typed then
+        typed.Text = "Reborn Skeleton"
+        typed.FocusLost:Fire(true)
+        check(called("toggleTarget Reborn Skeleton"), "circuit: a typed name goes to P.toggleTarget")
+    end
+    -- Random: the area dial writes RandomRadius; today (750) is step 3
+    tap("random", "4")
+    check(CFG_REAL.RandomRadius == 1200, "random: step 4 -> 1200 studs")
+    tap("random", "1")
+    check(CFG_REAL.RandomRadius == 300, "random: step 1 -> 300 studs")
+    tap("random", "3")
+    check(CFG_REAL.RandomRadius == 750, "random: step 3 is today's 750")
+    CFG_REAL.Quests, CFG_REAL.RandomRadius = was.q, was.r
 end
 
 print(string.format("%d passed, %d failed", pass, fail))
