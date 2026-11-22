@@ -945,6 +945,39 @@ function liveTap(m, state, running, nowMode, act)
     end
     return a
 end
+-- NEWS STRIP (R3 Task S, pure: tools/livecard_test.py). The board shows the
+-- strip on Home only, and only while something is up: the first headline
+-- with tone "up" -> { key, text, item } ("MIRAGE ISLAND IS UP"); nothing up
+-- -> nil, and there is no strip at all.
+function newsStripOf(items)
+    for _, it in ipairs(items or {}) do
+        if type(it) == "table" and it.tone == "up" and type(it.title) == "string" then
+            local boss = type(it.key) == "string" and string.match(it.key, "^boss:(.+)$")
+            local t
+            if boss then
+                t = string.upper(boss) .. " IS UP"
+            else
+                t = string.gsub(it.title, " UP$", " IS UP")
+                if it.key == "fruit" and type(it.body) == "string" and it.body ~= "" then
+                    t = t .. ": " .. string.upper(it.body)
+                end
+            end
+            return { key = it.key, text = t, item = it }
+        end
+    end
+    return nil
+end
+-- BOARD PX (R3 Task S). Roblox draws Montserrat at TextSize N with an em of
+-- N / 1.21 (its line box: ascent + descent = 1.219 em); the boards' CSS px is
+-- the em. Measured in game against the board at the same 342 px width
+-- (2026-11-23): "Servers & team" at TextSize 15 = 94 px, the board's 15px =
+-- 114 px. So a board size of N px is TextSize lookPx(N), and a CSS
+-- line-height r is LineHeight r / LOOK_EM.
+LOOK_EM = 1.21
+function lookPx(css) return math.floor((tonumber(css) or 0) * LOOK_EM + 0.5) end
+-- TYPE COLOURS (R3 Task S): a weapon's type borrows a pack accent, as on the
+-- Attack board: melee red, sword blue, fruit orange, gun violet.
+TYPE_ACCENT = { Melee = "raid", Sword = "sea", ["Blox Fruit"] = "prehistoric", Gun = "pvp" }
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -17457,14 +17490,18 @@ local function buildUI()
         warn    = Color3.fromRGB(240, 166, 60),
         stop    = Color3.fromRGB(232, 92, 78),
     }
-    local F = { tiny = 11, small = 13, body = 14, label = 15, subject = 21 }
+    -- The old size names, as board px turned into TextSize (lookPx: Roblox's
+    -- Montserrat is 1.21x smaller than CSS at the same number).
+    local F = { tiny = lookPx(11), small = lookPx(13), body = lookPx(14), label = lookPx(15), subject = lookPx(21) }
 
-    -- LOOK (R3): the boards' type and sizes. The boards are Montserrat 500 /
-    -- 600 / 700 / 800 plus Michroma for the marks; Roblox takes them through
-    -- FontFace. Each entry keeps its old Gotham enum: a client without the
-    -- family (or without Font.new) draws the panel as before, never errors.
+    -- LOOK (R3): the boards' type and sizes. The boards are Montserrat 400 /
+    -- 500 / 600 / 700 / 800 plus Michroma for the marks; Roblox takes them
+    -- through FontFace. Each entry keeps its old Gotham enum: a client without
+    -- the family (or without Font.new) draws the panel as before, never errors.
     -- Use them as Font = LOOK.semi inside mk(), or setFont(obj, LOOK.semi).
-    -- Sizes are the board's CSS px; letter-spacing has no Roblox twin: skipped.
+    -- Sizes: LOOK.px(board px) = the TextSize that draws the board's size
+    -- (Task S, measured); LOOK.lh(css line-height) = the LineHeight.
+    -- Letter-spacing has no Roblox twin: skipped.
     local LOOK = {}
     do
         local function face(file, weight, fallback)
@@ -17475,14 +17512,24 @@ local function buildUI()
             return { look = true, face = f, enum = fallback }
         end
         local okM, michroma = pcall(function() return Enum.Font.Michroma end)
-        LOOK.regular = face("Montserrat", "Medium", Enum.Font.Gotham)
+        -- The board's text with no weight is 400 (Regular): values, sub lines,
+        -- help text. 500 (Medium) is rare on the boards.
+        LOOK.regular = face("Montserrat", "Regular", Enum.Font.Gotham)
+        LOOK.medium = face("Montserrat", "Medium", Enum.Font.Gotham)
         LOOK.semi = face("Montserrat", "SemiBold", Enum.Font.GothamMedium)
         LOOK.bold = face("Montserrat", "Bold", Enum.Font.GothamBold)
         LOOK.black = face("Montserrat", "ExtraBold", Enum.Font.GothamBlack)
         LOOK.mark = face("Michroma", "Regular", (okM and michroma) or Enum.Font.GothamBlack)
-        LOOK.size = { title = 15, subject = 21, row = 15, value = 14, sub = 13, section = 11, chip = 9, strip = 10 }
-        LOOK.mute = Color3.fromRGB(132, 126, 117)       -- #847E75: section headers, chevrons
+        LOOK.px = lookPx
+        LOOK.lh = function(r) return r / LOOK_EM end
+        LOOK.size = { title = lookPx(15), subject = lookPx(21), row = lookPx(15), value = lookPx(14),
+            sub = lookPx(13), section = lookPx(11), chip = lookPx(9), strip = lookPx(10), help = lookPx(11),
+            hide = lookPx(12) }
+        LOOK.mute = Color3.fromRGB(132, 126, 117)       -- #847E75: section headers, chevrons, help
+        LOOK.soft = Color3.fromRGB(201, 195, 185)       -- #C9C3B9: ghost buttons, card text
+        LOOK.ghost = Color3.fromRGB(58, 54, 50)         -- #3A3632: a ghost button's outline
         LOOK.rim = Color3.fromRGB(43, 40, 37)           -- #2B2825: the panel's outline
+        LOOK.HEAD = 48                                  -- the header: back, title, chip, Hide
     end
     local function setFont(o, f)
         if type(f) == "table" and f.look then
@@ -17519,9 +17566,10 @@ local function buildUI()
     })
 
     -- Tall enough that Home ends without a scroll bar (2026-10-11; it was
-    -- 570; 666 until the Key & packs row, 2026-11-22): the title, the news
-    -- strip, then the body.
-    local PANEL_H = 706
+    -- 570; 666 until the Key & packs row, 2026-11-22; 706 with the news
+    -- strip always on): the 48 px header, then Home's 616 px body. The strip
+    -- (Home, something up) adds its 34 through P.hudHead.
+    local PANEL_H = 664
     local panel = mk("Frame", {
         Size = UDim2.fromOffset(342, PANEL_H),
         Position = UDim2.new(1, -18, 0, 18), AnchorPoint = Vector2.new(1, 0),
@@ -17567,93 +17615,103 @@ local function buildUI()
         end
     end
 
+    -- THE HEADER (Task S, the boards): a thin "‹" (a 44 px target) at 6,
+    -- the title in Bold at 54 (Home: at 20, no back), the page's pack chip
+    -- right after the title (P.pagePack, from kit.pageTop), and the dot and
+    -- Hide on the right. 48 high. Back is found by its Name.
     local backBtn = mk("TextButton", {
-        Size = UDim2.fromOffset(54, 30), Position = UDim2.fromOffset(14, 9),
-        BackgroundTransparency = 1, Font = LOOK.semi, TextSize = 14,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextColor3 = C.second, Text = "Back", Visible = false,
+        Name = "Back", Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(6, 2),
+        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 28,
+        TextColor3 = C.second, Text = "‹", Visible = false,
         AutoButtonColor = false, Parent = panel,
     })
+    -- the title and the chip in a row (heading.Parent): the chip follows the
+    -- title's own width; a long title truncates before it reaches Hide.
     local heading = mk("TextLabel", {
-        Size = UDim2.new(1, -104, 0, 22), Position = UDim2.fromOffset(20, 13),
+        Size = UDim2.fromOffset(0, 22), AutomaticSize = Enum.AutomaticSize.X,
         BackgroundTransparency = 1, Font = LOOK.bold,
         TextSize = LOOK.size.title, TextXAlignment = Enum.TextXAlignment.Left,
-        TextColor3 = C.text, Text = "Fast Farm · " .. tostring(P.build), Parent = panel,
+        TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 1,
+        TextColor3 = C.text, Text = "Fast Farm · " .. tostring(P.build),
+        Parent = mk("Frame", { Name = "TitleRow", Size = UDim2.new(1, -116, 0, 44),
+            Position = UDim2.fromOffset(20, 2), BackgroundTransparency = 1, Parent = panel }),
     })
+    -- 226 = the row up to 10 px before the dot; show() takes the chip off it
+    mk("UISizeConstraint", { MaxSize = Vector2.new(226, 22), Parent = heading })
+    mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
+        VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8), Parent = heading.Parent })
     local dot = mk("Frame", {
         Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -52, 0, 21),
         BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = panel,
     })
     corner(dot, 4)
     local foldBtn = mk("TextButton", {
-        Size = UDim2.fromOffset(42, 30), Position = UDim2.new(1, -56, 0, 9),
-        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
+        Size = UDim2.fromOffset(42, 44), Position = UDim2.new(1, -56, 0, 2),
+        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = LOOK.size.hide,
         TextXAlignment = Enum.TextXAlignment.Right,
         TextColor3 = C.second, Text = "Hide", AutoButtonColor = false, Parent = panel,
     })
 
+    -- The body starts under the header, and under the news strip while it
+    -- shows (P.hudHead: 0, or the strip's 34).
+    P.hudHead, P.viewNow, P.newsStripNow = 0, "home", nil
     local bodyFrame = mk("Frame", {
-        Size = UDim2.new(1, 0, 1, -82), Position = UDim2.fromOffset(0, 82),
+        Size = UDim2.new(1, 0, 1, -LOOK.HEAD), Position = UDim2.fromOffset(0, LOOK.HEAD),
         BackgroundTransparency = 1, ClipsDescendants = true, Parent = panel,
     })
 
-    -- THE NEWS STRIP (P.news): under the title, outside the body, so Hide
-    -- keeps it. A chip that holds still -- the day or night number and the
-    -- time to the next dusk or dawn, or the full moon's -- and a crawl
-    -- moving left. News starts the crawl over with it in front. Its own
-    -- function: buildUI's registers are its own business.
+    -- THE NEWS STRIP (P.news), Home.dc.html: on Home only, and only while
+    -- something is up (newsStripOf: the first headline with tone "up").
+    -- Nothing up, or another page: no strip, and the body moves up into its
+    -- place. "BREAKING" in red, the caption in bold (it shrinks, then
+    -- truncates with "..."), and a lock + pack chip with the pack's outline
+    -- when a pack this key does not hold runs it. Outside the body, so Hide
+    -- keeps it. The day / night / moon clock and the whole crawl are on the
+    -- Breaking news page now (its "Right now" lines). Its own function:
+    -- buildUI's registers are its own business.
     local function newsStrip()
         local N = P.news
         if not N then return end
-        -- The board's strip: 30 high, radius 9, 16 px side margins. The chip
-        -- is a small pill inside it (red letters while BREAKING); its word
-        -- shrinks to fit beside the clock, then truncates with "...".
-        local W, H, CHIP, CLK = 310, 30, 124, 40
-        local CLIP0 = 5 + CHIP + 8
+        local W, H = 310, 30
         local strip = mk("Frame", {
-            Size = UDim2.fromOffset(W, H), Position = UDim2.fromOffset(16, 48),
-            BackgroundColor3 = C.row, BorderSizePixel = 0, ClipsDescendants = true, Parent = panel,
+            Name = "NewsStrip", Size = UDim2.fromOffset(W, H), Position = UDim2.fromOffset(16, LOOK.HEAD),
+            BackgroundColor3 = C.row, BorderSizePixel = 0, ClipsDescendants = true,
+            Visible = false, Parent = panel,
         })
         corner(strip, 9)
-        local chip = mk("Frame", {
-            Size = UDim2.fromOffset(CHIP, H - 10), Position = UDim2.fromOffset(5, 5),
-            BackgroundColor3 = C.pressed, BorderSizePixel = 0, Parent = strip,
-        })
-        corner(chip, 5)
         local word = mk("TextLabel", {
-            Size = UDim2.new(1, -14, 1, 0), Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.fromOffset(0, H), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(10, 0),
             BackgroundTransparency = 1, Font = LOOK.black, TextSize = LOOK.size.strip,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.stop, Text = "BREAKING", Parent = strip,
+        })
+        local caption = mk("TextLabel", {
+            Size = UDim2.fromOffset(200, H), Position = UDim2.fromOffset(84, 0),
+            BackgroundTransparency = 1, Font = LOOK.bold, TextSize = LOOK.size.strip,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.text, Text = "", Parent = chip,
+            TextColor3 = C.text, Text = "", Parent = strip,
         })
-        -- Code: its digits are all one width, so the seconds do not jitter.
-        local clock = mk("TextLabel", {
-            Size = UDim2.new(0, CLK, 1, 0), Position = UDim2.new(1, -(CLK + 6), 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.Code,
-            TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.text,
-            Text = "", Parent = chip,
-        })
-        local clip = mk("Frame", {
-            Size = UDim2.fromOffset(W - CLIP0 - 6, H), Position = UDim2.fromOffset(CLIP0, 0),
-            BackgroundTransparency = 1, ClipsDescendants = true, Parent = strip,
-        })
-        -- The pack chip (a lock and the pack's name, in its colour) on the
-        -- right while the news names something a pack you do not hold runs.
+        -- The pack chip: 9 px ExtraBold, 1 px outline, radius 5, a 9 px lock.
         local packChip = mk("Frame", {
-            Size = UDim2.fromOffset(58, 20), Position = UDim2.fromOffset(W - 6 - 58, 5),
+            Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
+            AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0),
             BackgroundTransparency = 1, Visible = false, Parent = strip,
         })
         corner(packChip, 5)
         local packStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = packChip })
-        local packLock = mk("Frame", { Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(7, 4),
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 4), Parent = packChip })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = packChip })
+        local packLock = mk("Frame", { Size = UDim2.fromOffset(10, 10), LayoutOrder = 1,
             BackgroundTransparency = 1, Parent = packChip })
         local packWord = mk("TextLabel", {
-            Size = UDim2.new(1, -24, 1, 0), Position = UDim2.fromOffset(22, 0),
+            Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = 2,
             BackgroundTransparency = 1, Font = LOOK.black, TextSize = LOOK.size.chip,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = packChip,
         })
-        local packNow
+        local packNow, shownKey = nil, nil
         -- Shrink first (down to min); what still does not fit truncates.
         local function fitText(lab, room, size, min)
             lab.TextSize = size
@@ -17661,106 +17719,62 @@ local function buildUI()
                 lab.TextSize = lab.TextSize - 1
             end
         end
-        -- Two copies of the crawl, one after the other: it loops seamlessly.
-        local function crawlLine()
-            return mk("TextLabel", {
-                Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = 11,
-                RichText = true, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.text, Text = "", Parent = clip,
-            })
-        end
-        local lineA, lineB = crawlLine(), crawlLine()
-
-        local TONES = {
-            day = { C.ivory, C.base }, night = { Color3.fromRGB(52, 56, 84), C.ivory },
-            full = { C.warn, C.base }, breaking = { C.row, C.stop }, dim = { C.pressed, C.second },
-        }
-        local HEX = { breaking = "#E85C4E", full = "#F0A63C", up = "#3FD07E", night = "#B4BAE6",
-            day = "#E8E0D4", dim = "#9A958D" }
-        local SEP = '   <font color="#6B665F">·</font>   '
-        local function esc(s)
-            return (string.gsub(tostring(s), "[&<>]", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;" }))
-        end
-        local function compose()
-            local bits = {}
-            for _, it in ipairs(N.headlines()) do
-                local t = string.format('<font color="%s"><b>%s</b></font>', HEX[it.tone] or "#F2EFEA", esc(it.title))
-                if it.body and it.body ~= "" then t = t .. "  " .. esc(it.body) end
-                if it.breaking then t = '<font color="#E85C4E"><b>BREAKING</b></font>  ' .. t end
-                table.insert(bits, t)
-            end
-            -- Nothing ticked, or only what this sea does not have.
-            if #bits == 0 then bits[1] = '<font color="#9A958D">nothing to show · Home, Breaking news</font>' end
-            return table.concat(bits, SEP) .. SEP
-        end
 
         local myGui = gui
         N.shown = myGui                 -- Cake Prince is asked only while this is on screen
-        local SPEED = 42                -- px a second
-        local x, text, seenBreak, since = W - CHIP - 6, nil, N.breakAt, 1
-        local conn
-        conn = RunService.RenderStepped:Connect(function(dt)
-            if not (myGui and myGui.Parent) then
-                conn:Disconnect()
+        local function look()
+            if not (myGui and myGui.Parent) then return end
+            local st = nil
+            if P.viewNow == "home" then
+                local okH, items = pcall((P.news or N).headlines)
+                st = okH and newsStripOf(items) or nil
+            end
+            local want = st and (H + 4) or 0
+            strip.Visible = st ~= nil
+            if want ~= P.hudHead and P.panelHead then P.panelHead(want) end
+            if not st then
+                shownKey = nil
                 return
             end
-            since += dt
-            if since >= 0.5 then
-                since = 0
-                pcall(function()
-                    local w, t, tone = N.chip()
-                    local tt = TONES[tone] or TONES.dim
-                    word.Text, clock.Text = w, t
-                    word.Size = UDim2.new(1, (t == "") and -14 or -(CLK + 18), 1, 0)
-                    fitText(word, CHIP - 14 - ((t == "") and 0 or (CLK + 4)), LOOK.size.strip + 1, 8)
-                    chip.BackgroundColor3, word.TextColor3, clock.TextColor3 = tt[1], tt[2], tt[2]
-                    -- the pack chip: the first headline a locked pack runs
-                    local pk
-                    for _, it in ipairs(N.headlines()) do
-                        pk = P.newsPack and P.newsPack(it)
-                        if pk then break end
-                    end
-                    if pk ~= packNow then
-                        packNow = pk
-                        packChip.Visible = pk ~= nil
-                        clip.Size = UDim2.fromOffset(W - CLIP0 - 6 - (pk and 64 or 0), H)
-                        if pk then
-                            local R = P.r2
-                            local a = ACCENT[pk] or ACCENT.none
-                            local _, ink = R.acc(pk)
-                            -- the outline sits between the tint and the accent
-                            packStroke.Color = Color3.fromRGB(
-                                math.floor(a[1][1] + (a[3][1] - a[1][1]) * 0.55),
-                                math.floor(a[1][2] + (a[3][2] - a[1][2]) * 0.55),
-                                math.floor(a[1][3] + (a[3][3] - a[1][3]) * 0.55))
-                            packWord.TextColor3 = ink
-                            packWord.Text = string.upper(PACKS[pk].name)
-                            for _, k in ipairs(packLock:GetChildren()) do k:Destroy() end
-                            R.lock(packLock, 6, 3, ink, 9)
-                        end
-                    end
-                    local nt = compose()
-                    if nt ~= text then
-                        text = nt
-                        lineA.Text, lineB.Text = nt, nt
-                    end
-                    if N.breakAt ~= seenBreak then
-                        seenBreak = N.breakAt
-                        x = clip.AbsoluteSize.X           -- start over from the right, the news in front
-                    end
-                end)
+            caption.Text = st.text
+            -- the pack chip: a pack this key does not hold runs it
+            local pk = P.newsPack and P.newsPack(st.item) or nil
+            if pk ~= packNow then
+                packNow = pk
+                packChip.Visible = pk ~= nil
+                if pk then
+                    local R = P.r2
+                    local a = ACCENT[pk] or ACCENT.none
+                    local _, ink = R.acc(pk)
+                    -- the outline sits between the tint and the accent
+                    packStroke.Color = Color3.fromRGB(
+                        math.floor(a[1][1] + (a[3][1] - a[1][1]) * 0.55),
+                        math.floor(a[1][2] + (a[3][2] - a[1][2]) * 0.55),
+                        math.floor(a[1][3] + (a[3][3] - a[1][3]) * 0.55))
+                    packWord.TextColor3 = ink
+                    packWord.Text = string.upper(PACKS[pk].name)
+                    for _, k in ipairs(packLock:GetChildren()) do k:Destroy() end
+                    R.lock(packLock, 5, 4, ink, 7)
+                end
             end
-            local wA = lineA.TextBounds.X
-            if wA > 0 then
-                x -= SPEED * dt
-                if x < -wA then x += wA end
-                lineA.Position = UDim2.fromOffset(math.floor(x), 0)
-                lineB.Position = UDim2.fromOffset(math.floor(x + wA), 0)
+            -- the caption: after BREAKING (+8), up to the chip (-8)
+            local x0 = 10 + word.TextBounds.X + 8
+            local room = W - x0 - 8 - (pk and (packChip.AbsoluteSize.X + 8) or 0)
+            caption.Position = UDim2.fromOffset(x0, 0)
+            caption.Size = UDim2.fromOffset(math.max(20, room), H)
+            if shownKey ~= st.text then
+                shownKey = st.text
+                fitText(caption, room, LOOK.size.strip, LOOK.size.strip - 3)
+            end
+        end
+        P.newsStripNow = function() pcall(look) end
+        task.spawn(function()
+            while myGui and myGui.Parent do
+                pcall(look)
+                task.wait(0.5)
             end
         end)
     end
-    newsStrip()
 
     local folded = false
     -- Home's live moment card (R2) grows the panel by its height while it shows.
@@ -17771,9 +17785,9 @@ local function buildUI()
     -- is a ScrollingFrame inside bodyFrame, so a shorter panel just scrolls
     -- the page, and the title, Hide and the news strip (not in bodyFrame)
     -- never move. CFG.PanelScale / CFG.PanelHeight (0 = full) keep both.
-    local function fullH() return PANEL_H + (P.hudExtra or 0) end
+    local function fullH() return PANEL_H + (P.hudHead or 0) + (P.hudExtra or 0) end
     local function wantH()
-        if folded then return 82 end
+        if folded then return LOOK.HEAD + (P.hudHead or 0) end
         return panelHeightClamp(CFG.PanelHeight, fullH(), PANEL_MIN_H)
     end
     local grips = {}
@@ -17812,6 +17826,14 @@ local function buildUI()
         -- Folded: the title and the news strip stay.
         applySize(true)
     end)
+    -- The news strip came or went (Home, something up): the body moves
+    -- under it, and the panel grows or shrinks by its height.
+    P.panelHead = function(n)
+        P.hudHead = n
+        bodyFrame.Position = UDim2.fromOffset(0, LOOK.HEAD + n)
+        bodyFrame.Size = UDim2.new(1, 0, 1, -(LOOK.HEAD + n))
+        applySize(true)
+    end
     P.panelGrow = function(n)
         P.hudExtra = n
         if not folded then applySize(true) end
@@ -17973,10 +17995,27 @@ local function buildUI()
             end)
         end
         currentView = name
+        P.viewNow = name
         if P.onView then pcall(P.onView, name) end
         heading.Text = TITLES[name] or name
-        heading.Position = UDim2.fromOffset(name == "home" and 20 or 76, 13)
+        heading.Parent.Position = UDim2.fromOffset(name == "home" and 20 or 54, 2)
         backBtn.Visible = (name ~= "home")
+        -- the page's pack chip, inline after the title (the board's header)
+        local old = heading.Parent:FindFirstChild("PackChip")
+        if old then old:Destroy() end
+        local pk = P.pagePack and P.pagePack[name]
+        local room = 226
+        if pk and P.kit then
+            local ch = P.kit.packChip(heading.Parent, pk)
+            ch.Name, ch.LayoutOrder = "PackChip", 2
+            -- its width before it is drawn: ~7 px a capital at 9 px ExtraBold,
+            -- plus its padding; the title truncates rather than run under Hide
+            room = 226 - (#tostring(ch.Text) * 7 + 12) - 8
+        end
+        local cap = heading:FindFirstChild("UISizeConstraint")
+        if cap then cap.MaxSize = Vector2.new(room, 22) end
+        -- the news strip is Home's alone
+        if P.newsStripNow then P.newsStripNow() end
     end
     -- Back = the page you came from (a link can bring you to a shared page
     -- from more than one place: Fighting at sea from Sea events or the
@@ -17984,6 +18023,7 @@ local function buildUI()
     backBtn.Activated:Connect(function()
         show(table.remove(trail) or "home", true)
     end)
+    newsStrip()
 
 
     -- =====================================================
@@ -18035,11 +18075,14 @@ local function buildUI()
         return btn
     end
 
+    -- Help text, as the boards draw it: 11 px Regular, #847E75, line-height
+    -- 1.45, 20 px side margins.
     local function caption(view, text)
         local t = mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = LOOK.size.help,
+            LineHeight = LOOK.lh(1.45),
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
             TextWrapped = true, Text = text, LayoutOrder = nextOrder(), Parent = view,
         })
         mk("UIPadding", {
@@ -18052,7 +18095,16 @@ local function buildUI()
     -- A line that reports what is happening, and keeps reporting it. Code, the
     -- fixed-width font: its digits do not jitter while they change, and the
     -- readouts' columns ("now       ...") line up.
+    -- Task S: the boards show no raw lines. One made on a page's own surface
+    -- goes into that page's Details fold (P.detailsFor: made on first use,
+    -- last on the page; the page's own Details when it has one), so nothing
+    -- is lost. Owner pages and tools (no board) keep theirs where they are.
     local function readout(view, fn)
+        local outer = buildingFold
+        if outer == nil and P.detailsFor then
+            local box = P.detailsFor(view)
+            if box then view, buildingFold = box, box end
+        end
         local t = mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 12,
@@ -18067,6 +18119,7 @@ local function buildUI()
             local ok, v = pcall(fn)
             t.Text = ok and tostring(v or "") or ""
         end)
+        buildingFold = outer
         return t
     end
 
@@ -18196,8 +18249,8 @@ local function buildUI()
             local s = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, Font = LOOK.regular,
-                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
-                TextWrapped = true, TextColor3 = C.third,
+                TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true, TextColor3 = LOOK.mute,
                 Text = (type(sub) == "string") and sub or "", LayoutOrder = 2, Parent = col,
             })
             if type(sub) == "function" then
@@ -18277,7 +18330,7 @@ local function buildUI()
         for i, k in ipairs(keys) do
             local b = mk("TextButton", {
                 Size = UDim2.fromOffset(W, 30), BackgroundColor3 = C.raised,
-                BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.bold,
+                BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.black,
                 TextSize = F.small, TextColor3 = C.second, Text = k,
                 LayoutOrder = i, Parent = row,
             })
@@ -18360,7 +18413,20 @@ local function buildUI()
     -- CLOSED UNTIL TAPPED: "How it works" (the long text) and "Details"
     -- (learned tables, lists, probe lines) at the bottom of a page. build(v)
     -- fills it with the usual pieces; its live lines run only while it is open.
+    -- The boards draw it as a card, like Fine-tune: 48 high, radius 14, a
+    -- #35322E outline, the title 14 px SemiBold, Show / Hide in muted 12 px
+    -- and a thin chevron that turns. "Details" is one per page: a second
+    -- call (or a raw line, P.detailsFor) fills the same one.
+    P.detailsBox = {}
     local function fold(view, title, build)
+        local had = title == "Details" and P.detailsBox[view]
+        if had then
+            local outer = buildingFold
+            buildingFold = had.box
+            build(had.box)
+            buildingFold = outer
+            return had.holder
+        end
         local holder = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
@@ -18369,22 +18435,36 @@ local function buildUI()
             SortOrder = Enum.SortOrder.LayoutOrder,
             HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
         })
-        local b = mk("TextButton", {
-            Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base,
-            BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+        local top = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1,
             LayoutOrder = 1, Parent = holder,
         })
+        mk("UIPadding", {
+            PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
+            PaddingTop = UDim.new(0, 10), Parent = top,
+        })
+        local b = mk("TextButton", {
+            Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = C.row,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = top,
+        })
+        corner(b, 14)
+        mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
         mk("TextLabel", {
-            Size = UDim2.new(1, -100, 1, 0), Position = UDim2.fromOffset(20, 0),
+            Size = UDim2.new(1, -110, 1, 0), Position = UDim2.fromOffset(14, 0),
             BackgroundTransparency = 1, Font = LOOK.semi,
-            TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = C.second, Text = title, Parent = b,
+            TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
+            TextColor3 = C.text, Text = title, Parent = b,
         })
         local word = mk("TextLabel", {
-            Size = UDim2.fromOffset(60, 44), Position = UDim2.new(1, -80, 0, 0),
-            BackgroundTransparency = 1, Font = LOOK.semi,
-            TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
-            TextColor3 = C.third, Text = "Show", Parent = b,
+            Size = UDim2.fromOffset(60, 48), Position = UDim2.new(1, -96, 0, 0),
+            BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right,
+            TextColor3 = LOOK.mute, Text = "Show", Parent = b,
+        })
+        local chev = mk("TextLabel", {
+            Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -28, 0, 0),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22,
+            TextColor3 = LOOK.mute, Text = "›", Parent = b,
         })
         pressable(b)
         local box = mk("Frame", {
@@ -18395,6 +18475,8 @@ local function buildUI()
             SortOrder = Enum.SortOrder.LayoutOrder,
             HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
         })
+        mk("UIPadding", { PaddingTop = UDim.new(0, 6), Parent = box })
+        if title == "Details" then P.detailsBox[view] = { holder = holder, box = box } end
         local outer = buildingFold
         buildingFold = box
         build(box)
@@ -18402,6 +18484,7 @@ local function buildUI()
         b.Activated:Connect(function()
             box.Visible = not box.Visible
             word.Text = box.Visible and "Hide" or "Show"
+            chev.Rotation = box.Visible and 90 or 0
             if box.Visible then
                 for _, e in ipairs(live) do
                     if e.w == box then pcall(e.f) end
@@ -18409,6 +18492,21 @@ local function buildUI()
             end
         end)
         return holder
+    end
+    -- A page's Details for its raw lines (readout): made on first use, the
+    -- last thing on the page. nil = this page keeps raw lines in place (the
+    -- owner's tools and pages, which have no board; Lock & stats).
+    local RAW_OK = { stats = true, fruitmenu = true, fruitlog = true, trades = true, weapon = true, news = true }
+    P.detailsFor = function(view)
+        if not (view and view.IsA and view:IsA("ScrollingFrame") and views[view.Name] == view) then return nil end
+        if RAW_OK[view.Name] or (P.pagePack and P.pagePack[view.Name] == "owner") then return nil end
+        local d = P.detailsBox[view]
+        if not d then
+            local h = fold(view, "Details", function() end)
+            h.LayoutOrder = 1e6
+            d = P.detailsBox[view]
+        end
+        return d.box
     end
 
     local dragTarget = nil
@@ -18739,12 +18837,13 @@ local function buildUI()
     -- =====================================================
     P.kit = (function()
         local K = {}
+        P.pagePack = {}         -- page -> its pack: the header's chip (pageTop)
         local function rgb(t) return Color3.fromRGB(t[1], t[2], t[3]) end
         -- pack key -> tint, text on tint, accent, soft border. A Color3 stands
         -- for the accent alone.
         local function accentColors(a)
             if type(a) == "string" then
-                local t = ACCENT[a] or ACCENT.none
+                local t = ACCENT[a] or ACCENT[TYPE_ACCENT[a] or ""] or ACCENT.none
                 return rgb(t[1]), rgb(t[2]), rgb(t[3]), rgb(t[4])
             end
             if a then return C.row, a, a, C.hair end
@@ -18752,7 +18851,7 @@ local function buildUI()
             return rgb(t[1]), rgb(t[2]), rgb(t[3]), rgb(t[4])
         end
         local function stroke(o, color)
-            mk("UIStroke", {
+            return mk("UIStroke", {
                 Color = color, Thickness = 1,
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = o,
             })
@@ -18782,7 +18881,7 @@ local function buildUI()
             local t = mk("TextLabel", {
                 Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
                 BackgroundColor3 = tint, BorderSizePixel = 0,
-                Font = LOOK.bold, TextSize = 9, TextColor3 = text,
+                Font = LOOK.black, TextSize = LOOK.size.chip, TextColor3 = text,
                 Text = string.upper(pk and pk.name or tostring(pack)), Parent = parent,
             })
             corner(t, 5)
@@ -18790,39 +18889,89 @@ local function buildUI()
             return t
         end
 
-        -- MODE STRIP: is this page's mode the one running. id "volcano" is the
-        -- alongside kind (CFG.Volcano, its own switch).
-        function K.modeStrip(view, id)
-            local s = slot(view, 52)
-            local card = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row,
-                BorderSizePixel = 0, Parent = s,
+        -- PILL (Task S): the boards' primary action - "Use this", "Start",
+        -- "Use only this". style: "ivory" (filled ivory, dark words), "ghost"
+        -- (no fill, a #3A3632 outline, #C9C3B9 words), or a pack / weapon
+        -- type key or a Color3 (filled with that accent). Drawn h high (40,
+        -- radius 11, 14 px padding, 12 px ExtraBold); the target is 44 high.
+        -- Returns the button and paint(text, style).
+        function K.pill(parent, text, style, h)
+            h = h or 40
+            local b = mk("TextButton", {
+                Name = "Pill", Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = parent,
             })
-            corner(card, 12)
+            local face = mk("Frame", {
+                Name = "Face", Size = UDim2.new(1, 0, 0, h), Position = UDim2.fromOffset(0, (44 - h) / 2),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = b,
+            })
+            corner(face, 11)
+            local line = mk("UIStroke", { Color = C.ivory, Thickness = 1,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = face })
+            local word = mk("TextLabel", {
+                Name = "Word", Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.black, TextSize = lookPx(12),
+                TextColor3 = C.base, Text = "", ZIndex = 2, Parent = b,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = word })
+            local function paint(t, st)
+                word.Text = tostring(t or "")
+                if st == "ghost" then
+                    face.BackgroundTransparency = 1
+                    line.Color, word.TextColor3 = LOOK.ghost, LOOK.soft
+                else
+                    local acc = C.ivory
+                    if st and st ~= "ivory" then
+                        local _, _, a = accentColors(st)
+                        acc = a
+                    end
+                    face.BackgroundTransparency = 0
+                    face.BackgroundColor3, line.Color, word.TextColor3 = acc, acc, C.base
+                end
+            end
+            paint(text, style)
+            return b, paint
+        end
+
+        -- MODE STRIP (the boards' "Not your mode" row): is this page's mode
+        -- the one running. A dot (green = yours), a bold line, a muted sub
+        -- line, and a pill on the right: ivory "Use this", or a ghost "In
+        -- use". 52 high at least (a long sub line wraps and grows it), radius
+        -- 14, 16 px margins. id "volcano" is the alongside kind (CFG.Volcano,
+        -- its own switch).
+        function K.modeStrip(view, id)
+            local s = slot(view)
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 52), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
             local dot = mk("Frame", {
-                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(14, 22),
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 14, 0.5, -4),
                 BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = card,
             })
             corner(dot, 4)
-            local line = label(card, {
-                Size = UDim2.new(1, -140, 0, 18), Position = UDim2.fromOffset(32, 8),
-                Font = LOOK.bold, TextSize = F.body,
+            local col = mk("Frame", {
+                Size = UDim2.new(1, -136, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                Position = UDim2.fromOffset(32, 0), BackgroundTransparency = 1, Parent = card,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = col })
+            mk("UIPadding", { PaddingTop = UDim.new(0, 9), PaddingBottom = UDim.new(0, 9), Parent = col })
+            local line = label(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1,
+                Font = LOOK.bold, TextSize = lookPx(14), TextWrapped = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
             })
-            local sub = label(card, {
-                Size = UDim2.new(1, -140, 0, 26), Position = UDim2.fromOffset(32, 25),
-                Font = LOOK.regular, TextSize = F.tiny,
+            local sub = label(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2,
+                Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.35),
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-                TextColor3 = C.third, TextWrapped = true, Text = "",
+                TextColor3 = LOOK.mute, TextWrapped = true, Text = "",
             })
-            local btn = mk("TextButton", {
-                Size = UDim2.fromOffset(88, 44), Position = UDim2.new(1, -96, 0, 4),
-                BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                Font = LOOK.bold, TextSize = F.small, TextColor3 = C.text,
-                Text = "", Parent = card,
-            })
-            corner(btn, 10)
-            pressable(btn)
+            local btn, paint = K.pill(card, "", "ivory")
+            btn.Name = "ModePill"
+            btn.AnchorPoint = Vector2.new(1, 0.5)
+            btn.Position = UDim2.new(1, -6, 0.5, 0)
             local function isOn()
                 if id == "volcano" then return CFG.Volcano and true or false end
                 return modeNow() == id
@@ -18841,7 +18990,7 @@ local function buildUI()
                 if id == "volcano" then
                     line.Text = on and "On, alongside your mode" or "Off"
                     sub.Text = "Runs whenever a Prehistoric Island is up"
-                    btn.Text = on and "Turn off" or "Turn on"
+                    paint(on and "Turn off" or "Turn on", on and "ghost" or "ivory")
                 elseif on then
                     line.Text = "Your mode"
                     if id == "pvp" then
@@ -18853,7 +19002,7 @@ local function buildUI()
                     else
                         sub.Text = "Start on Home runs it"
                     end
-                    btn.Text = "In use"
+                    paint("In use", "ghost")
                 else
                     line.Text = "Not your mode"
                     local now = modeNow()
@@ -18861,9 +19010,10 @@ local function buildUI()
                     if id == "pvp" and now ~= "none" then
                         sub.Text = modeName(now) .. " is your mode now. On stops it while you fight."
                     end
-                    btn.Text = "Use this"
+                    paint("Use this", "ivory")
                 end
             end)
+            gap(view, 4)
             return s
         end
 
@@ -18887,14 +19037,14 @@ local function buildUI()
             local head = slot(view, 34)
             label(head, {
                 Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
-                Font = LOOK.semi, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Font = LOOK.semi, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 Text = string.upper(title),
             })
             local cur = label(head, {
                 Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.new(0.5, -4, 0, 6),
-                Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
+                Font = LOOK.regular, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
             local row = slot(view, 44)
             local btns = {}
@@ -18904,18 +19054,19 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.new(1 / n, -6, 0, 44),
                     Position = UDim2.new((i - 1) / n, (i - 1) * 6 / n, 0, 0),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
+                    BackgroundColor3 = C.base, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft,
                     Text = txt, Parent = row,
                 })
                 corner(b, 10)
-                stroke(b, C.hair)
-                btns[i] = b
+                btns[i] = { b = b, line = mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b }) }
             end
             local lineL = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = LOOK.size.help,
+                LineHeight = LOOK.lh(1.5),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 TextWrapped = true, Text = "", LayoutOrder = nextOrder(), Parent = view,
             })
             mk("UIPadding", {
@@ -18925,15 +19076,16 @@ local function buildUI()
             gap(view, 8)
             local function refresh()
                 local lit = dialStepOf(steps, CFG)
-                for i, b in ipairs(btns) do
-                    b.BackgroundColor3 = (i == lit) and acc or C.row
-                    b.TextColor3 = (i == lit) and C.base or C.second
+                for i, x in ipairs(btns) do
+                    x.b.BackgroundColor3 = (i == lit) and acc or C.base
+                    x.b.TextColor3 = (i == lit) and C.base or LOOK.soft
+                    x.line.Color = (i == lit) and acc or LOOK.ghost
                 end
                 cur.Text = lit and tostring(steps[lit].name) or "your own values"
                 lineL.Text = lit and tostring(steps[lit].line or "") or "your own values"
             end
-            for i, b in ipairs(btns) do
-                b.Activated:Connect(function()
+            for i, x in ipairs(btns) do
+                x.b.Activated:Connect(function()
                     dialApply(steps, i, CFG)
                     refresh()
                 end)
@@ -18944,7 +19096,9 @@ local function buildUI()
         end
 
         -- SEGMENTED: a big either/or (2-4 options), one lit. options =
-        -- { { value, label }, ... }.
+        -- { { value, label }, ... }. The board's tabs: the lit one #2E2B27.
+        local SEG_ON = Color3.fromRGB(46, 43, 39)
+        K.SEG_ON = SEG_ON
         function K.segmented(view, title, options, get, set)
             if title then heading2(view, title) end
             local s = slot(view, 44)
@@ -18960,7 +19114,7 @@ local function buildUI()
                     Size = UDim2.new(1 / n, -4, 1, -8),
                     Position = UDim2.new((i - 1) / n, 4, 0, 4),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = C.second,
                     Text = string.upper(tostring(o[2])), Parent = box,
                 })
                 corner(b, 9)
@@ -18970,8 +19124,8 @@ local function buildUI()
                 local cur = get()
                 for i, b in ipairs(btns) do
                     local on = options[i][1] == cur
-                    b.BackgroundColor3 = on and C.ivory or C.row
-                    b.TextColor3 = on and C.base or C.second
+                    b.BackgroundColor3 = on and SEG_ON or C.row
+                    b.TextColor3 = on and C.text or C.second
                 end
             end
             for i, b in ipairs(btns) do
@@ -18987,15 +19141,17 @@ local function buildUI()
         end
 
         -- TRUTH CARD: what will really happen. titleFn / reasonFn return text.
+        -- accent: a pack / type key, or a function returning one (the outline
+        -- follows it: Attack's card takes the picked weapon's type colour).
         function K.truthCard(view, titleFn, reasonFn, accent)
-            local _, _, _, soft = accentColors(accent)
+            local _, _, _, soft = accentColors(type(accent) == "function" and "none" or accent)
             local s = slot(view)
             local card = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
             })
             corner(card, 14)
-            stroke(card, soft)
+            local rimC = stroke(card, soft)
             mk("UIListLayout", {
                 SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = card,
             })
@@ -19011,7 +19167,8 @@ local function buildUI()
             })
             local r = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
+                LineHeight = LOOK.lh(1.5),
                 TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
                 TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
             })
@@ -19020,6 +19177,11 @@ local function buildUI()
                 t.Text = ok and tostring(a or "") or ""
                 local ok2, b = pcall(reasonFn)
                 r.Text = ok2 and tostring(b or "") or ""
+                if type(accent) == "function" and rimC then
+                    local ok3, k = pcall(accent)
+                    local _, _, _, s2 = accentColors(ok3 and k or "none")
+                    rimC.Color = s2
+                end
             end)
             gap(view, 8)
             return card
@@ -19051,19 +19213,19 @@ local function buildUI()
             corner(b, 14)
             stroke(b, C.hair)
             label(b, {
-                Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(14, 0),
-                Font = LOOK.bold, TextSize = F.body,
+                Size = UDim2.new(1, -150, 1, 0), Position = UDim2.fromOffset(14, 0),
+                Font = LOOK.semi, TextSize = lookPx(14),
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                 Text = "Fine-tune",
             })
             local hint = label(b, {
-                Size = UDim2.fromOffset(100, 48), Position = UDim2.new(1, -128, 0, 0),
-                Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "",
+                Size = UDim2.fromOffset(120, 48), Position = UDim2.new(1, -152, 0, 0),
+                Font = LOOK.regular, TextSize = lookPx(12),
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.mute, Text = "",
             })
             local chev = label(b, {
-                Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -26, 0, 0),
-                Font = LOOK.regular, TextSize = 14, TextColor3 = C.third, Text = "›",
+                Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -28, 0, 0),
+                Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute, Text = "›",
             })
             pressable(b)
             local box = mk("Frame", {
@@ -19147,7 +19309,7 @@ local function buildUI()
                 local p = mk("TextButton", {
                     Size = UDim2.fromOffset(w, 30), Position = UDim2.fromOffset(left, top),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.tiny, TextColor3 = C.second,
+                    Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(st.label), Parent = box,
                 })
                 corner(p, 15)
@@ -19168,7 +19330,7 @@ local function buildUI()
                 if st and st.accent then local _, _, a = accentColors(st.accent) acc = a end
                 for i, p in ipairs(pills) do
                     p.BackgroundColor3 = (i == lit) and acc or C.row
-                    p.TextColor3 = (i == lit) and C.base or C.second
+                    p.TextColor3 = (i == lit) and C.base or LOOK.soft
                 end
                 needle.BackgroundColor3 = acc
                 if st and st.deg ~= lastDeg then
@@ -19195,11 +19357,11 @@ local function buildUI()
         end
 
         -- PAGE TOP (R2 Task 4): the pack's chip, small, above the mode strip.
+        -- Task S: the boards put it in the header, right after the title (show
+        -- draws it there); the page itself starts with its mode strip.
         function K.pageTop(view, pack)
-            local s = slot(view, 26)
-            local chip = K.packChip(s, pack)
-            chip.Position = UDim2.fromOffset(4, 4)
-            return s
+            P.pagePack[view.Name] = pack
+            return nil
         end
 
         -- CHIP GRID (R2 Task 5): a few big either/ors in `cols` columns, one
@@ -19248,8 +19410,9 @@ local function buildUI()
         function K.noteLine(view, textOrFn)
             local l = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = LOOK.size.help,
+                LineHeight = LOOK.lh(1.45),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 TextWrapped = true, Text = type(textOrFn) == "string" and textOrFn or "",
                 LayoutOrder = nextOrder(), Parent = view,
             })
@@ -19271,14 +19434,14 @@ local function buildUI()
             local head = slot(view, 34)
             label(head, {
                 Size = UDim2.new(0.6, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
-                Font = LOOK.semi, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Font = LOOK.semi, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 Text = string.upper(left),
             })
             local r = label(head, {
                 Size = UDim2.new(0.4, 0, 1, -6), Position = UDim2.new(0.6, -4, 0, 6),
-                Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
+                Font = LOOK.regular, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
             if rightFn then
                 addLive(function()
@@ -19765,7 +19928,7 @@ local function buildUI()
         gap(v, 12)
         local hero = mk("TextButton", {
             Size = UDim2.new(1, -40, 0, 52), BackgroundColor3 = C.ivory,
-            BorderSizePixel = 0, Font = LOOK.bold, TextSize = 16,
+            BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(16),
             TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
             LayoutOrder = nextOrder(), Parent = v,
         })
@@ -19816,7 +19979,7 @@ local function buildUI()
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = "", Parent = card })
         local mLine = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 16), Position = UDim2.fromOffset(66, 34),
-            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.second, Text = "", Parent = card })
         local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -46, 0, 10),
@@ -19900,7 +20063,7 @@ local function buildUI()
                 setMoment(m)
             end
         end)
-        gap(v, 12)
+        gap(v, 4)       -- the board: MODE's own 4 px margin
 
         heading2(v, "mode")
         navRow(v, "Mode", modeValue, "modes")
@@ -23840,7 +24003,7 @@ local function buildUI()
 
         -- ---------- THE WHEEL ----------
         local RANK = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
-        local ACC = { Melee = "raid", Sword = "sea", ["Blox Fruit"] = "prehistoric", Gun = "pvp" }
+        local ACC = TYPE_ACCENT       -- melee red, sword blue, fruit orange, gun violet
         local TYPE_WORD = { Melee = "MELEE", Sword = "SWORD", ["Blox Fruit"] = "FRUIT", Gun = "GUN" }
         local function rgbOf(t) return Color3.fromRGB(t[1], t[2], t[3]) end
         local function carriedSorted()
@@ -23931,6 +24094,15 @@ local function buildUI()
             return f and f(name) or nil
         end
         local function modeWord(m) return tostring(TITLES[m] or m) end
+        -- the picked weapon's type: the card's outline (MIX: none)
+        local function pickAcc()
+            local one = forceOf(ctx())
+            if not one then return "none" end
+            for _, w in ipairs(carriedSorted()) do
+                if w.name == one then return ACC[w.ty] or "none" end
+            end
+            return "none"
+        end
         local card = P.kit.truthCard(v, function()
             local m = ctx()
             local x = fwOf(m)
@@ -23953,7 +24125,7 @@ local function buildUI()
             end
             return "M1 and its moves, for " .. modeWord(m) .. ". No other M1 pick, weapon order or mastery "
                 .. "setting can change it. Turn the wheel to MIX to use several."
-        end, "none")
+        end, pickAcc)
         local goalBtn = mk("TextButton", {
             Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base, BorderSizePixel = 0,
             AutoButtonColor = false, Text = "", LayoutOrder = 3, Visible = false, Parent = card,
@@ -24081,8 +24253,8 @@ local function buildUI()
                 })
                 local chip = mk("TextLabel", {
                     Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(0, 13),
-                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.bold,
-                    TextSize = 9, TextColor3 = text, Text = TYPE_WORD[w.ty] or string.upper(tostring(w.ty)),
+                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.black,
+                    TextSize = LOOK.size.chip, TextColor3 = text, Text = TYPE_WORD[w.ty] or string.upper(tostring(w.ty)),
                     Parent = top,
                 })
                 corner(chip, 5)
@@ -24097,14 +24269,15 @@ local function buildUI()
                 local only = mk("TextButton", {
                     Size = UDim2.fromOffset(112, 40), AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, 0, 0.5, 0),
-                    BackgroundColor3 = chosen and accent or C.row, BorderSizePixel = 0,
-                    AutoButtonColor = false, Font = LOOK.bold, TextSize = F.tiny,
-                    TextColor3 = chosen and C.base or C.second,
+                    BackgroundColor3 = chosen and accent or C.base, BorderSizePixel = 0,
+                    BackgroundTransparency = chosen and 0 or 1,
+                    AutoButtonColor = false, Font = LOOK.bold, TextSize = lookPx(11),
+                    TextColor3 = chosen and C.base or LOOK.soft,
                     Text = chosen and "Using only this" or "Use only this", Parent = top,
                 })
                 corner(only, 9)
                 mk("UIStroke", {
-                    Color = chosen and accent or C.hair, Thickness = 1,
+                    Color = chosen and accent or LOOK.ghost, Thickness = 1,
                     ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = only,
                 })
                 only.Activated:Connect(function()
@@ -24123,13 +24296,13 @@ local function buildUI()
                 local function chipBtn(order, word, width, lit, litColor, cb)
                     local b = mk("TextButton", {
                         Size = UDim2.fromOffset(width, 44), BackgroundColor3 = lit and litColor or C.base,
-                        BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.bold,
-                        TextSize = F.small, TextColor3 = lit and C.base or C.second,
+                        BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.black,
+                        TextSize = lookPx(13), TextColor3 = lit and C.base or LOOK.soft,
                         Text = word, LayoutOrder = order, Parent = row,
                     })
                     corner(b, 10)
                     mk("UIStroke", {
-                        Color = lit and litColor or C.hair, Thickness = 1,
+                        Color = lit and litColor or LOOK.ghost, Thickness = 1,
                         ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
                     })
                     b.Activated:Connect(function() pcall(cb) end)
@@ -25418,6 +25591,25 @@ local function buildUI()
     do
         local v = makeView("news")
         gap(v, 6)
+        -- RIGHT NOW (Task S): what the old crawl and its chip said - the day
+        -- or night and its clock, the moon, every headline. The strip itself
+        -- is on Home only, and only while something is up.
+        P.kit.sectionRight(v, "right now", function()
+            local N = P.news
+            if not N then return "" end
+            local w, t = N.chip()
+            return tostring(w) .. ((t and t ~= "") and (" " .. t) or "")
+        end)
+        readout(v, function()
+            local N = P.news
+            if not N then return "no news yet" end
+            local out = {}
+            for _, it in ipairs(N.headlines()) do
+                table.insert(out, (it.breaking and "BREAKING " or "") .. tostring(it.title)
+                    .. ((it.body and it.body ~= "") and ("  " .. tostring(it.body)) or ""))
+            end
+            return #out > 0 and table.concat(out, "\n") or "nothing to show: tick something below"
+        end)
         P.kit.sectionRight(v, "show in the strip", function()
             local on, total = 0, 0
             for _, x in pairs(CFG.NewsShow) do

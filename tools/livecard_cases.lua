@@ -79,4 +79,26 @@ check("sub held", liveSubOf("hunt", "SEA") == "Tap to hunt it · SEA", liveSubOf
 check("sub locked", liveSubOf("cover", "SEA") == "SEA runs it for you · look inside")
 check("sub hunting", liveSubOf("none", "SEA") == "Hunting it now · SEA")
 
+-- the news strip (R3 Task S): Home only, only while something is up
+check("strip: nothing up = no strip", newsStripOf({ { key = "moon", tone = "night", title = "NIGHT 3/8" },
+    { key = "fruit", tone = "dim", title = "NO FRUIT ON THE MAP" } }) == nil)
+check("strip: no news = no strip", newsStripOf(nil) == nil and newsStripOf({}) == nil)
+local st = newsStripOf({ { key = "moon", tone = "full", title = "FULL MOON" },
+    { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "came 2 min ago" } })
+check("strip: the first thing up, the board's words", st and st.key == "mirage" and st.text == "MIRAGE ISLAND IS UP",
+    st and st.text)
+st = newsStripOf({ { key = "boss:Diablo", tone = "up", title = "ELITE UP", body = "Diablo, near you" } })
+check("strip: a boss by name", st and st.text == "DIABLO IS UP", st and st.text)
+st = newsStripOf({ { key = "fruit", tone = "up", title = "FRUIT ON THE MAP", body = "Dragon · Ice" } })
+check("strip: a fruit with its names", st and st.text == "FRUIT ON THE MAP: DRAGON · ICE", st and st.text)
+
+-- board px -> TextSize (Montserrat's em is TextSize / 1.21 in Roblox)
+check("px: 15 -> 18", lookPx(15) == 18, tostring(lookPx(15)))
+check("px: 11 -> 13", lookPx(11) == 13, tostring(lookPx(11)))
+check("px: 9 -> 11", lookPx(9) == 11, tostring(lookPx(9)))
+check("px: 21 -> 25", lookPx(21) == 25, tostring(lookPx(21)))
+check("type colours: melee red, sword blue, fruit orange, gun violet",
+    TYPE_ACCENT.Melee == "raid" and TYPE_ACCENT.Sword == "sea" and TYPE_ACCENT["Blox Fruit"] == "prehistoric"
+    and TYPE_ACCENT.Gun == "pvp")
+
 print(all and "ALL PASS" or "SOME FAILED")

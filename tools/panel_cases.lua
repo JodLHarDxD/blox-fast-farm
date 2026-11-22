@@ -53,7 +53,8 @@ local function listeners(o, sig)
 end
 local backBtn
 for _, o in ipairs(ALL) do
-    if o.ClassName == "TextButton" and o.Text == "Back" then backBtn = o end
+    -- Task S: the board's thin "‹", found by its Name
+    if o.ClassName == "TextButton" and o.Name == "Back" then backBtn = o end
 end
 local function goHome()
     for _ = 1, 12 do
@@ -62,9 +63,10 @@ local function goHome()
     end
 end
 local function isPill(o) return o.ClassName == "TextButton" and o.Size and o.Size.X.Offset == 46 end
--- R2: a page's mode strip (P.kit.modeStrip) has an 88 x 44 button in place of the pill.
+-- R2: a page's mode strip (P.kit.modeStrip) has a button in place of the pill;
+-- Task S: the board's pill ("Use this" / "In use"), named ModePill, a 44 px target.
 local function isStrip(o)
-    return o.ClassName == "TextButton" and o.Size and o.Size.X.Offset == 88 and o.Size.Y.Offset == 44
+    return o.ClassName == "TextButton" and o.Name == "ModePill" and o.Size and o.Size.Y.Offset == 44
 end
 -- A switch's label: the row (the pill's side frame's parent), its first text.
 local function switchLabel(pill) return labelsOf(pill.Parent.Parent)[1] end
@@ -157,15 +159,17 @@ if RUN == "full" then
     check(current() == "home", "Home on screen at the start, got " .. current())
 
     -- ---------- Home fits without a scroll bar ----------
-    local panelH
+    local panelH, headH
     for _, o in ipairs(ALL) do
         if o.ClassName == "Frame" and o.Parent == gui then panelH = o.Size.Y.Offset end
     end
+    -- the header: 48 (Task S), plus the news strip's 34 while it shows
+    headH = VIEWS.home.Parent.Position.Y.Offset
     local h = 16
     for _, k in ipairs(rawget(VIEWS.home, "_kids")) do
         if k.Size and k.Size.Y then h += k.Size.Y.Offset end
     end
-    check(panelH and h <= panelH - 82, string.format("Home %d px in a %d px body", h, (panelH or 0) - 82))
+    check(panelH and h <= panelH - headH, string.format("Home %d px in a %d px body", h, (panelH or 0) - headH))
 
     -- ---------- one mode at a time; PvP / Leviathan on top ----------
     CFG_REAL.Hunt, CFG_REAL.RaidMode, CFG_REAL.RandomMode, CFG_REAL.Pvp, CFG_REAL.LeviFight =
@@ -691,7 +695,7 @@ do
             if o.ClassName == "ScrollingFrame" and o.Name ~= "ScrollingFrame" then V[o.Name] = o end
         end)
         local back
-        walk(g, function(o) if o.ClassName == "TextButton" and o.Text == "Back" then back = o end end)
+        walk(g, function(o) if o.ClassName == "TextButton" and o.Name == "Back" then back = o end end)
         local I = { V = V, g = g }
         function I.has(page, needle)
             for _, l in ipairs(labelsIn(V[page])) do if string.find(l, needle, 1, true) then return true end end
@@ -818,6 +822,33 @@ do
     P.news = { headlines = function() return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" } } end }
     B = build({ farm = NOW + 5 * 86400 + 60 }, "buyer", nil)
     B.live()
+    -- Task S: the BREAKING strip (Home.dc.html) - Home only, only while something is up
+    do
+        local panel = rawget(B.g, "_kids")[1]
+        local strip = panel:FindFirstChild("NewsStrip")
+        check(strip ~= nil, "strip: built when there is news")
+        P.newsStripNow()
+        local words = {}
+        walk(strip, function(o) if o.ClassName == "TextLabel" then table.insert(words, tostring(o.Text)) end end)
+        local w = table.concat(words, "|")
+        check(strip.Visible and string.find(w, "BREAKING", 1, true) and string.find(w, "MIRAGE ISLAND IS UP", 1, true)
+            and string.find(w, "SEA", 1, true), "strip: Home says BREAKING, MIRAGE ISLAND IS UP and the locked SEA chip: " .. w)
+        local body
+        for _, k in ipairs(rawget(panel, "_kids")) do
+            if k.ClassName == "Frame" and k.ClipsDescendants and k.Name ~= "NewsStrip" then body = k end
+        end
+        check(body.Position.Y.Offset == 82 and P.hudHead == 34, "strip: the body moves under it (" .. body.Position.Y.Offset .. ")")
+        B.tap("home", "Key & packs")
+        check(not strip.Visible and body.Position.Y.Offset == 48 and P.hudHead == 0,
+            "strip: another page has no strip, the body is right under the header")
+        B.home()
+        check(strip.Visible and body.Position.Y.Offset == 82, "strip: back on Home it is back")
+        P.news = { headlines = function() return { { key = "mirage", tone = "dim", title = "NO MIRAGE ISLAND", body = "" } } end }
+        P.newsStripNow()
+        check(not strip.Visible and body.Position.Y.Offset == 48, "strip: nothing up = no strip, no NEWS block")
+        P.news = { headlines = function() return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" } } end }
+        P.newsStripNow()
+    end
     check(B.has("home", "Mirage is up in this server") and B.has("home", "SEA runs it for you · look inside"),
         "Home: the live moment card shows for a locked pack")
     check(P.hudExtra == 76, "Home: the panel grows by the card (" .. tostring(P.hudExtra) .. ")")
@@ -866,6 +897,66 @@ do
     P.running = false
     P.fruitSpot = nil
     P.news = nil
+
+    -- ---------- Task S: the shell and kit match the boards ----------
+    do
+        local S = build({ fruits = 0 }, "owner", nil)
+        local panel = rawget(S.g, "_kids")[1]
+        check(panel:FindFirstChild("NewsStrip") == nil, "shell: no news = no strip at all")
+        local back, row
+        walk(S.g, function(o)
+            if o.Name == "Back" then back = o end
+            if o.Name == "TitleRow" then row = o end
+        end)
+        check(back and back.Text == "‹" and back.Size.X.Offset == 44 and back.Size.Y.Offset == 44,
+            "header: the board's thin chevron, a 44 px target (not the word Back)")
+        S.tap("home", "Mode")
+        S.tap("modes", "Legendary swords")
+        check(S.cur() == "sword", "header: on Swords, got " .. S.cur())
+        local chip = row and row:FindFirstChild("PackChip")
+        check(chip and chip.Text == "BOSSES + RAIDS" and row.Position.X.Offset == 54,
+            "header: the pack chip sits inline after the title, the title at 54")
+        check(not S.has("sword", "BOSSES + RAIDS"), "header: the chip is no longer a line of the page")
+        -- the raw here / last / bought lines are in Details, not on the page
+        -- (the stub's Enum is a table, so setFont takes Code through FontFace here)
+        local function mono(k)
+            return k.ClassName == "TextLabel" and (k.Font == Enum.Font.Code
+                or string.find(tostring(k.FontFace), "Enum.Font.Code", 1, true) ~= nil)
+        end
+        local raw = S.find("sword", mono)
+        local inFold = false
+        local p = raw and raw.Parent
+        while p do
+            for _, k in ipairs(rawget(p, "_kids")) do
+                if k.ClassName == "Frame" then
+                    walk(k, function(o) if o.ClassName == "TextLabel" and o.Text == "Details" then inFold = true end end)
+                end
+            end
+            if inFold or p == S.V.sword then break end
+            p = p.Parent
+        end
+        check(raw ~= nil and raw.Parent ~= S.V.sword and inFold, "raw readouts: Swords' monospace lines sit in Details")
+        -- the mode strip: the board's pill
+        local pill = S.find("sword", function(k) return k.Name == "ModePill" end)
+        local word = pill and pill:FindFirstChild("Word")
+        CFG_REAL.Pvp, CFG_REAL.LeviFight, CFG_REAL.Hunt = false, false, false
+        S.live()
+        check(word and word.Text == "Use this" and pill:FindFirstChild("Face").BackgroundColor3.R == 232,
+            "pill: Not your mode = an ivory Use this (" .. tostring(word and word.Text) .. ")")
+        pill.Activated:Fire()
+        S.live()
+        check(word.Text == "In use" and pill:FindFirstChild("Face").BackgroundTransparency == 1,
+            "pill: your mode = a ghost In use")
+        check(S.has("sword", "Not your mode") == false and S.has("sword", "Your mode"), "pill: the bold line says Your mode")
+        P.setHunt(false)
+        -- type scale: board px through lookPx (Montserrat in Roblox is 1.21x smaller)
+        local navLabel = S.find("sword", function(k) return k.ClassName == "TextLabel" and k.Text == "Fights with" end)
+        check(navLabel and navLabel.TextSize == 18, "type: a row label is the board's 15 px = TextSize 18")
+        local help = S.find("sword", function(k)
+            return k.ClassName == "TextLabel" and string.find(tostring(k.Text), "^For True Triple Katana") ~= nil end)
+        check(help and help.TextSize == 13 and help.LineHeight and help.LineHeight > 1.15,
+            "type: help text is the board's 11 px, line-height 1.45")
+    end
 
     -- The owner: nothing locked, every pack a cover that opens its modes, owner tools in their own section.
     local O = build({ fruits = 0 }, "owner", nil)
@@ -1558,10 +1649,10 @@ do
     -- the header is not inside the scrolling body
     local body
     for _, k in ipairs(rawget(panel, "_kids")) do
-        if k.ClassName == "Frame" and k.ClipsDescendants and k.Position.Y.Offset == 82 then body = k end
+        if k.ClassName == "Frame" and k.ClipsDescendants and k.Position.Y.Offset == 48 then body = k end
     end
-    check(body and body.Size.Y.Scale == 1 and body.Size.Y.Offset == -82,
-        "resize: the body follows the panel height; the header (82 px) is outside it")
+    check(body and body.Size.Y.Scale == 1 and body.Size.Y.Offset == -48,
+        "resize: the body follows the panel height; the header (48 px, no strip up) is outside it")
     local scrolls = 0
     for _, k in ipairs(rawget(body, "_kids")) do
         if k.ClassName == "ScrollingFrame" then scrolls += 1 end
