@@ -1057,6 +1057,8 @@ do
     check(B.has("home", "Mirage is up in this server") and B.has("home", "Tap to hunt it · SEA"),
         "Home: a held pack shows the card, Tap to hunt it")
     check(P.hudExtra == 76, "Home: the panel grows by the card for a held pack too")
+    -- the Mirage runs its picked job; "fire every control" leaves the last one picked
+    CFG_REAL.MirageJob = "mirage"
     table.clear(CALLS)
     B.tap("home", "Mirage is up in this server")
     check(B.cur() == "home" and called("setHunt true mirage") and called("start") and P.running,
@@ -1487,11 +1489,11 @@ do
     for _, k in ipairs(DODGE) do
         check(CFG_REAL[k] == P.cfgDefaults[k], "seafight: step 3 " .. k .. " is today's " .. tostring(P.cfgDefaults[k]))
     end
-    tap("seafight", "ALWAYS")
+    tap("seafight", "Always")
     check(CFG_REAL.SeaEvForm == "form", "seafight: Always -> SeaEvForm form")
-    tap("seafight", "NEVER")
+    tap("seafight", "Never")
     check(CFG_REAL.SeaEvForm == "base", "seafight: Never -> SeaEvForm base")
-    tap("seafight", "WHEN IT HURTS")
+    tap("seafight", "When it hurts")
     check(CFG_REAL.SeaEvForm == "auto", "seafight: When it hurts -> SeaEvForm auto")
     tap("seafight", "Fights with")
     check(current() == "attack", "seafight: Fights with opens Attack")
@@ -1511,7 +1513,15 @@ do
     local function whichShown()
         local shown
         each(VIEWS.mirage, function(k)
-            if k.ClassName == "TextLabel" and tostring(k.Text) == "BLUE GEAR: WHICH MIRAGE" then shown = k.Parent.Visible end
+            if k.ClassName == "TextLabel" and tostring(k.Text) == "BLUE GEAR: WHICH MIRAGE" then
+                -- shown = every frame from it up to the page is visible
+                shown = true
+                local p = k.Parent
+                while p and p ~= VIEWS.mirage do
+                    if p.Visible == false then shown = false end
+                    p = p.Parent
+                end
+            end
         end)
         return shown
     end
@@ -1522,11 +1532,11 @@ do
     tap("mirage", "Blue Gear")
     pcall(LIVE0)
     check(CFG_REAL.MirageJob == "gear" and whichShown() == true, "mirage: which Mirage shown for Blue Gear ")
-    tap("mirage", "FULL MOON")
+    tap("mirage", "Full moon")
     check(CFG_REAL.MirageNeed == "full", "mirage: Full moon -> MirageNeed full")
-    tap("mirage", "EVERY ONE")
+    tap("mirage", "Every one")
     check(CFG_REAL.MirageNeed == "any", "mirage: Every one -> MirageNeed any")
-    tap("mirage", "SEES NIGHT")
+    tap("mirage", "Sees night")
     check(CFG_REAL.MirageNeed == "night", "mirage: Sees night -> MirageNeed night")
     tap("mirage", "Advanced Fruit Dealer")
     pcall(LIVE0)

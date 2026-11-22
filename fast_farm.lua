@@ -19353,6 +19353,11 @@ local function buildUI()
                         local under = modeUnder()
                         sub.Text = under == "none" and "Off: no mode is on. Pick one on Home."
                             or ("Off: " .. modeName(under) .. " is yours again; Start runs it")
+                    elseif id == "levi" then
+                        -- the Leviathan sits over a mode (Leviathan.dc.html)
+                        local under = modeUnder()
+                        sub.Text = under == "none" and "Off: no mode is on"
+                            or ("Over " .. modeName(under) .. " · Off brings it back")
                     else
                         sub.Text = "Start on Home runs it"
                     end
@@ -19361,6 +19366,9 @@ local function buildUI()
                     line.Text = "Not your mode"
                     local now = modeNow()
                     sub.Text = now == "none" and "No mode is on" or (modeName(now) .. " is your mode now")
+                    if id == "levi" then
+                        sub.Text = now == "none" and "Starts at once" or ("Goes over " .. modeName(now) .. ", starts at once")
+                    end
                     if id == "pvp" and now ~= "none" then
                         sub.Text = modeName(now) .. " is your mode now. On stops it while you fight."
                     end
@@ -19421,6 +19429,75 @@ local function buildUI()
             end
             return f, paint
         end
+        -- DASHED LINE (R3 Task 5): the boards' dashed borders as a clipped
+        -- strip of short bars (3 x th long, 3 x th apart). The strip's Size
+        -- is the length shown; bars are made for up to max px.
+        function K.dash(parent, th, color, max, horizontal)
+            local f = mk("Frame", {
+                Name = "Dash", Size = horizontal and UDim2.fromOffset(max, th) or UDim2.fromOffset(th, max),
+                BackgroundTransparency = 1, ClipsDescendants = true, Parent = parent,
+            })
+            local at = 0
+            while at < max do
+                mk("Frame", {
+                    Size = horizontal and UDim2.fromOffset(3 * th, th) or UDim2.fromOffset(th, 3 * th),
+                    Position = horizontal and UDim2.fromOffset(at, 0) or UDim2.fromOffset(0, at),
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = f,
+                })
+                at += 6 * th
+            end
+            return f
+        end
+
+        -- SHAPE (R3 Task 5): a board's filled SVG path drawn with frames - one
+        -- 1 px row a line of it (scanline), its outline as K.icon strokes.
+        -- pts = the closed outline in px; K.bez(pts, p0, p1, p2, p3, n) adds
+        -- a cubic curve's points to it. fill / line: Color3 or nil.
+        function K.bez(pts, p0, p1, p2, p3, n)
+            for i = 1, n do
+                local t = i / n
+                local u = 1 - t
+                local a, b, c, d = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
+                table.insert(pts, { a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
+                    a * p0[2] + b * p1[2] + c * p2[2] + d * p3[2] })
+            end
+            return pts
+        end
+        function K.shape(parent, pts, fill, line, th)
+            local f = mk("Frame", {
+                Name = "Shape", Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Parent = parent,
+            })
+            if fill then
+                local y0, y1 = math.huge, -math.huge
+                for _, p in ipairs(pts) do y0, y1 = math.min(y0, p[2]), math.max(y1, p[2]) end
+                for y = math.floor(y0), math.ceil(y1) - 1 do
+                    local yc, xs = y + 0.5, {}
+                    for i, a in ipairs(pts) do
+                        local b = pts[i % #pts + 1]
+                        if (a[2] <= yc and b[2] > yc) or (b[2] <= yc and a[2] > yc) then
+                            table.insert(xs, a[1] + (yc - a[2]) / (b[2] - a[2]) * (b[1] - a[1]))
+                        end
+                    end
+                    table.sort(xs)
+                    for k = 1, #xs - 1, 2 do
+                        mk("Frame", {
+                            Size = UDim2.fromOffset(xs[k + 1] - xs[k], 1), Position = UDim2.fromOffset(xs[k], y),
+                            BackgroundColor3 = fill, BorderSizePixel = 0, Parent = f,
+                        })
+                    end
+                end
+            end
+            if line then
+                local segs = {}
+                for i, a in ipairs(pts) do
+                    local b = pts[i % #pts + 1]
+                    table.insert(segs, { a[1], a[2], b[1], b[2] })
+                end
+                K.icon(f, 24, segs, th or 1, line)
+            end
+            return f
+        end
+
         K.GLYPH = {
             sword = { { 9, 15, 20, 4 }, { 6.5, 12.5, 11.5, 17.5 }, { 8, 16, 4, 20 } },
             check = { { 5, 12, 10, 17 }, { 10, 17, 20, 7 } },
@@ -19433,6 +19510,16 @@ local function buildUI()
             -- the circuit's loop: back to 1
             loop = { { 9, 14, 5, 10 }, { 5, 10, 9, 6 }, { 5, 10, 14, 10 }, { 14, 10, 18, 12 }, { 18, 12, 18.5, 16 },
                 { 18.5, 16, 14, 20 }, { 14, 20, 11, 20 } },
+            minus = { { 6, 12, 18, 12 } },
+            -- Sea events: FIGHT's crosshair, SAIL AWAY's arrow, the ship raid's lock
+            aim = { { "ring", 12, 12, 7 }, { 12, 2, 12, 7 }, { 12, 17, 12, 22 }, { 2, 12, 7, 12 }, { 17, 12, 22, 12 } },
+            away = { { 7, 17, 17, 7 }, { 9, 7, 17, 7 }, { 17, 7, 17, 15 } },
+            lock = { { 5, 11, 19, 11 }, { 19, 11, 19, 21 }, { 19, 21, 5, 21 }, { 5, 21, 5, 11 },
+                { 8, 11, 8, 8 }, { 8, 8, 9.2, 5.2 }, { 9.2, 5.2, 12, 4 }, { 12, 4, 14.8, 5.2 }, { 14.8, 5.2, 16, 8 },
+                { 16, 8, 16, 11 } },
+            -- the Leviathan's card: a snowflake
+            flake = { { 12, 2, 12, 22 }, { 3.3, 7, 20.7, 17 }, { 3.3, 17, 20.7, 7 }, { 9, 3.5, 12, 6 }, { 12, 6, 15, 3.5 },
+                { 9, 20.5, 12, 18 }, { 12, 18, 15, 20.5 } },
         }
 
         -- DIAL: N steps that each set several CFG values. steps[i] = { name,
@@ -19443,6 +19530,10 @@ local function buildUI()
         -- the head and the buttons (Elite's lanes); a step's head = a bold
         -- 13 px line over its line (Raid's guard); note() = a dim 11 px line
         -- under it; dim() true = the whole dial at the board's opacity .45.
+        -- R3 Task 5 (Sea fight): px = the numbers' board px (12), offPx =
+        -- OFF's, radius (10); todayDot = the board's 4 px dot in the today
+        -- step's button; legend = { left, right, inset } the two muted
+        -- words under the buttons ("closer, hits harder" ... "wider, safer").
         function K.dial(view, title, steps, accent, opts)
             opts = opts or {}
             table.insert(P.dials, steps)
@@ -19467,16 +19558,37 @@ local function buildUI()
             for i, st in ipairs(steps) do
                 local txt = st.short or ((offFirst and i == 1) and "OFF")
                     or tostring(offFirst and (i - 1) or i)
+                local px = (offFirst and i == 1) and (opts.offPx or opts.px or 12) or (opts.px or 12)
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1 / n, -6, 0, 44),
+                    Size = UDim2.new(1 / n, -6 + 6 / n, 0, 44),
                     Position = UDim2.new((i - 1) / n, (i - 1) * 6 / n, 0, 0),
                     BackgroundColor3 = C.base, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft,
+                    Font = LOOK.black, TextSize = lookPx(px), TextColor3 = LOOK.soft,
                     Text = txt, Parent = row,
                 })
-                corner(b, 10)
+                corner(b, opts.radius or 10)
                 btns[i] = { b = b, line = mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
                     ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b }) }
+                if opts.todayDot and st.today then
+                    btns[i].dot = mk("Frame", {
+                        Size = UDim2.fromOffset(4, 4), Position = UDim2.new(0.5, -2, 1, -9),
+                        BackgroundColor3 = LOOK.mute, BorderSizePixel = 0, Parent = b,
+                    })
+                    corner(btns[i].dot, 2)
+                end
+            end
+            if opts.legend then
+                local lg = slot(view, 18)
+                local inner = mk("Frame", {
+                    Size = UDim2.new(1, -(opts.legend[3] or 0), 0, 12), Position = UDim2.fromOffset(opts.legend[3] or 0, 6),
+                    BackgroundTransparency = 1, Parent = lg,
+                })
+                for k, al in ipairs({ Enum.TextXAlignment.Left, Enum.TextXAlignment.Right }) do
+                    label(inner, {
+                        Size = UDim2.fromScale(1, 1), Font = LOOK.regular, TextSize = lookPx(10),
+                        TextXAlignment = al, TextColor3 = C.third, Text = opts.legend[k],
+                    })
+                end
             end
             local hasHead = false
             for _, st in ipairs(steps) do if st.head then hasHead = true end end
@@ -19533,6 +19645,7 @@ local function buildUI()
                     x.line.Color = (i == lit) and acc or LOOK.ghost
                     x.b.BackgroundTransparency = (i == lit) and a or 0
                     x.b.TextTransparency, x.line.Transparency = a, a
+                    if x.dot then x.dot.BackgroundColor3 = (i == lit) and C.base or LOOK.mute end
                 end
                 for _, t in pairs(texts) do t.TextTransparency = a end
                 cur.Text = lit and tostring(steps[lit].name) or "your own values"
@@ -19567,26 +19680,40 @@ local function buildUI()
         -- 13 px ExtraBold over 11 px SemiBold, radius 16 / 12.
         function K.segmented(view, title, options, get, set, opts)
             if title then heading2(view, title) end
+            -- rich = Circuit's accent halves; plain (R3 Task 5) = the boards'
+            -- small tabs: the words as written, 12 px Bold; ivory = the lit
+            -- one ivory with dark words (Sea fight's form); dot = the value
+            -- that carries the board's small "today" dot under its word.
+            local rich = opts and opts.accent ~= nil
+            local plain = opts and opts.plain
             local s = slot(view, opts and opts.h or 44)
             local box = mk("Frame", {
                 Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row,
                 BorderSizePixel = 0, Parent = s,
             })
-            corner(box, opts and 16 or 12)
+            corner(box, rich and 16 or 12)
             local n = #options
-            local btns, subs = {}, {}
-            local tint, _, acc = accentColors(opts and opts.accent or "none")
+            local btns, subs, dots = {}, {}, {}
+            local tint, _, acc = accentColors(rich and opts.accent or "none")
             for i, o in ipairs(options) do
                 -- 4 px inside the box and 4 px between: each 1/n less (4 + 4/n)
                 local b = mk("TextButton", {
                     Size = UDim2.new(1 / n, -4 - 4 / n, 1, -8),
                     Position = UDim2.new((i - 1) / n, 4 - 4 * (i - 1) / n, 0, 4),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = opts and LOOK.black or LOOK.bold, TextSize = lookPx(13), TextColor3 = C.second,
-                    Text = string.upper(tostring(o[2])), Parent = box,
+                    Font = rich and LOOK.black or LOOK.bold, TextSize = lookPx(plain and 12 or 13),
+                    TextColor3 = C.second, Text = plain and tostring(o[2]) or string.upper(tostring(o[2])),
+                    Parent = box,
                 })
-                corner(b, opts and 12 or 9)
-                if opts and o[3] then
+                corner(b, rich and 12 or 9)
+                if plain and opts.dot ~= nil and o[1] == opts.dot then
+                    dots[i] = mk("Frame", {
+                        Size = UDim2.fromOffset(4, 4), Position = UDim2.new(0.5, -2, 1, -8),
+                        BackgroundColor3 = LOOK.mute, BorderSizePixel = 0, Parent = b,
+                    })
+                    corner(dots[i], 2)
+                end
+                if rich and o[3] then
                     -- the word and its sub line, centred as a pair
                     b.Text = ""
                     local col = mk("Frame", {
@@ -19614,7 +19741,11 @@ local function buildUI()
                 local cur = get()
                 for i, b in ipairs(btns) do
                     local on = options[i][1] == cur
-                    if opts then
+                    if dots[i] then dots[i].BackgroundColor3 = on and C.base or LOOK.mute end
+                    if plain and opts.ivory then
+                        b.BackgroundColor3 = on and C.ivory or C.row
+                        b.TextColor3 = on and C.base or LOOK.soft
+                    elseif rich then
                         b.BackgroundColor3 = on and acc or C.row
                         b.TextColor3 = on and C.base or LOOK.soft
                         local x = subs[i]
@@ -19995,12 +20126,84 @@ local function buildUI()
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
             if rightFn then
+                -- rightFn may return a colour too (the boards' muted or amber notes)
                 addLive(function()
-                    local ok, t = pcall(rightFn)
+                    local ok, t, col = pcall(rightFn)
                     r.Text = ok and tostring(t or "") or ""
+                    r.TextColor3 = (ok and col) or LOOK.soft
                 end)
             end
             return head
+        end
+
+        -- HERO LIST (R3 Task 5, the boards' "seg" pick: Mirage's job): a card
+        -- (#1B1917, 4 px inside, radius 14) of 46 px rows, radius 10, 2 px
+        -- apart; a ring (16 px, 2 px line) filled when lit, the name 14 px
+        -- SemiBold, a muted 11 px tag on the right. Lit = #2E2B27 with the
+        -- accent's outline. items = { { value, name, tag }, ... }.
+        function K.heroList(view, items, get, set, accent)
+            local _, _, acc = accentColors(accent)
+            local RING = Color3.fromRGB(74, 69, 61)          -- #4A453D
+            local s = slot(view)
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = card })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+                PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = card,
+            })
+            local rows = {}
+            for i, it in ipairs(items) do
+                local b = mk("TextButton", {
+                    Name = "Pick", Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = C.row,
+                    BorderSizePixel = 0, AutoButtonColor = false, Text = "", LayoutOrder = i, Parent = card,
+                })
+                corner(b, 10)
+                local line = stroke(b, acc)
+                -- the 16 px ring: 12 inside a 2 px stroke drawn outside it
+                local ring = mk("Frame", {
+                    Size = UDim2.fromOffset(12, 12), Position = UDim2.new(0, 14, 0.5, -6),
+                    BackgroundTransparency = 1, Parent = b,
+                })
+                corner(ring, 6)
+                local rl = mk("UIStroke", { Color = RING, Thickness = 2,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ring })
+                local dot = mk("Frame", {
+                    Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(3, 3),
+                    BackgroundColor3 = acc, BorderSizePixel = 0, Parent = ring,
+                })
+                corner(dot, 3)
+                local tag = label(b, {
+                    Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                    AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0),
+                    Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = LOOK.mute,
+                    Text = tostring(it[3] or ""),
+                })
+                label(b, {
+                    Size = UDim2.new(1, -(40 + 12 + 8 + #tostring(it[3] or "") * 6), 1, 0), Position = UDim2.fromOffset(40, 0),
+                    Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = tostring(it[2]),
+                })
+                rows[i] = { b = b, line = line, ring = rl, dot = dot, tag = tag }
+                b.Activated:Connect(function()
+                    set(it[1])
+                    for _, e in ipairs(rows) do e.sync() end
+                end)
+                rows[i].sync = function()
+                    local on = get() == it[1]
+                    b.BackgroundColor3 = on and SEG_ON or C.row
+                    line.Transparency = on and 0 or 1
+                    rl.Color = on and acc or RING
+                    dot.Visible = on
+                end
+            end
+            local function refresh() for _, e in ipairs(rows) do e.sync() end end
+            refresh()
+            addLive(refresh)
+            return card
         end
 
         -- STEPPER: label, - value +. fmt turns the value into text; dot is an
@@ -23386,85 +23589,181 @@ local function buildUI()
     -- =====================================================
     -- SEA TRAVEL. R2 Task 6 (board SeaTravel): you steer; the keys shown,
     -- what the boat is doing, and the two boat numbers set in Travel.
+    -- R3 Task 5 (SeaTravel.dc.html): the keys sit round a drawn wheel (the
+    -- ring, the four arrows, the boat) in the board's night-blue card, each
+    -- with what it does; the live line under it; the truth card's three
+    -- lines; THE BOAT's two rows with their sub lines.
     -- =====================================================
     do
         local v = makeView("sail")
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "sail")
-        heading2(v, "you steer · your keyboard, at the wheel")
+        P.kit.sectionRight(v, "You steer", function() return "your keyboard, at the wheel", LOOK.mute end)
         do
+            local NIGHT = Color3.fromRGB(7, 22, 33)          -- #071621
+            local RIM = Color3.fromRGB(27, 74, 110)          -- #1B4A6E
+            local BLUE = Color3.fromRGB(74, 163, 232)        -- #4AA3E8
+            local PALE = Color3.fromRGB(159, 203, 239)       -- #9FCBEF
+            local DIM = Color3.fromRGB(127, 149, 166)        -- #7F95A6
             local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 140), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 204), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
-            local card = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            local box = mk("Frame", {
+                Size = UDim2.fromScale(1, 1), BackgroundColor3 = NIGHT, BorderSizePixel = 0,
+                ClipsDescendants = true, Parent = s,
             })
-            corner(card, 14)
+            corner(box, 14)
+            -- the board's 308 px drawing, its own coordinates, centred
+            local art = mk("Frame", {
+                Size = UDim2.fromOffset(308, 204), AnchorPoint = Vector2.new(0.5, 0),
+                Position = UDim2.fromScale(0.5, 0), BackgroundTransparency = 1, Parent = box,
+            })
+            P.kit.icon(art, 24, { { "ring", 154, 102, 40 } }, 1.5, RIM)
+            -- the arrows: go, stop, and the two turns along the ring
+            local segs = {
+                { 154, 74, 154, 55 }, { 149, 60, 154, 55 }, { 154, 55, 159, 60 },
+                { 154, 130, 154, 148 }, { 148, 148, 160, 148 },
+                { 120.8, 87.1, 115.4, 91.6 }, { 115.4, 91.6, 113, 85 },
+                { 187.2, 87.1, 192.6, 91.6 }, { 192.6, 91.6, 195, 85 },
+            }
+            local function arc(x1, y1, x2, y2)
+                local a1, a2 = math.atan2(y1 - 102, x1 - 154), math.atan2(y2 - 102, x2 - 154)
+                if a2 - a1 > math.pi then a2 -= 2 * math.pi elseif a1 - a2 > math.pi then a2 += 2 * math.pi end
+                local px, py = x1, y1
+                for i = 1, 6 do
+                    local a = a1 + (a2 - a1) * i / 6
+                    local nx, ny = 154 + 40 * math.cos(a), 102 + 40 * math.sin(a)
+                    table.insert(segs, { px, py, nx, ny })
+                    px, py = nx, ny
+                end
+            end
+            arc(143.6, 63.4, 115.4, 91.6)
+            arc(164.4, 63.4, 192.6, 91.6)
+            P.kit.icon(art, 24, segs, 1.6, BLUE)
+            -- the boat, bow up
+            local hull = { { 154, 80 } }
+            P.kit.bez(hull, { 154, 80 }, { 162, 89 }, { 164, 101 }, { 164, 113 }, 10)
+            table.insert(hull, { 164, 121 })
+            P.kit.bez(hull, { 164, 121 }, { 164, 122.7 }, { 162.7, 124 }, { 161, 124 }, 3)
+            table.insert(hull, { 147, 124 })
+            P.kit.bez(hull, { 147, 124 }, { 145.3, 124 }, { 144, 122.7 }, { 144, 121 }, 3)
+            table.insert(hull, { 144, 113 })
+            P.kit.bez(hull, { 144, 113 }, { 144, 101 }, { 146, 89 }, { 154, 80 }, 10)
+            table.remove(hull)
+            P.kit.shape(art, hull, C.ivory)
             local function key(txt, x, y)
                 local k = mk("TextLabel", {
-                    Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(x, y),
-                    BackgroundColor3 = C.raised, BorderSizePixel = 0, Font = LOOK.bold,
-                    TextSize = F.label, TextColor3 = C.text, Text = txt, Parent = card,
+                    Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(x + 1, y + 1),
+                    BackgroundColor3 = C.raised, BorderSizePixel = 0, Font = LOOK.black,
+                    TextSize = lookPx(14), TextColor3 = C.text, Text = txt, Parent = art,
                 })
                 corner(k, 9)
+                mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = k })
             end
-            key("W", 58, 14) key("A", 14, 60) key("S", 58, 60) key("D", 102, 60)
-            mk("TextLabel", {
-                Size = UDim2.fromOffset(140, 18), Position = UDim2.fromOffset(14, 108),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                Text = "arrow keys work too", Parent = card,
-            })
-            local rows = {}
-            for i = 1, 4 do
-                rows[i] = mk("TextLabel", {
-                    Size = UDim2.new(1, -170, 0, 26), Position = UDim2.fromOffset(156, 8 + (i - 1) * 30),
-                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
-                    TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = card,
+            -- what a key does: a bold word over a small line
+            local function says(x, y, w, align, word, line, mono, color)
+                mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 16), Position = UDim2.fromOffset(x, y), BackgroundTransparency = 1,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = C.text, TextXAlignment = align,
+                    Text = word, Parent = art,
+                })
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y + 18), BackgroundTransparency = 1,
+                    Font = mono and P.r2.MONO or LOOK.regular, TextSize = lookPx(11), TextColor3 = color,
+                    TextXAlignment = align, Text = line, Parent = art,
                 })
             end
+            local L, M, R = Enum.TextXAlignment.Left, Enum.TextXAlignment.Center, Enum.TextXAlignment.Right
+            key("W", 134, 10) key("A", 30, 82) key("D", 238, 82) key("S", 134, 156)
+            local goL = says(184, 13, 110, L, "go", "", true, PALE)
+            local leftL = says(10, 128, 80, M, "left", "", true, PALE)
+            local rightL = says(218, 128, 80, M, "right", "", true, PALE)
+            says(30, 162, 94, R, "stop", "W goes again", false, DIM)
+            mk("TextLabel", {
+                Size = UDim2.fromOffset(200, 14), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromOffset(294, 184),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = DIM,
+                TextXAlignment = R, Text = "arrow keys work too", Parent = art,
+            })
             addLive(function()
-                local sp = math.floor(tonumber(CFG.SeaSpeed) or 300)
-                local tr = math.floor(tonumber(CFG.SeaTurnRate) or 60)
-                rows[1].Text = "W  go · " .. sp .. " studs/s"
-                rows[2].Text = "A  left · " .. tr .. "°/s"
-                rows[3].Text = "D  right · " .. tr .. "°/s"
-                rows[4].Text = "S  stop · W goes again"
+                local tr = math.floor(tonumber(CFG.SeaTurnRate) or 60) .. "°/s"
+                goL.Text = math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s"
+                leftL.Text, rightL.Text = tr, tr
             end)
-            gap(v, 8)
         end
-        readout(v, function()
-            local s = P.sea
-            return (s.driving and s.meters) and string.format("at sea · %d m from Tiki · danger %s",
-                math.floor(s.meters), tostring(s.danger or "?")) or "not sailing"
-        end)
-        P.kit.truthCard(v, function()
-            return "You steer. Boat at " .. math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s."
-        end, function()
-            return "No island, no timer, never the next server. Lose the boat far out and Sea travel turns off."
-                .. "\n\nThird Sea. Your boat, or a Beast Hunter bought at Tiki Outpost."
-        end, "sea")
-        heading2(v, "the boat · set in Travel, every sea mode")
-        navRow(v, "Boat speed", function() return math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s" end, "travel")
+        -- the live line: at sea, how far out, the danger
+        do
+            local r = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            local line = mk("Frame", {
+                Size = UDim2.new(1, -40, 0, 20), Position = UDim2.fromOffset(20, 8), BackgroundTransparency = 1, Parent = r,
+            })
+            mk("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = line,
+            })
+            local dot = mk("Frame", {
+                Size = UDim2.fromOffset(6, 6), BackgroundColor3 = C.third, BorderSizePixel = 0, LayoutOrder = 1, Parent = line,
+            })
+            corner(dot, 3)
+            local word = mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(12), TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = line,
+            })
+            local num = mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                Font = P.r2.MONO, TextSize = lookPx(12), TextColor3 = LOOK.soft, Text = "", LayoutOrder = 3, Parent = line,
+            })
+            addLive(function()
+                local s = P.sea
+                local on = s.driving and s.meters
+                dot.BackgroundColor3 = on and C.live or C.third
+                word.Text = on and "At sea" or "Not sailing"
+                local m = on and tostring(math.floor(s.meters)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                num.Text = on and (m .. " m from Tiki · danger " .. tostring(s.danger or "?")) or ""
+            end)
+        end
+        gap(v, 8)
+        do
+            local card = P.kit.truthCard(v, function()
+                return "You steer. Boat at " .. math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s."
+            end, function()
+                return "No island, no timer, never the next server. Lose the boat far out and Sea travel turns off."
+            end, "sea")
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.45), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+                Text = "Third Sea. Your boat, or a Beast Hunter bought at Tiki Outpost.", LayoutOrder = 3, Parent = card,
+            })
+        end
+        P.kit.sectionRight(v, "The boat", function() return "set in Travel, every sea mode", LOOK.mute end)
+        navRow(v, "Boat speed", function() return math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s" end, "travel",
+            { sub = "how fast W goes", h = 50 })
         hairline(v)
-        navRow(v, "Turn speed", function() return math.floor(tonumber(CFG.SeaTurnRate) or 60) .. "°/s" end, "travel")
+        navRow(v, "Turn speed", function() return math.floor(tonumber(CFG.SeaTurnRate) or 60) .. "°/s" end, "travel",
+            { sub = "while A or D is held", h = 50 })
     end
 
     -- =====================================================
     -- SEA EVENTS. R2 Task 6 (board SeaEvents): fight or sail away (tap a kind
     -- to move it), the count and the Spy, the two actions; the dodging and the
     -- weapon live one tap away.
+    -- R3 Task 5 (SeaEvents.dc.html): FIGHT / SAIL AWAY with their glyphs,
+    -- ivory chips and ghost chips, the locked Ship raids chip; the help line
+    -- links the Leviathan; the Spy card holds the count, the GOAL stepper,
+    -- the bar, the Spy's answer, Stop at the goal and the two actions; How it
+    -- counts folds open in place; HOW IT FIGHTS rows with their sub lines.
     -- =====================================================
     do
         local v = makeView("seaevents")
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "seaevents")
-        heading2(v, "fight or sail away · tap one to move it")
+        P.kit.sectionRight(v, "Fight or sail away", function() return "tap one to move it", LOOK.mute end)
         local KINDS = { "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark" }
         local MANY = { ["Sea Beast"] = "Sea Beasts", ["Rumbling Waters"] = "Rumbling Waters",
             Terrorshark = "Terrorsharks", Piranha = "Piranhas", Shark = "Sharks" }
@@ -23478,7 +23777,7 @@ local function buildUI()
             for _, k in ipairs(KINDS) do table.insert(fights(k) and f or a, k) end
             return f, a
         end
-        local BLUE = Color3.fromRGB(159, 203, 239)
+        local PALE = Color3.fromRGB(159, 203, 239)
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -23497,13 +23796,20 @@ local function buildUI()
                 PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
                 PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = card,
             })
-            local function head(txt, color, order)
+            -- a group's head: its glyph and its name, 11 px Bold
+            local function head(txt, glyph, color, order)
+                local h = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, LayoutOrder = order, Parent = card,
+                })
+                local ic = P.kit.icon(h, 12, P.kit.GLYPH[glyph], 2.2 * 12 / 24, color)
+                ic.Position = UDim2.fromOffset(0, 2)
                 mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
-                    Font = LOOK.bold, TextSize = F.tiny, TextColor3 = color,
-                    TextXAlignment = Enum.TextXAlignment.Left, Text = txt, LayoutOrder = order, Parent = card,
+                    Size = UDim2.new(1, -18, 1, 0), Position = UDim2.fromOffset(18, 0), BackgroundTransparency = 1,
+                    Font = LOOK.bold, TextSize = lookPx(11), TextColor3 = color,
+                    TextXAlignment = Enum.TextXAlignment.Left, Text = txt, Parent = h,
                 })
             end
+            -- chips wrap; each sits in a 50 px slot (44 + the 6 px between lines)
             local function wrapBox(order)
                 local b = mk("Frame", {
                     Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -23515,95 +23821,144 @@ local function buildUI()
                 })
                 return b
             end
-            head("FIGHT", BLUE, 1)
+            local function holder(box, order)
+                return mk("Frame", {
+                    Size = UDim2.fromOffset(0, 50), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 1, LayoutOrder = order, Parent = box,
+                })
+            end
+            head("FIGHT", "aim", PALE, 1)
             local fightBox = wrapBox(2)
-            local empty = mk("TextLabel", {
-                Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-                TextColor3 = C.warn or C.second, Text = "  Nothing here: the boat only sails  ",
-                LayoutOrder = 99, Parent = fightBox,
-            })
+            local empty = holder(fightBox, 99)
+            do
+                local e = mk("TextLabel", {
+                    Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
+                    TextColor3 = C.warn, Text = "Nothing here: the boat only sails", Parent = empty,
+                })
+                corner(e, 12)
+                mk("UIStroke", { Color = Color3.fromRGB(74, 52, 22), Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = e })
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = e })
+            end
             local rule = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = C.line, BorderSizePixel = 0,
-                LayoutOrder = 3, Parent = card,
+                Size = UDim2.new(1, 0, 0, 9), BackgroundTransparency = 1, LayoutOrder = 3, Parent = card,
             })
-            head("SAIL AWAY", C.second, 4)
+            mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 1), Position = UDim2.fromOffset(0, 4),
+                BackgroundColor3 = C.line, BorderSizePixel = 0, Parent = rule,
+            })
+            head("SAIL AWAY", "away", C.second, 4)
             local awayBox = wrapBox(5)
-            local locked = mk("TextLabel", {
-                Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
-                TextColor3 = C.third, Text = "  Ship raids (always)  ", LayoutOrder = 99, Parent = awayBox,
-            })
-            local btns = {}
+            do
+                -- Ship raids: always sailed away from, never moved
+                local h = holder(awayBox, 99)
+                local lk = mk("Frame", {
+                    Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 1, Parent = h,
+                })
+                corner(lk, 12)
+                mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = lk })
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = lk })
+                mk("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = lk,
+                })
+                local ic = P.kit.icon(lk, 12, P.kit.GLYPH.lock, 1.1, LOOK.mute)
+                ic.LayoutOrder = 1
+                mk("TextLabel", {
+                    Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = LOOK.mute, Text = "Ship raids",
+                    LayoutOrder = 2, Parent = lk,
+                })
+            end
+            local chips = {}
             local function refresh()
                 for i, k in ipairs(KINDS) do
                     local on = fights(k)
-                    local b = btns[i]
-                    b.Parent = on and fightBox or awayBox
-                    b.BackgroundColor3 = on and C.ivory or C.row
-                    b.TextColor3 = on and C.base or C.second
+                    local x = chips[i]
+                    x.h.Parent = on and fightBox or awayBox
+                    x.b.BackgroundColor3 = on and C.ivory or C.row
+                    x.b.TextColor3 = on and C.base or LOOK.soft
+                    x.line.Color = on and C.ivory or LOOK.ghost
                 end
                 local f = split()
                 empty.Visible = (#f == 0)
             end
             for i, k in ipairs(KINDS) do
+                local h = holder(fightBox, i)
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
-                    Text = k, LayoutOrder = i, Parent = fightBox,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = LOOK.soft,
+                    Text = k, Parent = h,
                 })
                 corner(b, 12)
                 mk("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = b })
+                local line = mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
                 b.Activated:Connect(function()
                     CFG.SeaEvFight = CFG.SeaEvFight or {}
                     CFG.SeaEvFight[k] = not fights(k)
                     refresh()
                 end)
-                btns[i] = b
+                chips[i] = { h = h, b = b, line = line }
             end
             refresh()
             addLive(refresh)
         end
-        caption(v, "Ship raids always: slow, and they break the boat. The Leviathan is its own mode.")
-        P.kit.truthCard(v, function()
-            local f = split()
-            if #f == 0 then return "Fights nothing, only sails" end
-            if #f == 5 then return "Fights all 5 kinds" end
-            if #f <= 2 then
-                local n = {}
-                for _, k in ipairs(f) do table.insert(n, MANY[k]) end
-                return "Fights " .. join(n)
+        -- the help line; "its own mode" opens the Leviathan
+        do
+            local t = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, AutoButtonColor = false, Font = LOOK.regular, TextSize = LOOK.size.help,
+                LineHeight = LOOK.lh(1.45), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+                TextWrapped = true, RichText = true, LayoutOrder = nextOrder(), Parent = v,
+                Text = "Ship raids always: slow, and they break the boat. The Leviathan is "
+                    .. "<font color=\"#9FCBEF\">its own mode</font>.",
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingTop = UDim.new(0, 6), Parent = t,
+            })
+            t.Activated:Connect(function() show("levi") end)
+        end
+        gap(v, 10)
+        do
+            local card = P.kit.truthCard(v, function()
+                local f = split()
+                if #f == 0 then return "Fights nothing, only sails" end
+                if #f == 5 then return "Fights all 5 kinds" end
+                if #f <= 2 then
+                    local n = {}
+                    for _, k in ipairs(f) do table.insert(n, MANY[k]) end
+                    return "Fights " .. join(n)
+                end
+                return "Fights " .. #f .. " kinds, sails away from the rest"
+            end, function()
+                local f, a = split()
+                local fled = {}
+                for _, k in ipairs(a) do table.insert(fled, MANY[k]) end
+                table.insert(fled, "every ship raid")
+                return "Sailed away from: " .. join(fled) .. ". You steer the boat; it never hops to the next server."
+                    .. ((#f == 0) and " Nothing can be counted." or "")
+            end, "sea")
+            -- nothing fought: the title turns amber (the board)
+            local titleL
+            for _, k in ipairs(card:GetChildren()) do
+                if k:IsA("TextLabel") and k.LayoutOrder == 1 then titleL = k end
             end
-            return "Fights " .. #f .. " kinds, sails away from the rest"
-        end, function()
-            local f, a = split()
-            local fled = {}
-            for _, k in ipairs(a) do table.insert(fled, MANY[k]) end
-            table.insert(fled, "every ship raid")
-            return "Sailed away from: " .. join(fled) .. ". You steer the boat; it never hops to the next server."
-                .. ((#f == 0) and " Nothing can be counted." or "")
-        end, "sea")
+            addLive(function()
+                local f = split()
+                if titleL then titleL.TextColor3 = (#f == 0) and C.warn or C.text end
+            end)
+        end
         -- THE COUNT, for the Spy.
         local function goalNow() return math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)) end
+        P.kit.sectionRight(v, "For the Spy", function()
+            if goalNow() < 20 then return "under the Spy's 20", C.warn end
+            return "the Spy asks for 20 or more", LOOK.mute
+        end)
         do
-            local h = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
-            })
-            mk("TextLabel", {
-                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(20, 6),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, Text = "FOR THE SPY", Parent = h,
-            })
-            local note = mk("TextLabel", {
-                Size = UDim2.new(0.5, -20, 1, -6), Position = UDim2.new(0.5, 0, 0, 6),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = h,
-            })
-            addLive(function()
-                note.Text = goalNow() < 20 and "under the Spy's 20" or "the Spy asks for 20 or more"
-            end)
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
@@ -23615,105 +23970,139 @@ local function buildUI()
             })
             corner(card, 14)
             mk("UIListLayout", {
-                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = card,
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10), Parent = card,
             })
             mk("UIPadding", {
-                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 12),
                 PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
             })
+            -- the count (Roboto Mono 30) and "of N counted", the GOAL stepper
             local top = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, LayoutOrder = 1, Parent = card,
+                Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = 1, Parent = card,
+            })
+            local nums = mk("Frame", {
+                Size = UDim2.new(1, -132, 1, 0), BackgroundTransparency = 1, Parent = top,
+            })
+            mk("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = nums,
             })
             local big = mk("TextLabel", {
-                Size = UDim2.fromOffset(60, 46), BackgroundTransparency = 1, Font = Enum.Font.Code,
-                TextSize = 30, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
-                Text = "0", Parent = top,
+                Size = UDim2.fromOffset(0, 32), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                Font = P.r2.MONO, TextSize = lookPx(30), TextColor3 = C.text, Text = "0", LayoutOrder = 1, Parent = nums,
             })
             local ofg = mk("TextLabel", {
-                Size = UDim2.new(1, -230, 0, 46), Position = UDim2.fromOffset(62, 0),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-                TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = top,
+                Size = UDim2.fromOffset(0, 32), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(13), TextColor3 = C.second, TextYAlignment = Enum.TextYAlignment.Bottom,
+                Text = "", LayoutOrder = 2, Parent = nums,
             })
-            local function stepBtn(txt, x, d)
+            mk("UIPadding", { PaddingBottom = UDim.new(0, 5), Parent = ofg })
+            local grp = mk("Frame", {
+                Size = UDim2.fromOffset(122, 44), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
+                BackgroundTransparency = 1, Parent = top,
+            })
+            corner(grp, 12)
+            mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = grp })
+            local function stepBtn(x, glyph, d)
+                -- the word stays as the button's name; the drawn glyph shows
                 local b = mk("TextButton", {
-                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 1),
-                    BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = 20, TextColor3 = C.text, Text = txt, Parent = top,
+                    Size = UDim2.fromOffset(40, 44), Position = UDim2.fromOffset(x, 0),
+                    BackgroundTransparency = 1, AutoButtonColor = false, TextTransparency = 1,
+                    Text = d > 0 and "+" or "-", Parent = grp,
                 })
-                corner(b, 12)
+                local ic = P.kit.icon(b, 14, P.kit.GLYPH[glyph], 2.2 * 14 / 24, LOOK.soft)
+                ic.Position = UDim2.fromOffset(13, 15)
                 b.Activated:Connect(function()
                     CFG.SeaEvGoal = math.clamp(goalNow() + d, 1, 60)
                 end)
-                return b
             end
-            stepBtn("-", -152, -1)
-            stepBtn("+", -44, 1)
+            stepBtn(1, "minus", -1)
+            stepBtn(81, "plus", 1)
+            local mid = mk("Frame", {
+                Size = UDim2.fromOffset(40, 44), Position = UDim2.fromOffset(41, 0), BackgroundTransparency = 1, Parent = grp,
+            })
+            mk("TextLabel", {
+                Size = UDim2.fromOffset(40, 12), Position = UDim2.fromOffset(0, 6), BackgroundTransparency = 1,
+                Font = LOOK.black, TextSize = lookPx(9), TextColor3 = LOOK.mute, Text = "GOAL", Parent = mid,
+            })
             local gl = mk("TextLabel", {
-                Size = UDim2.fromOffset(60, 46), Position = UDim2.new(1, -104, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 15,
-                TextColor3 = C.text, Text = "", Parent = top,
+                Size = UDim2.fromOffset(40, 20), Position = UDim2.fromOffset(0, 19), BackgroundTransparency = 1,
+                Font = P.r2.MONO, TextSize = lookPx(15), TextColor3 = C.text, Text = "", Parent = mid,
             })
             local track = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = C.line, BorderSizePixel = 0,
-                LayoutOrder = 2, Parent = card,
+                ClipsDescendants = true, LayoutOrder = 2, Parent = card,
             })
             corner(track, 3)
             local fill = mk("Frame", {
-                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accentSea or Color3.fromRGB(74, 163, 232),
+                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(74, 163, 232),
                 BorderSizePixel = 0, Parent = track,
             })
             corner(fill, 3)
             local spyL = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.second,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12), LineHeight = LOOK.lh(1.45),
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = LOOK.soft,
                 Text = "", LayoutOrder = 3, Parent = card,
             })
-            addLive(function()
-                local c = P.seaev.count
-                local goal = goalNow()
-                big.Text = tostring(c.total)
-                ofg.Text = "of " .. goal .. " counted"
-                gl.Text = "GOAL\n" .. goal
-                fill.Size = UDim2.new(math.clamp(c.total / goal, 0, 1), 0, 1, 0)
-                fill.BackgroundColor3 = (c.total >= goal) and C.live or Color3.fromRGB(74, 163, 232)
-                local spy = P.seaev.spy
-                spyL.Text = spy and string.format("The Spy: %s · asked %d min ago%s", tostring(spy.text),
-                    math.floor((os.clock() - spy.at) / 60),
-                    spy.overAt and string.format(" · past the cooldown at %d", spy.overAt) or "")
-                    or "The Spy: not asked yet"
+            mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = C.line, BorderSizePixel = 0, LayoutOrder = 4, Parent = card,
+            })
+            -- Stop at the goal: the board's switch (44 x 26, no word)
+            local stop = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 50), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                AutoButtonColor = false, Text = "", LayoutOrder = 5, Parent = card,
+            })
+            local col = mk("Frame", {
+                Size = UDim2.new(1, -54, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.fromScale(0, 0.5), BackgroundTransparency = 1, Parent = stop,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = col })
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.semi, TextSize = lookPx(15), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "Stop at the goal", LayoutOrder = 1, Parent = col,
+            })
+            local stopSub = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = LOOK.mute, Text = "", LayoutOrder = 2, Parent = col,
+            })
+            local sw = mk("Frame", {
+                Size = UDim2.fromOffset(44, 26), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5),
+                BackgroundColor3 = LOOK.ghost, BorderSizePixel = 0, Parent = stop,
+            })
+            corner(sw, 13)
+            local knob = mk("Frame", {
+                Size = UDim2.fromOffset(20, 20), Position = UDim2.fromOffset(3, 3),
+                BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = sw,
+            })
+            corner(knob, 10)
+            local function paintStop()
+                local on = CFG.SeaEvStopAtGoal and true or false
+                tween(sw, { BackgroundColor3 = on and C.live or LOOK.ghost }, QUICK)
+                tween(knob, { Position = UDim2.fromOffset(on and 21 or 3, 3) }, QUICK)
+            end
+            stop.Activated:Connect(function()
+                CFG.SeaEvStopAtGoal = not CFG.SeaEvStopAtGoal
+                paintStop()
             end)
-        end
-        switchRow(v, "Stop at the goal", function()
-            local goal, total = goalNow(), P.seaev.count.total
-            if not CFG.SeaEvStopAtGoal then return "Keeps fighting past " .. goal end
-            if total >= goal then return "Reached " .. goal .. ": the hunt stops now" end
-            return "The hunt stops at " .. goal .. ", " .. (goal - total) .. " to go"
-        end, function() return CFG.SeaEvStopAtGoal end,
-            function(x) CFG.SeaEvStopAtGoal = x end)
-        do
-            local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
+            -- Ask the Spy now | Reset to 0 (a second tap within 4 s resets)
+            local acts = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = 6, Parent = card,
             })
-            mk("UIPadding", {
-                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 4), Parent = s,
-            })
-            local function btn(x, txt)
+            local function act(x, txt, line, color)
                 local b = mk("TextButton", {
                     Size = UDim2.new(0.5, -4, 0, 44), Position = UDim2.new(x, x == 0 and 0 or 4, 0, 0),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.text,
-                    Text = txt, Parent = s,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = color, Text = txt, Parent = acts,
                 })
                 corner(b, 12)
-                mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
-                return b
+                return b, mk("UIStroke", { Color = line, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
             end
-            local ask = btn(0, "Ask the Spy now")
+            local ask = act(0, "Ask the Spy now", LOOK.ghost, C.text)
             ask.Activated:Connect(function() task.spawn(function() pcall(function() P.seaev.spyAsk() end) end) end)
-            local reset = btn(0.5, "Reset to 0")
+            local reset, resetLine = act(0.5, "Reset to 0", Color3.fromRGB(74, 36, 32), C.stop)
             local armedAt = nil
             reset.Activated:Connect(function()
                 local c = P.seaev.count
@@ -23726,28 +24115,91 @@ local function buildUI()
                 end
             end)
             addLive(function()
+                local c = P.seaev.count
+                local goal = goalNow()
+                big.Text = tostring(c.total)
+                ofg.Text = "of " .. goal .. " counted"
+                gl.Text = tostring(goal)
+                fill.Size = UDim2.new(math.clamp(c.total / goal, 0, 1), 0, 1, 0)
+                fill.BackgroundColor3 = (c.total >= goal) and C.live or Color3.fromRGB(74, 163, 232)
+                local spy = P.seaev.spy
+                local open = spy and (spy.code == 2 or spy.code == 3 or spy.code == 4)
+                local what = not spy and nil
+                    or (spy.code == 1 and "not yet, he is on cooldown")
+                    or (open and "takes fragments again")
+                    or tostring(spy.text)
+                if spy then
+                    local mins = math.floor((os.clock() - spy.at) / 60)
+                    spyL.Text = "The Spy: " .. what .. " · asked " .. (mins < 1 and "just now" or (mins .. " min ago"))
+                        .. (spy.overAt and string.format(" · past the cooldown at %d", spy.overAt) or "")
+                else
+                    spyL.Text = "The Spy: not asked yet"
+                end
+                spyL.TextColor3 = open and C.live or LOOK.soft
+                local total = c.total
+                stopSub.Text = not CFG.SeaEvStopAtGoal and ("Keeps fighting past " .. goal)
+                    or (total >= goal and ("Reached " .. goal .. ": the hunt stops now"))
+                    or ("The hunt stops at " .. goal .. ", " .. (goal - total) .. " to go")
+                paintStop()
                 local armed = armedAt and os.clock() - armedAt < 4
-                reset.Text = armed and ("Tap again: " .. P.seaev.count.total .. " to 0") or "Reset to 0"
+                reset.Text = armed and ("Tap again: " .. total .. " to 0") or "Reset to 0"
                 reset.TextColor3 = armed and C.base or C.stop
                 reset.BackgroundColor3 = armed and C.stop or C.row
+                resetLine.Color = armed and C.stop or Color3.fromRGB(74, 36, 32)
             end)
         end
-        fold(v, "How it counts", function(v)
-            caption(v, "One group is one sea event: three beasts, or a school of Piranhas, count once.")
-            caption(v, "It counts when all of it is gone and at least one was killed. Escaped: not counted.")
-            caption(v, "Kept across joins, back to 0 when a Leviathan dies. The Spy's own answer is the truth.")
-        end)
-        heading2(v, "how it fights")
-        P.kit.fightsWith(v, "seaevents")
-        link(v, "Dodging & heights", function()
+        -- How it counts: a quiet fold in place (the board's, not a card)
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, -40, 0, 44), Position = UDim2.fromOffset(20, 4), BackgroundTransparency = 1,
+                AutoButtonColor = false, Font = LOOK.semi, TextSize = lookPx(12), TextColor3 = C.second,
+                TextXAlignment = Enum.TextXAlignment.Left, Text = "How it counts", Parent = s,
+            })
+            local chev = mk("TextLabel", {
+                Size = UDim2.fromOffset(14, 44), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute, Text = "›", Parent = b,
+            })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Visible = false, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = box })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingBottom = UDim.new(0, 4), Parent = box,
+            })
+            for i, t in ipairs({
+                "One group is one sea event: three beasts, or a school of Piranhas, count once.",
+                "It counts when all of it is gone and at least one was killed. Escaped: not counted.",
+                "Kept across joins, back to 0 when a Leviathan dies. The Spy's own answer is the truth.",
+            }) do
+                mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = LOOK.size.help, LineHeight = LOOK.lh(1.45), TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, Text = t, LayoutOrder = i, Parent = box,
+                })
+            end
+            b.Activated:Connect(function()
+                box.Visible = not box.Visible
+                chev.Rotation = box.Visible and 90 or 0
+            end)
+        end
+        P.kit.sectionRight(v, "How it fights", nil)
+        P.kit.fightsWith(v, "seaevents", { sub = "Attack, For Sea events", h = 50 })
+        hairline(v)
+        navRow(v, "Dodging & heights", function()
             return CFG.SeaDodge and ("On · " .. math.floor(tonumber(CFG.BeastHeight) or 90) .. " up") or "Off"
-        end, "seafight")
-        link(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "auto" end, "travel")
+        end, "seafight", { sub = "round it, up when it attacks", h = 50 })
+        hairline(v)
+        navRow(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "Auto" end, "travel",
+            { sub = "who drives the boat", h = 50 })
         P.kit.fineTune(v, function(v)
             sliderRow(v, "Ship raid: sail away to", 500, 4000, 100,
                 function() return CFG.FleeTo end,
                 function(x) CFG.FleeTo = x end, " studs off")
-        end, 1)
+        end, function() return "1 expert setting" end)
         fold(v, "Details", function(v)
             readout(v, function()
                 local s, e = P.sea, P.seaev
@@ -23772,53 +24224,66 @@ local function buildUI()
     -- =====================================================
     -- LEVIATHAN. R2 Task 6 (board Leviathan): one dial over the two numbers
     -- (how high, what share of each segment), the picture of it.
+    -- R3 Task 5 (Leviathan.dc.html): the Frozen Dimension card in the sea
+    -- tint with its snowflake; the picture sits between the dial's head and
+    -- its ivory buttons (the humps, the hit one outlined, the eye, a dashed
+    -- line to you; you, the line and the 8% ticks glide .3 s to a new step);
+    -- the thin-margin warning is the truth card's own amber line; the three
+    -- rows carry their sub lines.
     -- =====================================================
     do
         local v = makeView("levi")
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "levi")
+        gap(v, 6)
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local tint, soft = Color3.fromRGB(12, 30, 44), Color3.fromRGB(29, 62, 87)
             local card = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+                BackgroundColor3 = tint, BorderSizePixel = 0, Parent = s,
             })
             corner(card, 14)
+            mk("UIStroke", { Color = soft, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card })
             mk("UIListLayout", {
-                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = card,
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = card,
             })
             mk("UIPadding", {
-                PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
                 PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
             })
+            local h = mk("Frame", { Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, LayoutOrder = 1, Parent = card })
+            local ic = P.kit.icon(h, 16, P.kit.GLYPH.flake, 2 * 16 / 24, Color3.fromRGB(159, 203, 239))
+            ic.Position = UDim2.fromOffset(0, 1)
             mk("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.bold,
-                TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
-                Text = "Needs the Frozen Dimension", LayoutOrder = 1, Parent = card,
+                Size = UDim2.new(1, -24, 1, 0), Position = UDim2.fromOffset(24, 0), BackgroundTransparency = 1,
+                Font = LOOK.bold, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "Needs the Frozen Dimension", Parent = h,
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.third,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12), LineHeight = LOOK.lh(1.5),
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = Color3.fromRGB(157, 179, 196),
                 Text = "Turn it on inside, with your group. It starts at once; until the Leviathan shows, you play.",
                 LayoutOrder = 2, Parent = card,
             })
-            gap(v, 8)
         end
-        heading2(v, "how much you take")
         -- The picture: three segments and the head, you over the one being
-        -- hit, the 8% line the reward needs on each.
-        do
+        -- hit, the 8% line the reward needs on each. Built between the dial's
+        -- head and its buttons.
+        local function picture(view)
             local DEEP, WATER, LINE = Color3.fromRGB(7, 22, 33), Color3.fromRGB(12, 30, 44), Color3.fromRGB(29, 62, 87)
             local BLUE, PALE = Color3.fromRGB(74, 163, 232), Color3.fromRGB(159, 203, 239)
+            local MID, DIM, LEG = Color3.fromRGB(44, 106, 153), Color3.fromRGB(127, 149, 166), Color3.fromRGB(157, 179, 196)
+            local GLIDE = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 156), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
+                LayoutOrder = nextOrder(), Parent = view,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
             local box = mk("Frame", {
@@ -23837,51 +24302,86 @@ local function buildUI()
             local function text(x, y, w, str, color, align, mono)
                 return mk("TextLabel", {
                     Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or LOOK.regular,
-                    TextSize = 11, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
-                    Text = str, Parent = box,
+                    BackgroundTransparency = 1, Font = mono and P.r2.MONO or LOOK.regular,
+                    TextSize = lookPx(11), TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
+                    TextWrapped = true, Text = str, Parent = box,
                 })
             end
-            text(14, 12, 130, "Segments first, the head last", Color3.fromRGB(127, 149, 166))
-            rect(30, 92, 26, 13, LINE, 13)
-            rect(84, 86, 38, 19, LINE, 19)
-            rect(142, 86, 38, 19, Color3.fromRGB(44, 106, 153), 19)
-            rect(222, 76, 56, 29, LINE, 28)
+            local note = text(14, 12, 110, "Segments first, the head last", DIM)
+            note.Size, note.LineHeight = UDim2.fromOffset(110, 30), LOOK.lh(1.4)
+            note.TextYAlignment = Enum.TextYAlignment.Top
+            -- the humps: whole circles, their lower halves under the water
+            rect(30, 92, 26, 26, LINE, 13)
+            rect(84, 86, 38, 38, LINE, 19)
+            local hit = rect(144, 88, 34, 34, MID, 17)
+            mk("UIStroke", { Color = BLUE, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = hit })
+            rect(222, 76, 56, 56, LINE, 28)
+            rect(258, 86, 6, 6, DEEP, 3)
             rect(0, 104, 400, 60, WATER)
             rect(0, 104, 400, 1, LINE)
-            local line = rect(160, 60, 2, 20, Color3.fromRGB(44, 106, 153))
+            local line = P.kit.dash(box, 2, MID, 90)
             local you = rect(155, 40, 12, 12, C.ivory, 6)
-            local youL = text(173, 39, 30, "you", C.second)
+            local youL = text(173, 39, 30, "you", LOOK.soft)
             local hL = text(70, 60, 82, "", PALE, Enum.TextXAlignment.Right, true)
-            local bars = {}
+            local ticks = {}
             for i, left in ipairs({ 23, 83, 141 }) do
                 rect(left, 116, 40, 5, LINE, 3)
-                local fill = rect(left, 116, (i == 3) and 22 or 40, 5, BLUE, 3)
-                bars[i] = rect(left + 20, 113, 2, 11, C.ivory, 1)
+                rect(left, 116, (i == 3) and 22 or 40, 5, BLUE, 3)
+                ticks[i] = rect(left + 20, 113, 2, 11, C.ivory, 1)
             end
-            text(230, 112, 40, "last", Color3.fromRGB(127, 149, 166), Enum.TextXAlignment.Center)
-            rect(14, 135, 2, 11, C.ivory, 1)
-            text(22, 134, 120, "8% gets the reward", Color3.fromRGB(157, 179, 196))
-            rect(160, 138, 12, 5, BLUE, 3)
-            local leg = text(176, 134, 130, "", Color3.fromRGB(157, 179, 196))
+            text(230, 112, 40, "last", DIM, Enum.TextXAlignment.Center)
+            -- the two legends, at the card's edges
+            local legs = mk("Frame", {
+                Size = UDim2.new(1, -28, 0, 14), Position = UDim2.fromOffset(14, 133), BackgroundTransparency = 1, Parent = box,
+            })
+            local function legend(order, align, swatch, words)
+                local g = mk("Frame", {
+                    Size = UDim2.fromOffset(0, 14), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                    AnchorPoint = Vector2.new(order == 1 and 0 or 1, 0),
+                    Position = UDim2.fromScale(order == 1 and 0 or 1, 0), Parent = legs,
+                })
+                mk("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = g,
+                })
+                local sw = mk("Frame", {
+                    Size = swatch, BackgroundColor3 = order == 1 and C.ivory or BLUE, BorderSizePixel = 0,
+                    LayoutOrder = 1, Parent = g,
+                })
+                corner(sw, order == 1 and 1 or 3)
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(0, 14), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = LEG, TextXAlignment = align,
+                    Text = words, LayoutOrder = 2, Parent = g,
+                })
+            end
+            legend(1, Enum.TextXAlignment.Left, UDim2.fromOffset(2, 11), "8% gets the reward")
+            local leg = legend(2, Enum.TextXAlignment.Right, UDim2.fromOffset(12, 5), "")
+            local last = nil
             addLive(function()
                 local h = tonumber(CFG.LeviHeight) or 75
                 local sh = math.max(1, tonumber(CFG.LeviShare) or 15)
+                hL.Text = math.floor(h) .. " studs"
+                leg.Text = math.floor(sh) .. "%, then the next"
+                local key = h .. "/" .. sh
+                if key == last then return end
+                local first = last == nil
+                last = key
                 local px = math.min(78, math.floor(h * 0.5 + 0.5))
                 local youTop = math.max(4, 86 - px - 6)
                 local lineTop = youTop + 14
                 local lineH = math.max(4, 83 - lineTop)
-                you.Position = UDim2.fromOffset(155, youTop)
-                youL.Position = UDim2.fromOffset(173, youTop - 1)
-                line.Position = UDim2.fromOffset(160, lineTop)
-                line.Size = UDim2.fromOffset(2, lineH)
-                hL.Position = UDim2.fromOffset(70, math.floor(lineTop + lineH / 2 - 7))
-                hL.Text = math.floor(h) .. " studs"
                 local tick = math.min(37, math.floor(40 * 8 / sh + 0.5) - 1)
-                for i, left in ipairs({ 23, 83, 141 }) do bars[i].Position = UDim2.fromOffset(left + tick, 113) end
-                leg.Text = math.floor(sh) .. "%, then the next"
+                local function go(o, props)
+                    if first then for k, x in pairs(props) do o[k] = x end else tween(o, props, GLIDE) end
+                end
+                go(you, { Position = UDim2.fromOffset(155, youTop) })
+                go(youL, { Position = UDim2.fromOffset(173, youTop - 1) })
+                go(line, { Position = UDim2.fromOffset(160, lineTop), Size = UDim2.fromOffset(2, lineH) })
+                go(hL, { Position = UDim2.fromOffset(70, math.floor(lineTop + lineH / 2 - 7)) })
+                for i, left in ipairs({ 23, 83, 141 }) do go(ticks[i], { Position = UDim2.fromOffset(left + tick, 113) }) end
             end)
-            gap(v, 8)
+            gap(view, 8)
         end
         do
             local STEPS = {}
@@ -23896,27 +24396,36 @@ local function buildUI()
                     line = d[2] .. " studs over the part being hit, " .. d[3] .. "% of each segment, then the next" .. d[4],
                     today = (d[1] == "3  BALANCED") or nil })
             end
-            P.kit.dial(v, "How much you take", STEPS, "sea")
+            P.kit.dial(v, "How much you take", STEPS, "none", { under = picture })
         end
-        P.kit.truthCard(v, function()
-            return "Each segment to " .. math.floor(tonumber(CFG.LeviShare) or 15) .. "%, then the head"
-        end, function()
-            local sh = tonumber(CFG.LeviShare) or 15
-            local thin = sh <= 12
-            return "The reward needs 8% of every segment, so " .. math.floor(sh) .. "% "
-                .. (thin and "is close to the line." or "leaves room.")
-                .. " Its attacks are dodged. When it dies, its heart is yours to harpoon and tow to Tiki."
-                .. (thin and "\n\nThin margin: other players' hits in the same moment count as yours." or "")
-        end, "sea")
-        heading2(v, "before and during")
+        gap(v, 2)
+        do
+            local card = P.kit.truthCard(v, function()
+                return "Each segment to " .. math.floor(tonumber(CFG.LeviShare) or 15) .. "%, then the head"
+            end, function()
+                local sh = tonumber(CFG.LeviShare) or 15
+                return "The reward needs 8% of every segment, so " .. math.floor(sh) .. "% "
+                    .. ((sh <= 12) and "is close to the line." or "leaves room.")
+                    .. " Its attacks are dodged. When it dies, its heart is yours to harpoon and tow to Tiki."
+            end, "sea")
+            local thin = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.45), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.warn, Visible = false,
+                Text = "Thin margin: other players' hits in the same moment count as yours.", LayoutOrder = 3, Parent = card,
+            })
+            addLive(function() thin.Visible = (tonumber(CFG.LeviShare) or 15) <= 12 end)
+        end
+        P.kit.sectionRight(v, "Before and during", nil)
         navRow(v, "The Spy's count", function()
             local c = P.seaev.count
             return c.total .. " of " .. math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
-        end, "seaevents")
+        end, "seaevents", { sub = "20 sea events after each one", h = 50 })
         hairline(v)
-        P.kit.fightsWith(v, "levi")
+        P.kit.fightsWith(v, "levi", { sub = "Attack, For Leviathan", h = 50 })
         hairline(v)
-        navRow(v, "Dodging & form", function() return "as Sea events" end, "seafight")
+        navRow(v, "Dodging & form", function() return "as Sea events" end, "seafight",
+            { sub = "its attacks: always dodged", h = 50 })
         P.kit.fineTune(v, function(v)
             sliderRow(v, "Over the part being hit", 30, 300, 5,
                 function() return CFG.LeviHeight end,
@@ -24089,13 +24598,15 @@ local function buildUI()
     -- =====================================================
     -- MIRAGE: four jobs, one mode. R2 Task 6 (board Mirage): the job is the
     -- main control; "which Mirage" is asked only of the Blue Gear job.
+    -- R3 Task 5 (Mirage.dc.html): THE JOB names the pick on its right; the
+    -- four jobs are the board's ring list (lit #2E2B27, sea outline); Blue
+    -- Gear's three small tabs; the three link rows as the board spaces them.
     -- =====================================================
     do
         local v = makeView("mirage")
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "mirage")
-        heading2(v, "the job")
         -- Which of the four Mirage hunts. Kept in CFG.MirageJob while the
         -- Mirage is off; picked while it runs = that job from now on.
         local function jobNow()
@@ -24103,17 +24614,18 @@ local function buildUI()
             return CFG.MirageJob
         end
         local JOBS = {
-            mirage = { "Puts you on the Mirage", "Finds the Mirage and lands you on it. Nothing else." },
-            dealer = { "Shops at the Advanced Fruit Dealer", "Lands on the Mirage and opens his shop for you." },
-            mchest = { "Opens every chest on the Mirage", "Lands, then takes every chest on the island." },
-            gear = { "Hunts the Blue Gear", "The gear needs night." },
+            mirage = { "Puts you on the Mirage", "Finds the Mirage and lands you on it. Nothing else.", "Onto it" },
+            dealer = { "Shops at the Advanced Fruit Dealer", "Lands on the Mirage and opens his shop for you.", "Fruit dealer" },
+            mchest = { "Opens every chest on the Mirage", "Lands, then takes every chest on the island.", "Chests" },
+            gear = { "Hunts the Blue Gear", "The gear needs night.", "Blue Gear" },
         }
         local NEEDS = {
             night = "Takes a Mirage that will see night.",
             full = "Only a full-moon night.",
             any = "Takes every Mirage.",
         }
-        radio(v, 164, {
+        P.kit.sectionRight(v, "The job", function() return (JOBS[jobNow()] or JOBS.mirage)[3] end)
+        P.kit.heroList(v, {
             { "mirage", "Onto it", "just land" },
             { "dealer", "Advanced Fruit Dealer", "the dealer" },
             { "mchest", "Every chest", "chests" },
@@ -24121,7 +24633,7 @@ local function buildUI()
         }, jobNow, function(x)
             CFG.MirageJob = x
             if CFG.Hunt and MIRAGE[CFG.HuntKind] then P.setHunt(true, x) end
-        end)
+        end, "sea")
         -- Only the gear asks which Mirage: the box is there, hidden, for the others.
         do
             local box = mk("Frame", {
@@ -24129,13 +24641,14 @@ local function buildUI()
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = box })
-            heading2(box, "blue gear: which mirage")
+            P.kit.sectionRight(box, "Blue gear: which Mirage", nil)
             P.kit.segmented(box, nil, {
                 { "night", "Sees night" }, { "full", "Full moon" }, { "any", "Every one" },
-            }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
+            }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end, { plain = true, h = 44 })
             box.Visible = (jobNow() == "gear")
             addLive(function() box.Visible = (jobNow() == "gear") end)
         end
+        gap(v, 12)
         P.kit.truthCard(v, function()
             return (JOBS[jobNow()] or JOBS.mirage)[1]
         end, function()
@@ -24144,14 +24657,19 @@ local function buildUI()
             if j == "gear" then r = r .. " " .. (NEEDS[CFG.MirageNeed] or NEEDS.night) end
             return r
         end, "sea")
+        gap(v, 2)
+        P.kit.fightsWith(v, "mirage", { h = 50, valueSize = 13 })
         hairline(v)
-        P.kit.fightsWith(v, "mirage")
-        link(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "auto" end, "travel")
-        link(v, "Sea fight", function()
+        gap(v, 14)
+        navRow(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "Auto" end, "travel",
+            { h = 50, valueSize = 13 })
+        hairline(v)
+        navRow(v, "Sea fight", function()
             local st = P.seaDodge and P.seaDodge.steps
             local i = st and dialStepOf(st, CFG)
             return i and P.seaDodge.word(i) or "your own values"
-        end, "seafight")
+        end, "seafight", { h = 50, valueSize = 13 })
+        hairline(v)
         fold(v, "Details", function(v)
             readout(v, function()
                 local s = P.sea
@@ -25047,6 +25565,14 @@ local function buildUI()
     -- the form choice, the exact values in Fine-tune. A settings page: no mode
     -- strip; Back walks to the page you came from (Sea events or the
     -- Leviathan).
+    -- R3 Task 5 (SeaFight.dc.html): the side view sits between the dial's
+    -- head and its buttons - the boat on its mast, the beast's hump and fin,
+    -- dashed height lines, the rings, you; every moving part glides .3 s to
+    -- a new step. Ivory buttons with today's dot, the two legend words; the
+    -- truth card names the sea pick and turns amber with dodge off; the form
+    -- title with its V key, ivory tabs with the dot on When it hurts, the
+    -- test's verdicts; Details is the board's card (how it works, right now,
+    -- what hurts a sea beast).
     -- =====================================================
     do
         local v = makeView("seafight")
@@ -25093,16 +25619,23 @@ local function buildUI()
             "Fewer attacks reach you; kills take a little longer.",
             "Almost nothing reaches you; kills take longest.",
         }
+        -- the sea pick's name ("Tiger only" on Attack = Tiger), nil = a mix
+        local function pickName()
+            local ok, w = pcall(P.fightWithText, "seaevents")
+            return ok and type(w) == "string" and string.match(w, "^(.-) only$") or nil
+        end
 
         -- THE SIDE VIEW: 0.5 px a stud both ways, the water at y 132. It reads
         -- CFG, so your own values move it too.
-        do
+        local function sideView(view)
             local WY, CX, SC = 132, 170, 0.5
             local DEEP, WATER, LINE = Color3.fromRGB(12, 30, 44), Color3.fromRGB(7, 22, 33), Color3.fromRGB(29, 62, 87)
             local BLUE, PALE, DIM = Color3.fromRGB(74, 163, 232), Color3.fromRGB(159, 203, 239), Color3.fromRGB(127, 149, 166)
+            local MID = Color3.fromRGB(44, 106, 153)                     -- #2C6A99
+            local GLIDE = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 164), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
+                LayoutOrder = nextOrder(), Parent = view,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
             local box = mk("Frame", {
@@ -25122,36 +25655,60 @@ local function buildUI()
             local function text(x, y, w, str, color, align, mono)
                 return mk("TextLabel", {
                     Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or LOOK.bold,
-                    TextSize = mono and 10 or 9, TextColor3 = color,
+                    BackgroundTransparency = 1, Font = mono and P.r2.MONO or LOOK.bold,
+                    TextSize = lookPx(mono and 10 or 9), TextColor3 = color,
                     TextXAlignment = align or Enum.TextXAlignment.Left, Text = str, Parent = box,
                 })
             end
             rect(0, WY, 400, 40, WATER)
-            rect(0, WY, 400, 1, Color3.fromRGB(44, 106, 153))
-            rect(29, 57, 1, 75, Color3.fromRGB(53, 96, 127))          -- the boat's height
-            rect(14, 48, 2, 12, DIM)                                   -- the boat: mast and hull
-            rect(0 + 14, 56, 30, 8, DIM, 4)
-            rect(138, 110, 64, 22, Color3.fromRGB(18, 48, 73), 11)     -- the beast
+            rect(0, WY, 400, 1, MID)
+            local boatH = P.kit.dash(box, 1, Color3.fromRGB(53, 96, 127), 75)    -- the boat's height
+            boatH.Position = UDim2.fromOffset(29, 57)
+            rect(28, 37, 2, 12, C.second)                                        -- the mast
+            rect(14, 48, 30, 8, C.second, 4)                                     -- the hull
+            -- the beast: its hump and the fin on it
+            local hump = { { 0, 22 } }
+            P.kit.bez(hump, { 0, 22 }, { 10, 22 }, { 15, 7 }, { 32, 6 }, 8)
+            P.kit.bez(hump, { 32, 6 }, { 49, 7 }, { 54, 22 }, { 64, 22 }, 8)
+            table.remove(hump)
+            local beast = mk("Frame", {
+                Size = UDim2.fromOffset(64, 22), Position = UDim2.fromOffset(138, 110),
+                BackgroundTransparency = 1, Parent = box,
+            })
+            P.kit.shape(beast, hump, Color3.fromRGB(18, 48, 73), MID, 1.5)
+            P.kit.icon(beast, 24, { { 25, 8, 28, 2 }, { 28, 2, 31, 7 }, { 31, 7, 34, 1 }, { 34, 1, 37, 7 },
+                { 37, 7, 40, 3 }, { 40, 3, 42, 9 } }, 1.5, MID)
+            local hLine = P.kit.dash(box, 1, Color3.fromRGB(60, 110, 148), 140)
             local ringO = rect(CX, 100, 0, 0, Color3.fromRGB(21, 54, 79), 100)
             mk("UIStroke", { Color = BLUE, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ringO })
             local ringI = rect(CX, 100, 0, 0, DEEP, 100)
-            mk("UIStroke", { Color = Color3.fromRGB(44, 106, 153), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ringI })
-            local hLine = rect(CX, 100, 1, 20, Color3.fromRGB(60, 110, 148))
-            local upLine = rect(CX, 90, 1, 10, PALE)
-            local you = rect(CX, 100, 12, 12, C.ivory, 6)
+            mk("UIStroke", { Color = MID, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ringI })
+            local upLine = P.kit.dash(box, 1, PALE, 80)
+            local upHead = mk("Frame", {
+                Size = UDim2.fromOffset(10, 6), BackgroundTransparency = 1, Parent = box,
+            })
+            P.kit.icon(upHead, 24, { { 1, 5, 5, 1 }, { 5, 1, 9, 5 } }, 1.5, PALE)
+            local you = rect(CX, 100, 8, 8, C.ivory, 6)
+            mk("UIStroke", { Color = DEEP, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = you })
             local distL = text(0, 100, 90, "", PALE, Enum.TextXAlignment.Right, true)
             local upL = text(CX + 8, 90, 80, "", PALE, nil, true)
             local hL = text(CX + 7, 110, 70, "", PALE, nil, true)
-            local offL = text(CX + 9, 90, 100, "nothing dodged", Color3.fromRGB(240, 166, 60))
+            local offL = text(CX + 9, 90, 100, "nothing dodged", C.warn)
+            offL.TextSize = lookPx(10)
             local boatL = text(10, 141, 130, "", DIM)
             text(130, 141, 80, "SEA BEAST", DIM, Enum.TextXAlignment.Center)
             text(200, 141, 96, "SIDE VIEW", Color3.fromRGB(79, 115, 145), Enum.TextXAlignment.Right)
+            local last = nil
             addLive(function()
                 local off = not CFG.SeaDodge
                 local bMin, bMax = tonumber(CFG.BeastDodgeMin) or 40, tonumber(CFG.BeastDodgeMax) or 60
                 local bH = tonumber(CFG.BeastHeight) or 90
                 local up, upT = tonumber(CFG.DodgeUp) or 40, tonumber(CFG.DodgeTime) or 1
+                boatL.Text = "YOUR BOAT, " .. math.floor(tonumber(CFG.BoatLift) or 150) .. " UP"
+                local key = table.concat({ tostring(off), bMin, bMax, bH, up, upT }, "/")
+                if key == last then return end
+                local first = last == nil
+                last = key
                 local cy = math.max(16, WY - bH * SC)
                 local youX = off and (CX + 50 * SC) or (CX + (bMin + bMax) / 2 * SC)
                 local rxo = off and 0 or bMax * SC
@@ -25159,34 +25716,43 @@ local function buildUI()
                 local ryo, ryi = rxo * 0.25, rxi * 0.25
                 local upPx = off and 0 or up * SC
                 local upTop = math.max(2, cy - upPx)
+                local function go(o, props)
+                    if first then for k, x in pairs(props) do o[k] = x end else tween(o, props, GLIDE) end
+                end
                 ringO.Visible, ringI.Visible = not off, not off
-                ringO.Position = UDim2.fromOffset(math.floor(CX - rxo), math.floor(cy - ryo))
-                ringO.Size = UDim2.fromOffset(math.max(1, math.floor(rxo * 2)), math.max(1, math.floor(ryo * 2)))
-                ringI.Position = UDim2.fromOffset(math.floor(CX - rxi), math.floor(cy - ryi))
-                ringI.Size = UDim2.fromOffset(math.max(1, math.floor(rxi * 2)), math.max(1, math.floor(ryi * 2)))
-                distL.Visible = not off
-                distL.Position = UDim2.fromOffset(math.floor(math.max(0, CX - rxo - 96)), math.floor(cy - 7))
-                distL.Text = off and "" or (math.floor(bMin) .. "–" .. math.floor(bMax) .. " out")
-                upLine.Visible, upL.Visible = not off, not off
-                upLine.Position = UDim2.fromOffset(math.floor(youX), math.floor(upTop + 2))
-                upLine.Size = UDim2.fromOffset(1, math.max(2, math.floor(upPx - 8)))
-                upL.Position = UDim2.fromOffset(math.floor(youX + 8), math.floor(upTop - 6))
-                upL.Text = off and "" or ("+" .. math.floor(up) .. " · " .. string.format("%.1f", upT) .. " s")
+                distL.Visible, upLine.Visible, upL.Visible, upHead.Visible = not off, not off, not off, not off
                 offL.Visible = off
-                offL.Position = UDim2.fromOffset(math.floor(youX + 9), math.floor(cy - 20))
-                you.Position = UDim2.fromOffset(math.floor(youX - 6), math.floor(cy - 6))
-                hLine.Position = UDim2.fromOffset(math.floor(youX), math.floor(cy + 6))
-                hLine.Size = UDim2.fromOffset(1, math.max(2, math.floor(WY - cy - 6)))
-                hL.Position = UDim2.fromOffset(math.floor(math.max(youX + 7, 208)), math.floor((cy + 6 + WY) / 2 - 7))
+                -- a ring is drawn inside its box with a 1 px line outside it
+                go(ringO, { Position = UDim2.fromOffset(CX - rxo + 1, cy - ryo + 1),
+                    Size = UDim2.fromOffset(math.max(1, rxo * 2 - 2), math.max(1, ryo * 2 - 2)) })
+                go(ringI, { Position = UDim2.fromOffset(CX - rxi + 1, cy - ryi + 1),
+                    Size = UDim2.fromOffset(math.max(1, rxi * 2 - 2), math.max(1, ryi * 2 - 2)) })
+                distL.Text = off and "" or (math.floor(bMin) .. "–" .. math.floor(bMax) .. " out")
+                go(distL, { Position = UDim2.fromOffset(math.max(0, CX - rxo - 96), cy - 7) })
+                go(upLine, { Position = UDim2.fromOffset(youX - 0.5, upTop + 2),
+                    Size = UDim2.fromOffset(1, math.max(2, upPx - 8)) })
+                go(upHead, { Position = UDim2.fromOffset(youX - 5, upTop - 3) })
+                upL.Text = off and "" or ("+" .. math.floor(up) .. " · " .. string.format("%.1f", upT) .. " s")
+                go(upL, { Position = UDim2.fromOffset(youX + 8, upTop - 6) })
+                go(offL, { Position = UDim2.fromOffset(youX + 9, cy - 20) })
+                go(you, { Position = UDim2.fromOffset(youX - 4, cy - 4) })
+                go(hLine, { Position = UDim2.fromOffset(youX - 0.5, cy + 6),
+                    Size = UDim2.fromOffset(1, math.max(2, WY - cy - 6)) })
                 hL.Text = math.floor(bH) .. " up"
-                boatL.Text = "YOUR BOAT, " .. math.floor(tonumber(CFG.BoatLift) or 150) .. " UP"
+                go(hL, { Position = UDim2.fromOffset(math.max(youX + 7, 208), (cy + 6 + WY) / 2 - 7) })
             end)
+            gap(view, 10)
         end
 
-        P.kit.dial(v, "Dodge", STEPS, "sea")
-        caption(v, "closer, hits harder · wider, safer")
+        P.kit.dial(v, "Dodge", STEPS, "none", {
+            under = sideView, px = 13, offPx = 11, radius = 11, todayDot = true,
+            legend = { "closer, hits harder", "wider, safer", 52 },
+        })
+        gap(v, 6)
         P.kit.truthCard(v, function()
-            return CFG.SeaDodge and "Circling every attacker" or "Hovering still"
+            local who = pickName()
+            if not CFG.SeaDodge then return who and (who .. ", hovering still") or "Hovering still" end
+            return who and (who .. ", circling every attacker") or "Circling every attacker"
         end, function()
             local i = dialStepOf(STEPS, CFG)
             local form = CFG.SeaEvForm
@@ -25195,21 +25761,55 @@ local function buildUI()
                 or "Kitsune form only where its M1 hurts them."
             return (i and STEPWORD[i] or "Your own values: the circles are the ones set in Fine-tune.")
                 .. " " .. fw .. " No hit for 6 s: in close for that one."
-        end, "sea")
+        end, function() return CFG.SeaDodge and "sea" or "prehistoric" end)
 
-        heading2(v, "weapon")
-        P.kit.fightsWith(v, "seaevents")
+        P.kit.sectionRight(v, "Weapon", nil)
+        P.kit.fightsWith(v, "seaevents", { sub = "set on Attack, For Sea events", h = 54 })
+        hairline(v)
 
-        heading2(v, "fight in kitsune form")
-        caption(v, "A normal M1 does nothing at sea. Kitsune form's M1 might. V is pressed for you, off the boat.")
+        -- THE FORM: its title and the V key, why, three ivory tabs.
+        do
+            local r = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            local row = mk("Frame", {
+                Size = UDim2.new(1, -40, 0, 22), Position = UDim2.fromOffset(20, 12), BackgroundTransparency = 1, Parent = r,
+            })
+            mk("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = row,
+            })
+            mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 22), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                Font = LOOK.semi, TextSize = lookPx(15), TextColor3 = C.text, Text = "Fight in Kitsune form",
+                LayoutOrder = 1, Parent = row,
+            })
+            local vk = mk("TextLabel", {
+                Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1, Font = LOOK.black, TextSize = lookPx(11),
+                TextColor3 = LOOK.soft, Text = "V", LayoutOrder = 2, Parent = row,
+            })
+            corner(vk, 7)
+            mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = vk })
+            local why = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(12), LineHeight = LOOK.lh(1.45), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+                Text = "A normal M1 does nothing at sea. Kitsune form's M1 might.", LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingTop = UDim.new(0, 3),
+                PaddingBottom = UDim.new(0, 10), Parent = why,
+            })
+        end
         P.kit.segmented(v, nil, {
             { "auto", "When it hurts" }, { "form", "Always" }, { "base", "Never" },
-        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
+        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end,
+            { plain = true, ivory = true, dot = "auto", h = 48 })
         do
             local t = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, TextWrapped = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.5),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, TextWrapped = true,
                 Text = "", LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = t })
@@ -25220,35 +25820,35 @@ local function buildUI()
                     or ("Tried for up to " .. math.floor(tonumber(CFG.SeaEvTrial) or 20)
                         .. " s on each kind of attacker, kept only where its M1 hurts them. Tried again every 5th one.")
             end)
-            gap(v, 8)
         end
         -- What the test found, per kind of attacker (the "when it hurts" choice only).
         do
             local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 68), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 8), Parent = s })
             local card = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, -8), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+                Size = UDim2.new(1, 0, 0, 68), BackgroundColor3 = Color3.fromRGB(21, 20, 19), BorderSizePixel = 0, Parent = s,
             })
             corner(card, 12)
             local rows = {}
             for i, who in ipairs({ "Sea Beasts", "Terrorshark, Piranha, Shark" }) do
+                local y = 4 + (i - 1) * 30
                 local dot = mk("Frame", {
-                    Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(12, 15 + (i - 1) * 26),
-                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = card,
+                    Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(12, y + 12),
+                    BackgroundColor3 = LOOK.mute, BorderSizePixel = 0, Parent = card,
                 })
                 corner(dot, 3)
                 mk("TextLabel", {
-                    Size = UDim2.new(0.5, -26, 0, 26), Position = UDim2.fromOffset(26, (i - 1) * 26 + 2),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
+                    Size = UDim2.new(0.6, -26, 0, 30), Position = UDim2.fromOffset(26, y),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
                     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                    TextColor3 = C.text, Text = who, Parent = card,
+                    TextColor3 = LOOK.soft, Text = who, Parent = card,
                 })
                 local what = mk("TextLabel", {
-                    Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, (i - 1) * 26 + 2),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
+                    Size = UDim2.new(0.4, -12, 0, 30), Position = UDim2.new(0.6, 0, 0, y),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
                     TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = C.second, Text = "", Parent = card,
                 })
@@ -25264,10 +25864,11 @@ local function buildUI()
                     elseif f.casts > 0 then w = string.format("testing: %d of %d", f.hits, f.casts)
                     else w = "not tested yet" end
                     rows[i].what.Text = w
-                    rows[i].dot.BackgroundColor3 = on and C.live or C.third
+                    rows[i].dot.BackgroundColor3 = on and C.live or LOOK.mute
                 end
             end)
         end
+        gap(v, 6)
 
         P.kit.fineTune(v, function(v)
             heading2(v, "dodging")
@@ -25344,48 +25945,115 @@ local function buildUI()
                 end)
         end, 24)
 
+        -- DETAILS: the board's card - how it works, right now, and what hurts
+        -- a sea beast (learned), as label / value rows.
         fold(v, "Details", function(v)
-            heading2(v, "how it works")
-            caption(v, "Off the boat (held up out of the waves), then round the attacker, the aim locked on it.")
-            caption(v, "The water is a floor: you never go under it, knockback is undone. A dived beast: you wait 200 over the water.")
-            caption(v, "Rumbling Waters: your circle stays clear of the other two beasts. Piranha / Shark: the small circle. The Leviathan keeps its own.")
-            heading2(v, "right now")
-            readout(v, function()
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 6), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = card })
+            mk("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 10), Parent = card })
+            local n = 0
+            local function add(o)
+                n += 1
+                o.LayoutOrder, o.Parent = n, card
+                return o
+            end
+            local function head(txt, top)
+                local t = add(mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                    Font = LOOK.bold, TextSize = lookPx(10), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextColor3 = C.third, Text = txt,
+                }))
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+                    PaddingTop = UDim.new(0, top), PaddingBottom = UDim.new(0, 2), Parent = t })
+            end
+            local function para(txt)
+                local t = add(mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.5), TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = txt,
+                }))
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+                    PaddingTop = UDim.new(0, 5), Parent = t })
+            end
+            -- a label / value row; mono = the value in Roboto Mono 11
+            local function row(mono)
+                local r = add(mk("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1 }))
+                local l = mk("TextLabel", {
+                    Size = UDim2.new(0.5, -14, 1, 0), Position = UDim2.fromOffset(14, 0), BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.soft, Text = "", Parent = r,
+                })
+                local val = mk("TextLabel", {
+                    Size = UDim2.new(0.5, -14, 1, 0), Position = UDim2.new(0.5, 0, 0, 0), BackgroundTransparency = 1,
+                    Font = mono and P.r2.MONO or LOOK.regular, TextSize = lookPx(mono and 11 or 12),
+                    TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = LOOK.mute, Text = "", Parent = r,
+                })
+                return r, l, val
+            end
+            head("HOW IT WORKS", 10)
+            para("Off the boat (held up out of the waves), then round the attacker, the aim locked on it.")
+            para("The water is a floor: you never go under it, knockback is undone. A dived beast: you wait 200 over the water.")
+            para("Rumbling Waters: your circle stays clear of the other two beasts. Piranha / Shark: the small circle. The Leviathan keeps its own.")
+            head("RIGHT NOW", 12)
+            local now = {}
+            for i = 1, 5 do now[i] = { row(false) } end
+            head("WHAT HURTS A SEA BEAST, LEARNED", 12)
+            local learned = {}
+            for i = 1, 10 do learned[i] = { row(true) } end
+            local none = add(mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, Text = "nothing fired at a sea beast yet",
+            }))
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 14), Parent = none })
+            addLive(function()
                 local e = P.seaev
-                local lines = {}
+                local rows = {}
                 for _, cls in ipairs({ "beast", "fish" }) do
                     local f = e.form[cls]
-                    local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
-                    local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
-                        or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
-                        or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
-                    table.insert(lines, string.format("%-17s %s", name, what))
+                    table.insert(rows, { (cls == "beast") and "Sea Beasts" or "Terrorshark, Piranha, Shark",
+                        (f.verdict == "form") and string.format("form: hurt them %d of %d", f.hits, f.casts)
+                        or (f.verdict == "base") and string.format("plain: form hurt them %d of %d", f.hits, f.casts)
+                        or ((f.casts > 0) and string.format("testing: %d of %d, %.0f s", f.hits, f.casts, f.up)
+                        or "not tested yet") })
                 end
-                table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
-                    .. (e.kitsune() and "" or " · no Kitsune fruit carried") .. (e.formNote and (" · " .. tostring(e.formNote)) or ""))
-                table.insert(lines, string.format("dodged           %d times · last: %s", e.dodges or 0, tostring(e.lastDodge or "-")))
-                table.insert(lines, "water            " .. (P.floorY
-                    and string.format("a floor at Y %.0f - you never go under it", P.floorY)
-                    or "a floor during every sea fight"))
-                return table.concat(lines, "\n")
-            end)
-            heading2(v, "what hurts a sea beast (learned)")
-            readout(v, function()
-                local rows = {}
-                for key, L in pairs(P.seaev.learn or {}) do table.insert(rows, { key = key, L = L }) end
-                table.sort(rows, function(a, b)
-                    local sa, sb = P.sea.keyScore(a.key, P.seaev.learn), P.sea.keyScore(b.key, P.seaev.learn)
+                table.insert(rows, { "You now", (e.inForm() and "in Kitsune form" or "not transformed")
+                    .. (e.kitsune() and "" or " · no Kitsune fruit carried") .. (e.formNote and (" · " .. tostring(e.formNote)) or "") })
+                table.insert(rows, { "Dodged", CFG.SeaDodge and string.format("%d times, last: %s", e.dodges or 0,
+                    tostring(e.lastDodge or "-")) or "dodge is off" })
+                table.insert(rows, { "Water", P.floorY and string.format("a floor at Y %.0f", P.floorY) or "a floor in every sea fight" })
+                for i, x in ipairs(now) do
+                    x[2].Text, x[3].Text = rows[i][1], rows[i][2]
+                end
+                local list = {}
+                for key, L in pairs(e.learn or {}) do table.insert(list, { key = key, L = L }) end
+                table.sort(list, function(a, b)
+                    local sa, sb = P.sea.keyScore(a.key, e.learn), P.sea.keyScore(b.key, e.learn)
                     if sa ~= sb then return sa > sb end
                     return a.key < b.key
                 end)
-                if #rows == 0 then return "nothing fired at a sea beast yet" end
-                local out = {}
-                for i, r in ipairs(rows) do
-                    if i > 10 then break end
-                    table.insert(out, string.format("%-24s hurt it %d of %d%s", r.key, r.L.closed, r.L.casts,
-                        (r.L.closed == 0 and r.L.casts >= 4) and "  - does not" or ""))
+                for i, x in ipairs(learned) do
+                    local r = list[i]
+                    x[1].Visible = r ~= nil
+                    if r then
+                        local no = r.L.closed == 0 and r.L.casts >= 4
+                        x[2].Text = r.key
+                        x[3].Text = no and string.format("%d of %d, does not", r.L.closed, r.L.casts)
+                            or string.format("hurt it %d of %d", r.L.closed, r.L.casts)
+                        x[2].TextColor3 = no and LOOK.mute or LOOK.soft
+                        x[3].TextColor3 = no and LOOK.mute or C.second
+                    end
                 end
-                return table.concat(out, "\n")
+                none.Visible = #list == 0
             end)
         end)
     end
