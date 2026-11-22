@@ -779,6 +779,33 @@ function packLines(ent, kind, now)
     end
     return table.concat(out, "\n")
 end
+-- DIALS (Plan 2 R2): a dial step sets several CFG values at once. A step is
+-- { name, set = { Key = value, ... }, line, today = true?, short? }.
+P.dials = P.dials or {}   -- every dial the panel builds registers its steps here
+function dialStepOf(steps, cfg)
+    for i, st in ipairs(steps) do
+        local same = true
+        for k, v in pairs(st.set) do if cfg[k] ~= v then same = false break end end
+        if same then return i end
+    end
+    return nil
+end
+function dialApply(steps, i, cfg)
+    for k, v in pairs(steps[i].set) do cfg[k] = v end
+end
+function dialToday(steps)
+    for i, st in ipairs(steps) do if st.today then return i end end
+    return nil
+end
+ACCENT = {   -- pack accents: tint, text on tint, accent, soft border (RGB)
+    farm = { { 15, 33, 24 }, { 143, 227, 181 }, { 63, 208, 126 }, { 31, 74, 51 } },
+    raid = { { 42, 20, 18 }, { 240, 138, 126 }, { 232, 92, 78 }, { 74, 36, 32 } },
+    sea = { { 12, 30, 44 }, { 159, 203, 239 }, { 74, 163, 232 }, { 29, 62, 87 } },
+    prehistoric = { { 42, 28, 11 }, { 247, 196, 119 }, { 240, 166, 60 }, { 74, 52, 22 } },
+    pvp = { { 28, 23, 48 }, { 198, 182, 255 }, { 166, 140, 255 }, { 52, 43, 87 } },
+    fruits = { { 42, 16, 36 }, { 242, 166, 207 }, { 224, 85, 154 }, { 74, 31, 61 } },
+    none = { { 27, 25, 23 }, { 232, 224, 212 }, { 232, 224, 212 }, { 53, 50, 46 } },
+}
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -18170,6 +18197,459 @@ local function buildUI()
         elseif id == "mirage" then P.setHunt(true, CFG.MirageJob or "mirage")
         else P.setHunt(true, id) end
     end
+
+    -- =====================================================
+    -- R2 KIT (2026-11-22): the pieces the new pages are built from. One
+    -- function, so its locals stay out of the builder's 200. Reached as
+    -- P.kit.<name>(view, ...). Colours: C plus ACCENT (pack accents).
+    -- =====================================================
+    P.kit = (function()
+        local K = {}
+        local function rgb(t) return Color3.fromRGB(t[1], t[2], t[3]) end
+        -- pack key -> tint, text on tint, accent, soft border. A Color3 stands
+        -- for the accent alone.
+        local function accentColors(a)
+            if type(a) == "string" then
+                local t = ACCENT[a] or ACCENT.none
+                return rgb(t[1]), rgb(t[2]), rgb(t[3]), rgb(t[4])
+            end
+            if a then return C.row, a, a, C.hair end
+            local t = ACCENT.none
+            return rgb(t[1]), rgb(t[2]), rgb(t[3]), rgb(t[4])
+        end
+        local function stroke(o, color)
+            mk("UIStroke", {
+                Color = color, Thickness = 1,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = o,
+            })
+        end
+        -- A row slot with the board's 16 px side margins; h nil = grows.
+        local function slot(view, h)
+            local f = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, h or 0), BackgroundTransparency = 1,
+                AutomaticSize = h and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
+                LayoutOrder = nextOrder(), Parent = view,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = f,
+            })
+            return f
+        end
+        local function label(parent, props)
+            props.BackgroundTransparency = 1
+            props.Parent = parent
+            return mk("TextLabel", props)
+        end
+
+        -- PACK CHIP: a small label with the pack's name in its tint.
+        function K.packChip(parent, pack)
+            local tint, text = accentColors(pack)
+            local pk = PACKS[pack]
+            local t = mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundColor3 = tint, BorderSizePixel = 0,
+                Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = text,
+                Text = string.upper(pk and pk.name or tostring(pack)), Parent = parent,
+            })
+            corner(t, 5)
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = t })
+            return t
+        end
+
+        -- MODE STRIP: is this page's mode the one running. id "volcano" is the
+        -- alongside kind (CFG.Volcano, its own switch).
+        function K.modeStrip(view, id)
+            local s = slot(view, 52)
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row,
+                BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 12)
+            local dot = mk("Frame", {
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(14, 22),
+                BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = card,
+            })
+            corner(dot, 4)
+            local line = label(card, {
+                Size = UDim2.new(1, -140, 0, 18), Position = UDim2.fromOffset(32, 8),
+                Font = Enum.Font.GothamBold, TextSize = F.body,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
+            })
+            local sub = label(card, {
+                Size = UDim2.new(1, -140, 0, 16), Position = UDim2.fromOffset(32, 27),
+                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
+            })
+            local btn = mk("TextButton", {
+                Size = UDim2.fromOffset(88, 44), Position = UDim2.new(1, -96, 0, 4),
+                BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
+                Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.text,
+                Text = "", Parent = card,
+            })
+            corner(btn, 10)
+            pressable(btn)
+            local function isOn()
+                if id == "volcano" then return CFG.Volcano and true or false end
+                return modeNow() == id
+            end
+            btn.Activated:Connect(function()
+                if id == "volcano" then
+                    CFG.Volcano = not CFG.Volcano
+                    say(CFG.Volcano and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
+                else
+                    setMode(id, not isOn())
+                end
+            end)
+            addLive(function()
+                local on = isOn()
+                dot.BackgroundColor3 = on and C.live or C.third
+                if id == "volcano" then
+                    line.Text = on and "On, alongside your mode" or "Off"
+                    sub.Text = "Runs whenever a Prehistoric Island is up"
+                    btn.Text = on and "Turn off" or "Turn on"
+                elseif on then
+                    line.Text = "Your mode"
+                    sub.Text = "Start on Home runs it"
+                    btn.Text = "In use"
+                else
+                    line.Text = "Not your mode"
+                    local now = modeNow()
+                    sub.Text = now == "none" and "No mode is on" or (modeName(now) .. " is your mode now")
+                    btn.Text = "Use this"
+                end
+            end)
+            return s
+        end
+
+        -- FIGHTS WITH: a row to the Attack page. Task 3 replaces this default
+        -- P.fightWithText (mode -> "Dragon Talon only" / "Mix of 3").
+        P.fightWithText = P.fightWithText or function() return "Attack" end
+        function K.fightsWith(view, modeId)
+            return navRow(view, "Fights with", function() return P.fightWithText(modeId) end, "attack")
+        end
+
+        -- DIAL: N steps that each set several CFG values. steps[i] = { name,
+        -- set, line, today?, short? }; the button label is short, else "OFF"
+        -- for a first step named OFF (then 1, 2, ...), else the step number.
+        -- accent = a pack key or a Color3.
+        function K.dial(view, title, steps, accent)
+            table.insert(P.dials, steps)
+            local _, _, acc = accentColors(accent)
+            local n = #steps
+            local offFirst = string.upper(tostring(steps[1].name)) == "OFF"
+            local head = slot(view, 34)
+            label(head, {
+                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
+                Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Text = string.upper(title),
+            })
+            local cur = label(head, {
+                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.new(0.5, -4, 0, 6),
+                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
+            })
+            local row = slot(view, 44)
+            local btns = {}
+            for i, st in ipairs(steps) do
+                local txt = st.short or ((offFirst and i == 1) and "OFF")
+                    or tostring(offFirst and (i - 1) or i)
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1 / n, -6, 0, 44),
+                    Position = UDim2.new((i - 1) / n, (i - 1) * 6 / n, 0, 0),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Text = txt, Parent = row,
+                })
+                corner(b, 10)
+                stroke(b, C.hair)
+                btns[i] = b
+            end
+            local lineL = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                TextWrapped = true, Text = "", LayoutOrder = nextOrder(), Parent = view,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+                PaddingTop = UDim.new(0, 6), Parent = lineL,
+            })
+            gap(view, 8)
+            local function refresh()
+                local lit = dialStepOf(steps, CFG)
+                for i, b in ipairs(btns) do
+                    b.BackgroundColor3 = (i == lit) and acc or C.row
+                    b.TextColor3 = (i == lit) and C.base or C.second
+                end
+                cur.Text = lit and tostring(steps[lit].name) or "your own values"
+                lineL.Text = lit and tostring(steps[lit].line or "") or "your own values"
+            end
+            for i, b in ipairs(btns) do
+                b.Activated:Connect(function()
+                    dialApply(steps, i, CFG)
+                    refresh()
+                end)
+            end
+            refresh()
+            addLive(refresh)
+            return row
+        end
+
+        -- SEGMENTED: a big either/or (2-4 options), one lit. options =
+        -- { { value, label }, ... }.
+        function K.segmented(view, title, options, get, set)
+            if title then heading2(view, title) end
+            local s = slot(view, 44)
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row,
+                BorderSizePixel = 0, Parent = s,
+            })
+            corner(box, 12)
+            local n = #options
+            local btns = {}
+            for i, o in ipairs(options) do
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1 / n, -4, 1, -8),
+                    Position = UDim2.new((i - 1) / n, 4, 0, 4),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Text = string.upper(tostring(o[2])), Parent = box,
+                })
+                corner(b, 9)
+                btns[i] = b
+            end
+            local function refresh()
+                local cur = get()
+                for i, b in ipairs(btns) do
+                    local on = options[i][1] == cur
+                    b.BackgroundColor3 = on and C.ivory or C.row
+                    b.TextColor3 = on and C.base or C.second
+                end
+            end
+            for i, b in ipairs(btns) do
+                b.Activated:Connect(function()
+                    set(options[i][1])
+                    refresh()
+                end)
+            end
+            refresh()
+            addLive(refresh)
+            gap(view, 10)
+            return box
+        end
+
+        -- TRUTH CARD: what will really happen. titleFn / reasonFn return text.
+        function K.truthCard(view, titleFn, reasonFn, accent)
+            local _, _, _, soft = accentColors(accent)
+            local s = slot(view)
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            stroke(card, soft)
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = card,
+            })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
+            })
+            local t = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = C.text, Text = "", LayoutOrder = 1, Parent = card,
+            })
+            local r = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
+            })
+            addLive(function()
+                local ok, a = pcall(titleFn)
+                t.Text = ok and tostring(a or "") or ""
+                local ok2, b = pcall(reasonFn)
+                r.Text = ok2 and tostring(b or "") or ""
+            end)
+            gap(view, 8)
+            return card
+        end
+
+        -- FINE-TUNE: the board's button; build(box) adds the raw rows. count
+        -- (a number or a function) fills "<n> exact values".
+        function K.fineTune(view, build, count)
+            local holder = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
+            })
+            local top = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1,
+                LayoutOrder = 1, Parent = holder,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
+                PaddingTop = UDim.new(0, 10), Parent = top,
+            })
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = C.row,
+                BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = top,
+            })
+            corner(b, 14)
+            stroke(b, C.hair)
+            label(b, {
+                Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(14, 0),
+                Font = Enum.Font.GothamBold, TextSize = F.body,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "Fine-tune",
+            })
+            local hint = label(b, {
+                Size = UDim2.fromOffset(100, 48), Position = UDim2.new(1, -128, 0, 0),
+                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "",
+            })
+            local chev = label(b, {
+                Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -26, 0, 0),
+                Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = C.third, Text = ">",
+            })
+            pressable(b)
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Visible = false, LayoutOrder = 2, Parent = holder,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
+            })
+            local outer = buildingFold
+            buildingFold = box
+            build(box)
+            buildingFold = outer
+            local function words()
+                if box.Visible then return "hide" end
+                local n = type(count) == "function" and count() or count
+                return n and (tostring(n) .. " exact values") or "exact values"
+            end
+            hint.Text = words()
+            b.Activated:Connect(function()
+                box.Visible = not box.Visible
+                chev.Rotation = box.Visible and 90 or 0
+                hint.Text = words()
+                if box.Visible then
+                    for _, e in ipairs(live) do
+                        if e.w == box then pcall(e.f) end
+                    end
+                end
+            end)
+            return holder
+        end
+
+        -- WHEEL: Attack's FIGHT WITH. stops = { { id, label, deg?, left?, top?,
+        -- w?, accent? }, ... } in turning order; get() = the lit id, set(id).
+        -- Missing places come from a ring (the board's five, then evenly).
+        local BOARD_DEG = { 0, -60, -120, 60, 120 }
+        function K.wheel(view, stops, get, set)
+            local n = #stops
+            local s = slot(view, 196)
+            local box = mk("Frame", {
+                Size = UDim2.fromOffset(302, 196), BackgroundTransparency = 1, Parent = s,
+            })
+            local function disc(size, color)
+                local c = mk("Frame", {
+                    Size = UDim2.fromOffset(size, size),
+                    Position = UDim2.fromOffset(151 - size / 2, 118 - size / 2),
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = box,
+                })
+                corner(c, size / 2)
+                return c
+            end
+            stroke(disc(110, C.raised), C.hair)
+            local inner = disc(90, C.raised)
+            inner.BackgroundTransparency = 1
+            stroke(inner, C.line)
+            -- The pointer: a 4x88 carrier turning about its middle (the pivot),
+            -- its lit half the top 44.
+            local carrier = mk("Frame", {
+                Size = UDim2.fromOffset(4, 88), AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromOffset(151, 118), BackgroundTransparency = 1,
+                Rotation = 0, Parent = box,
+            })
+            local needle = mk("Frame", {
+                Size = UDim2.fromOffset(4, 44), BackgroundColor3 = C.ivory,
+                BorderSizePixel = 0, Parent = carrier,
+            })
+            corner(needle, 2)
+            disc(14, C.ivory)
+            local pills = {}
+            local refresh
+            for i, st in ipairs(stops) do
+                local deg = st.deg or (n <= 5 and BOARD_DEG[i]) or (((i - 1) * 360 / n + 180) % 360 - 180)
+                st.deg = deg
+                local w = st.w or math.max(60, math.min(104, #tostring(st.label) * 7 + 24))
+                local rad = math.rad(deg)
+                local cx, cy = 151 + 104 * math.sin(rad), 118 - 104 * math.cos(rad)
+                if i == 1 and deg == 0 then cy = 17 end
+                local left = st.left or math.max(0, math.min(302 - w, math.floor(cx - w / 2 + 0.5)))
+                local top = st.top or math.max(0, math.min(166, math.floor(cy - 15 + 0.5)))
+                local p = mk("TextButton", {
+                    Size = UDim2.fromOffset(w, 30), Position = UDim2.fromOffset(left, top),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.tiny, TextColor3 = C.second,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(st.label), Parent = box,
+                })
+                corner(p, 15)
+                stroke(p, C.hair)
+                p.Activated:Connect(function()
+                    set(st.id)
+                    refresh()
+                end)
+                pills[i] = p
+            end
+            local lastDeg = nil
+            refresh = function()
+                local cur = get()
+                local lit = 1
+                for i, st in ipairs(stops) do if st.id == cur then lit = i end end
+                local st = stops[lit]
+                local acc = C.ivory
+                if st and st.accent then local _, _, a = accentColors(st.accent) acc = a end
+                for i, p in ipairs(pills) do
+                    p.BackgroundColor3 = (i == lit) and acc or C.row
+                    p.TextColor3 = (i == lit) and C.base or C.second
+                end
+                needle.BackgroundColor3 = acc
+                if st and st.deg ~= lastDeg then
+                    lastDeg = st.deg
+                    tween(carrier, { Rotation = st.deg })
+                end
+                return lit
+            end
+            local inside = false
+            box.MouseEnter:Connect(function() inside = true end)
+            box.MouseLeave:Connect(function() inside = false end)
+            -- The mouse wheel over it turns through the stops, in order.
+            UIS.InputChanged:Connect(function(i)
+                if inside and i.UserInputType == Enum.UserInputType.MouseWheel and n > 0 then
+                    local at = refresh()
+                    local to = ((at + (i.Position.Z < 0 and 1 or -1) - 1) % n) + 1
+                    set(stops[to].id)
+                    refresh()
+                end
+            end)
+            refresh()
+            addLive(refresh)
+            return box
+        end
+
+        return K
+    end)()
 
     -- What On will turn off, for the line under a mode's switch.
     local function offList(id)

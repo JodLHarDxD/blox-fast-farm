@@ -19,7 +19,7 @@ local function signal()
 end
 
 local SIGNALS = {
-    Activated = true, MouseButton1Down = true, MouseButton1Up = true, MouseLeave = true,
+    Activated = true, MouseButton1Down = true, MouseButton1Up = true, MouseLeave = true, MouseEnter = true,
     InputBegan = true, InputEnded = true, FocusLost = true, InputChanged = true,
     RenderStepped = true, Heartbeat = true, Stepped = true,
 }

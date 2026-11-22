@@ -7,6 +7,11 @@ local function check(cond, msg)
 end
 
 local built = P.panel()
+-- The defaults, as the real file keeps them (P.cfgDefaults is set outside the panel).
+if not P.cfgDefaults then
+    P.cfgDefaults = {}
+    for k, v in pairs(CFG_REAL) do P.cfgDefaults[k] = v end
+end
 check(built, "the panel builds  " .. table.concat(WARNED, " | "))
 local gui = PG:FindFirstChild("BFFHUD")
 
@@ -436,6 +441,66 @@ for name in pairs(VIEWS) do
     check(depth[name] ~= nil and depth[name] <= 3,
         name .. " within 3 taps of Home (" .. tostring(depth[name]) .. ")")
   end
+end
+
+-- ---------- R2 kit: every component builds on a scratch view; every dial's today step is today's CFG ----------
+do
+    local K = P.kit
+    check(K ~= nil, "P.kit exists")
+    for _, n in ipairs({ "packChip", "modeStrip", "fightsWith", "dial", "segmented", "truthCard", "fineTune", "wheel" }) do
+        check(K and type(K[n]) == "function", "P.kit." .. n .. " is a function")
+    end
+    if K then
+        local scratch = Instance.new("Frame")
+        scratch.Name = "scratch"
+        scratch.Parent = gui
+        local nDials = #P.dials
+        local keyName = "RandomRadius"
+        local today = P.cfgDefaults[keyName]
+        local mine = {
+            { name = "1  CLOSE", set = { [keyName] = 300 }, line = "Reaches 300 studs" },
+            { name = "3  BALANCED", set = { [keyName] = today }, line = "today", today = true },
+        }
+        local ok, err = pcall(function()
+            K.packChip(scratch, "farm")
+            K.modeStrip(scratch, "random")
+            K.modeStrip(scratch, "volcano")
+            K.fightsWith(scratch, "random")
+            K.dial(scratch, "Pace", mine, "farm")
+            K.segmented(scratch, "By", { { true, "My level" }, { false, "My list" } },
+                function() return true end, function() end)
+            K.truthCard(scratch, function() return "Title" end, function() return "Reason" end, "sea")
+            K.fineTune(scratch, function(box) K.packChip(box, "pvp") end, 3)
+            local picked = "MIX"
+            K.wheel(scratch, { { id = "MIX", label = "MIX" }, { id = "Tiger", label = "Tiger" },
+                { id = "CDK", label = "CDK" } }, function() return picked end, function(v) picked = v end)
+            flush()
+        end)
+        check(ok, "every kit component builds on a scratch view  " .. tostring(err))
+        -- Pressing the scratch dial's step 1 writes its values, and Fine-tune opens.
+        local before = CFG[keyName]
+        local b1
+        each(scratch, function(k) if not b1 and k.ClassName == "TextButton" and k.Text == "1" then b1 = k end end)
+        check(b1 ~= nil, "the scratch dial has a button 1")
+        if b1 then
+            b1.Activated:Fire()
+            check(CFG[keyName] == 300, "a dial tap writes its step's values")
+            CFG[keyName] = before
+        end
+        -- The automatic check: every registered dial's today step equals today's defaults.
+        check(#P.dials == nDials + 1, "a dial registers its steps in P.dials")
+        for i, steps in ipairs(P.dials) do
+            local t = dialToday(steps)
+            check(t ~= nil, "dial " .. i .. " has a today step")
+            if t then
+                for k, v in pairs(steps[t].set) do
+                    check(P.cfgDefaults[k] == v, "dial " .. i .. " today step sets CFG." .. k .. " to its default")
+                end
+            end
+        end
+        table.remove(P.dials, nDials + 1)   -- the scratch dial leaves with the scratch view
+        scratch:Destroy()
+    end
 end
 
 print(string.format("%d passed, %d failed", pass, fail))
