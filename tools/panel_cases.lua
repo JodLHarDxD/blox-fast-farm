@@ -1457,5 +1457,86 @@ do
     check(chev == 0, "no text '>' chevrons left (" .. chev .. ")")
 end
 
+-- ---------- R3 Task 1b: resize (scale + crop) ----------
+do
+    local panel
+    local liveGui = PG:FindFirstChild("BFFHUD")      -- (the cases above rebuilt the panel)
+    for _, k in ipairs(rawget(liveGui, "_kids")) do
+        if k.ClassName == "Frame" then panel = k break end
+    end
+    local sg, cg = panel:FindFirstChild("ScaleGrip"), panel:FindFirstChild("CropGrip")
+    local us = panel:FindFirstChild("UIScale")
+    check(sg and cg and us, "resize: a corner grip, an edge grip and a UIScale on the panel")
+    check(panel.AnchorPoint.X == 1 and panel.AnchorPoint.Y == 0, "resize: the panel is anchored top-right")
+    check(sg.Size.X.Offset == 44 and sg.Size.Y.Offset == 44 and cg.Size.Y.Offset == 44,
+        "resize: 44 px hit areas")
+    -- the hit areas lie over the page by 16 px at most (its bottom padding)
+    check(sg.Position.Y.Offset == -16 and cg.Position.Y.Offset == -16,
+        "resize: only the inner 16 px of a grip is over the page")
+    local function bg(o)
+        for _, k in ipairs(rawget(o, "_kids")) do
+            if k.ClassName == "Frame" and k.BackgroundTransparency == 0 then return true end
+        end
+        return false
+    end
+    check(not bg(sg), "resize: the corner marks stay hidden until hover / touch / drag")
+    sg.MouseEnter:Fire()
+    check(bg(sg), "resize: the corner marks show on hover")
+    sg.MouseLeave:Fire()
+    check(CFG_REAL.PanelScale == 1.0 and CFG_REAL.PanelHeight == 0, "resize: starts at 1.0 / full")
+    local fullH = panel.Size.Y.Offset
+    local M1 = Enum.UserInputType.MouseButton1
+    local function press(g, y, id)
+        local inp = { UserInputType = M1, Position = { X = 0, Y = y } }
+        g.InputBegan:Fire(inp)
+        return inp
+    end
+    -- touch + mouse both start a drag; the move comes through UIS.InputChanged
+    local inp = press(cg, 500)
+    UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseMovement, Position = { X = 0, Y = 300 } })
+    check(panel.Size.Y.Offset == fullH - 200, "resize: edge drag crops the height (" .. panel.Size.Y.Offset .. ")")
+    check(CFG_REAL.PanelHeight == fullH - 200, "resize: the crop is in CFG.PanelHeight")
+    UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseMovement, Position = { X = 0, Y = -4000 } })
+    check(panel.Size.Y.Offset == 250, "resize: the crop stops at the header plus 3 rows")
+    UIS.InputEnded:Fire(inp)
+    UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseMovement, Position = { X = 0, Y = 0 } })
+    check(panel.Size.Y.Offset == 250, "resize: after release a move does nothing")
+    -- scale: a touch drag
+    local T = Enum.UserInputType.Touch
+    local tin = { UserInputType = T, Position = { X = 0, Y = 100 } }
+    sg.InputBegan:Fire(tin)
+    UIS.InputChanged:Fire({ UserInputType = T, Position = { X = 0, Y = -60 } })
+    check(us.Scale < 1 and us.Scale >= 0.6 and CFG_REAL.PanelScale == us.Scale,
+        "resize: corner drag (touch) scales the panel, kept in CFG.PanelScale")
+    UIS.InputChanged:Fire({ UserInputType = T, Position = { X = 0, Y = -9000 } })
+    check(us.Scale == 0.6, "resize: scale stops at 0.6")
+    UIS.InputEnded:Fire(tin)
+    -- double tap resets
+    sg.InputBegan:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    UIS.InputEnded:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    sg.InputBegan:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    check(CFG_REAL.PanelScale == 1.0 and us.Scale == 1.0, "resize: double tap on the corner resets the scale")
+    UIS.InputEnded:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    cg.InputBegan:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    UIS.InputEnded:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    cg.InputBegan:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    check(CFG_REAL.PanelHeight == 0 and panel.Size.Y.Offset == fullH, "resize: double tap on the edge resets the height")
+    UIS.InputEnded:Fire({ UserInputType = M1, Position = { X = 0, Y = 0 } })
+    -- the header is not inside the scrolling body
+    local body
+    for _, k in ipairs(rawget(panel, "_kids")) do
+        if k.ClassName == "Frame" and k.ClipsDescendants and k.Position.Y.Offset == 82 then body = k end
+    end
+    check(body and body.Size.Y.Scale == 1 and body.Size.Y.Offset == -82,
+        "resize: the body follows the panel height; the header (82 px) is outside it")
+    local scrolls = 0
+    for _, k in ipairs(rawget(body, "_kids")) do
+        if k.ClassName == "ScrollingFrame" then scrolls += 1 end
+    end
+    check(scrolls >= 25, "resize: every page is a scrolling frame (" .. scrolls .. ")")
+    -- the settings file keeps both
+    check(P.cfgDefaults.PanelScale == 1.0 and P.cfgDefaults.PanelHeight == 0, "resize: defaults are in P.cfgDefaults")
+end
+
 print(string.format("%d passed, %d failed", pass, fail))
 if fail == 0 then print("ALL PASS") end

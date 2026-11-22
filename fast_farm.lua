@@ -198,6 +198,12 @@ local CFG = {
     InvSwap            = true,
     InvSwapGap         = 1.5,        -- seconds between two loads, at least
     InvSkip            = {},         -- [name] = true: never loaded
+    -- THE PANEL'S SIZE (R3, owner 2026-11-22: "it covers a big chunk of the
+    -- screen"). Scale: the whole panel zoomed, 0.6 - 1.0. Height: the page
+    -- cropped, in unscaled px; 0 = the full height. Both go through the
+    -- settings lock and over a hop like any other setting.
+    PanelScale         = 1.0,
+    PanelHeight        = 0,
     -- THE MASTERY FARM (user, 2026-10-07: Dragonstorm to 500 for Draco v4,
     -- Dragonheart already done). A weapon named here is the ONLY one that
     -- hurts anything, in every fight: its M1 and its AutoKeys (a key not
@@ -834,6 +840,46 @@ end
 function fightLabel(single)
     if single then return tostring(single) .. " only" end
     return "Mix"
+end
+
+-- PANEL SIZE (R3, pure: tools/panelsize_test.py). The panel scales (UIScale,
+-- 0.6 - 1.0, top-right pinned) and crops (height from the header plus three
+-- rows up to full); these keep every value in range, whatever a settings file
+-- or a hop carried in.
+PANEL_BASE_W, PANEL_MIN_H, PANEL_SCALE_MIN = 342, 250, 0.6
+function panelScaleClamp(s)
+    if type(s) ~= "number" or s ~= s then return 1 end
+    return math.max(PANEL_SCALE_MIN, math.min(1, s))
+end
+-- h: the saved crop (0 / nothing / too tall = full); full: the full height.
+function panelHeightClamp(h, full, minH)
+    if type(full) ~= "number" or full <= 0 then full = PANEL_MIN_H end
+    minH = math.min(type(minH) == "number" and minH or PANEL_MIN_H, full)
+    if type(h) ~= "number" or h ~= h or h <= 0 or h >= full then return full end
+    return math.max(minH, h)
+end
+-- The bottom-right grip moves the panel's bottom edge on screen: the panel is
+-- pinned at the top right, so only the vertical drag counts. curH = the
+-- unscaled height now; dy = px the pointer moved down since the press.
+function panelScaleDrag(startScale, curH, dy)
+    local s = panelScaleClamp(startScale)
+    if type(curH) ~= "number" or curH <= 0 or type(dy) ~= "number" then return s end
+    return panelScaleClamp(s + dy / curH)
+end
+-- The bottom-edge grip: the height follows the pointer (dy is screen px).
+function panelHeightDrag(startH, dy, scale, full, minH)
+    if type(dy) ~= "number" then dy = 0 end
+    -- (a drag past zero must land on the minimum, not read as 0 = full)
+    local h = math.max(type(minH) == "number" and minH or PANEL_MIN_H, startH + dy / panelScaleClamp(scale))
+    return panelHeightClamp(h, full, minH)
+end
+-- Right edge rx and top ty of the scaled panel (w x h on screen) in a
+-- viewport vw x vh: the nearest place where it is all on screen (top-left
+-- wins when it is bigger than the screen).
+function panelKeepOnScreen(rx, ty, w, h, vw, vh)
+    local x = math.min(vw, math.max(rx, math.min(w, vw)))
+    local y = math.max(0, math.min(ty, vh - h))
+    return x, y
 end
 -- PACKS END
 
@@ -17414,11 +17460,14 @@ local function buildUI()
     local PANEL_H = 706
     local panel = mk("Frame", {
         Size = UDim2.fromOffset(342, PANEL_H),
-        Position = UDim2.new(1, -360, 0, 18),
+        Position = UDim2.new(1, -18, 0, 18), AnchorPoint = Vector2.new(1, 0),
         BackgroundColor3 = C.base, BorderSizePixel = 0,
         Active = true, Draggable = true, Parent = gui,
     })
     corner(panel, 20)
+    -- R3: the scale. UIScale zooms the panel and everything in it; the anchor
+    -- (1, 0) keeps the top-right corner where it is while it does.
+    local uiScale = mk("UIScale", { Scale = 1, Parent = panel })
     -- THE OUTLINE (R3): the board's 1 px #2B2825 rim. Border mode draws it
     -- outside the frame's edge, so it never covers content. A narrow white
     -- band (Transparency 0.6) rides round it once every 6 s - the white
@@ -17650,20 +17699,150 @@ local function buildUI()
     newsStrip()
 
     local folded = false
+    -- Home's live moment card (R2) grows the panel by its height while it shows.
+    P.hudExtra = 0
+
+    -- THE PANEL'S SIZE (R3). Scale: UIScale on the panel, set by the corner
+    -- grip. Crop: the panel's height, set by the bottom-edge grip; every page
+    -- is a ScrollingFrame inside bodyFrame, so a shorter panel just scrolls
+    -- the page, and the title, Hide and the news strip (not in bodyFrame)
+    -- never move. CFG.PanelScale / CFG.PanelHeight (0 = full) keep both.
+    local function fullH() return PANEL_H + (P.hudExtra or 0) end
+    local function wantH()
+        if folded then return 82 end
+        return panelHeightClamp(CFG.PanelHeight, fullH(), PANEL_MIN_H)
+    end
+    local grips = {}
+    -- After any change: the whole panel stays on the screen (top-right wins).
+    local function keepOnScreen()
+        pcall(function()
+            local vp = gui.AbsoluteSize
+            if not (vp and vp.X > 0 and vp.Y > 0) then return end
+            local sc = panelScaleClamp(CFG.PanelScale)
+            local px, py = panel.Position.X, panel.Position.Y
+            local rx = px.Scale * vp.X + px.Offset
+            local ty = py.Scale * vp.Y + py.Offset
+            local nx, ny = panelKeepOnScreen(rx, ty, PANEL_BASE_W * sc, wantH() * sc, vp.X, vp.Y)
+            if nx ~= rx or ny ~= ty then
+                panel.Position = UDim2.new(px.Scale, nx - px.Scale * vp.X, py.Scale, ny - py.Scale * vp.Y)
+            end
+        end)
+    end
+    local function applySize(animate)
+        local sc = panelScaleClamp(CFG.PanelScale)
+        uiScale.Scale = sc
+        -- UIStroke scales with its UIScale: 1 / scale keeps the rim 1 px on
+        -- screen (at 0.6 it would be a 0.6 px smear).
+        rim.Thickness = 1 / sc
+        local sz = UDim2.fromOffset(PANEL_BASE_W, wantH())
+        if animate then tween(panel, { Size = sz }) else panel.Size = sz end
+        for _, g in ipairs(grips) do g.Visible = not folded end
+        keepOnScreen()
+    end
+
     foldBtn.Activated:Connect(function()
         folded = not folded
         bodyFrame.Visible = not folded
         foldBtn.Text = folded and "Show" or "Hide"
         sweepSet(not folded)
         -- Folded: the title and the news strip stay.
-        tween(panel, { Size = UDim2.fromOffset(342, folded and 82 or PANEL_H + (P.hudExtra or 0)) })
+        applySize(true)
     end)
-    -- Home's live moment card (R2) grows the panel by its height while it shows.
-    P.hudExtra = 0
     P.panelGrow = function(n)
         P.hudExtra = n
-        if not folded then tween(panel, { Size = UDim2.fromOffset(342, PANEL_H + n) }) end
+        if not folded then applySize(true) end
     end
+
+    -- The grips. Each hit area is 44 px, mostly OUTSIDE the panel: only the
+    -- inner 16 px lie over the page, and that is the page's bottom padding
+    -- (and the side margin at the corner), so a grip never sits on a row.
+    -- The drawn mark is small: a short bar (edge), three dots (corner).
+    do
+        local HIT, IN = 44, 16
+        local myGui = gui
+        local conns = {}
+        local drag, lastTap = nil, {}
+        local function isPress(i)
+            return i.UserInputType == Enum.UserInputType.MouseButton1
+                or i.UserInputType == Enum.UserInputType.Touch
+        end
+        local function setCrop(h)
+            CFG.PanelHeight = (h >= fullH()) and 0 or math.floor(h + 0.5)
+            applySize(false)
+        end
+        -- Press: a second press within 0.35 s resets that grip's size.
+        local function begin(kind, input)
+            local now = os.clock()
+            if lastTap[kind] and now - lastTap[kind] < 0.35 then
+                lastTap[kind] = nil
+                drag = nil
+                if kind == "scale" then CFG.PanelScale = 1.0 else CFG.PanelHeight = 0 end
+                applySize(true)
+                return
+            end
+            lastTap[kind] = now
+            drag = { kind = kind, input = input, y0 = input.Position.Y,
+                s0 = panelScaleClamp(CFG.PanelScale), h0 = wantH() }
+        end
+        local function track(i)
+            if not drag then return end
+            if not (i == drag.input or i.UserInputType == Enum.UserInputType.MouseMovement
+                or i.UserInputType == Enum.UserInputType.Touch) then return end
+            local dy = i.Position.Y - drag.y0
+            if drag.kind == "scale" then
+                CFG.PanelScale = panelScaleDrag(drag.s0, drag.h0, dy)
+                applySize(false)
+            else
+                setCrop(panelHeightDrag(drag.h0, dy, CFG.PanelScale, fullH(), PANEL_MIN_H))
+            end
+        end
+        local function alive()
+            if myGui and myGui.Parent then return true end
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            conns = {}
+            return false
+        end
+        table.insert(conns, UIS.InputChanged:Connect(function(i) if alive() then track(i) end end))
+        table.insert(conns, UIS.InputEnded:Connect(function(i)
+            if drag and alive() and (i == drag.input or isPress(i)) then drag = nil end
+        end))
+
+        local function hit(name, pos, size, kind)
+            local f = mk("Frame", { Name = name, Size = size, Position = pos,
+                BackgroundTransparency = 1, Active = true, ZIndex = 20, Parent = panel })
+            f.InputBegan:Connect(function(i)
+                if isPress(i) then begin(kind, i) end
+            end)
+            table.insert(grips, f)
+            return f
+        end
+        -- bottom edge: crop. Left of the corner grip; the bar sits in the padding.
+        local edge = hit("CropGrip", UDim2.new(0, 0, 1, -IN), UDim2.new(1, -IN, 0, HIT), "crop")
+        corner(mk("Frame", { Size = UDim2.fromOffset(34, 3), Position = UDim2.new(0.5, -17, 0, IN - 9),
+            BackgroundColor3 = C.third, BorderSizePixel = 0, ZIndex = 21, Parent = edge }), 2)
+        -- bottom-right corner: scale. Marks show on hover, while dragging, or always on touch.
+        local cornerHit = hit("ScaleGrip", UDim2.new(1, -IN, 1, -IN), UDim2.fromOffset(HIT, HIT), "scale")
+        local dots = {}
+        for _, d in ipairs({ { 12, 12 }, { 6, 12 }, { 12, 6 } }) do
+            table.insert(dots, corner(mk("Frame", { Size = UDim2.fromOffset(3, 3),
+                Position = UDim2.fromOffset(IN - d[1] - 3, IN - d[2] - 3),
+                BackgroundColor3 = C.third, BackgroundTransparency = 1,
+                BorderSizePixel = 0, ZIndex = 21, Parent = cornerHit }), 2))
+        end
+        local touchOnly = false
+        pcall(function() touchOnly = UIS.TouchEnabled and not UIS.MouseEnabled end)
+        local hover = false
+        local function dotsShow()
+            local on = touchOnly or hover or (drag ~= nil and drag.kind == "scale")
+            for _, d in ipairs(dots) do d.BackgroundTransparency = on and 0 or 1 end
+        end
+        cornerHit.MouseEnter:Connect(function() hover = true dotsShow() end)
+        cornerHit.MouseLeave:Connect(function() hover = false dotsShow() end)
+        cornerHit.InputBegan:Connect(dotsShow)
+        table.insert(conns, UIS.InputEnded:Connect(dotsShow))
+        dotsShow()
+    end
+    applySize(false)
 
     -- A live line refreshes only while its page is on screen - and, inside a
     -- closed "How it works" / "Details", only while that is open.
