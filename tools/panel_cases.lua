@@ -130,15 +130,15 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 38 pages (2026-11-08: Trades; 2026-11-22: five locked covers) ----------
+    -- ---------- 39 pages (2026-11-08: Trades; 2026-11-22: five locked covers, Key & packs) ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
         "servers", "stats", "news", "fruitmenu", "trades",
-        "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp" }
+        "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp", "key" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "38 pages, got " .. n)
+    check(n == #EXPECT, "39 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 

@@ -25,4 +25,10 @@ check("settings pages: free with any key", packState("attack", { farm = gone }, 
 check("PACKS has the 5 packs with prices", PACKS.farm.price == "$0.99" and PACKS.sea.price == "$1.49"
     and PACKS.prehistoric and PACKS.pvp and PACKS.raid)
 
+local lines = packLines({ farm = NOW + 5 * 86400 + 60, pvp = 0, sea = NOW - 10 }, "buyer", NOW)
+check("pack lines: days left, for ever, locked with price",
+    lines:find("GRIND   on  ·  5d left", 1, true) and lines:find("PVP   on  ·  for ever", 1, true)
+    and lines:find("SEA   locked  ·  $1.49", 1, true), lines)
+check("pack lines: no key", packLines(nil, nil, NOW) == "no key: every mode open")
+
 print(all and "ALL PASS" or "SOME FAILED")

@@ -763,6 +763,19 @@ function packState(id, ent, kind, now)
     return active(f) and "open" or "locked"
 end
 P.packState = function(id) return packState(id, _G.BFF_ENT, _G.BFF_KIND, os.time()) end
+function packLines(ent, kind, now)
+    if type(ent) ~= "table" then return "no key: every mode open" end
+    local out = {}
+    for _, f in ipairs(PACK_ORDER) do
+        local pk, e = PACKS[f], ent[f]
+        local s
+        if kind == "owner" or e == 0 then s = "on  ·  for ever"
+        elseif type(e) == "number" and e > now then s = "on  ·  " .. math.floor((e - now) / 86400) .. "d left"
+        else s = "locked  ·  " .. pk.price end
+        table.insert(out, pk.name .. "   " .. s)
+    end
+    return table.concat(out, "\n")
+end
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -17175,8 +17188,9 @@ local function buildUI()
     })
 
     -- Tall enough that Home ends without a scroll bar (2026-10-11; it was
-    -- 570): the title, the news strip, then the body.
-    local PANEL_H = 666
+    -- 570; 666 until the Key & packs row, 2026-11-22): the title, the news
+    -- strip, then the body.
+    local PANEL_H = 702
     local panel = mk("Frame", {
         Size = UDim2.fromOffset(342, PANEL_H),
         Position = UDim2.new(1, -360, 0, 18),
@@ -18312,6 +18326,15 @@ local function buildUI()
                 .. (CFG.AutoTeam and tostring(CFG.Team) or "team: yours")
         end, "servers")
         hairline(v)
+        navRow(v, "Key & packs", function()
+            if not _G.BFF_ENT then return "no key" end
+            local n, e, now = 0, _G.BFF_ENT, os.time()
+            for _, f in ipairs(PACK_ORDER) do
+                if _G.BFF_KIND == "owner" or e[f] == 0 or (type(e[f]) == "number" and e[f] > now) then n = n + 1 end
+            end
+            return n .. " of 5 packs"
+        end, "key")
+        hairline(v)
         -- SETTINGS LOCK (user, 2026-10-14) on the same page: the row says it.
         navRow(v, "Lock & stats", function()
             local k = (P :: any).lock
@@ -18450,6 +18473,43 @@ local function buildUI()
             end)
             navRow(v, "I have a code", function() return "" end, "key")
         end
+    end
+
+    -- =====================================================
+    -- KEY & PACKS (Plan 2 R1): what this key holds, and Redeem a store code
+    -- =====================================================
+    do
+        function P.redeem(code)
+            local k, gate = _G.BFF_KEY, _G.BFF_GATE
+            if not k or not gate then P.redeemNote = "no key: get one from the store first" return end
+            code = string.upper((string.gsub(code, "%s", "")))
+            P.redeemNote = "checking ..."
+            task.spawn(function()
+                local ok, body = pcall(function() return game:HttpGet(gate .. "/r?k=" .. k .. "&v=" .. code) end)
+                task.wait()     -- never run on from HttpGet: the top of this file
+                local okj, r = pcall(function() return game:GetService("HttpService"):JSONDecode(body) end)
+                if not (ok and okj and type(r) == "table") then P.redeemNote = "no answer from the gate - try again" return end
+                if not r.ok then P.redeemNote = tostring(r.error) return end
+                if type(r.ent) == "table" then _G.BFF_ENT = r.ent end
+                P.redeemNote = tostring(r.feature) .. ": " .. tostring(r.days) .. " days added - hop once to open it everywhere"
+            end)
+        end
+
+        local v = makeView("key")
+        gap(v, 6)
+        readout(v, function()
+            local k = _G.BFF_KEY
+            if not k then return "no key - the raw loader" end
+            return "key   " .. string.sub(k, 1, 8) .. "····" .. string.sub(k, -4)
+        end)
+        heading2(v, "your packs")
+        readout(v, function() return packLines(_G.BFF_ENT, _G.BFF_KIND, os.time()) end)
+        heading2(v, "redeem a store code")
+        textRow(v, "BFV-XXXX-XXXX-XXXX-XXXX-XXXX", function(val)
+            if #val == 0 then return end
+            P.redeem(val)
+        end)
+        readout(v, function() return P.redeemNote or "a code adds days to its pack, on this key" end)
     end
 
     -- =====================================================
