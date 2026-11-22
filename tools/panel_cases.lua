@@ -828,10 +828,43 @@ do
     check(P.hudExtra == 76, "Home: the card is back when Home is")
     B.tap("home", "×")
     check(P.hudExtra == 0, "Home: x puts the card away")
-    -- a pack this key holds: no card at all
+    -- a pack this key holds (R3 1c): the card shows too, and a tap hunts it
     B = build({ farm = NOW + 86400, sea = 0 }, "buyer", nil)
+    P.running = false
     B.live()
-    check(P.hudExtra == 0, "Home: no card when the pack is yours")
+    check(B.has("home", "Mirage is up in this server") and B.has("home", "Tap to hunt it · SEA"),
+        "Home: a held pack shows the card, Tap to hunt it")
+    check(P.hudExtra == 76, "Home: the panel grows by the card for a held pack too")
+    table.clear(CALLS)
+    B.tap("home", "Mirage is up in this server")
+    check(B.cur() == "home" and called("setHunt true mirage") and called("start") and P.running,
+        "Home: a tap on a held pack sets the Mirage hunt and starts the farm")
+    B.live()
+    check(B.has("home", "Hunting it now · SEA"), "Home: the card says Hunting it now")
+    P.running = false
+    -- the event ends: the card clears itself
+    P.news = { headlines = function() return { { key = "mirage", tone = "dim", title = "NO MIRAGE ISLAND", body = "" } } end }
+    P.momentLook()    -- the card looks every 2 s: look now
+    B.live()
+    check(P.hudExtra == 0,
+        "Home: the card clears when the event ends")
+    -- the owner: a fruit on the map beats the island, named, and a tap hunts it
+    P.fruitSpot = function() return "spot" end
+    P.fruitBase = P.fruitBase or function(o) return tostring(o) end
+    P.news = { fruits = { { orig = "Ice-Ice" } }, headlines = function()
+        return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" },
+            { key = "fruit", tone = "up", title = "FRUIT ON THE MAP", body = "" } } end }
+    local OW = build({ fruits = 0 }, "owner", nil)
+    P.running = false
+    P.momentLook()
+    OW.live()
+    check(OW.has("home", "Ice fruit is up in this server") and OW.has("home", "Tap to hunt it · FRUITS"),
+        "Home (owner): a fruit on the map leads, named")
+    table.clear(CALLS)
+    OW.tap("home", "Ice fruit is up in this server")
+    check(called("setHunt true fruit") and called("start"), "Home (owner): a tap hunts the fruit")
+    P.running = false
+    P.fruitSpot = nil
     P.news = nil
 
     -- The owner: nothing locked, every pack a cover that opens its modes, owner tools in their own section.

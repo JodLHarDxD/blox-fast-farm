@@ -881,6 +881,70 @@ function panelKeepOnScreen(rx, ty, w, h, vw, vh)
     local y = math.max(0, math.min(ty, vh - h))
     return x, y
 end
+-- LIVE CARD (R3 Task 1c, pure: tools/livecard_test.py). Home's "X is up in
+-- this server" card: a headline (tone "up") -> the hunt it is. Priority, one
+-- card at a time: a fruit, Mirage, Prehistoric, a boss, any other news item
+-- that maps to a hunt (the Frozen Dimension = the Leviathan hunt).
+LIVE_RAIDBOSS = { ["Dough King"] = true, ["Cake Prince"] = true, ["rip_indra True Form"] = true,
+    ["Soul Reaper"] = true }
+-- fruit = { name, spot } of the dearest fruit lying here (nil = none read).
+-- Returns { key, rank, mode, pack, title } or nil: a headline with no hunt.
+function liveEventOf(it, fruit)
+    if type(it) ~= "table" or it.tone ~= "up" or type(it.key) ~= "string" then return nil end
+    local boss = string.match(it.key, "^boss:(.+)$")
+    if it.key == "fruit" then
+        local nm = fruit and fruit.name
+        return { key = "fruit:" .. tostring(fruit and fruit.spot or "?"), rank = 1, mode = "fruit", pack = "fruits",
+            title = nm and (tostring(nm) .. " fruit is up in this server") or "A fruit spawned in this server" }
+    elseif it.key == "mirage" then
+        return { key = it.key, rank = 2, mode = "mirage", pack = "sea", title = "Mirage is up in this server" }
+    elseif it.key == "prehistoric" then
+        return { key = it.key, rank = 3, mode = "prehistoric", pack = "prehistoric",
+            title = "Prehistoric Island is up in this server" }
+    elseif boss then
+        return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "raid" or "elite", pack = "raid",
+            title = boss .. " is up in this server" }
+    elseif it.key == "frozen" then
+        return { key = it.key, rank = 5, mode = "levi", pack = "sea", title = "Frozen Dimension is up in this server" }
+    end
+    return nil
+end
+-- The one card to show: the best rank not put away (dismissed[key]); the
+-- first of a rank wins.
+function liveMoment(items, fruit, dismissed)
+    dismissed = dismissed or {}
+    local best
+    for _, it in ipairs(items or {}) do
+        local m = liveEventOf(it, fruit)
+        if m and not dismissed[m.key] and (not best or m.rank < best.rank) then best = m end
+    end
+    return best
+end
+-- What a tap does: "cover" (pack not held), "none" (already hunting it),
+-- else "hunt". state = packState of the pack's mode.
+function liveTapOf(m, state, running, nowMode)
+    if state ~= "open" then return "cover" end
+    if running and nowMode == m.mode then return "none" end
+    return "hunt"
+end
+-- The card's sub line, by what a tap does.
+function liveSubOf(action, packName)
+    if action == "cover" then return packName .. " runs it for you · look inside" end
+    if action == "none" then return "Hunting it now · " .. packName end
+    return "Tap to hunt it · " .. packName
+end
+-- The tap: the hunt = picking the mode (the Library's setMode) and pressing
+-- Start when nothing runs; a running farm just switches mode. act = { cover,
+-- setMode, start } (the panel's own functions).
+function liveTap(m, state, running, nowMode, act)
+    local a = liveTapOf(m, state, running, nowMode)
+    if a == "cover" then act.cover(m.pack)
+    elseif a == "hunt" then
+        act.setMode(m.mode, true)
+        if not running then act.start() end
+    end
+    return a
+end
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -19725,11 +19789,13 @@ local function buildUI()
             hero.TextColor3 = busy and C.text or C.base
         end)
 
-        -- THE LIVE MOMENT: the news says a thing is up in this server and it
-        -- belongs to a pack this key does not hold - a card that opens that
-        -- pack's cover. Nothing in the news, or a pack you hold: no card at
-        -- all (0 high). The x puts it away for the session. The panel grows
-        -- by its height while Home shows it, so Home still has no scroll bar.
+        -- THE LIVE MOMENT (R3): the news says a thing is up in this server
+        -- (a fruit, Mirage, Prehistoric, a boss, the Frozen Dimension). A pack
+        -- you hold: a tap hunts it (the mode, and Start when nothing runs). A
+        -- pack you do not hold: a tap opens its cover. Nothing up: no card at
+        -- all (0 high), and it clears when the event ends. The x puts it away
+        -- for the session. The panel grows by its height while Home shows it
+        -- (applyGrow -> P.panelGrow; a cropped panel just scrolls).
         local dismissed, shown, momentOn = {}, nil, false
         local mom = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, ClipsDescendants = true,
@@ -19756,8 +19822,17 @@ local function buildUI()
         local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -46, 0, 10),
             BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute,
             Text = "×", AutoButtonColor = false, Parent = card })
-        local cur = nil
-        card.Activated:Connect(function() if cur then show("cover_" .. cur.pack) end end)
+        local cur, nextLook = nil, 0
+        P.momentLook = function() nextLook = 0 end    -- look at the news now (a tap; the tests)
+        local function momentState(m) return P.packState(R.REP[m.pack]) end
+        card.Activated:Connect(function()
+            if not cur then return end
+            liveTap(cur, momentState(cur), P.running, modeNow(), {
+                cover = function(pack) show("cover_" .. pack) end,
+                setMode = setMode, start = P.start,
+            })
+            nextLook = 0    -- the line says "Hunting it now" at the next look
+        end)
         local function applyGrow(name)
             local want = (name == "home" and momentOn) and 76 or 0
             if want ~= P.hudExtra then P.panelGrow(want) end
@@ -19771,7 +19846,7 @@ local function buildUI()
                 card.BackgroundColor3, cardStroke.Color = tint, soft
                 mLine.TextColor3 = text
                 mTitle.Text = m.title
-                mLine.Text = PACKS[m.pack].name .. " runs it for you · look inside"
+                mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
                 if shown ~= m.pack then
                     shown = m.pack
                     for _, k in ipairs(artBox:GetChildren()) do
@@ -19803,26 +19878,27 @@ local function buildUI()
             if not N then return nil end
             local ok, items = pcall(N.headlines)
             if not ok or type(items) ~= "table" then return nil end
-            for _, it in ipairs(items) do
-                if it.tone == "up" and not dismissed[it.key] then
-                    local pack, title
-                    local boss = string.match(it.key, "^boss:(.+)$")
-                    if it.key == "mirage" then pack, title = "sea", "Mirage is up in this server"
-                    elseif it.key == "prehistoric" then pack, title = "prehistoric", "Prehistoric Island is up in this server"
-                    elseif boss then pack, title = "raid", boss .. " is up in this server" end
-                    if pack and P.packState(R.REP[pack]) == "locked" then
-                        return { key = it.key, pack = pack, title = title }
-                    end
-                end
+            -- The fruit named on the card: the dearest one lying here (N.fruits,
+            -- the news's own list, already filtered to the ones you care about).
+            local fruit
+            local f = N.fruits and N.fruits[1]
+            if f then
+                fruit = { spot = P.fruitSpot(f),
+                    name = f.orig and (P.fruitKey(f.orig) or P.fruitBase(f.orig)) or nil }
             end
-            return nil
+            return liveMoment(items, fruit, dismissed)
         end
-        local nextLook = 0
+        local lastSig
         addLive(function()
             if os.clock() < nextLook then return end
             nextLook = os.clock() + 2
             local m = findMoment()
-            if (m and m.key) ~= (cur and cur.key) then setMoment(m) end
+            local sig = m and (m.key .. "|" .. m.title .. "|" .. tostring(momentState(m)) .. "|"
+                .. tostring(P.running and modeNow() == m.mode)) or nil
+            if sig ~= lastSig then
+                lastSig = sig
+                setMoment(m)
+            end
         end)
         gap(v, 12)
 
