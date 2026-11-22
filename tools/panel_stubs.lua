@@ -109,10 +109,29 @@ function UDim2.fromOffset(x, y) return UDim2.new(0, x, 0, y) end
 function UDim2.fromScale(x, y) return UDim2.new(x, 0, y, 0) end
 local Vector2 = { new = function(x, y) return { X = x, Y = y } end }
 local Color3 = { fromRGB = function(r, g, b) return { R = r, G = g, B = b } end }
-local TweenInfo = { new = function() return {} end }
+local TweenInfo = { new = function(...) return { args = { ... } } end }
+local ColorSequence = { new = function(k) return { keys = k } end }
+local ColorSequenceKeypoint = { new = function(t, c) return { Time = t, Value = c } end }
+local NumberSequence = { new = function(k) return { keys = k } end }
+local NumberSequenceKeypoint = { new = function(t, v) return { Time = t, Value = v } end }
+-- Font.new: the panel's LOOK takes Montserrat / Michroma through FontFace.
+local Font = { new = function(path, weight) return { Path = path, Weight = tostring(weight) } end }
+local TWEENS = {}           -- every tween made: { target, info, props, playing }
 local TweenService = {}
-function TweenService:Create(o, _, props)
-    return { Play = function() for k, v in pairs(props) do o[k] = v end end }
+function TweenService:Create(o, info, props)
+    local rec = { target = o, info = info, props = props, playing = false }
+    table.insert(TWEENS, rec)
+    return {
+        Play = function()
+            rec.playing = true
+            -- a looping tween (RepeatCount -1) does not end: it sets nothing now
+            if not (info and info.args and info.args[4] == -1) then
+                for k, v in pairs(props) do o[k] = v end
+            end
+        end,
+        Cancel = function() rec.playing = false end,
+        Pause = function() rec.playing = false end,
+    }
 end
 local RunService = newInst("RunService")
 function RunService:BindToRenderStep() end

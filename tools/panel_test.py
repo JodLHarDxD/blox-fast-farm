@@ -21,6 +21,7 @@ usage: python tools/panel_test.py [path-to-luau.exe]
        python tools/panel_test.py --census path/to/fast_farm.lua   (print the keys a panel changes)
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -231,6 +232,24 @@ cfg = src[a:src.index("\n}\n", a) + 3]
 p = src.index("-- PANEL\n")
 panel = src[p:src.index("-- API\n", p)]
 
+# R3 look checks, on the panel's source (the LOOK table itself is where the
+# Gotham fallbacks live, so it is cut out first):
+#  - no panel view builder draws in Enum.Font.Gotham*: the look is LOOK.*;
+#  - no value string has a double space around the middle dot (the board,
+#    being HTML, shows one; "auto ·  13 up" came from the game).
+look_a = panel.index("    local LOOK = {}")
+look_b = panel.index("    local function setFont(")
+rest = panel[:look_a] + panel[look_b:]
+LOOK_FAILS = []
+for line in rest.split(chr(10)):
+    if "Enum.Font.Gotham" in line:
+        LOOK_FAILS.append("panel source uses Enum.Font.Gotham (use LOOK.*): " + line.strip()[:100])
+    code = line.strip()
+    if code.startswith("--") or "<font" in code:
+        continue
+    if re.search(r"\s{2,}·|·\s{2,}", code):
+        LOOK_FAILS.append("double space around the middle dot: " + code[:100])
+
 pa = src.index("-- PACKS (2026-11-22)")
 packs = src[pa:src.index("-- PACKS END", pa)]     # the real pack table, as the panel reads it
 
@@ -251,4 +270,6 @@ os.unlink(path)
 print(r.stdout + r.stderr)
 if census:
     sys.exit(0)
-sys.exit(0 if "ALL PASS" in r.stdout else 1)
+for f in LOOK_FAILS:
+    print("FAIL  " + f)
+sys.exit(0 if ("ALL PASS" in r.stdout and not LOOK_FAILS) else 1)

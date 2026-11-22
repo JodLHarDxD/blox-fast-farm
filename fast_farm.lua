@@ -17349,11 +17349,47 @@ local function buildUI()
     }
     local F = { tiny = 11, small = 13, body = 14, label = 15, subject = 21 }
 
+    -- LOOK (R3): the boards' type and sizes. The boards are Montserrat 500 /
+    -- 600 / 700 / 800 plus Michroma for the marks; Roblox takes them through
+    -- FontFace. Each entry keeps its old Gotham enum: a client without the
+    -- family (or without Font.new) draws the panel as before, never errors.
+    -- Use them as Font = LOOK.semi inside mk(), or setFont(obj, LOOK.semi).
+    -- Sizes are the board's CSS px; letter-spacing has no Roblox twin: skipped.
+    local LOOK = {}
+    do
+        local function face(file, weight, fallback)
+            local f
+            pcall(function()
+                f = Font.new("rbxasset://fonts/families/" .. file .. ".json", Enum.FontWeight[weight])
+            end)
+            return { look = true, face = f, enum = fallback }
+        end
+        local okM, michroma = pcall(function() return Enum.Font.Michroma end)
+        LOOK.regular = face("Montserrat", "Medium", Enum.Font.Gotham)
+        LOOK.semi = face("Montserrat", "SemiBold", Enum.Font.GothamMedium)
+        LOOK.bold = face("Montserrat", "Bold", Enum.Font.GothamBold)
+        LOOK.black = face("Montserrat", "ExtraBold", Enum.Font.GothamBlack)
+        LOOK.mark = face("Michroma", "Regular", (okM and michroma) or Enum.Font.GothamBlack)
+        LOOK.size = { title = 15, subject = 21, row = 15, value = 14, sub = 13, section = 11, chip = 9, strip = 10 }
+        LOOK.mute = Color3.fromRGB(132, 126, 117)       -- #847E75: section headers, chevrons
+        LOOK.rim = Color3.fromRGB(43, 40, 37)           -- #2B2825: the panel's outline
+    end
+    local function setFont(o, f)
+        if type(f) == "table" and f.look then
+            if f.face and pcall(function() o.FontFace = f.face end) then return end
+            o.Font = f.enum
+        else
+            o.Font = f
+        end
+    end
+
     local function mk(class, props)
         local o = Instance.new(class)
         local parent = props.Parent
         props.Parent = nil
-        for k, v in pairs(props) do o[k] = v end
+        for k, v in pairs(props) do
+            if k == "Font" then setFont(o, v) else o[k] = v end
+        end
         if parent then o.Parent = parent end
         return o
     end
@@ -17375,7 +17411,7 @@ local function buildUI()
     -- Tall enough that Home ends without a scroll bar (2026-10-11; it was
     -- 570; 666 until the Key & packs row, 2026-11-22): the title, the news
     -- strip, then the body.
-    local PANEL_H = 702
+    local PANEL_H = 706
     local panel = mk("Frame", {
         Size = UDim2.fromOffset(342, PANEL_H),
         Position = UDim2.new(1, -360, 0, 18),
@@ -17383,31 +17419,62 @@ local function buildUI()
         Active = true, Draggable = true, Parent = gui,
     })
     corner(panel, 20)
-    mk("UIStroke", { Color = C.hair, Transparency = 0.45, Parent = panel })
-    -- No UIGradient: its transparency applied to the panel itself and
-    -- made farm_pro's background 94-100% see-through.
+    -- THE OUTLINE (R3): the board's 1 px #2B2825 rim. Border mode draws it
+    -- outside the frame's edge, so it never covers content. A narrow white
+    -- band (Transparency 0.6) rides round it once every 6 s - the white
+    -- reflection - from a UIGradient on the STROKE only (a gradient on the
+    -- panel itself once made the background see-through). It turns only
+    -- while the panel is up and not folded; see sweepSet below.
+    local rim = mk("UIStroke", { Color = Color3.fromRGB(255, 255, 255), Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = panel })
+    local rimGrad = mk("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, LOOK.rim), ColorSequenceKeypoint.new(0.42, LOOK.rim),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(0.58, LOOK.rim), ColorSequenceKeypoint.new(1, LOOK.rim),
+        }),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.42, 0),
+            NumberSequenceKeypoint.new(0.5, 0.6),
+            NumberSequenceKeypoint.new(0.58, 0), NumberSequenceKeypoint.new(1, 0),
+        }),
+        Parent = rim,
+    })
+    local sweepTween
+    local function sweepSet(on)
+        if on and not sweepTween then
+            rimGrad.Rotation = 0
+            sweepTween = TweenService:Create(rimGrad,
+                TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+                { Rotation = 360 })
+            sweepTween:Play()
+        elseif not on and sweepTween then
+            pcall(function() sweepTween:Cancel() end)
+            sweepTween = nil
+        end
+    end
 
     local backBtn = mk("TextButton", {
-        Size = UDim2.fromOffset(54, 30), Position = UDim2.fromOffset(14, 14),
-        BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 14,
+        Size = UDim2.fromOffset(54, 30), Position = UDim2.fromOffset(14, 9),
+        BackgroundTransparency = 1, Font = LOOK.semi, TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextColor3 = C.second, Text = "Back", Visible = false,
         AutoButtonColor = false, Parent = panel,
     })
     local heading = mk("TextLabel", {
-        Size = UDim2.new(1, -104, 0, 22), Position = UDim2.fromOffset(20, 18),
-        BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
-        TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
-        TextColor3 = C.text, Text = "Fast Farm  ·  " .. tostring(P.build), Parent = panel,
+        Size = UDim2.new(1, -104, 0, 22), Position = UDim2.fromOffset(20, 13),
+        BackgroundTransparency = 1, Font = LOOK.bold,
+        TextSize = LOOK.size.title, TextXAlignment = Enum.TextXAlignment.Left,
+        TextColor3 = C.text, Text = "Fast Farm · " .. tostring(P.build), Parent = panel,
     })
     local dot = mk("Frame", {
-        Size = UDim2.fromOffset(7, 7), Position = UDim2.new(1, -62, 0, 26),
+        Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -52, 0, 21),
         BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = panel,
     })
     corner(dot, 4)
     local foldBtn = mk("TextButton", {
-        Size = UDim2.fromOffset(42, 30), Position = UDim2.new(1, -52, 0, 14),
-        BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 12,
+        Size = UDim2.fromOffset(42, 30), Position = UDim2.new(1, -56, 0, 9),
+        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Right,
         TextColor3 = C.second, Text = "Hide", AutoButtonColor = false, Parent = panel,
     })
@@ -17425,37 +17492,67 @@ local function buildUI()
     local function newsStrip()
         local N = P.news
         if not N then return end
-        local W, H, CHIP = 314, 26, 122
+        -- The board's strip: 30 high, radius 9, 16 px side margins. The chip
+        -- is a small pill inside it (red letters while BREAKING); its word
+        -- shrinks to fit beside the clock, then truncates with "...".
+        local W, H, CHIP, CLK = 310, 30, 124, 40
+        local CLIP0 = 5 + CHIP + 8
         local strip = mk("Frame", {
-            Size = UDim2.fromOffset(W, H), Position = UDim2.fromOffset(14, 50),
+            Size = UDim2.fromOffset(W, H), Position = UDim2.fromOffset(16, 48),
             BackgroundColor3 = C.row, BorderSizePixel = 0, ClipsDescendants = true, Parent = panel,
         })
-        corner(strip, 8)
+        corner(strip, 9)
         local chip = mk("Frame", {
-            Size = UDim2.fromOffset(CHIP, H), BackgroundColor3 = C.pressed,
-            BorderSizePixel = 0, Parent = strip,
+            Size = UDim2.fromOffset(CHIP, H - 10), Position = UDim2.fromOffset(5, 5),
+            BackgroundColor3 = C.pressed, BorderSizePixel = 0, Parent = strip,
         })
-        corner(chip, 8)
+        corner(chip, 5)
         local word = mk("TextLabel", {
-            Size = UDim2.new(1, -8, 1, 0), Position = UDim2.fromOffset(8, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = chip,
+            Size = UDim2.new(1, -14, 1, 0), Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1, Font = LOOK.black, TextSize = LOOK.size.strip,
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+            TextColor3 = C.text, Text = "", Parent = chip,
         })
         -- Code: its digits are all one width, so the seconds do not jitter.
         local clock = mk("TextLabel", {
-            Size = UDim2.new(1, -8, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Code,
-            TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.text,
+            Size = UDim2.new(0, CLK, 1, 0), Position = UDim2.new(1, -(CLK + 6), 0, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.Code,
+            TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.text,
             Text = "", Parent = chip,
         })
         local clip = mk("Frame", {
-            Size = UDim2.fromOffset(W - CHIP - 6, H), Position = UDim2.fromOffset(CHIP + 6, 0),
+            Size = UDim2.fromOffset(W - CLIP0 - 6, H), Position = UDim2.fromOffset(CLIP0, 0),
             BackgroundTransparency = 1, ClipsDescendants = true, Parent = strip,
         })
+        -- The pack chip (a lock and the pack's name, in its colour) on the
+        -- right while the news names something a pack you do not hold runs.
+        local packChip = mk("Frame", {
+            Size = UDim2.fromOffset(58, 20), Position = UDim2.fromOffset(W - 6 - 58, 5),
+            BackgroundTransparency = 1, Visible = false, Parent = strip,
+        })
+        corner(packChip, 5)
+        local packStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = packChip })
+        local packLock = mk("Frame", { Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(7, 4),
+            BackgroundTransparency = 1, Parent = packChip })
+        local packWord = mk("TextLabel", {
+            Size = UDim2.new(1, -24, 1, 0), Position = UDim2.fromOffset(22, 0),
+            BackgroundTransparency = 1, Font = LOOK.black, TextSize = LOOK.size.chip,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = packChip,
+        })
+        local packNow
+        -- Shrink first (down to min); what still does not fit truncates.
+        local function fitText(lab, room, size, min)
+            lab.TextSize = size
+            while lab.TextBounds.X > room and lab.TextSize > min do
+                lab.TextSize = lab.TextSize - 1
+            end
+        end
         -- Two copies of the crawl, one after the other: it loops seamlessly.
         local function crawlLine()
             return mk("TextLabel", {
                 Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 12,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = 11,
                 RichText = true, TextXAlignment = Enum.TextXAlignment.Left,
                 TextColor3 = C.text, Text = "", Parent = clip,
             })
@@ -17464,7 +17561,7 @@ local function buildUI()
 
         local TONES = {
             day = { C.ivory, C.base }, night = { Color3.fromRGB(52, 56, 84), C.ivory },
-            full = { C.warn, C.base }, breaking = { C.stop, C.text }, dim = { C.pressed, C.second },
+            full = { C.warn, C.base }, breaking = { C.row, C.stop }, dim = { C.pressed, C.second },
         }
         local HEX = { breaking = "#E85C4E", full = "#F0A63C", up = "#3FD07E", night = "#B4BAE6",
             day = "#E8E0D4", dim = "#9A958D" }
@@ -17481,7 +17578,7 @@ local function buildUI()
                 table.insert(bits, t)
             end
             -- Nothing ticked, or only what this sea does not have.
-            if #bits == 0 then bits[1] = '<font color="#9A958D">nothing to show  ·  Home, Breaking news</font>' end
+            if #bits == 0 then bits[1] = '<font color="#9A958D">nothing to show · Home, Breaking news</font>' end
             return table.concat(bits, SEP) .. SEP
         end
 
@@ -17502,7 +17599,34 @@ local function buildUI()
                     local w, t, tone = N.chip()
                     local tt = TONES[tone] or TONES.dim
                     word.Text, clock.Text = w, t
+                    word.Size = UDim2.new(1, (t == "") and -14 or -(CLK + 18), 1, 0)
+                    fitText(word, CHIP - 14 - ((t == "") and 0 or (CLK + 4)), LOOK.size.strip + 1, 8)
                     chip.BackgroundColor3, word.TextColor3, clock.TextColor3 = tt[1], tt[2], tt[2]
+                    -- the pack chip: the first headline a locked pack runs
+                    local pk
+                    for _, it in ipairs(N.headlines()) do
+                        pk = P.newsPack and P.newsPack(it)
+                        if pk then break end
+                    end
+                    if pk ~= packNow then
+                        packNow = pk
+                        packChip.Visible = pk ~= nil
+                        clip.Size = UDim2.fromOffset(W - CLIP0 - 6 - (pk and 64 or 0), H)
+                        if pk then
+                            local R = P.r2
+                            local a = ACCENT[pk] or ACCENT.none
+                            local _, ink = R.acc(pk)
+                            -- the outline sits between the tint and the accent
+                            packStroke.Color = Color3.fromRGB(
+                                math.floor(a[1][1] + (a[3][1] - a[1][1]) * 0.55),
+                                math.floor(a[1][2] + (a[3][2] - a[1][2]) * 0.55),
+                                math.floor(a[1][3] + (a[3][3] - a[1][3]) * 0.55))
+                            packWord.TextColor3 = ink
+                            packWord.Text = string.upper(PACKS[pk].name)
+                            for _, k in ipairs(packLock:GetChildren()) do k:Destroy() end
+                            R.lock(packLock, 6, 3, ink, 9)
+                        end
+                    end
                     local nt = compose()
                     if nt ~= text then
                         text = nt
@@ -17530,6 +17654,7 @@ local function buildUI()
         folded = not folded
         bodyFrame.Visible = not folded
         foldBtn.Text = folded and "Show" or "Hide"
+        sweepSet(not folded)
         -- Folded: the title and the news strip stay.
         tween(panel, { Size = UDim2.fromOffset(342, folded and 82 or PANEL_H + (P.hudExtra or 0)) })
     end)
@@ -17572,7 +17697,7 @@ local function buildUI()
     -- Every page's title. The modes' are their names everywhere (the Modes
     -- list, the Start button, the Mode row).
     local TITLES = {
-        home = "Fast Farm  ·  " .. tostring(P.build), modes = "Modes",
+        home = "Fast Farm · " .. tostring(P.build), modes = "Modes",
         circuit = "Circuit farm", none = "No mode", random = "Random", raid = "Raid",
         elite = "Elite pirates", fruit = "Fruits", fruitlog = "Fruit history", berry = "Haki berries",
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
@@ -17607,7 +17732,7 @@ local function buildUI()
         currentView = name
         if P.onView then pcall(P.onView, name) end
         heading.Text = TITLES[name] or name
-        heading.Position = UDim2.fromOffset(name == "home" and 20 or 76, 18)
+        heading.Position = UDim2.fromOffset(name == "home" and 20 or 76, 13)
         backBtn.Visible = (name ~= "home")
     end
     -- Back = the page you came from (a link can bring you to a shared page
@@ -17634,11 +17759,12 @@ local function buildUI()
     local function heading2(view, text)
         local t = mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1,
-            Font = Enum.Font.GothamMedium, TextSize = F.tiny,
-            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+            Font = LOOK.semi, TextSize = LOOK.size.section,
+            TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+            TextColor3 = LOOK.mute,
             Text = string.upper(text), LayoutOrder = nextOrder(), Parent = view,
         })
-        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = t })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingBottom = UDim.new(0, 6), Parent = t })
         return t
     end
 
@@ -17669,7 +17795,7 @@ local function buildUI()
     local function caption(view, text)
         local t = mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
             TextWrapped = true, Text = text, LayoutOrder = nextOrder(), Parent = view,
         })
@@ -17701,7 +17827,16 @@ local function buildUI()
         return t
     end
 
-    -- A ROW THAT OPENS A PAGE: its name, what is set there now, ">".
+    -- The thin chevron: a "›" in #847E75, 14 px from the right edge.
+    local function chevron(parent)
+        return mk("TextLabel", {
+            Size = UDim2.fromOffset(14, 44), Position = UDim2.new(1, -28, 0, 0),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22,
+            TextColor3 = LOOK.mute, Text = "›", Parent = parent,
+        })
+    end
+
+    -- A ROW THAT OPENS A PAGE: its name, what is set there now, "›".
     -- valueFn may return a second value: true = that word is green (On).
     local function navRow(view, label, valueFn, target)
         local b = mk("TextButton", {
@@ -17710,24 +17845,20 @@ local function buildUI()
             LayoutOrder = nextOrder(), Parent = view,
         })
         mk("TextLabel", {
-            Size = UDim2.new(0, 128, 1, 0), Position = UDim2.fromOffset(20, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
-            TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
+            Size = UDim2.new(0, 140, 1, 0), Position = UDim2.fromOffset(20, 0),
+            BackgroundTransparency = 1, Font = LOOK.semi,
+            TextSize = LOOK.size.row, TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = label, Parent = b,
         })
         local val = mk("TextLabel", {
-            Size = UDim2.new(1, -188, 1, 0), Position = UDim2.fromOffset(148, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-            TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Right,
+            Size = UDim2.new(1, -198, 1, 0), Position = UDim2.fromOffset(160, 0),
+            BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = LOOK.size.value, TextXAlignment = Enum.TextXAlignment.Right,
             TextColor3 = C.second, TextTruncate = Enum.TextTruncate.AtEnd,
             Text = "", Parent = b,
         })
-        mk("TextLabel", {
-            Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -28, 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-            TextSize = 14, TextColor3 = C.third, Text = ">", Parent = b,
-        })
+        chevron(b)
         pressable(b)
         b.Activated:Connect(function() show(target) end)
         if valueFn then
@@ -17750,30 +17881,26 @@ local function buildUI()
             LayoutOrder = nextOrder(), Parent = view,
         })
         mk("TextLabel", {
-            Size = UDim2.new(1, -112, 0, 20), Position = UDim2.fromOffset(20, 9),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
-            TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
+            Size = UDim2.new(1, -112, 0, 20), Position = UDim2.fromOffset(20, 8),
+            BackgroundTransparency = 1, Font = LOOK.semi,
+            TextSize = LOOK.size.row, TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = label, Parent = b,
         })
         mk("TextLabel", {
             Size = UDim2.new(1, -112, 0, 16), Position = UDim2.fromOffset(20, 29),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-            TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = LOOK.size.sub, TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.third, Text = sub, Parent = b,
+            TextColor3 = LOOK.mute, Text = sub, Parent = b,
         })
         local val = mk("TextLabel", {
-            Size = UDim2.new(0, 56, 1, 0), Position = UDim2.new(1, -88, 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+            Size = UDim2.new(0, 56, 1, 0), Position = UDim2.new(1, -96, 0, 0),
+            BackgroundTransparency = 1, Font = LOOK.bold,
             TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
             TextColor3 = C.third, Text = "", Parent = b,
         })
-        mk("TextLabel", {
-            Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -28, 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-            TextSize = 14, TextColor3 = C.third, Text = ">", Parent = b,
-        })
+        chevron(b)
         pressable(b)
         b.Activated:Connect(function() show(target) end)
         addLive(function()
@@ -17817,7 +17944,7 @@ local function buildUI()
         })
         mk("TextLabel", {
             Size = UDim2.new(1, 0, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
             TextWrapped = true, TextColor3 = C.text, Text = label,
             LayoutOrder = 1, Parent = col,
@@ -17825,7 +17952,7 @@ local function buildUI()
         if sub then
             local s = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                BackgroundTransparency = 1, Font = LOOK.regular,
                 TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left,
                 TextWrapped = true, TextColor3 = C.third,
                 Text = (type(sub) == "string") and sub or "", LayoutOrder = 2, Parent = col,
@@ -17844,7 +17971,7 @@ local function buildUI()
         })
         local word = mk("TextLabel", {
             Size = UDim2.fromOffset(30, 20), Position = UDim2.fromOffset(26, 4),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+            BackgroundTransparency = 1, Font = LOOK.bold,
             TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
             TextColor3 = C.third, Text = "Off", Parent = ctl,
         })
@@ -17882,7 +18009,7 @@ local function buildUI()
         })
         mk("TextLabel", {
             Size = UDim2.new(1, -(width + 50), 1, 0), Position = UDim2.fromOffset(20, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = label, Parent = f,
@@ -17907,7 +18034,7 @@ local function buildUI()
         for i, k in ipairs(keys) do
             local b = mk("TextButton", {
                 Size = UDim2.fromOffset(W, 30), BackgroundColor3 = C.raised,
-                BorderSizePixel = 0, AutoButtonColor = false, Font = Enum.Font.GothamBold,
+                BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.bold,
                 TextSize = F.small, TextColor3 = C.second, Text = k,
                 LayoutOrder = i, Parent = row,
             })
@@ -17944,7 +18071,7 @@ local function buildUI()
                 local on = ok and v and true or false
                 local r = rows[i]
                 r.b.BackgroundColor3 = on and C.ivory or C.row
-                r.name.Font = on and Enum.Font.GothamBold or Enum.Font.Gotham
+                setFont(r.name, on and LOOK.bold or LOOK.regular)
                 r.name.TextColor3 = on and C.base or C.text
                 r.name.Text = (on and "  > " or "      ") .. it[1]
                 if r.tag then r.tag.TextColor3 = on and C.base or C.third end
@@ -17961,7 +18088,7 @@ local function buildUI()
             local hasTag = it[2] and it[2] ~= ""
             local name = mk("TextLabel", {
                 Size = UDim2.new(1, hasTag and -142 or -10, 1, 0), BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham, TextSize = F.body, TextColor3 = C.text,
+                Font = LOOK.regular, TextSize = F.body, TextColor3 = C.text,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
             })
@@ -17970,7 +18097,7 @@ local function buildUI()
                 tag = mk("TextLabel", {
                     Size = UDim2.fromOffset(128, 38), Position = UDim2.new(1, -138, 0, 0),
                     TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+                    BackgroundTransparency = 1, Font = LOOK.semi,
                     TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
                     TextColor3 = C.third, Text = it[2], Parent = b,
                 })
@@ -18006,13 +18133,13 @@ local function buildUI()
         })
         mk("TextLabel", {
             Size = UDim2.new(1, -100, 1, 0), Position = UDim2.fromOffset(20, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left,
             TextColor3 = C.second, Text = title, Parent = b,
         })
         local word = mk("TextLabel", {
             Size = UDim2.fromOffset(60, 44), Position = UDim2.new(1, -80, 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
             TextColor3 = C.third, Text = "Show", Parent = b,
         })
@@ -18081,7 +18208,7 @@ local function buildUI()
         })
         mk("TextLabel", {
             Size = UDim2.new(1, -110, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
-            TextWrapped = true, BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+            TextWrapped = true, BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
             TextColor3 = C.text, Text = label, LayoutOrder = 1, Parent = head,
         })
@@ -18148,7 +18275,7 @@ local function buildUI()
     local function actionRow(view, label, tone, cb)
         local b = mk("TextButton", {
             Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = C.base,
-            BorderSizePixel = 0, Font = Enum.Font.GothamMedium, TextSize = F.label,
+            BorderSizePixel = 0, Font = LOOK.semi, TextSize = F.label,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextColor3 = (tone == "danger") and C.stop or C.ivory, Text = label,
             AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = view,
@@ -18167,7 +18294,7 @@ local function buildUI()
         local tb = mk("TextBox", {
             Size = UDim2.new(1, -40, 0, 36), Position = UDim2.fromOffset(20, 8),
             BackgroundColor3 = C.raised, BorderSizePixel = 0,
-            ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = F.body,
+            ClearTextOnFocus = false, Font = LOOK.regular, TextSize = F.body,
             TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left,
             PlaceholderText = placeholder, PlaceholderColor3 = C.third,
             Text = "", Parent = f,
@@ -18208,7 +18335,7 @@ local function buildUI()
             Size = UDim2.new(1, 0, 0, 38),
             BackgroundColor3 = chosen and C.ivory or C.row,
             BackgroundTransparency = 0, BorderSizePixel = 0,
-            Font = chosen and Enum.Font.GothamBold or Enum.Font.Gotham,
+            Font = chosen and LOOK.bold or LOOK.regular,
             TextSize = F.body, TextColor3 = chosen and C.base or C.text,
             TextXAlignment = Enum.TextXAlignment.Left,
             Text = hasTag and "" or text,
@@ -18221,7 +18348,7 @@ local function buildUI()
             -- server" was drawn under "the hunt goes on there").
             mk("TextLabel", {
                 Size = UDim2.new(1, -118, 1, 0), BackgroundTransparency = 1,
-                Font = chosen and Enum.Font.GothamBold or Enum.Font.Gotham,
+                Font = chosen and LOOK.bold or LOOK.regular,
                 TextSize = F.body, TextColor3 = chosen and C.base or C.text,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 TextTruncate = Enum.TextTruncate.AtEnd, Text = text, Parent = b,
@@ -18229,7 +18356,7 @@ local function buildUI()
             mk("TextLabel", {
                 Size = UDim2.fromOffset(104, 38), Position = UDim2.new(1, -114, 0, 0),
                 TextTruncate = Enum.TextTruncate.AtEnd,
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+                BackgroundTransparency = 1, Font = LOOK.semi,
                 TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
                 TextColor3 = chosen and C.base or C.third, Text = tag, Parent = b,
             })
@@ -18412,7 +18539,7 @@ local function buildUI()
             local t = mk("TextLabel", {
                 Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
                 BackgroundColor3 = tint, BorderSizePixel = 0,
-                Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = text,
+                Font = LOOK.bold, TextSize = 9, TextColor3 = text,
                 Text = string.upper(pk and pk.name or tostring(pack)), Parent = parent,
             })
             corner(t, 5)
@@ -18436,19 +18563,19 @@ local function buildUI()
             corner(dot, 4)
             local line = label(card, {
                 Size = UDim2.new(1, -140, 0, 18), Position = UDim2.fromOffset(32, 8),
-                Font = Enum.Font.GothamBold, TextSize = F.body,
+                Font = LOOK.bold, TextSize = F.body,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
             })
             local sub = label(card, {
                 Size = UDim2.new(1, -140, 0, 26), Position = UDim2.fromOffset(32, 25),
-                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
                 TextColor3 = C.third, TextWrapped = true, Text = "",
             })
             local btn = mk("TextButton", {
                 Size = UDim2.fromOffset(88, 44), Position = UDim2.new(1, -96, 0, 4),
                 BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.text,
+                Font = LOOK.bold, TextSize = F.small, TextColor3 = C.text,
                 Text = "", Parent = card,
             })
             corner(btn, 10)
@@ -18517,13 +18644,13 @@ local function buildUI()
             local head = slot(view, 34)
             label(head, {
                 Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
-                Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                Font = LOOK.semi, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 Text = string.upper(title),
             })
             local cur = label(head, {
                 Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.new(0.5, -4, 0, 6),
-                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
             })
             local row = slot(view, 44)
@@ -18535,7 +18662,7 @@ local function buildUI()
                     Size = UDim2.new(1 / n, -6, 0, 44),
                     Position = UDim2.new((i - 1) / n, (i - 1) * 6 / n, 0, 0),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     Text = txt, Parent = row,
                 })
                 corner(b, 10)
@@ -18544,7 +18671,7 @@ local function buildUI()
             end
             local lineL = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 TextWrapped = true, Text = "", LayoutOrder = nextOrder(), Parent = view,
             })
@@ -18590,7 +18717,7 @@ local function buildUI()
                     Size = UDim2.new(1 / n, -4, 1, -8),
                     Position = UDim2.new((i - 1) / n, 4, 0, 4),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     Text = string.upper(tostring(o[2])), Parent = box,
                 })
                 corner(b, 9)
@@ -18635,13 +18762,13 @@ local function buildUI()
             })
             local t = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
                 TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
                 TextColor3 = C.text, Text = "", LayoutOrder = 1, Parent = card,
             })
             local r = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
                 TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
                 TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
             })
@@ -18682,18 +18809,18 @@ local function buildUI()
             stroke(b, C.hair)
             label(b, {
                 Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(14, 0),
-                Font = Enum.Font.GothamBold, TextSize = F.body,
+                Font = LOOK.bold, TextSize = F.body,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                 Text = "Fine-tune",
             })
             local hint = label(b, {
                 Size = UDim2.fromOffset(100, 48), Position = UDim2.new(1, -128, 0, 0),
-                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "",
             })
             local chev = label(b, {
                 Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -26, 0, 0),
-                Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = C.third, Text = ">",
+                Font = LOOK.regular, TextSize = 14, TextColor3 = C.third, Text = "›",
             })
             pressable(b)
             local box = mk("Frame", {
@@ -18777,7 +18904,7 @@ local function buildUI()
                 local p = mk("TextButton", {
                     Size = UDim2.fromOffset(w, 30), Position = UDim2.fromOffset(left, top),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.tiny, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.tiny, TextColor3 = C.second,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(st.label), Parent = box,
                 })
                 corner(p, 15)
@@ -18846,7 +18973,7 @@ local function buildUI()
                     Size = UDim2.new(1 / cols, -6, 0, 44),
                     Position = UDim2.new(c / cols, c * 6 / cols, 0, r * 50),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(it[2]), Parent = s,
                 })
                 corner(b, 10)
@@ -18878,7 +19005,7 @@ local function buildUI()
         function K.noteLine(view, textOrFn)
             local l = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 TextWrapped = true, Text = type(textOrFn) == "string" and textOrFn or "",
                 LayoutOrder = nextOrder(), Parent = view,
@@ -18901,13 +19028,13 @@ local function buildUI()
             local head = slot(view, 34)
             label(head, {
                 Size = UDim2.new(0.6, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
-                Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                Font = LOOK.semi, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 Text = string.upper(left),
             })
             local r = label(head, {
                 Size = UDim2.new(0.4, 0, 1, -6), Position = UDim2.new(0.6, -4, 0, 6),
-                Font = Enum.Font.Gotham, TextSize = F.tiny,
+                Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
             })
             if rightFn then
@@ -18937,14 +19064,14 @@ local function buildUI()
             end
             label(r, {
                 Size = UDim2.new(1, -(x0 + 170), 1, 0), Position = UDim2.fromOffset(x0, 0),
-                Font = Enum.Font.GothamMedium, TextSize = F.label,
+                Font = LOOK.semi, TextSize = F.label,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = text,
             })
             local function btn(x, txt)
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 5),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.body, TextColor3 = C.text,
+                    Font = LOOK.bold, TextSize = F.body, TextColor3 = C.text,
                     Text = txt, Parent = r,
                 })
                 corner(b, 12)
@@ -19034,9 +19161,8 @@ local function buildUI()
             local t = ACCENT[pack] or ACCENT.none
             return rgb(t[1]), rgb(t[2]), rgb(t[3]), rgb(t[4])
         end
-        -- Michroma is in Roblox's font list; if this build lacks it, a heavy Gotham.
-        local okF, fontM = pcall(function() return Enum.Font.Michroma end)
-        R.MICH = (okF and fontM) or Enum.Font.GothamBlack
+        -- Michroma through LOOK.mark; a build that lacks it gets a heavy Gotham.
+        R.MICH = LOOK.mark
         R.NICE = { farm = "Grind", raid = "Bosses + Raids", sea = "Sea", prehistoric = "Prehistoric",
             pvp = "PvP", fruits = "Fruits" }
         -- One mode of each pack: its packState is the pack's.
@@ -19047,29 +19173,29 @@ local function buildUI()
         -- id nil = not a page yet.
         R.COVER = {
             farm = { words = { "YOUR LEVEL.", "YOUR LIST.", "CIRCUIT FARM.", "OR RANDOM." },
-                sub = "2 modes  ·  your level or your list  ·  every kill counted",
+                sub = "2 modes · your level or your list · every kill counted",
                 inside = { { "circuit", "Circuit farm", "your targets, by level" },
                     { "random", "Random", "anything near you" } } },
             raid = { words = { "ELITE PIRATES.", "THE SWORD DEALER.", "RAIDS.", "NEXT SERVER." },
-                sub = "3 modes  ·  hunts that come to you  ·  every kill counted",
+                sub = "3 modes · hunts that come to you · every kill counted",
                 inside = { { "raid", "Raid", "the raid's island" },
                     { "elite", "Elite pirates", "Diablo · Deandre · Urban" },
                     { "sword", "Legendary swords", "Shizu · Saishi · Oroshi" } } },
             sea = { words = { "SEA BEASTS.", "LEVIATHAN.", "MIRAGE.", "FROM YOUR BOAT." },
-                sub = "4 modes  ·  from your boat  ·  every kill counted",
+                sub = "4 modes · from your boat · every kill counted",
                 inside = { { "sail", "Sea travel", "your boat, you steer" },
                     { "seaevents", "Sea events", "sea beasts, sharks, counted" },
                     { "levi", "Leviathan", "Frozen Dimension, with a group" },
                     { "mirage", "Mirage", "onto it, the dealer, chests, gear" } } },
             prehistoric = { words = { "THE ISLAND.", "THE VOLCANO.", "BONES.", "DRAGON EGGS." },
-                sub = "2 modes  ·  the island and its volcano  ·  bones and eggs counted",
+                sub = "2 modes · the island and its volcano · bones and eggs counted",
                 inside = { { "prehistoric", "Prehistoric", "the island + volcano loop" },
                     { "volcano", "Volcano event", "when Prehistoric is up" } } },
             pvp = { words = { "AIM.", "KEN.", "SPEED.", "WHEN YOU FIGHT." },
-                sub = "1 mode  ·  aim, Ken and speed  ·  the farm stops while you fight",
+                sub = "1 mode · aim, Ken and speed · the farm stops while you fight",
                 inside = { { "pvp", "PvP", "aim, Ken, speed - farm stops" } } },
             fruits = { words = { "A FRUIT SPAWNS.", "YOU GO GET IT.", "STORED AT ONCE.", "BACK TO YOUR FARM." },
-                sub = "a fruit notifier that also grabs it  ·  you choose the server",
+                sub = "a fruit notifier that also grabs it · you choose the server",
                 inside = {
                     { false, "Fruit notifier", "every spawn in your server, and where" },
                     { false, "Grab it while you farm", "leaves your farm, grabs it, comes back" },
@@ -19107,7 +19233,7 @@ local function buildUI()
             end
             if kind == "owner" then
                 return { chip = "OWNER", pack = "none", text = "everything is open on your key",
-                    short = "owner  ·  all open", on = true }
+                    short = "owner · all open", on = true }
             end
             local n, bestF, bestRank = 0, nil, nil
             for _, f in ipairs(PACK_ORDER) do
@@ -19124,7 +19250,7 @@ local function buildUI()
             local when = R.packWhen(bestF)
             return { chip = string.upper(R.NICE[bestF]), pack = bestF,
                 text = (when == "for ever") and "yours for ever" or (when .. " on your key"),
-                short = ((n == 1) and R.NICE[bestF] or (n .. " packs")) .. "  ·  " .. shortWhen(bestF), on = true }
+                short = ((n == 1) and R.NICE[bestF] or (n .. " packs")) .. " · " .. shortWhen(bestF), on = true }
         end
 
         -- ---- drawing: circles, slabs, the lock ----
@@ -19332,11 +19458,11 @@ local function buildUI()
                 BackgroundTransparency = 1, Font = R.MICH, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
                 TextColor3 = C.text, TextTruncate = Enum.TextTruncate.AtEnd, Text = pk.name, Parent = b })
             mk("TextLabel", { Size = UDim2.new(1, -24, 0, 44), Position = UDim2.fromOffset(12, 119),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
                 TextWrapped = true, TextColor3 = text, Text = pk.line, Parent = b })
             mk("TextLabel", { Size = UDim2.new(1, -24, 0, 18), Position = UDim2.new(0, 12, 1, -28),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, RichText = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
                 Text = open and ('<font color="#3FD07E"><b>on</b></font>' .. ((when == "open") and "" or ("   " .. tostring(when))))
                     or ('<font size="13" color="#F2EFEA"><b>' .. pk.price .. '</b></font> / week'),
@@ -19358,28 +19484,32 @@ local function buildUI()
         local v = makeView("home")
         v.Visible = true
         v.Position = UDim2.fromScale(0, 0)
-        gap(v, 4)
+        gap(v, 6)
+        -- Full width with 20 px of padding each side: the text starts at the
+        -- rows' left edge (a width of -40 in a centred list, plus padding,
+        -- had pushed it 20 px right of them).
         local subject = mk("TextLabel", {
-            Size = UDim2.new(1, -40, 0, 26), BackgroundTransparency = 1,
-            Font = Enum.Font.GothamBold, TextSize = F.subject,
+            Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1,
+            Font = LOOK.bold, TextSize = LOOK.size.subject,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
             TextTruncate = Enum.TextTruncate.AtEnd, Text = "Idle",
             LayoutOrder = nextOrder(), Parent = v,
         })
-        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = subject })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = subject })
+        gap(v, 2)
         local detail = mk("TextLabel", {
-            Size = UDim2.new(1, -40, 0, 18), BackgroundTransparency = 1,
-            Font = Enum.Font.Gotham, TextSize = F.small,
+            Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1,
+            Font = LOOK.regular, TextSize = LOOK.size.sub,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
             TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
             LayoutOrder = nextOrder(), Parent = v,
         })
-        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = detail })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = detail })
         addLive(function()
             if P.running then
                 subject.Text = tostring(activeName or "Fast farm")
                 local mins = math.max((os.clock() - stats.startedAt) / 60, 1 / 60)
-                detail.Text = string.format("%s  ·  %d kills  ·  %.0f/min  ·  %s",
+                detail.Text = string.format("%s · %d kills · %.0f/min · %s",
                     state, stats.kills, stats.kills / mins, statusLine)
             else
                 subject.Text = "Idle"
@@ -19387,12 +19517,12 @@ local function buildUI()
             end
             -- RACE: V4 on = every weapon (user, 2026-10-12).
             local race = (P :: any).race
-            if race and race.allNow() then detail.Text = "V4 - every weapon  ·  " .. detail.Text end
+            if race and race.allNow() then detail.Text = "V4 - every weapon · " .. detail.Text end
         end)
         gap(v, 12)
         local hero = mk("TextButton", {
             Size = UDim2.new(1, -40, 0, 52), BackgroundColor3 = C.ivory,
-            BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 16,
+            BorderSizePixel = 0, Font = LOOK.bold, TextSize = 16,
             TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
             LayoutOrder = nextOrder(), Parent = v,
         })
@@ -19408,10 +19538,10 @@ local function buildUI()
         local function heroUp() tween(hero, { Size = UDim2.new(1, -40, 0, 52) }, QUICK) end
         hero.MouseButton1Up:Connect(heroUp)
         hero.MouseLeave:Connect(heroUp)
-        -- It says what it starts: "Start  ·  Haki berries".
+        -- It says what it starts: "Start · Haki berries".
         addLive(function()
             local busy = P.running or CFG.Pvp
-            hero.Text = (busy and "Stop" or "Start") .. "  ·  " .. modeName()
+            hero.Text = (busy and "Stop" or "Start") .. " · " .. modeName()
             hero.BackgroundColor3 = busy and C.stop or C.ivory
             hero.TextColor3 = busy and C.text or C.base
         end)
@@ -19436,17 +19566,17 @@ local function buildUI()
         local artBox = mk("Frame", { Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(10, 10),
             BackgroundColor3 = C.base, BorderSizePixel = 0, ClipsDescendants = true, Parent = card })
         corner(artBox, 10)
-        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 20), Position = UDim2.fromOffset(64, 11),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 18), Position = UDim2.fromOffset(66, 14),
+            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = "", Parent = card })
-        local mLine = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 18), Position = UDim2.fromOffset(64, 32),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+        local mLine = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 16), Position = UDim2.fromOffset(66, 34),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.second, Text = "", Parent = card })
         local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -46, 0, 10),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 14, TextColor3 = C.third,
-            Text = "x", AutoButtonColor = false, Parent = card })
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute,
+            Text = "×", AutoButtonColor = false, Parent = card })
         local cur = nil
         card.Activated:Connect(function() if cur then show("cover_" .. cur.pack) end end)
         local function applyGrow(name)
@@ -19462,7 +19592,7 @@ local function buildUI()
                 card.BackgroundColor3, cardStroke.Color = tint, soft
                 mLine.TextColor3 = text
                 mTitle.Text = m.title
-                mLine.Text = PACKS[m.pack].name .. " runs it for you  ·  look inside"
+                mLine.Text = PACKS[m.pack].name .. " runs it for you · look inside"
                 if shown ~= m.pack then
                     shown = m.pack
                     for _, k in ipairs(artBox:GetChildren()) do
@@ -19478,6 +19608,17 @@ local function buildUI()
             if cur then dismissed[cur.key] = true end
             setMoment(nil)
         end)
+        -- The pack a headline belongs to, when this key does not hold it.
+        function P.newsPack(it)
+            if it.tone ~= "up" then return nil end
+            local pack
+            local boss = string.match(it.key, "^boss:(.+)$")
+            if it.key == "mirage" then pack = "sea"
+            elseif it.key == "prehistoric" then pack = "prehistoric"
+            elseif boss then pack = "raid" end
+            if pack and P.packState(R.REP[pack]) == "locked" then return pack end
+            return nil
+        end
         local function findMoment()
             local N = P.news
             if not N then return nil end
@@ -19509,7 +19650,7 @@ local function buildUI()
         heading2(v, "mode")
         navRow(v, "Mode", modeValue, "modes")
 
-        heading2(v, "fight  ·  every mode")
+        heading2(v, "fight · every mode")
         navRow(v, "Attack", function()
             -- FIGHT WITH: one weapon decides this mode - say so.
             local fwText = P.fightWithText(modeNow())
@@ -19523,7 +19664,7 @@ local function buildUI()
                     for _, k in ipairs(KEYS) do if w[k] then return s end end
                 end
             end
-            return s .. "  ·  no skills on"
+            return s .. " · no skills on"
         end, "attack")
         hairline(v)
         navRow(v, "Magnet", function()
@@ -19533,7 +19674,7 @@ local function buildUI()
         hairline(v)
         navRow(v, "Position", function()
             if CFG.HeightMode == "fixed" then return math.floor(CFG.HeightFixed) .. " up, fixed" end
-            return "auto  ·  " .. math.floor(CFG.HeightSafe) .. " up" .. (CFG.StayHigh and ", always" or "")
+            return "auto · " .. math.floor(CFG.HeightSafe) .. " up" .. (CFG.StayHigh and ", always" or "")
         end, "position")
         hairline(v)
         navRow(v, "Safety & haki", function()
@@ -19546,7 +19687,7 @@ local function buildUI()
         end, "travel")
         hairline(v)
         navRow(v, "Servers & team", function()
-            return (CFG.HuntHop and "hop on" or "no hop") .. "  ·  "
+            return (CFG.HuntHop and "hop on" or "no hop") .. " · "
                 .. (CFG.AutoTeam and tostring(CFG.Team) or "team: yours")
         end, "servers")
         hairline(v)
@@ -19561,9 +19702,9 @@ local function buildUI()
             local lock = (k and k.on) and "locked" or "unlocked"
             local m = meas
             if m and m.fight > 5 then
-                return lock .. "  ·  " .. string.format("%.1f kills/min", m.kills / (m.fight / 60))
+                return lock .. " · " .. string.format("%.1f kills/min", m.kills / (m.fight / 60))
             end
-            return lock .. "  ·  " .. stats.kills .. " killed"
+            return lock .. " · " .. stats.kills .. " killed"
         end, "stats")
     end
 
@@ -19585,21 +19726,19 @@ local function buildUI()
             corner(b, 12)
             local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X,
                 Position = UDim2.fromOffset(12, 12), BackgroundColor3 = C.ivory, BorderSizePixel = 0,
-                Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.base, Text = k0.chip, Parent = b })
+                Font = LOOK.bold, TextSize = 9, TextColor3 = C.base, Text = k0.chip, Parent = b })
             corner(chip, 6)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7), Parent = chip })
             -- the chip is as wide as its word: the sentence starts after it
             local x0 = 12 + 14 + math.max(36, #k0.chip * 7) + 10
             local sentence = mk("TextLabel", { Size = UDim2.new(1, -(x0 + 76), 1, 0), Position = UDim2.fromOffset(x0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                 TextColor3 = C.second, Text = k0.text, Parent = b })
             mk("TextLabel", { Size = UDim2.fromOffset(40, 44), Position = UDim2.new(1, -62, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "Key", Parent = b })
-            mk("TextLabel", { Size = UDim2.fromOffset(16, 44), Position = UDim2.new(1, -26, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = C.third,
-                Text = ">", Parent = b })
+            chevron(b)
             pressable(b)
             b.Activated:Connect(function() show("key") end)
             addLive(function()
@@ -19613,49 +19752,49 @@ local function buildUI()
         readout(v, function()
             local lv = P.seaev and P.seaev.levi
             if CFG.LeviFight and lv then
-                return "LEVIATHAN  " .. tostring(lv.note) .. string.format("\n%d Leviathans down  ·  %d dodges",
+                return "LEVIATHAN  " .. tostring(lv.note) .. string.format("\n%d Leviathans down · %d dodges",
                     lv.kills, P.seaev.dodges or 0)
             end
             if CFG.Volcano and P.sea.ev then
                 local ev = P.sea.ev
-                return string.format("VOLCANO  %s\n%d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                return string.format("VOLCANO  %s\n%d vents closed · %d golems down · %d bones · %d eggs",
                     tostring(ev.note), ev.vents, ev.golems, ev.bones, ev.eggs)
             end
             if CFG.Hunt then
                 local t = P.elite.tally
                 local k = CFG.HuntKind
-                local count = P.sea.MIRAGE_HUNT[k] and string.format("%d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears  ·  %s",
+                local count = P.sea.MIRAGE_HUNT[k] and string.format("%d Mirages · %d dealers · %d chests · %d Blue Gears · %s",
                         P.sea.tally.mirages, P.sea.tally.dealers, P.sea.tally.chests, P.sea.tally.gears,
                         P.handsOff and "YOUR TURN - the character is yours"
                             or (P.sea.mirage and "on the Mirage")
                             or (P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing"))
-                    or (k == "seaevents") and string.format("%d of %d sea events  ·  Spy: %s", P.seaev.count.total,
+                    or (k == "seaevents") and string.format("%d of %d sea events · Spy: %s", P.seaev.count.total,
                         math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)),
                         P.seaev.spy and tostring(P.seaev.spy.text) or "not asked yet")
-                    or (k == "prehistoric") and string.format("%d islands found  ·  %s", P.sea.tally.found,
+                    or (k == "prehistoric") and string.format("%d islands found · %s", P.sea.tally.found,
                         P.sea.meters and string.format("%d m from Tiki", math.floor(P.sea.meters)) or "not sailing")
-                    or (k == "sail") and ((P.sea.driving and P.sea.meters) and string.format("%d m from Tiki  ·  danger %s",
+                    or (k == "sail") and ((P.sea.driving and P.sea.meters) and string.format("%d m from Tiki · danger %s",
                         math.floor(P.sea.meters), tostring(P.sea.danger or "?")) or "not sailing")
                     or (k == "fruit") and string.format("%d fruits stored", t.fruits or 0)
                     or (k == "berry") and string.format("%d berries picked", t.berries or 0)
-                    or (k == "recipe") and string.format("%d recipes learned  ·  here: %s", t.recipes or 0,
+                    or (k == "recipe") and string.format("%d recipes learned · here: %s", t.recipes or 0,
                         tostring(P.elite.offer or "not asked yet"))
-                    or (k == "sword") and string.format("%d swords bought  ·  here: %s", t.swords or 0,
+                    or (k == "sword") and string.format("%d swords bought · here: %s", t.swords or 0,
                         tostring(P.elite.swordOffer or "not asked yet"))
-                    or (k == "ember") and string.format("%d Blaze Embers  ·  you have %s", P.ember.tally.embers,
+                    or (k == "ember") and string.format("%d Blaze Embers · you have %s", P.ember.tally.embers,
                         P.ember.have and tostring(P.ember.have) or "?")
-                    or (k == "halloween") and string.format("%d pumpkins  ·  %d doors  ·  %d killed  ·  tokens %s",
+                    or (k == "halloween") and string.format("%d pumpkins · %d doors · %d killed · tokens %s",
                         P.halloween.tally.pumpkins, P.halloween.tally.doors, P.halloween.tally.kills,
                         P.halloween.have and tostring(P.halloween.have) or "?")
-                    or (k == "flower") and string.format("%d Fire Flowers picked  ·  you have %s", t.flowers or 0,
+                    or (k == "flower") and string.format("%d Fire Flowers picked · you have %s", t.flowers or 0,
                         P.elite.flowerHave and tostring(P.elite.flowerHave) or "?")
-                    or string.format("%d elites down  ·  %d chalice", t.kills, t.chalices)
-                return string.format("%s\n%d joined  ·  %s", tostring(P.elite.note), t.joins, count)
+                    or string.format("%d elites down · %d chalice", t.kills, t.chalices)
+                return string.format("%s\n%d joined · %s", tostring(P.elite.note), t.joins, count)
             end
             if CFG.RandomMode then return tostring(P.randomNote) end
             if CFG.RaidMode then return tostring(P.raidNote) end
-            if CFG.Circuit then return "circuit farm  ·  your targets, in order" end
-            return "no mode on  ·  pick one below - nothing runs until you do"
+            if CFG.Circuit then return "circuit farm · your targets, in order" end
+            return "no mode on · pick one below - nothing runs until you do"
         end)
         local function on(id)
             return function()
@@ -19676,7 +19815,7 @@ local function buildUI()
             end
             return any
         end
-        heading2(v, "main job  ·  one at a time")
+        heading2(v, "main job · one at a time")
         local any = rows({
             { "Circuit farm", "your targets, by level", "circuit" },
             { "Random", "anything near you", "random" },
@@ -19700,11 +19839,11 @@ local function buildUI()
             end } })
         end
         if P.packState("berry") == "open" then
-            heading2(v, "owner tools  ·  hunt, next server when not here")
+            heading2(v, "owner tools · hunt, next server when not here")
             rows({
                 { "Haki berries", "Legendary Aura colors", "berry" },
                 { "Aura recipe", "the Barista Cousin", "recipe" },
-                { "Fire Flower", "Draco V2  ·  Third Sea", "flower" },
+                { "Fire Flower", "Draco V2 · Third Sea", "flower" },
                 { "Blaze Ember", "Hydra Island quests", "ember" },
                 { "Halloween", "pumpkins · Harvest Moon doors", "halloween" },
             })
@@ -19722,12 +19861,12 @@ local function buildUI()
             local h = mk("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v })
             mk("TextLabel", { Size = UDim2.new(1, -120, 0, 26), Position = UDim2.fromOffset(20, 8),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                Text = (nMore > 0) and ("LIBRARY  ·  " .. nMore .. (nMore == 1 and " MORE PACK" or " MORE PACKS"))
-                    or "LIBRARY  ·  EVERY PACK IS YOURS", Parent = h })
+                Text = (nMore > 0) and ("LIBRARY · " .. nMore .. (nMore == 1 and " MORE PACK" or " MORE PACKS"))
+                    or "LIBRARY · EVERY PACK IS YOURS", Parent = h })
             mk("TextLabel", { Size = UDim2.fromOffset(90, 26), Position = UDim2.new(1, -110, 0, 8),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "tap a cover", Parent = h })
         end
         local grid = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -19761,19 +19900,19 @@ local function buildUI()
                 BackgroundTransparency = 1, Font = R.MICH, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
                 TextColor3 = C.text, Text = "FRUITS", Parent = b })
             local soon = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-                Position = UDim2.fromOffset(170, 14), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                Position = UDim2.fromOffset(170, 14), BackgroundTransparency = 1, Font = LOOK.bold,
                 TextSize = 9, TextColor3 = text, Text = "SOON", Parent = b })
             corner(soon, 5)
             mk("UIStroke", { Color = soft, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = soon })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = soon })
             mk("TextLabel", { Size = UDim2.new(1, -112, 0, 32), Position = UDim2.fromOffset(98, 36),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
                 TextWrapped = true, TextColor3 = text, Text = PACKS.fruits.line, Parent = b })
             mk("TextLabel", { Size = UDim2.new(1, -112, 0, 18), Position = UDim2.new(0, 98, 1, -28),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, RichText = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-                Text = '<font size="13" color="#F2EFEA"><b>' .. PACKS.fruits.price .. '</b></font> lifetime  ·  or $4.99 / month',
+                Text = '<font size="13" color="#F2EFEA"><b>' .. PACKS.fruits.price .. '</b></font> lifetime · or $4.99 / month',
                 Parent = b })
             if not fruitsOpen then
                 local badge = mk("Frame", { Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -36, 0, 10),
@@ -19800,20 +19939,20 @@ local function buildUI()
             R.artAll(art)
             local best = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
                 Position = UDim2.fromOffset(108, 14), BackgroundColor3 = C.ivory, BorderSizePixel = 0,
-                Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.base, Text = "BEST VALUE", Parent = b })
+                Font = LOOK.bold, TextSize = 9, TextColor3 = C.base, Text = "BEST VALUE", Parent = b })
             corner(best, 5)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = best })
             mk("TextLabel", { Size = UDim2.new(1, -122, 0, 18), Position = UDim2.fromOffset(108, 38),
                 BackgroundTransparency = 1, Font = R.MICH, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
                 TextColor3 = C.text, Text = "EVERYTHING", Parent = b })
             mk("TextLabel", { Size = UDim2.new(1, -122, 0, 30), Position = UDim2.fromOffset(108, 60),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
                 TextWrapped = true, TextColor3 = C.second, Text = "All 5 packs, plus seasonal events", Parent = b })
             mk("TextLabel", { Size = UDim2.new(1, -122, 0, 18), Position = UDim2.new(0, 108, 1, -30),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, RichText = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                Text = '<font size="13" color="#F2EFEA"><b>$2.99</b></font> / week  ·  $5.99 / month', Parent = b })
+                Text = '<font size="13" color="#F2EFEA"><b>$2.99</b></font> / week · $5.99 / month', Parent = b })
             pressable(b)
             b.Activated:Connect(function() R.copyStore() end)
             gap(v, 4)
@@ -19855,7 +19994,7 @@ local function buildUI()
             end
             local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
                 Position = UDim2.fromOffset(12, 12), BackgroundColor3 = Color3.fromRGB(11, 10, 9),
-                BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.text,
+                BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9, TextColor3 = C.text,
                 Text = "PREVIEW", Parent = card })
             corner(chip, 5)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = chip })
@@ -19890,7 +20029,7 @@ local function buildUI()
                 TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                 Text = pk.name, LayoutOrder = 1, Parent = head })
             mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small, TextWrapped = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small, TextWrapped = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = cv.sub,
                 LayoutOrder = 2, Parent = head })
 
@@ -19913,11 +20052,11 @@ local function buildUI()
                     local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
                         LayoutOrder = nextOrder(), Parent = v })
                     mk("TextLabel", { Size = UDim2.new(1, -60, 0, 20), Position = UDim2.fromOffset(20, 8),
-                        BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                        BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
                         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                         TextColor3 = C.text, Text = r[2], Parent = row })
                     mk("TextLabel", { Size = UDim2.new(1, -60, 0, 16), Position = UDim2.fromOffset(20, 28),
-                        BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                         TextColor3 = C.third, Text = r[3], Parent = row })
                     if not open then R.lock(row, 322, 20, C.third, 11) end
@@ -19941,39 +20080,39 @@ local function buildUI()
                     BackgroundColor3 = C.live, BorderSizePixel = 0, Parent = row })
                 corner(dot, 4)
                 mk("TextLabel", { Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(18, 0),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.body,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.body,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "On your key", Parent = row })
                 mk("TextLabel", { Size = UDim2.fromOffset(120, 22), Position = UDim2.new(1, -120, 0, 0),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
                     TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.live,
                     Text = (when == "open") and "" or tostring(when), Parent = row })
             else
                 R.lock(row, 6, 7, C.second, 11)
                 mk("TextLabel", { Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(22, 0),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.body,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.body,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "Not on your key yet", Parent = row })
                 if pk.soon then
                     local c2 = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
                         AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 2),
-                        BackgroundColor3 = tint, BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 9,
+                        BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9,
                         TextColor3 = text, Text = "COMING SOON", Parent = row })
                     corner(c2, 5)
                     mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = c2 })
                 end
-                mk("TextLabel", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                mk("TextLabel", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Font = LOOK.bold,
                     TextSize = 14, RichText = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
                     Text = '<font size="28" color="#F2EFEA"><b>' .. pk.price .. '</b></font>  '
                         .. (pk.soon and "once, yours for good" or "/ week"),
                     LayoutOrder = nx(), Parent = plate })
                 mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12, TextWrapped = true,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12, TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, LayoutOrder = nx(),
                     Text = pk.soon and "or $4.99 / month. The game's own notifier is 2,700 Robux, and it only tells you. Not in EVERYTHING."
                         or "or every pack: EVERYTHING, $2.99 / week", Parent = plate })
                 local get = mk("TextButton", { Size = UDim2.new(1, 0, 0, 52),
                     BackgroundColor3 = pk.soon and C.pressed or C.ivory, BorderSizePixel = 0,
-                    Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = pk.soon and C.second or C.base,
-                    Text = pk.soon and "Coming soon" or ("Get " .. R.NICE[f] .. "  ·  copy store link"),
+                    Font = LOOK.bold, TextSize = 15, TextColor3 = pk.soon and C.second or C.base,
+                    Text = pk.soon and "Coming soon" or ("Get " .. R.NICE[f] .. " · copy store link"),
                     AutoButtonColor = false, LayoutOrder = nx(), Parent = plate })
                 corner(get, 14)
                 get.Activated:Connect(function()
@@ -19985,7 +20124,7 @@ local function buildUI()
                     end
                 end)
                 local code = mk("TextButton", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
-                    BorderSizePixel = 0, Font = Enum.Font.GothamMedium, TextSize = F.body, TextColor3 = C.text,
+                    BorderSizePixel = 0, Font = LOOK.semi, TextSize = F.body, TextColor3 = C.text,
                     Text = pk.soon and "Back to the Library" or "I have a code", AutoButtonColor = false,
                     LayoutOrder = nx(), Parent = plate })
                 corner(code, 14)
@@ -20029,7 +20168,7 @@ local function buildUI()
         mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 8),
             PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 12), Parent = card })
         local who = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-            BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 9,
+            BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9,
             TextColor3 = C.base, Text = "", LayoutOrder = 1, Parent = card })
         corner(who, 5)
         mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = who })
@@ -20049,7 +20188,7 @@ local function buildUI()
             TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = masked(), Parent = keyRow })
         local copy = mk("TextButton", { Size = UDim2.fromOffset(52, 36), Position = UDim2.new(1, -52, 0, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small, TextColor3 = C.second,
+            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small, TextColor3 = C.second,
             Text = "Copy", AutoButtonColor = false, Parent = keyRow })
         copy.Activated:Connect(function()
             local k = _G.BFF_KEY
@@ -20060,7 +20199,7 @@ local function buildUI()
                 say("no key to copy")
             end
         end)
-        mk("TextLabel", { Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+        mk("TextLabel", { Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
             TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
             Text = "Keep it private.", LayoutOrder = 3, Parent = card })
         gap(v, 2)
@@ -20075,10 +20214,10 @@ local function buildUI()
                 BackgroundColor3 = dotColor, BorderSizePixel = 0, Parent = b })
             corner(dot, 4)
             mk("TextLabel", { Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(38, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.body,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.body,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b })
             local state = mk("TextLabel", { Size = UDim2.fromOffset(110, 42), Position = UDim2.new(1, -130, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = b })
             local lockHolder = mk("Frame", { Size = UDim2.fromOffset(20, 42), Position = UDim2.new(1, -156, 0, 0),
                 BackgroundTransparency = 1, Parent = b })
@@ -20119,7 +20258,7 @@ local function buildUI()
 
         -- REDEEM: a code from the store adds days to its pack, on this key.
         heading2(v, "redeem a code")
-        local lab = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+        local lab = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.regular,
             TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
             Text = "Code from the store", LayoutOrder = nextOrder(), Parent = v })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = lab })
@@ -20134,7 +20273,7 @@ local function buildUI()
             mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = tb })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 12), Parent = tb })
             local go = mk("TextButton", { Size = UDim2.fromOffset(92, 44), Position = UDim2.new(1, -108, 0, 4),
-                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = F.body,
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.bold, TextSize = F.body,
                 TextColor3 = C.base, Text = "Redeem", AutoButtonColor = false, Parent = row })
             corner(go, 12)
             local function run(val)
@@ -20148,7 +20287,7 @@ local function buildUI()
         end
         -- The answer: green when days were added, red on a refusal.
         local note = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, BorderSizePixel = 0, Font = Enum.Font.Gotham,
+            BackgroundTransparency = 1, BorderSizePixel = 0, Font = LOOK.regular,
             TextSize = 12, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
             Text = "", LayoutOrder = nextOrder(), Parent = v })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
@@ -20250,7 +20389,7 @@ local function buildUI()
         })
         do
             local v = listBox
-            heading2(v, "your list  ·  tap to add, # = order")
+            heading2(v, "your list · tap to add, # = order")
             local box = chooser(v, 230)
             local signature = nil
             local function refresh()
@@ -20296,9 +20435,9 @@ local function buildUI()
                             for _, n in ipairs(rec.names) do if counts[n] then shown = n end end
                         end
                         local at, where = bossUp(shown)
-                        bossTag[shown] = "boss  ·  " .. ((where == "here" and "up, here")
+                        bossTag[shown] = "boss · " .. ((where == "here" and "up, here")
                             or (where == "parked" and "up") or "not spawned")
-                            .. ((lv and lv < rec.lv) and ("  ·  Lv " .. rec.lv .. " for the quest") or "")
+                            .. ((lv and lv < rec.lv) and (" · Lv " .. rec.lv .. " for the quest") or "")
                         add(shown)
                         for _, c in ipairs(cand) do
                             if c.name == shown and not counts[shown] then
@@ -20480,10 +20619,10 @@ local function buildUI()
                 local rl = rd.loop
                 return table.concat({
                     "raid      " .. tostring(P.raidNote),
-                    string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
-                        rd.note and ("  ·  last: " .. rd.note) or ""),
-                    string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
-                        rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
+                    string.format("done      %d raids · %d relocations%s", rd.done, rd.moves,
+                        rd.note and (" · last: " .. rd.note) or ""),
+                    string.format("loop      %s · %d chips · %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
+                        rl.chips, rl.presses, rl.paid and (" · last paid " .. tostring(rl.paid)) or ""),
                 }, "\n")
             end)
             sliderRow(v, "Pulls within", 100, 1500, 50,
@@ -20537,7 +20676,7 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham, TextSize = F.tiny, TextColor3 = C.third,
+                Font = LOOK.regular, TextSize = F.tiny, TextColor3 = C.third,
                 TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1,
                 Text = "After a join, the Elite Hunter is asked:", Parent = s,
             })
@@ -20554,9 +20693,9 @@ local function buildUI()
                 })
                 mk("TextLabel", {
                     Size = UDim2.new(0.42, 0, 1, 0), BackgroundTransparency = 1,
-                    Font = Enum.Font.GothamMedium, TextSize = F.small, TextColor3 = C.text,
+                    Font = LOOK.semi, TextSize = F.small, TextColor3 = C.text,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    TextTruncate = Enum.TextTruncate.AtEnd, Text = ln[1] .. "  ·  " .. ln[2], Parent = r,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = ln[1] .. " · " .. ln[2], Parent = r,
                 })
                 local track = mk("Frame", {
                     Size = UDim2.new(0.38, 0, 0, 6), Position = UDim2.new(0.44, 0, 0.5, -3),
@@ -20570,14 +20709,14 @@ local function buildUI()
                 corner(fill, 3)
                 local val = mk("TextLabel", {
                     Size = UDim2.new(0.16, 0, 1, 0), Position = UDim2.new(0.84, 0, 0, 0),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
                     TextColor3 = C.second, TextXAlignment = Enum.TextXAlignment.Right, Text = "", Parent = r,
                 })
                 rows[i] = { fill = fill, val = val, f = ln[3] }
             end
             mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham, TextSize = F.tiny, TextColor3 = C.third,
+                Font = LOOK.regular, TextSize = F.tiny, TextColor3 = C.third,
                 TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 9,
                 Text = "then the next server", Parent = s,
             })
@@ -20613,7 +20752,7 @@ local function buildUI()
                 return table.concat({
                     "Elite Hunter  " .. tostring(el.reply or "not asked")
                         .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
-                    string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
+                    string.format("had one   %d (%s) · down %d · chalices %d", t.found, rate, t.kills, t.chalices),
                     "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
                     "last      " .. tostring(el.lastKill or "-"),
                 }, "\n")
@@ -20639,7 +20778,7 @@ local function buildUI()
             local ok, list = pcall(P.fruitsLying)
             if ok and type(list) == "table" and #list > 0 then
                 for _, f in ipairs(list) do
-                    table.insert(lines, string.format("   %s  ·  %s%s", P.fruitWords(f),
+                    table.insert(lines, string.format("   %s · %s%s", P.fruitWords(f),
                         f.dropper and ("dropped by " .. tostring(f.dropper) .. (f.dropperNear and ", still by it" or ""))
                             or "server spawn",
                         (f.how == "mesh name" or f.how == "look learned") and (", named by its " .. f.how) or ""))
@@ -20656,7 +20795,7 @@ local function buildUI()
                     or "storage   its size is not read yet")
             end
             if P.route then table.insert(lines, P.route.words()) end
-            table.insert(lines, string.format("keep safe %s  ·  history %d fruits",
+            table.insert(lines, string.format("keep safe %s · history %d fruits",
                 ((CFG.FruitKeepValue or 0) > 0) and ("worth " .. P.valueWords(CFG.FruitKeepValue) .. "+ on the market") or "off",
                 #(P.fruitLog or {})))
             return table.concat(lines, "\n")
@@ -20667,7 +20806,7 @@ local function buildUI()
             for _, c in pairs(CFG.FruitMenu) do
                 if c == "take" then take += 1 elseif c == "skip" then skip += 1 end
             end
-            return string.format("%s+  ·  %d take  ·  %d skip", P.valueWords(CFG.FruitMinPrice), take, skip)
+            return string.format("%s+ · %d take · %d skip", P.valueWords(CFG.FruitMinPrice), take, skip)
         end, "fruitmenu")
         navRow(v, "Trades", function() return P.trades.short() end, "trades")
         switchRow(v, "Include fruits players dropped",
@@ -20802,13 +20941,13 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, -150, 0, 20), Position = UDim2.fromOffset(20, 6),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                 TextColor3 = C.text, Text = n, Parent = f,
             })
             local sub = mk("TextLabel", {
                 Size = UDim2.new(1, -150, 0, 16), Position = UDim2.fromOffset(20, 26),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                 TextColor3 = C.third, Text = "", Parent = f,
             })
@@ -20816,7 +20955,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(52, 30), Position = UDim2.new(1, x, 0.5, -15),
                     BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     Text = text, Parent = f,
                 })
                 corner(b, 8)
@@ -20855,7 +20994,7 @@ local function buildUI()
         readout(v, function()
             local log = P.fruitLog or {}
             local lines = { string.format("picked    %d fruits%s", #log,
-                (#log > 0) and ("  ·  since " .. os.date("%d %b %H:%M", log[1].t or 0)) or "") }
+                (#log > 0) and (" · since " .. os.date("%d %b %H:%M", log[1].t or 0)) or "") }
             local held = P.elite and P.elite.keepHeld
             if held and next(held) then table.insert(lines, "now       " .. tostring(P.elite.fruitNote)) end
             table.insert(lines, "server #  the hunt's join count when it came (Servers & team)")
@@ -21026,7 +21165,7 @@ local function buildUI()
         gap(v, 6)
         P.kit.pageTop(v, "raid")
         P.kit.modeStrip(v, "sword")
-        heading2(v, "legendary swords  ·  $2,000,000 each")
+        heading2(v, "legendary swords · $2,000,000 each")
         local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
         local _, _, accent, _ = P.r2.acc("raid")
         local cards = {}
@@ -21052,18 +21191,18 @@ local function buildUI()
                 })
                 local name = mk("TextLabel", {
                     Size = UDim2.new(1, -110, 0, 22), Position = UDim2.fromOffset(14, 8),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.body,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.body,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = n, Parent = b,
                 })
                 mk("TextLabel", {
                     Size = UDim2.new(1, -110, 0, 16), Position = UDim2.fromOffset(14, 31),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                     Text = "was " .. OLD[n], Parent = b,
                 })
                 local pill = mk("TextLabel", {
                     Size = UDim2.fromOffset(70, 30), Position = UDim2.new(1, -84, 0, 13),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, Font = LOOK.bold,
                     TextSize = F.small, TextColor3 = C.second, Text = "", Parent = b,
                 })
                 corner(pill, 8)
@@ -21127,12 +21266,12 @@ local function buildUI()
         readout(v, function()
             local el = P.elite
             local lines = { "last      " .. tostring(el.flowerNote),
-                string.format("picked    %d   ·   you have %s", el.tally.flowers or 0,
+                string.format("picked    %d · you have %s", el.tally.flowers or 0,
                     el.flowerHave and tostring(el.flowerHave) or "not read yet") }
             if CFG.Hunt and CFG.HuntKind == "flower" then
                 if el.flowerFirstKill then
                     local s = math.floor(os.clock() - el.flowerFirstKill)
-                    table.insert(lines, string.format("here      %d:%02d since the first kill  ·  no flower = next server at %g min",
+                    table.insert(lines, string.format("here      %d:%02d since the first kill · no flower = next server at %g min",
                         s // 60, s % 60, CFG.FlowerGiveUp or 2.5))
                 else
                     table.insert(lines, "here      the clock starts at the first kill")
@@ -21171,9 +21310,9 @@ local function buildUI()
             local lines = {
                 "now       " .. tostring(m.note),
                 "quest     " .. tostring(m.quest or "none yet") .. (m.how and ("  (" .. m.how .. ")") or ""),
-                string.format("embers    %d taken   ·   you have %s", m.tally.embers, m.have and tostring(m.have) or "not read yet"),
-                string.format("quests    %d   ·   trees broken %d%s", m.tally.quests, m.tally.trees,
-                    m.mustVisit and "   ·   asked AT the Dragon Hunter" or ""),
+                string.format("embers    %d taken · you have %s", m.tally.embers, m.have and tostring(m.have) or "not read yet"),
+                string.format("quests    %d · trees broken %d%s", m.tally.quests, m.tally.trees,
+                    m.mustVisit and " · asked AT the Dragon Hunter" or ""),
             }
             local best, bn = nil, -1
             for key, L in pairs(m.learn) do
@@ -21227,7 +21366,7 @@ local function buildUI()
                 local st = {}
                 for k, n in pairs(by) do table.insert(st, k .. " " .. n) end
                 table.sort(st)
-                server = string.format("%d pumpkins  ·  %s", total, table.concat(st, "  ·  "))
+                server = string.format("%d pumpkins · %s", total, table.concat(st, " · "))
             end
             local _, _, _, rareNow = m.census()
             local rw = {}
@@ -21244,14 +21383,14 @@ local function buildUI()
                 "now       " .. tostring(m.note),
                 "moon      " .. moon,
                 "server    " .. server,
-                string.format("pumpkins  %d smashed   ·   way %s", t.pumpkins, tostring(m.way or "not found yet")),
-                string.format("rare      %d here now (the seed one)   ·   %d smashed", rareNow or 0, t.rare or 0),
-                string.format("doors     %d knocked   ·   %d treats   ·   %d tricks   ·   %d Hell Riders", t.doors, t.treats, t.tricks, t.bosses),
+                string.format("pumpkins  %d smashed · way %s", t.pumpkins, tostring(m.way or "not found yet")),
+                string.format("rare      %d here now (the seed one) · %d smashed", rareNow or 0, t.rare or 0),
+                string.format("doors     %d knocked · %d treats · %d tricks · %d Hell Riders", t.doors, t.treats, t.tricks, t.bosses),
                 string.format("killed    %d that came at you", t.kills),
-                "rewards   " .. (#rw > 0 and table.concat(rw, "   ·   ") or "not read yet"),
+                "rewards   " .. (#rw > 0 and table.concat(rw, " · ") or "not read yet"),
             }
             if w and (w.on or w.n > 0) then
-                table.insert(lines, string.format("recorder  %s  ·  %d lines  ·  %s", w.on and "ON" or "off", w.n,
+                table.insert(lines, string.format("recorder  %s · %d lines · %s", w.on and "ON" or "off", w.n,
                     string.sub(tostring(w.last or ""), 1, 60)))
             end
             return table.concat(lines, "\n")
@@ -21330,7 +21469,7 @@ local function buildUI()
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "sail")
-        heading2(v, "you steer  ·  your keyboard, at the wheel")
+        heading2(v, "you steer · your keyboard, at the wheel")
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 140), BackgroundTransparency = 1,
@@ -21344,7 +21483,7 @@ local function buildUI()
             local function key(txt, x, y)
                 local k = mk("TextLabel", {
                     Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(x, y),
-                    BackgroundColor3 = C.raised, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    BackgroundColor3 = C.raised, BorderSizePixel = 0, Font = LOOK.bold,
                     TextSize = F.label, TextColor3 = C.text, Text = txt, Parent = card,
                 })
                 corner(k, 9)
@@ -21352,7 +21491,7 @@ local function buildUI()
             key("W", 58, 14) key("A", 14, 60) key("S", 58, 60) key("D", 102, 60)
             mk("TextLabel", {
                 Size = UDim2.fromOffset(140, 18), Position = UDim2.fromOffset(14, 108),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 Text = "arrow keys work too", Parent = card,
             })
@@ -21360,7 +21499,7 @@ local function buildUI()
             for i = 1, 4 do
                 rows[i] = mk("TextLabel", {
                     Size = UDim2.new(1, -170, 0, 26), Position = UDim2.fromOffset(156, 8 + (i - 1) * 30),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = card,
                 })
@@ -21368,16 +21507,16 @@ local function buildUI()
             addLive(function()
                 local sp = math.floor(tonumber(CFG.SeaSpeed) or 300)
                 local tr = math.floor(tonumber(CFG.SeaTurnRate) or 60)
-                rows[1].Text = "W  go  ·  " .. sp .. " studs/s"
-                rows[2].Text = "A  left  ·  " .. tr .. "°/s"
-                rows[3].Text = "D  right  ·  " .. tr .. "°/s"
-                rows[4].Text = "S  stop  ·  W goes again"
+                rows[1].Text = "W  go · " .. sp .. " studs/s"
+                rows[2].Text = "A  left · " .. tr .. "°/s"
+                rows[3].Text = "D  right · " .. tr .. "°/s"
+                rows[4].Text = "S  stop · W goes again"
             end)
             gap(v, 8)
         end
         readout(v, function()
             local s = P.sea
-            return (s.driving and s.meters) and string.format("at sea  ·  %d m from Tiki  ·  danger %s",
+            return (s.driving and s.meters) and string.format("at sea · %d m from Tiki · danger %s",
                 math.floor(s.meters), tostring(s.danger or "?")) or "not sailing"
         end)
         P.kit.truthCard(v, function()
@@ -21386,7 +21525,7 @@ local function buildUI()
             return "No island, no timer, never the next server. Lose the boat far out and Sea travel turns off."
                 .. "\n\nThird Sea. Your boat, or a Beast Hunter bought at Tiki Outpost."
         end, "sea")
-        heading2(v, "the boat  ·  set in Travel, every sea mode")
+        heading2(v, "the boat · set in Travel, every sea mode")
         navRow(v, "Boat speed", function() return math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s" end, "travel")
         hairline(v)
         navRow(v, "Turn speed", function() return math.floor(tonumber(CFG.SeaTurnRate) or 60) .. "°/s" end, "travel")
@@ -21402,7 +21541,7 @@ local function buildUI()
         gap(v, 6)
         P.kit.pageTop(v, "sea")
         P.kit.modeStrip(v, "seaevents")
-        heading2(v, "fight or sail away  ·  tap one to move it")
+        heading2(v, "fight or sail away · tap one to move it")
         local KINDS = { "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark" }
         local MANY = { ["Sea Beast"] = "Sea Beasts", ["Rumbling Waters"] = "Rumbling Waters",
             Terrorshark = "Terrorsharks", Piranha = "Piranhas", Shark = "Sharks" }
@@ -21438,7 +21577,7 @@ local function buildUI()
             local function head(txt, color, order)
                 mk("TextLabel", {
                     Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
-                    Font = Enum.Font.GothamBold, TextSize = F.tiny, TextColor3 = color,
+                    Font = LOOK.bold, TextSize = F.tiny, TextColor3 = color,
                     TextXAlignment = Enum.TextXAlignment.Left, Text = txt, LayoutOrder = order, Parent = card,
                 })
             end
@@ -21457,7 +21596,7 @@ local function buildUI()
             local fightBox = wrapBox(2)
             local empty = mk("TextLabel", {
                 Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextColor3 = C.warn or C.second, Text = "  Nothing here: the boat only sails  ",
                 LayoutOrder = 99, Parent = fightBox,
             })
@@ -21469,7 +21608,7 @@ local function buildUI()
             local awayBox = wrapBox(5)
             local locked = mk("TextLabel", {
                 Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
                 TextColor3 = C.third, Text = "  Ship raids (always)  ", LayoutOrder = 99, Parent = awayBox,
             })
             local btns = {}
@@ -21488,7 +21627,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     Text = k, LayoutOrder = i, Parent = fightBox,
                 })
                 corner(b, 12)
@@ -21531,12 +21670,12 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(20, 6),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, Text = "FOR THE SPY", Parent = h,
             })
             local note = mk("TextLabel", {
                 Size = UDim2.new(0.5, -20, 1, -6), Position = UDim2.new(0.5, 0, 0, 6),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = h,
             })
             addLive(function()
@@ -21569,7 +21708,7 @@ local function buildUI()
             })
             local ofg = mk("TextLabel", {
                 Size = UDim2.new(1, -230, 0, 46), Position = UDim2.fromOffset(62, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
                 TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = top,
             })
@@ -21577,7 +21716,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 1),
                     BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = C.text, Text = txt, Parent = top,
+                    Font = LOOK.bold, TextSize = 20, TextColor3 = C.text, Text = txt, Parent = top,
                 })
                 corner(b, 12)
                 b.Activated:Connect(function()
@@ -21604,7 +21743,7 @@ local function buildUI()
             corner(fill, 3)
             local spyL = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.second,
                 Text = "", LayoutOrder = 3, Parent = card,
             })
@@ -21617,9 +21756,9 @@ local function buildUI()
                 fill.Size = UDim2.new(math.clamp(c.total / goal, 0, 1), 0, 1, 0)
                 fill.BackgroundColor3 = (c.total >= goal) and C.live or Color3.fromRGB(74, 163, 232)
                 local spy = P.seaev.spy
-                spyL.Text = spy and string.format("The Spy: %s  ·  asked %d min ago%s", tostring(spy.text),
+                spyL.Text = spy and string.format("The Spy: %s · asked %d min ago%s", tostring(spy.text),
                     math.floor((os.clock() - spy.at) / 60),
-                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "")
+                    spy.overAt and string.format(" · past the cooldown at %d", spy.overAt) or "")
                     or "The Spy: not asked yet"
             end)
         end
@@ -21642,7 +21781,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.new(0.5, -4, 0, 44), Position = UDim2.new(x, x == 0 and 0 or 4, 0, 0),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.text,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.text,
                     Text = txt, Parent = s,
                 })
                 corner(b, 12)
@@ -21678,7 +21817,7 @@ local function buildUI()
         heading2(v, "how it fights")
         P.kit.fightsWith(v, "seaevents")
         link(v, "Dodging & heights", function()
-            return CFG.SeaDodge and ("On  ·  " .. math.floor(tonumber(CFG.BeastHeight) or 90) .. " up") or "Off"
+            return CFG.SeaDodge and ("On · " .. math.floor(tonumber(CFG.BeastHeight) or 90) .. " up") or "Off"
         end, "seafight")
         link(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "auto" end, "travel")
         P.kit.fineTune(v, function(v)
@@ -21697,11 +21836,11 @@ local function buildUI()
                 end
                 return table.concat({
                     "now       " .. tostring(e.note),
-                    string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
-                    "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
+                    string.format("count     %d of %d sea events · since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
+                    "          " .. ((#kinds > 0) and table.concat(kinds, " · ") or "none yet"),
                     "last      " .. tostring(e.last),
-                    string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
-                        s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
+                    string.format("boat      %s%s · %d fights · %d fled", tostring(s.boatNote),
+                        s.hp and string.format(" · %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
                 }, "\n")
             end)
         end)
@@ -21735,13 +21874,13 @@ local function buildUI()
                 PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
             })
             mk("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.bold,
                 TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                 Text = "Needs the Frozen Dimension", LayoutOrder = 1, Parent = card,
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.third,
                 Text = "Turn it on inside, with your group. It starts at once; until the Leviathan shows, you play.",
                 LayoutOrder = 2, Parent = card,
@@ -21775,7 +21914,7 @@ local function buildUI()
             local function text(x, y, w, str, color, align, mono)
                 return mk("TextLabel", {
                     Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or Enum.Font.Gotham,
+                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or LOOK.regular,
                     TextSize = 11, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
                     Text = str, Parent = box,
                 })
@@ -21867,12 +22006,12 @@ local function buildUI()
             readout(v, function()
                 local lv = P.seaev.levi
                 local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills),
-                    string.format("dodged    %d (last: %s)  ·  out of now: %s", P.seaev.dodges or 0,
+                    string.format("dodged    %d (last: %s) · out of now: %s", P.seaev.dodges or 0,
                         tostring(P.seaev.lastDodge or "-"), (#lv.now > 0) and table.concat(lv.now, ", ") or "nothing") }
                 local ok, list = pcall(P.seaev._t.leviParts)
                 for _, x in ipairs((ok and list) or {}) do
                     local m = x.max or x.maxSeen
-                    table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
+                    table.insert(lines, string.format("  %-18s HP %s%s · %s · your share %s", x.label,
                         x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
                         x.enabled and "takes damage" or "not now",
                         m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
@@ -21930,7 +22069,7 @@ local function buildUI()
                 local d = mk("TextLabel", {
                     Size = UDim2.fromOffset(28, 28), AnchorPoint = Vector2.new(0.5, 0),
                     Position = UDim2.new(0.5, 0, 0, 12), BackgroundColor3 = C.row, BorderSizePixel = 0,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     Text = tostring(i), ZIndex = 2, Parent = col,
                 })
                 corner(d, 14)
@@ -21938,7 +22077,7 @@ local function buildUI()
                 dots[i] = d
                 words[i] = mk("TextLabel", {
                     Size = UDim2.new(1, -4, 0, 30), Position = UDim2.fromOffset(2, 44),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextWrapped = true, TextColor3 = C.second, Text = w, Parent = col,
                 })
             end
@@ -21987,7 +22126,7 @@ local function buildUI()
             function(x) CFG.SeaMagnet = x end)
         link(v, "Volcano event", function() return CFG.Volcano and "On" or "bones + egg, next server" end, "volcano")
         link(v, "Searching the sea", function()
-            return CFG.SeaSteer == "manual" and "you steer" or ("auto  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m")
+            return CFG.SeaSteer == "manual" and "you steer" or ("auto · to " .. math.floor(CFG.SeaSearchTo) .. " m")
         end, "travel")
         P.kit.fineTune(v, function(v)
             sliderRow(v, "Safety cap: no island this long, exact (0 = off)", 0, 60, 1,
@@ -21999,12 +22138,12 @@ local function buildUI()
                 return table.concat({
                     "now       " .. tostring(s.note),
                     "boat      " .. tostring(s.boatNote)
-                        .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
-                    string.format("where     %s  ·  danger %s",
+                        .. (s.hp and string.format(" · %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
+                    string.format("where     %s · danger %s",
                         s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
                             math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
                         tostring(s.danger or "-")),
-                    string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
+                    string.format("found     %d islands · %d boats bought", t.found, t.buys),
                 }, "\n")
             end)
             readout(v, function()
@@ -22012,7 +22151,7 @@ local function buildUI()
                 if not g then return "-" end
                 local c = g.inv
                 return string.format("magnet     %s\nhave       %s", tostring(g.note),
-                    c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
+                    c and string.format("%d magnet · %d / 15 Blaze Ember · %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
                         or "not read yet")
             end)
             caption(v, "Sail to the island, run the volcano event, loot, next server - the loop.")
@@ -22095,11 +22234,11 @@ local function buildUI()
                 local s = P.sea
                 local m = s.mirage
                 local lines = {
-                    string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
+                    string.format("found     %d Mirages · %d dealers · %d chests · %d Blue Gears",
                         s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
                 }
                 if m then
-                    table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
+                    table.insert(lines, string.format("this one  %s hunt · %s%s", tostring(m.kind), tostring(m.why),
                         m.fits and "" or "  - sailed past"))
                     if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
                     if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
@@ -22133,7 +22272,7 @@ local function buildUI()
         local function hasLine(parent, text, order)
             local l = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 TextWrapped = true, Text = text, LayoutOrder = order or nextOrder(), Parent = parent,
             })
@@ -22160,14 +22299,14 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, -190, 1, 0), Position = UDim2.fromOffset(20, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = label, Parent = r,
             })
             local function btn(x, txt)
                 local b = mk("TextButton", {
                     Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 4),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.body, TextColor3 = C.text, Text = txt, Parent = r,
+                    Font = LOOK.bold, TextSize = F.body, TextColor3 = C.text, Text = txt, Parent = r,
                 })
                 corner(b, 10)
                 pressable(b)
@@ -22176,7 +22315,7 @@ local function buildUI()
             local minus, plus = btn(-148, "-"), btn(-64, "+")
             local val = mk("TextLabel", {
                 Size = UDim2.fromOffset(40, 52), Position = UDim2.new(1, -104, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
                 TextColor3 = C.text, Text = "", Parent = r,
             })
             local function show() val.Text = fmt(get()) end
@@ -22242,7 +22381,7 @@ local function buildUI()
             local function text(x, y, w, str, color, align)
                 return mk("TextLabel", {
                     Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 9,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = 9,
                     TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
                     Text = str, Parent = stage,
                 })
@@ -22390,13 +22529,13 @@ local function buildUI()
             corner(dot, 4)
             local line = mk("TextLabel", {
                 Size = UDim2.new(1, -60, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                Position = UDim2.fromOffset(16, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+                Position = UDim2.fromOffset(16, 0), BackgroundTransparency = 1, Font = LOOK.semi,
                 TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
                 TextColor3 = C.text, Text = "", Parent = row,
             })
             mk("TextLabel", {
                 Size = UDim2.fromOffset(40, 16), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 9,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = 9,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "NOW", Parent = row,
             })
             addLive(function()
@@ -22408,7 +22547,7 @@ local function buildUI()
         end
 
         -- ---------- ALSO: three one-tap tiles ----------
-        heading2(v, "also  ·  one tap each")
+        heading2(v, "also · one tap each")
         do
             local VIS = { "PvpVision", "PvpFar", "PvpClean", "PvpNoShake", "PvpKenBack" }
             local s = mk("Frame", {
@@ -22430,12 +22569,12 @@ local function buildUI()
                 corner(dot, 3)
                 local nm = mk("TextLabel", {
                     Size = UDim2.new(1, -30, 0, 20), Position = UDim2.fromOffset(12, 8),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
                 })
                 local val = mk("TextLabel", {
                     Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(12, 34),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = C.third, Text = "", Parent = b,
                 })
@@ -22470,7 +22609,7 @@ local function buildUI()
         end
 
         -- ---------- AIMED MOVES: which attacks the aim takes, per weapon ----------
-        heading2(v, "aimed moves  ·  lit = at him, dark = your mouse")
+        heading2(v, "aimed moves · lit = at him, dark = your mouse")
         for _, kd in ipairs(KINDS) do
             local kind = kd[1]
             local s = mk("Frame", {
@@ -22484,12 +22623,12 @@ local function buildUI()
             corner(card, 12)
             mk("TextLabel", {
                 Size = UDim2.new(0.5, 0, 0, 26), Position = UDim2.fromOffset(12, 6),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = kd[2], Parent = card,
             })
             local state = mk("TextLabel", {
                 Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, 6),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = card,
             })
             local btns = {}
@@ -22497,7 +22636,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.new(1 / 6, -6, 0, 44), Position = UDim2.new((i - 1) / 6, 3, 0, 36),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second, Text = k, Parent = card,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second, Text = k, Parent = card,
                 })
                 corner(b, 10)
                 mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
@@ -22524,7 +22663,7 @@ local function buildUI()
         hasLine(v, "You hold the weapon and press the keys. A key counts for its whole kind: the sword's Z is every sword's Z, not your fruit's.")
 
         -- ---------- LEAD: Learns | Off | Fixed ----------
-        P.kit.segmented(v, "lead  ·  aim ahead of him", {
+        P.kit.segmented(v, "lead · aim ahead of him", {
             { "learn", "Learns" }, { "off", "Off" }, { "fixed", "Fixed" },
         }, leadNow, function(x)
             if x == "learn" then
@@ -22562,7 +22701,7 @@ local function buildUI()
 
         -- ---------- DETAILS: what the moves learned, the live readings ----------
         fold(v, "Details", function(v)
-            heading2(v, "what your moves learned  ·  hit or miss")
+            heading2(v, "what your moves learned · hit or miss")
             readout(v, function() return S.tuneText and S.tuneText() or "" end)
             actionRow(v, "Forget what the moves learned", nil, function()
                 table.clear(S.tune.moves)
@@ -22570,7 +22709,7 @@ local function buildUI()
                 S.tune.closed, S.tune.kens = 0, 0
                 pcall(S.tuneSave)
             end)
-            heading2(v, "live  ·  while PvP is on")
+            heading2(v, "live · while PvP is on")
             readout(v, function()
                 if not CFG.Pvp then return "PvP mode is off" end
                 return "PLAYER  " .. S.targetText()
@@ -22622,12 +22761,12 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(20, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.body,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "Lab  ·  TEST", Parent = b,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.body,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "Lab · TEST", Parent = b,
             })
             local word = mk("TextLabel", {
                 Size = UDim2.fromOffset(140, 44), Position = UDim2.new(1, -160, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = b,
             })
             pressable(b)
@@ -22710,7 +22849,7 @@ local function buildUI()
             sliderRow(v, "Lead strength", 0, 2, 0.1,
                 function() return CFG.PvpLeadScale end,
                 function(x) CFG.PvpLeadScale = x end, "x")
-            heading2(v, "vision  ·  the tile sets all five")
+            heading2(v, "vision · the tile sets all five")
             switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
                 function() return CFG.PvpVision end,
                 function(x) CFG.PvpVision = x end)
@@ -22889,23 +23028,23 @@ local function buildUI()
                 local lines = {}
                 if ev then
                     table.insert(lines, "now       " .. tostring(ev.note))
-                    table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
+                    table.insert(lines, string.format("this one  %s · live vents %s · golems %s · you %s",
                         tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
                         ev.counted and "COUNTED" or "not counted (not there at the start)"))
-                    table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                    table.insert(lines, string.format("          %d vents closed · %d golems down · %d bones · %d eggs",
                         ev.vents, ev.golems, ev.bones, ev.eggs))
-                    table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
+                    table.insert(lines, string.format("meters    relic %s · pressure %s · relic lowest %s",
                         ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
                         ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
                         ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
                     table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
-                    table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
+                    table.insert(lines, string.format("golems    %s held up in the air · %s NOT held",
                         tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
                     table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
                 else
                     table.insert(lines, "no Prehistoric Island in this server")
                 end
-                table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
+                table.insert(lines, string.format("all       %d events · %d vents · %d golems · %d bones · %d eggs",
                     t.events, t.vents, t.golems, t.bones, t.eggs))
                 return table.concat(lines, "\n")
             end)
@@ -22914,10 +23053,10 @@ local function buildUI()
                 local ev = s.ev
                 local lines = {}
                 local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
-                table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
+                table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones · %d Dragon Egg  (%s)",
                     b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
                 if ev and ev.base then
-                    table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
+                    table.insert(lines, string.format("this one  bones %d confirmed%s · egg %d confirmed%s · before: %s",
                         ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
                         ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
                 end
@@ -22929,7 +23068,7 @@ local function buildUI()
                 local g = S.ventGun and S.ventGun()
                 if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
                 local L = S.learn[g .. " M1"]
-                return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
+                return string.format("vent gun   %s · %s · closed %d of %d turns", g,
                     tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
             end)
             readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
@@ -23060,7 +23199,7 @@ local function buildUI()
             local function text(x, y, w, str, color, align, mono)
                 return mk("TextLabel", {
                     Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or Enum.Font.GothamBold,
+                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or LOOK.bold,
                     TextSize = mono and 10 or 9, TextColor3 = color,
                     TextXAlignment = align or Enum.TextXAlignment.Left, Text = str, Parent = box,
                 })
@@ -23122,7 +23261,7 @@ local function buildUI()
         end
 
         P.kit.dial(v, "Dodge", STEPS, "sea")
-        caption(v, "closer, hits harder  ·  wider, safer")
+        caption(v, "closer, hits harder · wider, safer")
         P.kit.truthCard(v, function()
             return CFG.SeaDodge and "Circling every attacker" or "Hovering still"
         end, function()
@@ -23146,7 +23285,7 @@ local function buildUI()
         do
             local t = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, TextWrapped = true,
                 Text = "", LayoutOrder = nextOrder(), Parent = v,
             })
@@ -23180,13 +23319,13 @@ local function buildUI()
                 corner(dot, 3)
                 mk("TextLabel", {
                     Size = UDim2.new(0.5, -26, 0, 26), Position = UDim2.fromOffset(26, (i - 1) * 26 + 2),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = C.text, Text = who, Parent = card,
                 })
                 local what = mk("TextLabel", {
                     Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, (i - 1) * 26 + 2),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = C.second, Text = "", Parent = card,
                 })
@@ -23262,7 +23401,7 @@ local function buildUI()
                 function(x) CFG.SeaEvTrial = x end, " s")
             -- Attack's "Fights with" decides the weapon now; these two lists
             -- are read only when it is on Mix.
-            heading2(v, "mix only  ·  weapons out of form")
+            heading2(v, "mix only · weapons out of form")
             local items = {}
             for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
                 table.insert(items, { ty, nil,
@@ -23273,7 +23412,7 @@ local function buildUI()
                     end })
             end
             ticks(v, items)
-            heading2(v, "mix only  ·  keys fired at a sea event")
+            heading2(v, "mix only · keys fired at a sea event")
             chips(v, "Keys", { "Z", "X", "C", "V", "F" },
                 function(k) return (CFG.SeaEvKeys or {})[k] end,
                 function(k, x)
@@ -23300,8 +23439,8 @@ local function buildUI()
                     table.insert(lines, string.format("%-17s %s", name, what))
                 end
                 table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
-                    .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
-                table.insert(lines, string.format("dodged           %d times  ·  last: %s", e.dodges or 0, tostring(e.lastDodge or "-")))
+                    .. (e.kitsune() and "" or " · no Kitsune fruit carried") .. (e.formNote and (" · " .. tostring(e.formNote)) or ""))
+                table.insert(lines, string.format("dodged           %d times · last: %s", e.dodges or 0, tostring(e.lastDodge or "-")))
                 table.insert(lines, "water            " .. (P.floorY
                     and string.format("a floor at Y %.0f - you never go under it", P.floorY)
                     or "a floor during every sea fight"))
@@ -23417,7 +23556,7 @@ local function buildUI()
                 local b = mk("TextButton", {
                     Size = UDim2.new(1, -8, 1, -8), Position = UDim2.fromOffset(4, 4),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Visible = false, Parent = strip,
                 })
                 corner(b, 9)
@@ -23568,7 +23707,7 @@ local function buildUI()
         pressable(goalBtn)
         local goalTxt = mk("TextLabel", {
             Size = UDim2.new(1, -64, 1, 0), Position = UDim2.fromOffset(10, 0),
-            BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
             TextColor3 = C.second, Text = "", Parent = goalBtn,
         })
@@ -23616,13 +23755,13 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(0.5, 0, 1, -4), Position = UDim2.fromOffset(20, 4),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 Text = "YOUR WEAPONS", Parent = h,
             })
             mk("TextLabel", {
                 Size = UDim2.new(0.5, -20, 1, -4), Position = UDim2.new(0.5, 0, 0, 4),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third,
                 Text = "tap the moves to use", Parent = h,
             })
@@ -23687,14 +23826,14 @@ local function buildUI()
                 })
                 local chip = mk("TextLabel", {
                     Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(0, 13),
-                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.bold,
                     TextSize = 9, TextColor3 = text, Text = TYPE_WORD[w.ty] or string.upper(tostring(w.ty)),
                     Parent = top,
                 })
                 corner(chip, 5)
                 local nameBtn = mk("TextButton", {
                     Size = UDim2.new(1, -176, 1, 0), Position = UDim2.fromOffset(58, 0),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
                     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = isOn and C.text or C.second, Text = name, AutoButtonColor = false,
                     Parent = top,
@@ -23704,7 +23843,7 @@ local function buildUI()
                     Size = UDim2.fromOffset(112, 40), AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, 0, 0.5, 0),
                     BackgroundColor3 = chosen and accent or C.row, BorderSizePixel = 0,
-                    AutoButtonColor = false, Font = Enum.Font.GothamBold, TextSize = F.tiny,
+                    AutoButtonColor = false, Font = LOOK.bold, TextSize = F.tiny,
                     TextColor3 = chosen and C.base or C.second,
                     Text = chosen and "Using only this" or "Use only this", Parent = top,
                 })
@@ -23729,7 +23868,7 @@ local function buildUI()
                 local function chipBtn(order, word, width, lit, litColor, cb)
                     local b = mk("TextButton", {
                         Size = UDim2.fromOffset(width, 44), BackgroundColor3 = lit and litColor or C.base,
-                        BorderSizePixel = 0, AutoButtonColor = false, Font = Enum.Font.GothamBold,
+                        BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.bold,
                         TextSize = F.small, TextColor3 = lit and C.base or C.second,
                         Text = word, LayoutOrder = order, Parent = row,
                     })
@@ -23780,7 +23919,7 @@ local function buildUI()
                     stateColor = isOn and C.live or C.third
                 end
                 mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
                     TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
                     TextColor3 = stateColor, Text = state, LayoutOrder = 3, Parent = c,
                 })
@@ -23829,24 +23968,24 @@ local function buildUI()
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, -150, 0, 22), Position = UDim2.fromOffset(20, 8),
-                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "Aim", Parent = b,
             })
             mk("TextLabel", {
                 Size = UDim2.new(1, -150, 0, 18), Position = UDim2.fromOffset(20, 30),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                 Text = "skills land on the target", Parent = b,
             })
             local val = mk("TextLabel", {
                 Size = UDim2.fromOffset(100, 56), Position = UDim2.new(1, -128, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.body,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.body,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = b,
             })
             local chev = mk("TextLabel", {
                 Size = UDim2.fromOffset(20, 56), Position = UDim2.new(1, -28, 0, 0),
-                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 14,
-                TextColor3 = C.third, Text = ">", Parent = b,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 14,
+                TextColor3 = C.third, Text = "›", Parent = b,
             })
             pressable(b)
             local box = mk("Frame", {
@@ -23897,7 +24036,7 @@ local function buildUI()
             end)
             -- RACE V3 / V4 (user, 2026-10-12): on by default - any mode, the farm
             -- stopped, PvP too.
-            heading2(v, "race  ·  V4 and V3")
+            heading2(v, "race · V4 and V3")
             readout(v, function() return (P :: any).race and (P :: any).race.text() or "" end)
             switchRow(v, "V4 when the meter is full", "Y the moment it is full - every mode, PvP too",
                 function() return CFG.RaceV4 end,
@@ -23917,7 +24056,7 @@ local function buildUI()
             sliderRow(v, "V3: then a T every", 0.2, 2, 0.1,
                 function() return CFG.RaceV3Every end,
                 function(x) CFG.RaceV3Every = x end, " s")
-            heading2(v, "m1 with  ·  when the wheel says mix")
+            heading2(v, "m1 with · when the wheel says mix")
             local m1box = chooser(v, 130)
             local m1sig = nil
             local function m1refresh()
@@ -23950,7 +24089,7 @@ local function buildUI()
             end
             m1refresh()
             addLive(m1refresh)
-            heading2(v, "skills  ·  when the wheel says mix")
+            heading2(v, "skills · when the wheel says mix")
             switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
                 function() return CFG.AutoAttack end,
                 function(x) CFG.AutoAttack = x end)
@@ -23961,7 +24100,7 @@ local function buildUI()
                 "Every skill cooling: the next one is put in your hands, no menu",
                 function() return CFG.InvSwap end,
                 function(x) CFG.InvSwap = x end)
-            heading2(v, "hold each key, per weapon  ·  and the order")
+            heading2(v, "hold each key, per weapon · and the order")
             local box = chooser(v, 170)
             local signature = nil
             local function refresh()
@@ -23986,7 +24125,7 @@ local function buildUI()
             end
             refresh()
             addLive(refresh)
-            heading2(v, "rhythm  ·  M1 and skills both on")
+            heading2(v, "rhythm · M1 and skills both on")
             radio(v, 82, {
                 { "Skills", "Skills first" },
                 { "M1", "M1 first" },
@@ -24014,7 +24153,7 @@ local function buildUI()
                 return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
                     .. "\nsilent aim  " .. tostring(P.silentNote or "-")
             end)
-            heading2(v, "mastery  ·  the goal's target, and the old farm")
+            heading2(v, "mastery · the goal's target, and the old farm")
             local mbox = chooser(v, 130)
             local msig = nil
             local function mrefresh()
@@ -24144,7 +24283,7 @@ local function buildUI()
                 local R = (P :: any).rot
                 if not R then return "-" end
                 local inv = R.inv and #R.inv or 0
-                return string.format("inventory  %s\nloaded     %d   ·   %s\nback at stop  %s",
+                return string.format("inventory  %s\nloaded     %d · %s\nback at stop  %s",
                     R.inv and (inv .. " swords / guns") or "not read yet",
                     R.loads, tostring(R.note), R.original and tostring(R.originalText) or "-")
             end)
@@ -24165,7 +24304,7 @@ local function buildUI()
                 or ((heldTool() == tool) and "in hand" or "in backpack")
             local idx = "?"
             for i, n in ipairs(CFG.WeaponOrder) do if n == editW then idx = i end end
-            return toolType(tool) .. "  ·  " .. where .. "  ·  #" .. idx .. " in the order"
+            return toolType(tool) .. " · " .. where .. " · #" .. idx .. " in the order"
         end)
         switchRow(v, "Use this weapon", "Off keeps its switches but fires nothing",
             function() local w = W() return w and w.use or false end,
@@ -24247,7 +24386,7 @@ local function buildUI()
             return "Pulls from " .. studs(CFG.GrabRadius) .. " studs, " .. tostring(CFG.GrabMax) .. " at most in one pile."
         end, "none")
         readout(v, function()
-            return string.format("held %d   ·   staying put %d   ·   put back %d\n%s",
+            return string.format("held %d · staying put %d · put back %d\n%s",
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
         heading2(v, "also")
@@ -24266,7 +24405,7 @@ local function buildUI()
                 function(x) CFG.PullAll = x end)
             readout(box, function()
                 if not CFG.PullAll then return "off: only ones spawned within the distance below" end
-                return P.pileReach and string.format("pile at the camp's middle  ·  farthest pull %.0f studs",
+                return P.pileReach and string.format("pile at the camp's middle · farthest pull %.0f studs",
                     P.pileReach) or "pile at the camp's middle (found on the first pile)"
             end)
             sliderRow(box, "Pull at most, from their spawn", 50, 1000, 10,
@@ -24328,7 +24467,7 @@ local function buildUI()
                         l.ok and string.format("%.0f", l.ok) or "-",
                         l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
                 end
-                if #lines == 0 then return "one pile per camp  ·  nothing measured yet" end
+                if #lines == 0 then return "one pile per camp · nothing measured yet" end
                 return table.concat(lines, "\n")
             end)
             actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
@@ -24420,7 +24559,7 @@ local function buildUI()
         local GREEN = Color3.fromRGB(63, 208, 126)
         local function pct(x) return math.floor((tonumber(x) or 0) * 100 + 0.5) end
         gap(v, 4)
-        P.kit.sectionRight(v, "getting out  ·  every mode", function()
+        P.kit.sectionRight(v, "getting out · every mode", function()
             local n = stats.escapes or 0
             if n == 0 then return "no escape yet" end
             return n == 1 and "1 escape this run" or (n .. " escapes this run")
@@ -24438,12 +24577,12 @@ local function buildUI()
                     BackgroundTransparency = 1, Parent = s,
                 })
                 local a = mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 15), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                    Size = UDim2.new(1, 0, 0, 15), BackgroundTransparency = 1, Font = LOOK.bold,
                     TextSize = F.tiny, TextColor3 = color, Text = "", Parent = h,
                 })
                 local b = mk("TextLabel", {
                     Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 15), BackgroundTransparency = 1,
-                    Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = C.third, Text = sub, Parent = h,
+                    Font = LOOK.regular, TextSize = 10, TextColor3 = C.third, Text = sub, Parent = h,
                 })
                 return h, a, b
             end
@@ -24513,7 +24652,7 @@ local function buildUI()
         end, "none")
         caption(v, "There is no real god mode: health lives on the server. "
             .. "Height, a pinned pile and Observation keep you alive. This gets you out.")
-        P.kit.sectionRight(v, "haki  ·  every mode", function() return "keep it on" end)
+        P.kit.sectionRight(v, "haki · every mode", function() return "keep it on" end)
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 124), BackgroundTransparency = 1,
@@ -24545,7 +24684,7 @@ local function buildUI()
                 corner(knob, 9)
                 local nm = mk("TextLabel", {
                     Size = UDim2.new(1, -24, 0, 20), Position = UDim2.fromOffset(12, 52),
-                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
                 })
                 local dot = mk("Frame", {
@@ -24555,12 +24694,12 @@ local function buildUI()
                 corner(dot, 3)
                 local state = mk("TextLabel", {
                     Size = UDim2.new(1, -36, 0, 14), Position = UDim2.fromOffset(24, 76),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "", Parent = b,
                 })
                 local sub = mk("TextLabel", {
                     Size = UDim2.new(1, -24, 0, 14), Position = UDim2.fromOffset(12, 94),
-                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
                 })
@@ -24642,7 +24781,7 @@ local function buildUI()
                 today = (i == 3) or nil,
             })
         end
-        P.kit.dial(v, "Speed  ·  every mode", SSTEPS, "none")
+        P.kit.dial(v, "Speed · every mode", SSTEPS, "none")
         P.kit.truthCard(v, function()
             return "Flies at " .. tostring(CFG.TravelSpeed) .. ", sails at " .. tostring(CFG.SeaSpeed)
         end, function()
@@ -24671,7 +24810,7 @@ local function buildUI()
             mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 16), Parent = head })
             mk("TextLabel", {
                 Size = UDim2.new(1, -150, 1, -6), Position = UDim2.fromOffset(0, 6), BackgroundTransparency = 1,
-                Font = Enum.Font.GothamMedium, TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
+                Font = LOOK.semi, TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
                 TextColor3 = C.third, Text = "SEARCHING THE SEA", Parent = head,
             })
             local chips = mk("Frame", {
@@ -24723,7 +24862,7 @@ local function buildUI()
             })
             local function text(w, str, color, align)
                 return mk("TextLabel", {
-                    Size = UDim2.fromOffset(w, 14), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                    Size = UDim2.fromOffset(w, 14), BackgroundTransparency = 1, Font = LOOK.regular,
                     TextSize = 10, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
                     Text = str, Parent = stage,
                 })
@@ -24829,13 +24968,13 @@ local function buildUI()
                 PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
             })
             mk("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.bold,
                 TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
-                Text = "A D turn   ·   W go   ·   S stop", LayoutOrder = 1, Parent = card,
+                Text = "A D turn · W go · S stop", LayoutOrder = 1, Parent = card,
             })
             local r = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+                Font = LOOK.regular, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
                 TextWrapped = true, TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
             })
             addLive(function()
@@ -24883,7 +25022,7 @@ local function buildUI()
         end, 11)
         readout(v, function()
             return "last flight  " .. tostring(P.lastFlight)
-                .. string.format("\nflights %d   ·   instant hops %d   ·   pulled back %d",
+                .. string.format("\nflights %d · instant hops %d · pulled back %d",
                     stats.flights, stats.hops, stats.pulledBack)
         end)
         fold(v, "How it works", function(v)
@@ -25000,7 +25139,7 @@ local function buildUI()
                 local avg = (t.joins > 0) and string.format("%.0fs", t.joinSecs / t.joins) or "-"
                 return table.concat({
                     "now       " .. tostring(el.note),
-                    string.format("joined    %d   ·   join %s   ·   failed joins %d", t.joins, avg, t.fails),
+                    string.format("joined    %d · join %s · failed joins %d", t.joins, avg, t.fails),
                     "servers   " .. tostring(el.lastList or "not read yet"),
                     "last join " .. tostring(el.lastJoin or "none yet"),
                     "counting since " .. os.date("%d %b %H:%M", t.since or os.time()),
@@ -25080,7 +25219,7 @@ local function buildUI()
                 local kpm = (m.fight > 0) and (m.kills / (m.fight / 60)) or 0
                 table.insert(lines, "THIS SETUP")
                 table.insert(lines, "   " .. m.key)
-                table.insert(lines, string.format("   %.1f kills/min  ·  pile %s  ·  %d piles  ·  %s fighting",
+                table.insert(lines, string.format("   %.1f kills/min · pile %s · %d piles · %s fighting",
                     kpm, (m.piles > 0) and string.format("%.1fs", m.pileSecs / m.piles) or "-",
                     m.piles, mmss(m.fight)))
             end
@@ -25088,7 +25227,7 @@ local function buildUI()
                 table.insert(lines, "")
                 table.insert(lines, "TRIED")
                 for _, t in ipairs(tried) do
-                    table.insert(lines, string.format("   %.1f kills/min  ·  %s  ·  %s",
+                    table.insert(lines, string.format("   %.1f kills/min · %s · %s",
                         t.kpm, t.avg and string.format("pile %.1fs", t.avg) or "pile -", mmss(t.secs)))
                     table.insert(lines, "      " .. t.key)
                 end
@@ -25134,11 +25273,13 @@ local function buildUI()
         gap(v, 8)
         actionRow(v, "Stop and close the panel", "danger", function()
             P.stop()
+            sweepSet(false)
             if gui then gui:Destroy() end
         end)
     end
 
     show("home")
+    sweepSet(true)
 
     task.spawn(function()
         while gui and gui.Parent do
@@ -25148,6 +25289,7 @@ local function buildUI()
             end
             task.wait(0.3)
         end
+        sweepSet(false)
     end)
 end
 
@@ -27262,7 +27404,7 @@ do
                 hl.Name = "BFFMark"
                 hl.FillColor = Color3.fromRGB(255, 30, 30)
                 hl.FillTransparency = 0.35
-                hl.OutlineColor = Color3.new(1, 1, 1)
+                hl.OutlineColor = Color3.fromRGB(255, 255, 255)
                 hl.OutlineTransparency = 0
                 hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                 hl.Parent = cam
@@ -27284,7 +27426,7 @@ do
                 d.BorderSizePixel = 0
                 d.Parent = bb
                 local st = Instance.new("UIStroke")
-                st.Color = Color3.new(1, 1, 1)
+                st.Color = Color3.fromRGB(255, 255, 255)
                 st.Thickness = 2
                 st.Parent = d
                 bb.Parent = player:FindFirstChildOfClass("PlayerGui")

@@ -116,7 +116,11 @@ local function modeRowValue(label)
     local b = button("modes", label)
     if not b then return "<no row " .. label .. ">" end
     for _, k in ipairs(rawget(b, "_kids")) do
-        if k.ClassName == "TextLabel" and k.Font == Enum.Font.GothamBold then return k.Text end
+        -- the bold word: LOOK.bold (Montserrat Bold through FontFace) or, on a
+        -- client without the family, GothamBold
+        local bold = k.Font == Enum.Font.GothamBold
+            or (k.FontFace ~= nil and tostring(k.FontFace.Weight) == "Enum.FontWeight.Bold")
+        if k.ClassName == "TextLabel" and bold then return k.Text end
     end
     return "<no value>"
 end
@@ -201,7 +205,7 @@ if RUN == "full" then
     -- Home's big button is PvP's Stop now.
     table.clear(CALLS)
     goHome() livePass()
-    check(string.find(tostring(button("home", "Stop").Text), "PvP", 1, true) ~= nil, "hero: Stop  ·  PvP")
+    check(string.find(tostring(button("home", "Stop").Text), "PvP", 1, true) ~= nil, "hero: Stop · PvP")
     button("home", "Stop").Activated:Fire()
     check(called("pvpSet false") and not called("start"), "hero with PvP on = PvP off, no farm start")
     showModes()
@@ -236,7 +240,7 @@ if RUN == "full" then
     P.running = false
     goHome() livePass()
     check(string.find(tostring(button("home", "Start").Text), "No mode", 1, true) ~= nil,
-        "hero with no mode: Start  ·  No mode")
+        "hero with no mode: Start · No mode")
 
     -- ---------- R2 Task 3: Attack - the FIGHT WITH wheel ----------
     do
@@ -387,8 +391,8 @@ if RUN == "full" then
     button("mirage", "Every chest").Activated:Fire()
     check(called("setHunt true mchest") and CFG_REAL.MirageJob == "mchest", "job changed while on: that job now")
     goHome() livePass()
-    check(string.find(tostring(button("home", "·  Mirage").Text), "Mirage", 1, true) ~= nil,
-        "hero names the mode: " .. tostring(button("home", "·  Mirage") and button("home", "·  Mirage").Text))
+    check(string.find(tostring(button("home", "· Mirage").Text), "Mirage", 1, true) ~= nil,
+        "hero names the mode: " .. tostring(button("home", "· Mirage") and button("home", "· Mirage").Text))
     modePill("mirage").Activated:Fire()
     check(CFG_REAL.Hunt == false, "Mirage off")
 
@@ -734,7 +738,7 @@ do
     check(not B.btn("modes", "Raid") and not B.btn("modes", "Mirage") and not B.btn("modes", "PvP"),
         "buyer: a locked pack's modes are not rows")
     check(not B.btn("modes", "Haki berries") and not B.btn("modes", "Halloween"), "buyer: no owner tools")
-    check(B.has("modes", "LIBRARY  ·  5 MORE PACKS") and B.has("modes", "tap a cover"), "buyer: LIBRARY  ·  5 MORE PACKS (4 covers and Fruits)")
+    check(B.has("modes", "LIBRARY · 5 MORE PACKS") and B.has("modes", "tap a cover"), "buyer: LIBRARY · 5 MORE PACKS (4 covers and Fruits)")
     check(B.has("modes", "EVERYTHING") and B.has("modes", "BEST VALUE"), "buyer: the EVERYTHING card shows")
     check(B.has("modes", "Diablo, Deandre, Urban, the sword dealer, raids"), "buyer: a cover carries its line")
     local function coverText(line)
@@ -752,7 +756,7 @@ do
         "buyer: cover page has the plate and INSIDE")
     check(B.has("cover_raid", "Elite pirates") and B.has("cover_raid", "Legendary swords") and not B.btn("cover_raid", "Raid"),
         "buyer: INSIDE lists the modes, not tappable")
-    B.tap("cover_raid", "Get Bosses + Raids  ·  copy store link")
+    B.tap("cover_raid", "Get Bosses + Raids · copy store link")
     check(CLIP == "https://store.example/x", "buyer: Get ... copies the store link")
     check(B.btn("cover_raid", "Link copied: paste it in your browser") ~= nil, "buyer: the button says the link is copied")
     B.tap("cover_raid", "I have a code")
@@ -791,9 +795,9 @@ do
     local keyRow = B.btn("home", "Key & packs")
     local kv
     for _, k in ipairs(rawget(keyRow, "_kids")) do
-        if k.ClassName == "TextLabel" and k.Text ~= ">" and k.Text ~= "Key & packs" then kv = k.Text end
+        if k.ClassName == "TextLabel" and k.Text ~= "›" and k.Text ~= "Key & packs" then kv = k.Text end
     end
-    check(kv == "Grind  ·  5d left", "Home Key row: Grind  ·  5d left (" .. tostring(kv) .. ")")
+    check(kv == "Grind · 5d left", "Home Key row: Grind · 5d left (" .. tostring(kv) .. ")")
     B.tap("home", "Key & packs")
     -- Redeem: a tap with a code runs P.redeem; the answer shows
     local nCalls = 0
@@ -814,7 +818,7 @@ do
     P.news = { headlines = function() return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" } } end }
     B = build({ farm = NOW + 5 * 86400 + 60 }, "buyer", nil)
     B.live()
-    check(B.has("home", "Mirage is up in this server") and B.has("home", "SEA runs it for you  ·  look inside"),
+    check(B.has("home", "Mirage is up in this server") and B.has("home", "SEA runs it for you · look inside"),
         "Home: the live moment card shows for a locked pack")
     check(P.hudExtra == 76, "Home: the panel grows by the card (" .. tostring(P.hudExtra) .. ")")
     B.tap("home", "Mirage is up in this server")
@@ -822,7 +826,7 @@ do
     check(P.hudExtra == 0, "Home: the panel is its own size again off Home")
     B.home()
     check(P.hudExtra == 76, "Home: the card is back when Home is")
-    B.tap("home", "x")
+    B.tap("home", "×")
     check(P.hudExtra == 0, "Home: x puts the card away")
     -- a pack this key holds: no card at all
     B = build({ farm = NOW + 86400, sea = 0 }, "buyer", nil)
@@ -839,8 +843,8 @@ do
         "Prehistoric", "Mirage", "Leviathan", "PvP", "Fruits", "Haki berries", "Aura recipe", "Fire Flower", "Blaze Ember", "Halloween" }) do
         check(O.btn("modes", row) ~= nil, "owner: a row for " .. row)
     end
-    check(O.has("modes", "OWNER TOOLS  ·  HUNT, NEXT SERVER WHEN NOT HERE"), "owner: the owner tools have their own section")
-    check(O.has("modes", "LIBRARY  ·  EVERY PACK IS YOURS") and not O.has("modes", "BEST VALUE"), "owner: no shop, no EVERYTHING card")
+    check(O.has("modes", "OWNER TOOLS · HUNT, NEXT SERVER WHEN NOT HERE"), "owner: the owner tools have their own section")
+    check(O.has("modes", "LIBRARY · EVERY PACK IS YOURS") and not O.has("modes", "BEST VALUE"), "owner: no shop, no EVERYTHING card")
     O.tap("modes", "SEA")
     check(O.cur() == "cover_sea", "owner: a pack's cover opens, got " .. O.cur())
     check(O.has("cover_sea", "On your key") and not O.has("cover_sea", "Not on your key yet"), "owner: the plate says On your key, no price")
@@ -1249,14 +1253,14 @@ do
     check(called("hopNow"), "pvp: the hop row hops")
     -- Lab: a test on turns the header amber
     local function labHint()
-        local b = button("pvp", "Lab  ·  TEST")
+        local b = button("pvp", "Lab · TEST")
         local kids = b and rawget(b, "_kids") or {}
         return kids[2]
     end
     goHome() tap("home", "Mode") tap("modes", "PvP")
     CFG_REAL.PvpSoruCut, CFG_REAL.PvpCdTest = 0, false
     pcall(LIVE0)
-    if labHint() and tostring(labHint().Text) == "hide" then tap("pvp", "Lab  ·  TEST") end   -- folds start shut
+    if labHint() and tostring(labHint().Text) == "hide" then tap("pvp", "Lab · TEST") end   -- folds start shut
     check(labHint() ~= nil and tostring(labHint().Text) == "2 tests, both off" and labHint().TextColor3.R ~= 240,
         "pvp: Lab header, both off, is not amber")
     nth("pvp", "+", 2).Activated:Fire()
@@ -1392,6 +1396,65 @@ do
     check(called("hopNow"), "servers: the second tap hops")
     for _, k in ipairs(KEYS) do CFG_REAL[k] = was[k] end
     goHome()
+end
+
+-- ---------- R3: the look ----------
+do
+    local function loops()
+        local out = {}
+        for _, t in ipairs(TWEENS) do
+            -- (the cases rebuild the panel; only the live one's tween counts)
+            local g = t.target.Parent and t.target.Parent.Parent and t.target.Parent.Parent.Parent
+            if t.info and t.info.args and t.info.args[4] == -1 and g == gui then table.insert(out, t) end
+        end
+        return out
+    end
+    local function foldBtn()
+        for _, o in ipairs(ALL) do
+            if o.ClassName == "TextButton" and (o.Text == "Hide" or o.Text == "Show") then return o end
+        end
+    end
+    local L = loops()
+    check(#L == 1 and L[1].playing and L[1].target.ClassName == "UIGradient",
+        "outline sweep: one looping gradient tween, playing while the panel is up")
+    local stroke = L[1] and L[1].target.Parent
+    check(stroke and stroke.ClassName == "UIStroke" and stroke.Parent and stroke.Parent.Parent == gui,
+        "outline sweep: the gradient is on the panel's own stroke (never on the panel)")
+    check(stroke and tostring(stroke.ApplyStrokeMode) == "Enum.ApplyStrokeMode.Border" and stroke.Thickness == 1,
+        "outline: a 1 px stroke in Border mode, outside the content")
+    foldBtn().Activated:Fire()
+    check(not L[1].playing, "outline sweep stops when the panel is folded")
+    foldBtn().Activated:Fire()
+    local playing = 0
+    for _, t in ipairs(loops()) do if t.playing then playing += 1 end end
+    check(playing == 1, "outline sweep runs again when the panel is shown (and only one runs)")
+
+    -- Montserrat, through FontFace, on the labels of Home
+    local mont, gotham = 0, 0
+    for _, k in ipairs(rawget(VIEWS.home, "_kids")) do
+        for _, o in ipairs(rawget(k, "_kids") or {}) do
+            if o.FontFace and string.find(o.FontFace.Path, "Montserrat", 1, true) then mont += 1 end
+            if o.Font and tostring(o.Font):find("Gotham", 1, true) then gotham += 1 end
+        end
+    end
+    check(mont > 0 and gotham == 0, "Home rows: Montserrat, no Gotham (" .. mont .. "/" .. gotham .. ")")
+
+    -- "Idle" and its line start where the rows do: full width, 20 px padding
+    local function labelWith(txt)
+        for _, k in ipairs(rawget(VIEWS.home, "_kids")) do
+            if k.ClassName == "TextLabel" and k.Text == txt then return k end
+        end
+    end
+    local idle = labelWith("Idle")
+    local pad = idle and idle:FindFirstChild("UIPadding")
+    check(idle and idle.Size.X.Scale == 1 and idle.Size.X.Offset == 0 and pad and pad.PaddingLeft.Offset == 20,
+        "Idle: full width + 20 px padding, in line with the rows")
+    -- thin chevrons
+    local chev = 0
+    for _, o in ipairs(ALL) do
+        if o.ClassName == "TextLabel" and o.Text == ">" then chev += 1 end
+    end
+    check(chev == 0, "no text '>' chevrons left (" .. chev .. ")")
 end
 
 print(string.format("%d passed, %d failed", pass, fail))
