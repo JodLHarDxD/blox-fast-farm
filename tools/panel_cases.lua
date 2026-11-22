@@ -146,15 +146,15 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 40 pages (2026-11-08: Trades; 2026-11-22: six locked covers, Key & packs) ----------
+    -- ---------- 41 pages (2026-11-08: Trades; 2026-11-22: six locked covers, Key & packs; R3: the trial recap) ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
         "servers", "stats", "news", "fruitmenu", "trades",
-        "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp", "cover_fruits", "key" }
+        "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp", "cover_fruits", "key", "recap" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "40 pages, got " .. n)
+    check(n == #EXPECT, "41 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -891,23 +891,88 @@ do
     check(B.btn("cover_raid", "Link copied: paste it in your browser") ~= nil, "buyer: the button says the link is copied")
     B.tap("cover_raid", "I have a code")
     check(B.cur() == "key", "buyer: I have a code opens Key & packs")
-    -- the motion: one live step puts word 1 in; it ticks only while the page is visible
+    -- R3 Task 2: the cover's motion. ONE Heartbeat driver, only while its
+    -- page is on screen and the panel is up; every layer from the board's
+    -- @keyframes at time t.
+    local function running()
+        local out = {}
+        for name, c in pairs(P.motionConn) do if c then table.insert(out, name) end end
+        table.sort(out)
+        return table.concat(out, ",")
+    end
+    check(running() == "", "motion: no driver runs on the Library (" .. running() .. ")")
     B.home() B.tap("home", "Mode") B.tap("modes", "SEA")
     check(B.cur() == "cover_sea", "buyer: SEA cover opens, got " .. B.cur())
-    B.live()
+    check(running() == "cover_sea", "motion: the SEA cover's driver starts when it shows, and only it (" .. running() .. ")")
+    local step = P.motions.cover_sea
     local w1 = B.find("cover_sea", function(k) return k.ClassName == "TextLabel" and k.Text == "SEA BEASTS." end)
-    check(w1 and w1.TextTransparency == 0, "SEA cover: the first word is in after a live step")
+    local w2 = B.find("cover_sea", function(k) return k.ClassName == "TextLabel" and k.Text == "LEVIATHAN." end)
     local w4 = B.find("cover_sea", function(k) return k.ClassName == "TextLabel" and k.Text == "FROM YOUR BOAT." end)
-    check(w4 and w4.TextTransparency == 1, "SEA cover: the fourth word waits")
+    step(1)
+    check(w1 and w1.TextTransparency == 0 and w1.Position.Y.Offset == 0, "SEA cover: 1 s in, the first word is in, in place")
+    check(w2.TextTransparency == 1 and w2.Position.Y.Offset == 10 and w4.TextTransparency == 1,
+        "SEA cover: the next words wait at their 0% frame (fill both, 10 px low)")
+    step(3.5)
+    check(w1.TextTransparency == 1 and w2.TextTransparency == 0, "SEA cover: 3.5 s in, the second word has taken over")
+    local fills = {}
+    walk(B.V.cover_sea, function(k) if k.Name == "Fill" then table.insert(fills, k) end end)
+    step(1)
+    check(#fills == 4 and math.abs(fills[1].Size.X.Scale - 0.5) < 1e-6 and fills[2].Size.X.Scale == 0,
+        "SEA cover: bar 1 half full at 1 s (ffS1, linear), bar 2 empty")
+    local boat = B.find("cover_sea", function(k) return k.Name == "Boat" end)
+    step(4)
+    check(boat and math.abs(boat.Position.X.Offset - 150) < 1e-6, "SEA cover: the boat is half across at 4 s (ffBoat)")
+    local fin = B.find("cover_sea", function(k) return k.Name == "Fin" end)
+    check(fin and fin.Position.Y.Offset == 8, "SEA cover: the fin is up at 4 s (ffFin 42-60%)")
+    check(fin.Rotation == nil or fin.Rotation == 0, "SEA cover: the fin is not a rotated frame (a clip cannot cut one)")
+    -- the Heartbeat drives it; Hide stops it; Show starts it again
     w1.TextTransparency = 0.5
+    RunService.Heartbeat:Fire(0.016)
+    check(w1.TextTransparency ~= 0.5, "motion: a Heartbeat moves the layers")
+    local fold
+    walk(B.g, function(o) if o.ClassName == "TextButton" and (o.Text == "Hide" or o.Text == "Show") then fold = o end end)
+    fold.Activated:Fire()
+    check(running() == "", "motion: Hide stops the driver (" .. running() .. ")")
+    w1.TextTransparency = 0.5
+    RunService.Heartbeat:Fire(0.016)
+    check(w1.TextTransparency == 0.5, "motion: nothing moves while the panel is folded")
+    fold.Activated:Fire()
+    check(running() == "cover_sea", "motion: Show starts it again")
     B.home()
-    flush()
-    B.live()
+    check(running() == "", "motion: leaving the cover stops its driver")
+    w1.TextTransparency = 0.5
+    RunService.Heartbeat:Fire(0.016)
     check(w1.TextTransparency == 0.5, "SEA cover: nothing ticks while the page is not on screen")
+    -- the board's preview: muted, no lock badge on it (the lock is the plate's)
+    local prev = B.find("cover_sea", function(k) return k.Name == "Preview" end)
+    check(prev and prev:FindFirstChild("Muted") and not prev:FindFirstChild("LockBadge"),
+        "SEA cover: the preview carries the muted mark, not a lock")
+    check(prev.BackgroundColor3.R == 7 and prev.BackgroundColor3.B == 33, "SEA cover: the board's #071621 preview ground")
     -- FRUITS: coming soon
     B.tap("home", "Mode") B.tap("modes", "FRUITS")
     check(B.cur() == "cover_fruits" and B.btn("cover_fruits", "Coming soon") and B.has("cover_fruits", "$14.99")
         and B.has("cover_fruits", "Fruit notifier"), "FRUITS cover: coming soon, $14.99, what it does")
+    check(B.has("cover_fruits", "LIFETIME") and B.has("cover_fruits", "once, yours for good"),
+        "FRUITS cover: the plate's LIFETIME chip and its price line")
+    check(running() == "cover_fruits", "motion: the FRUITS cover runs its own driver (" .. running() .. ")")
+    do
+        local fs = P.motions.cover_fruits
+        local got = B.find("cover_fruits", function(k) return k.Name == "Stored" end)
+        local you = B.find("cover_fruits", function(k) return k.Name == "You" end)
+        fs(1)
+        check(got.TextTransparency == 1 and you.Position.X.Offset == 40, "FRUITS cover: at 1 s you wait, STORED hidden")
+        fs(4.4)
+        check(got.TextTransparency == 0 and math.abs(you.Position.X.Offset - 208) < 1e-6,
+            "FRUITS cover: at 4.4 s you are at the fruit (+168) and STORED shows (frYou, frGot)")
+        local pings = {}
+        walk(B.V.cover_fruits, function(k)
+            local s = k:FindFirstChild("UIStroke")
+            if k.ClassName == "Frame" and s and s.Color and s.Color.R == 224 then table.insert(pings, k) end
+        end)
+        fs(0.5)
+        check(#pings == 2 and pings[1].Size.X.Offset > 0 and pings[2].Size.X.Offset == 52,
+            "FRUITS cover: ping 1 grows from .3, ping 2 waits its 1 s delay at its own size")
+    end
     B.tap("cover_fruits", "Coming soon")
     check(string.find(SAID[#SAID] or "", "not for sale yet", 1, true) ~= nil, "FRUITS: the plate says it is not for sale yet")
     B.tap("cover_fruits", "Back to the Library")
@@ -1114,6 +1179,53 @@ do
     local N = build(nil, nil, nil)
     N.tap("home", "Mode")
     check(N.has("modes", "NO KEY") and N.btn("modes", "Raid") ~= nil and N.btn("modes", "Mirage") ~= nil, "no key: every mode is a row")
+
+    -- R3 Task 2: Key & packs - the executor's checks, NEW on a pack a code opened
+    do
+        local K = build({ farm = NOW + 86400 }, "buyer", nil)
+        K.tap("home", "Key & packs")
+        check(K.has("key", "EXECUTOR") and (K.has("key", "checks pass") or K.has("key", "of 7")),
+            "Key: the EXECUTOR row says how many of the 7 checks pass")
+        check(K.find("key", function(k) return k.Name == "CopyKey" end) ~= nil, "Key: the copy mark (not the word)")
+        check(K.has("key", "Keep it private. It works on 3 Roblox accounts."), "Key: the board's keep-it-private line")
+        _G.BFF_ENT.sea = NOW + 7 * 86400
+        P.redeemedPack, P.redeemNote = "sea", "sea: 7 days added - hop once to open it everywhere"
+        K.live()
+        local seaNew
+        walk(K.V.key, function(k) if k.Name == "New" and k.Visible then seaNew = k end end)
+        check(seaNew ~= nil, "Key: NEW shows on the pack a code just opened")
+        check(K.has("key", "Sea unlocked: 7 days added to this key"), "Key: the board's green answer")
+        P.redeemedPack, P.redeemNote = nil, nil
+        local n, miss = execChecks({ writefile = true })
+        check(n == 1 and #miss == 6 and miss[1] == "readfile", "execChecks: 1 of 7, readfile first missing")
+    end
+    -- R3 Task 2: the trial recap - a trial whose days ran out opens on it
+    do
+        P.trialUse = { elite = 6 * 3600 + 12 * 60, seaevents = 2 * 3600 + 40 * 60, circuit = 3900, random = 30 }
+        P.recapShown = nil
+        local T = build({ farm = NOW - 10, raid = NOW - 10, sea = NOW - 10, prehistoric = NOW - 10, pvp = NOW - 10 },
+            "trial", "https://store.example/x")
+        T.live()
+        check(T.cur() == "recap", "recap: an ended trial opens on the recap, got " .. T.cur())
+        check(T.has("recap", "3 DAYS OF EVERYTHING.") and T.has("recap", "Elite pirates") and T.has("recap", "6h 12m")
+            and T.has("recap", "in BOSSES + RAIDS") and T.has("recap", "1h 05m"), "recap: the three modes used most, with times")
+        check(not T.has("recap", "Random"), "recap: under a minute does not count")
+        check(T.has("recap", "The 3 you used") and T.has("recap", "Bosses + Raids, Sea, Grind")
+            and T.has("recap", "$3.47") and T.has("recap", "all 5 packs for $0.48 less"), "recap: KEEP THEM, priced as the board")
+        T.tap("recap", "I have a code")
+        check(T.cur() == "key", "recap: I have a code opens Key & packs")
+        T.tap("key", "Your trial")
+        check(T.cur() == "recap", "recap: Key & packs leads back to it on a trial key")
+        -- the count: a trial key farming adds seconds to the mode on
+        local was = P.trialUse.elite
+        CFG_REAL.Hunt, CFG_REAL.HuntKind = true, "elite"
+        P.running = true
+        P.trialTick()
+        P.running = false
+        CFG_REAL.Hunt = false
+        check(P.trialUse.elite >= was, "recap: P.trialTick counts while a trial key farms")
+        P.trialUse, P.recapShown = {}, nil
+    end
     _G.BFF_ENT, _G.BFF_KIND, _G.BFF_STORE, _G.BFF_KEY = nil, nil, nil, nil
     setclipboard = nil
 end

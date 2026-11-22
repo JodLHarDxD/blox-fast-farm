@@ -1091,6 +1091,131 @@ function wheelLayout(widths)
     end
     return out
 end
+-- COVER MOTION (R3 Task 2, pure: tools/coveranim_test.py). The covers'
+-- CSS @keyframes, sampled at a time: one Heartbeat driver per visible cover
+-- page sets every moving layer from coverAnimAt(name, t). Stops are
+-- { at (0-1), value } with the CSS's own percentages; the easing runs per
+-- segment, as CSS does. A value is a number or a list of numbers.
+CSS_EASE = { ease = { 0.25, 0.1, 0.25, 1 }, ["ease-in-out"] = { 0.42, 0, 0.58, 1 },
+    ["ease-out"] = { 0, 0, 0.58, 1 }, ["ease-in"] = { 0.42, 0, 1, 1 } }
+function cssEase(name, u)
+    local b = CSS_EASE[name]
+    if not b or u <= 0 or u >= 1 then return math.max(0, math.min(1, u)) end
+    local x1, y1, x2, y2 = b[1], b[2], b[3], b[4]
+    local function bez(p1, p2, s) return 3 * p1 * s * (1 - s) ^ 2 + 3 * p2 * s * s * (1 - s) + s ^ 3 end
+    local lo, hi, s = 0, 1, u
+    for _ = 1, 24 do                -- bisection: x(s) is monotone on 0-1
+        s = (lo + hi) / 2
+        if bez(x1, x2, s) < u then lo = s else hi = s end
+    end
+    return bez(y1, y2, (lo + hi) / 2)
+end
+function kfAt(stops, u, ease)
+    local function mix(a, b, k)
+        if type(a) == "table" then
+            local o = {}
+            for i = 1, #a do o[i] = a[i] + (b[i] - a[i]) * k end
+            return o
+        end
+        return a + (b - a) * k
+    end
+    if u <= stops[1][1] then return stops[1][2] end
+    for i = 2, #stops do
+        local a, b = stops[i - 1], stops[i]
+        if u <= b[1] then
+            local span = b[1] - a[1]
+            if span <= 0 then return b[2] end
+            return mix(a[2], b[2], cssEase(ease, (u - a[1]) / span))
+        end
+    end
+    return stops[#stops][2]
+end
+-- dur s, delay s, ease, stops, fill ("both" = the 0% frame during the
+-- delay; otherwise the layer's own look, `rest`).
+COVER_ANIM = {
+    ffWord = { dur = 8, ease = "ease", fill = "both",
+        stops = { { 0, { 1, 10 } }, { 0.04, { 0, 0 } }, { 0.21, { 0, 0 } }, { 0.25, { 1, -6 } }, { 1, { 1, -6 } } } },
+    ffS1 = { dur = 8, ease = "linear", stops = { { 0, 0 }, { 0.25, 1 }, { 0.999, 1 }, { 1, 0 } } },
+    ffS2 = { dur = 8, ease = "linear", stops = { { 0, 0 }, { 0.25, 0 }, { 0.5, 1 }, { 0.999, 1 }, { 1, 0 } } },
+    ffS3 = { dur = 8, ease = "linear", stops = { { 0, 0 }, { 0.5, 0 }, { 0.75, 1 }, { 0.999, 1 }, { 1, 0 } } },
+    ffS4 = { dur = 8, ease = "linear", stops = { { 0, 0 }, { 0.75, 0 }, { 1, 1 } } },
+    ffSwell = { dur = 4, ease = "ease-in-out", rest = 1, stops = { { 0, 1 }, { 0.5, 1.07 }, { 1, 1 } } },
+    ffBoat = { dur = 8, ease = "linear", stops = { { 0, -40 }, { 1, 340 } } },
+    ffFin = { dur = 8, ease = "ease-in-out",
+        stops = { { 0, 22 }, { 0.3, 22 }, { 0.42, 0 }, { 0.6, 0 }, { 0.72, 22 }, { 1, 22 } } },
+    frPing = { dur = 2, ease = "ease-out", rest = { 1, 0 }, stops = { { 0, { 0.3, 0.1 } }, { 1, { 1.6, 1 } } } },
+    frBob = { dur = 3, ease = "ease-in-out", stops = { { 0, 0 }, { 0.5, -6 }, { 1, 0 } } },
+    frYou = { dur = 8, ease = "ease-in-out",
+        stops = { { 0, { 0, 0 } }, { 0.22, { 0, 0 } }, { 0.45, { 168, -18 } }, { 0.6, { 168, -18 } },
+            { 0.85, { 0, 0 } }, { 1, { 0, 0 } } } },
+    frGot = { dur = 8, ease = "ease",
+        stops = { { 0, 1 }, { 0.46, 1 }, { 0.5, 0 }, { 0.62, 0 }, { 0.66, 1 }, { 1, 1 } } },
+}
+-- (ffWord's value is { transparency, y px }; frPing's { scale, transparency };
+-- frGot's a transparency: CSS opacity turned into Roblox's 1 - opacity.)
+-- The value of animation `name` t s after the page showed, delayed `delay` s.
+function coverAnimAt(name, t, delay)
+    local a = COVER_ANIM[name]
+    if not a then return nil end
+    local lt = (tonumber(t) or 0) - (delay or 0)
+    if lt < 0 then
+        if a.fill == "both" then return a.stops[1][2] end
+        if a.rest ~= nil then return a.rest end
+        return a.stops[1][2]
+    end
+    return kfAt(a.stops, (lt % a.dur) / a.dur, a.ease)
+end
+-- TRIAL RECAP (R3 Task 2, pure: tools/coveranim_test.py). use = { [mode] =
+-- seconds } from the trial; names[mode] = its title; packOf[mode] = its pack.
+-- -> the 3 modes used most (a minute at least), bars against the first,
+-- the packs they sit in (in that order), what those cost a week, and what
+-- EVERYTHING ($2.99) saves against them (negative = costs more).
+function durWords(s)
+    s = math.max(0, math.floor(tonumber(s) or 0))
+    local h, m = math.floor(s / 3600), math.floor((s % 3600) / 60)
+    if h > 0 then return string.format("%dh %02dm", h, m) end
+    return m .. "m"
+end
+function trialRecapOf(use, names, packOf, packs)
+    local rows = {}
+    for mode, secs in pairs(use or {}) do
+        if type(secs) == "number" and secs >= 60 and packOf[mode] and packs[packOf[mode]] then
+            table.insert(rows, { mode = mode, secs = secs })
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.secs ~= b.secs then return a.secs > b.secs end
+        return a.mode < b.mode
+    end)
+    while #rows > 3 do table.remove(rows) end
+    local out = { rows = rows, packs = {}, sum = 0 }
+    local seen = {}
+    for _, r in ipairs(rows) do
+        r.name = (names and names[r.mode]) or r.mode
+        r.dur = durWords(r.secs)
+        r.frac = r.secs / rows[1].secs
+        r.pack = packOf[r.mode]
+        if not seen[r.pack] then
+            seen[r.pack] = true
+            table.insert(out.packs, r.pack)
+            out.sum += tonumber(string.match(packs[r.pack].price or "", "[%d%.]+")) or 0
+        end
+    end
+    out.sum = math.floor(out.sum * 100 + 0.5) / 100
+    out.save = math.floor((out.sum - 2.99) * 100 + 0.5) / 100
+    return out
+end
+-- EXECUTOR (R3 Task 2): the seven things the farm asks of an executor.
+-- have[name] = whether it is there -> passed, the names missing.
+EXEC_NEEDS = { "writefile", "readfile", "isfile", "queue_on_teleport", "hookmetamethod",
+    "fireproximityprompt", "firetouchinterest" }
+function execChecks(have)
+    local n, miss = 0, {}
+    for _, k in ipairs(EXEC_NEEDS) do
+        if have[k] then n += 1 else table.insert(miss, k) end
+    end
+    return n, miss
+end
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -17936,6 +18061,8 @@ local function buildUI()
         bodyFrame.Visible = not folded
         foldBtn.Text = folded and "Show" or "Hide"
         sweepSet(not folded)
+        -- a cover's motion stops while folded, and starts again on Show
+        if P.motionSync then P.motionSync() end
         -- Folded: the title and the news strip stay.
         applySize(true)
     end)
@@ -18086,8 +18213,44 @@ local function buildUI()
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
         stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu", trades = "Trades",
         cover_farm = "Grind", cover_raid = "Bosses + Raids", cover_sea = "Sea", cover_prehistoric = "Prehistoric",
-        cover_pvp = "PvP", cover_fruits = "Fruits", key = "Key & packs",
+        cover_pvp = "PvP", cover_fruits = "Fruits", key = "Key & packs", recap = "Your trial",
     }
+
+    -- MOTION (R3 Task 2): a page with moving parts registers ONE driver,
+    -- P.motions[page] = step(t). P.motionSync runs it on a Heartbeat while
+    -- that page is the one on screen, the body is not folded (Hide) and the
+    -- panel is alive; anything else disconnects it. Every show(), Hide and
+    -- close calls it. t restarts at 0 each time the page comes back, as the
+    -- board's CSS does on load. (P fields: the builder is at 200 locals.)
+    P.motions, P.motionConn = {}, {}
+    do
+        local myGui = gui
+        P.motionSync = function()
+            local alive = myGui and myGui.Parent ~= nil and gui == myGui
+            for name, step in pairs(P.motions) do
+                local want = alive and currentView == name and bodyFrame.Visible
+                local c = P.motionConn[name]
+                if want and not c then
+                    local t0 = os.clock()
+                    local conn
+                    conn = RunService.Heartbeat:Connect(function()
+                        if P.motionConn[name] ~= conn then conn:Disconnect() return end
+                        if not (myGui and myGui.Parent) then
+                            P.motionConn[name] = nil
+                            conn:Disconnect()
+                            return
+                        end
+                        pcall(step, os.clock() - t0)
+                    end)
+                    P.motionConn[name] = conn
+                    pcall(step, 0)
+                elseif not want and c then
+                    P.motionConn[name] = nil
+                    pcall(function() c:Disconnect() end)
+                end
+            end
+        end
+    end
 
     local function show(name, back)
         if name == currentView then return end
@@ -18129,6 +18292,7 @@ local function buildUI()
         if cap then cap.MaxSize = Vector2.new(room, 22) end
         -- the news strip is Home's alone
         if P.newsStripNow then P.newsStripNow() end
+        P.motionSync()
     end
     -- Back = the page you came from (a link can bring you to a shared page
     -- from more than one place: Fighting at sea from Sea events or the
@@ -19724,6 +19888,11 @@ local function buildUI()
         end
         -- Michroma through LOOK.mark; a build that lacks it gets a heavy Gotham.
         R.MICH = LOOK.mark
+        -- Roboto Mono (the key, the code box): through FontFace; Code without it.
+        R.MONO = { look = true, enum = Enum.Font.Code }
+        pcall(function()
+            R.MONO.face = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Medium)
+        end)
         R.NICE = { farm = "Grind", raid = "Bosses + Raids", sea = "Sea", prehistoric = "Prehistoric",
             pvp = "PvP", fruits = "Fruits" }
         -- One mode of each pack: its packState is the pack's.
@@ -19825,10 +19994,18 @@ local function buildUI()
                 Position = UDim2.fromOffset(cx, cy), BackgroundColor3 = fill or C.base,
                 BackgroundTransparency = fill and 0 or 1, BorderSizePixel = 0, Parent = parent,
             })
-            corner(f, d / 2)
+            -- half the size, whatever the size: a circle that swells stays round
+            mk("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = f })
             if line then stroke(f, line, th or 2) end
             return f
         end
+        -- A CSS border-box ring (outer size d, border th): Roblox's Border
+        -- stroke is drawn outside the frame, so the frame is d - 2 th.
+        local function ringBox(parent, cx, cy, d, color, th)
+            th = th or 2
+            return circ(parent, cx, cy, d - 2 * th, nil, color, th)
+        end
+        R.circ, R.ringBox = circ, ringBox
         local function slab(parent, cx, cy, w, h, color, rot, r)
             local f = mk("Frame", {
                 Size = UDim2.fromOffset(w, h), AnchorPoint = Vector2.new(0.5, 0.5),
@@ -19838,6 +20015,7 @@ local function buildUI()
             if r then corner(f, r) end
             return f
         end
+        R.slab = slab
         -- A padlock: body top-centre at (cx, cy), s wide.
         function R.lock(parent, cx, cy, color, s)
             s = s or 10
@@ -19857,53 +20035,42 @@ local function buildUI()
             return body
         end
 
-        -- The pack's picture, in a W x H box (the box clips). Board shapes: bars
-        -- crossed, rings, a dome with embers and an egg, a crosshair; Grind a
-        -- target, Fruits a fruit in a ring. Returns the parts that move.
-        function R.art(parent, pack, W, H, motion)
-            local parts = { pulse = {}, bob = {}, rot = {} }
+        -- The pack's picture, in a W x H box (the box clips). Board shapes
+        -- (Main.dc.html, at 146 x 92; Fruits 96 x 104): bars crossed and a
+        -- ring, rings, a dome with embers and an egg, a crosshair; Grind a
+        -- target, Fruits a fruit in a ring. Returns the parts that breathe
+        -- (pulse: rings, bob: dots) for a cover's preview; the Library's
+        -- covers stand still, as on the board.
+        function R.art(parent, pack, W, H)
+            local parts = { pulse = {}, bob = {} }
             local k = H / (pack == "fruits" and 104 or 92)
             local cx = W / 2
             local tint = R.acc(pack)
+            -- a CSS border-box ring: top edge `top`, outer size d
             local function ring(top, d, color, th)
-                local f = circ(parent, cx, (top + d / 2) * k, d * k, nil, color, th or 2)
-                table.insert(parts.pulse, { f = f, d = d * k })
+                local f = ringBox(parent, cx, (top + d / 2) * k, d * k, color, th or 2)
+                table.insert(parts.pulse, { f = f, d = d * k - 2 * (th or 2) })
                 return f
             end
             if pack == "sea" then
                 ring(58, 200, Color3.fromRGB(44, 106, 153))
                 ring(72, 140, Color3.fromRGB(60, 136, 194))
                 ring(86, 80, Color3.fromRGB(74, 163, 232))
-                if motion then
-                    -- the boat crosses it once an 8 s loop; a fin comes up on the way
-                    local boat = mk("Frame", { Size = UDim2.fromOffset(30, 20),
-                        Position = UDim2.fromOffset(-40, 112), BackgroundTransparency = 1, Parent = parent })
-                    mk("Frame", { Size = UDim2.fromOffset(2, 12), Position = UDim2.fromOffset(13, 0),
-                        BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = boat })
-                    corner(mk("Frame", { Size = UDim2.fromOffset(30, 8), Position = UDim2.fromOffset(0, 11),
-                        BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = boat }), 4)
-                    parts.move, parts.moveY = boat, 112
-                    local clip = mk("Frame", { Size = UDim2.fromOffset(40, 22), Position = UDim2.fromOffset(W - 82, 120),
-                        BackgroundTransparency = 1, ClipsDescendants = true, Parent = parent })
-                    local fin = mk("Frame", { Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(10, 22),
-                        BackgroundColor3 = Color3.fromRGB(74, 163, 232), BorderSizePixel = 0, Rotation = 45, Parent = clip })
-                    parts.fin = { f = fin, up = UDim2.fromOffset(10, 8), down = UDim2.fromOffset(10, 22) }
-                end
             elseif pack == "raid" then
-                local a = slab(parent, cx, 46 * k, 118 * k, 4 * k, Color3.fromRGB(232, 92, 78), 32, 2)
-                local b = slab(parent, cx, 46 * k, 118 * k, 4 * k, Color3.fromRGB(184, 71, 60), -32, 2)
-                table.insert(parts.rot, { f = a, base = 32 })
-                table.insert(parts.rot, { f = b, base = -32 })
-                local r = circ(parent, cx - 2 * k, 44 * k, 18 * k, tint, Color3.fromRGB(232, 92, 78), 2)
+                slab(parent, cx, 46 * k, 118 * k, 4 * k, Color3.fromRGB(232, 92, 78), 32, 2)
+                slab(parent, cx, 46 * k, 118 * k, 4 * k, Color3.fromRGB(184, 71, 60), -32, 2)
+                -- 18 px and a 2 px border, centred on the cross
+                local r = circ(parent, cx, 46 * k, 18 * k, tint, Color3.fromRGB(232, 92, 78), 2)
                 table.insert(parts.pulse, { f = r, d = 18 * k })
             elseif pack == "prehistoric" then
                 circ(parent, cx, 116 * k, 128 * k, Color3.fromRGB(90, 58, 18))
-                local r = circ(parent, cx, 116 * k, 128 * k, nil, Color3.fromRGB(240, 166, 60), 2)
-                table.insert(parts.pulse, { f = r, d = 128 * k })
-                for _, e in ipairs({ { -13, 33.5, 7, 240, 166, 60 }, { 3, 20.5, 5, 247, 196, 119 },
-                    { 11, 37, 6, 240, 166, 60 } }) do
+                local r = ringBox(parent, cx, 116 * k, 128 * k, Color3.fromRGB(240, 166, 60), 2)
+                table.insert(parts.pulse, { f = r, d = 128 * k - 4 })
+                -- embers: the board's left/top + half the size, from the centre
+                for _, e in ipairs({ { -9.5, 33.5, 7, 240, 166, 60 }, { 5.5, 20.5, 5, 247, 196, 119 },
+                    { 14, 37, 6, 240, 166, 60 } }) do
                     local d = circ(parent, cx + e[1] * k, e[2] * k, e[3] * k, Color3.fromRGB(e[4], e[5], e[6]))
-                    table.insert(parts.bob, { f = d, x = cx + e[1] * k, y = e[2] * k, dy = -8 * k })
+                    table.insert(parts.bob, { f = d, x = cx + e[1] * k, y = e[2] * k })
                 end
                 slab(parent, cx - 43.5 * k, 70.5 * k, 15 * k, 21 * k, Color3.fromRGB(247, 231, 198), 0, 8 * k)
             elseif pack == "pvp" then
@@ -19920,20 +20087,22 @@ local function buildUI()
                 ring(33, 34, Color3.fromRGB(63, 208, 126))
                 circ(parent, cx, 50 * k, 8 * k, Color3.fromRGB(63, 208, 126))
             elseif pack == "fruits" then
-                local r = circ(parent, cx, 52 * k, 52 * k, nil, Color3.fromRGB(74, 31, 61), 2)
-                table.insert(parts.pulse, { f = r, d = 52 * k })
-                local fr = circ(parent, cx, 53 * k, 24 * k, Color3.fromRGB(224, 85, 154))
-                local lf = slab(parent, cx + 5 * k, 40 * k, 9 * k, 6 * k, Color3.fromRGB(143, 227, 181), 0, 3)
-                table.insert(parts.bob, { f = fr, x = cx, y = 53 * k, dy = -6 * k })
-                table.insert(parts.bob, { f = lf, x = cx + 5 * k, y = 40 * k, dy = -6 * k })
+                -- ring left 22 top 26 (52, border-box), fruit 24 x 22, leaf 9 x 6
+                local r = ringBox(parent, cx, 52 * k, 52 * k, Color3.fromRGB(74, 31, 61), 2)
+                table.insert(parts.pulse, { f = r, d = 52 * k - 4 })
+                local fr = slab(parent, cx, 53 * k, 24 * k, 22 * k, Color3.fromRGB(224, 85, 154))
+                mk("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = fr })
+                local lf = slab(parent, cx + 5.5 * k, 40 * k, 9 * k, 6 * k, Color3.fromRGB(143, 227, 181), 0, 3)
+                table.insert(parts.bob, { f = fr, x = cx, y = 53 * k })
+                table.insert(parts.bob, { f = lf, x = cx + 5.5 * k, y = 40 * k })
             end
             return parts
         end
 
         -- The "everything" picture: rings and one dot per pack colour.
         function R.artAll(parent)
-            circ(parent, 52, 60, 76, nil, Color3.fromRGB(74, 69, 61))
-            circ(parent, 52, 60, 44, nil, Color3.fromRGB(110, 103, 92))
+            ringBox(parent, 52, 60, 76, Color3.fromRGB(74, 69, 61), 2)
+            ringBox(parent, 52, 60, 44, Color3.fromRGB(110, 103, 92), 2)
             circ(parent, 52, 60, 10, C.ivory)
             for _, d in ipairs({ { 51.5, 21.5, 63, 208, 126 }, { 88.5, 54.5, 232, 92, 78 },
                 { 70.5, 92.5, 74, 163, 232 }, { 16.5, 74.5, 240, 166, 60 }, { 26.5, 34.5, 166, 140, 255 } }) do
@@ -19941,45 +20110,189 @@ local function buildUI()
             end
         end
 
-        -- The cover page's motion, one step a 2 s quarter: the four words
-        -- fade through, the four bars fill, the shapes breathe. Run by the
-        -- page's addLive, so it ticks only while the page is on screen
-        -- (the panel's live loop skips a hidden view): one loop, no more.
-        local LINEAR2 = TweenInfo.new(2, Enum.EasingStyle.Linear)
-        local LINEAR8 = TweenInfo.new(8, Enum.EasingStyle.Linear)
-        local SWELL = TweenInfo.new(1.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-        function R.stepper(parts, words, bars, W)
-            local t0, last = os.clock(), 0
-            return function()
-                local step = math.floor(((os.clock() - t0) % 8) / 2) + 1
-                if step == last then return end
-                last = step
-                for i, w in ipairs(words) do tween(w, { TextTransparency = (i == step) and 0 or 1 }) end
-                for i, b in ipairs(bars) do
-                    if i < step then b.Size = UDim2.new(1, 0, 1, 0)
-                    elseif i > step then b.Size = UDim2.new(0, 0, 1, 0) end
-                end
-                bars[step].Size = UDim2.new(0, 0, 1, 0)
-                tween(bars[step], { Size = UDim2.new(1, 0, 1, 0) }, LINEAR2)
-                local big = (step % 2 == 1)
-                for _, p in ipairs(parts.pulse) do
-                    local d = p.d * (big and 1.07 or 1)
-                    tween(p.f, { Size = UDim2.fromOffset(d, d) }, SWELL)
-                end
-                for _, b in ipairs(parts.bob) do
-                    tween(b.f, { Position = UDim2.fromOffset(b.x, b.y + (big and b.dy or 0)) }, SWELL)
-                end
-                for _, r in ipairs(parts.rot) do
-                    tween(r.f, { Rotation = r.base + (big and (r.base > 0 and 6 or -6) or 0) }, SWELL)
-                end
-                if parts.fin then
-                    tween(parts.fin.f, { Position = (step == 2 or step == 3) and parts.fin.up or parts.fin.down }, SWELL)
-                end
-                if step == 1 and parts.move then
-                    parts.move.Position = UDim2.fromOffset(-40, parts.moveY)
-                    tween(parts.move, { Position = UDim2.fromOffset(W, parts.moveY) }, LINEAR8)
+        -- THE COVER'S PREVIEW (SeaCover / FruitCover .dc.html): a 174 px
+        -- card, its moving layers in a clipped Stage under the words, chips
+        -- and bars. Every layer is set from coverAnimAt (the boards'
+        -- @keyframes, same timings and easings): R.preview returns
+        -- step(t), which the page's ONE Heartbeat driver calls while the
+        -- page is on screen (P.motionSync). Nothing is made per frame.
+        -- Sea and Fruits are drawn from their boards; the packs without a
+        -- board of their own get their Library picture, breathing (ffSwell
+        -- on the rings, frBob on the dots).
+        local PREVIEW_BG = { sea = { 7, 22, 33 }, fruits = { 26, 10, 22 } }
+        local TRACK = { sea = { 42, 62, 77 }, fruits = { 58, 26, 49 } }
+        function R.previewBg(f)
+            local t = PREVIEW_BG[f]
+            if t then return rgb(t) end
+            local a = (ACCENT[f] or ACCENT.none)[1]
+            return Color3.fromRGB(math.floor(a[1] * 0.62), math.floor(a[2] * 0.62), math.floor(a[3] * 0.62))
+        end
+        -- The fin: a square turned 45 degrees. ClipsDescendants does not clip
+        -- a rotated child, so it is drawn unturned, as 2 px strips of the
+        -- diamond (half-diagonal 9 * sqrt 2), in a box the clip can cut.
+        local function diamond(parent, side, color)
+            local box = mk("Frame", { Size = UDim2.fromOffset(side, side), BackgroundTransparency = 1,
+                BorderSizePixel = 0, Parent = parent })
+            local h, c = side * math.sqrt(2) / 2, side / 2
+            for y = -h, h, 2 do
+                local w = 2 * (h - math.abs(y + 1))
+                if w > 0 then
+                    mk("Frame", { Size = UDim2.fromOffset(w, 2), Position = UDim2.fromOffset(c - w / 2, c + y),
+                        BackgroundColor3 = color, BorderSizePixel = 0, Parent = box })
                 end
             end
+            return box
+        end
+        function R.preview(card, f)
+            local cv = R.COVER[f]
+            local W = 310
+            local layers = {}
+            local function on(fn) table.insert(layers, fn) end
+            local stage = mk("Frame", { Name = "Stage", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+                BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 1, Parent = card })
+            if f == "sea" then
+                -- three swells, 0 / 0.6 / 1.2 s apart (ffSwell, 4 s ease-in-out)
+                for i, r in ipairs({ { 104, 360, { 27, 74, 110 } }, { 124, 260, { 44, 106, 153 } },
+                    { 144, 160, { 74, 163, 232 } } }) do
+                    local d0 = r[2] - 4
+                    local ring = ringBox(stage, W / 2, r[1] + r[2] / 2, r[2], rgb(r[3]), 2)
+                    local delay = (i - 1) * 0.6
+                    on(function(t)
+                        local d = d0 * coverAnimAt("ffSwell", t, delay)
+                        ring.Size = UDim2.fromOffset(d, d)
+                    end)
+                end
+                -- the boat crosses (ffBoat, 8 s linear, -40 to 340 px)
+                local boat = mk("Frame", { Name = "Boat", Size = UDim2.fromOffset(30, 20),
+                    Position = UDim2.fromOffset(-40, 112), BackgroundTransparency = 1, Parent = stage })
+                mk("Frame", { Size = UDim2.fromOffset(2, 12), Position = UDim2.fromOffset(13, 0),
+                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = boat })
+                corner(mk("Frame", { Size = UDim2.fromOffset(30, 8), Position = UDim2.fromOffset(0, 11),
+                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = boat }), 4)
+                on(function(t) boat.Position = UDim2.fromOffset(coverAnimAt("ffBoat", t), 112) end)
+                -- a fin comes up out of its slot (ffFin, 8 s ease-in-out)
+                local clip = mk("Frame", { Size = UDim2.fromOffset(40, 22), Position = UDim2.fromOffset(228, 120),
+                    BackgroundTransparency = 1, ClipsDescendants = true, Parent = stage })
+                local fin = diamond(clip, 18, Color3.fromRGB(74, 163, 232))
+                fin.Name = "Fin"
+                on(function(t) fin.Position = UDim2.fromOffset(10, 8 + coverAnimAt("ffFin", t)) end)
+            elseif f == "fruits" then
+                mk("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.fromOffset(0, 136),
+                    BackgroundColor3 = Color3.fromRGB(58, 26, 49), BorderSizePixel = 0, Parent = stage })
+                -- two pings round the fruit, 1 s apart (frPing, 2 s ease-out)
+                for i = 1, 2 do
+                    local ping = ringBox(stage, 220, 96, 56, Color3.fromRGB(224, 85, 154), 2)
+                    local st = ping:FindFirstChild("UIStroke")
+                    local delay = i - 1
+                    on(function(t)
+                        local v = coverAnimAt("frPing", t, delay)
+                        local s = v[1]
+                        ping.Size = UDim2.fromOffset(52 * s, 52 * s)
+                        if st then st.Thickness, st.Transparency = 2 * s, v[2] end
+                    end)
+                end
+                -- the fruit bobs (frBob, 3 s ease-in-out)
+                local fruit = mk("Frame", { Name = "Fruit", Size = UDim2.fromOffset(22, 24),
+                    Position = UDim2.fromOffset(209, 84), BackgroundTransparency = 1, Parent = stage })
+                mk("UICorner", { CornerRadius = UDim.new(0.5, 0), Parent = mk("Frame", {
+                    Size = UDim2.fromOffset(22, 20), Position = UDim2.fromOffset(0, 4),
+                    BackgroundColor3 = Color3.fromRGB(224, 85, 154), BorderSizePixel = 0, Parent = fruit }) })
+                corner(mk("Frame", { Size = UDim2.fromOffset(8, 5), Position = UDim2.fromOffset(11, 0),
+                    BackgroundColor3 = Color3.fromRGB(143, 227, 181), BorderSizePixel = 0, Parent = fruit }), 2)
+                on(function(t) fruit.Position = UDim2.fromOffset(209, 84 + coverAnimAt("frBob", t)) end)
+                -- you go get it and come back (frYou, 8 s ease-in-out)
+                local you = mk("Frame", { Name = "You", Size = UDim2.fromOffset(14, 22),
+                    Position = UDim2.fromOffset(40, 112), BackgroundTransparency = 1, Parent = stage })
+                corner(mk("Frame", { Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(3, 0),
+                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = you }), 4)
+                corner(mk("Frame", { Size = UDim2.fromOffset(10, 13), Position = UDim2.fromOffset(2, 9),
+                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = you }), 3)
+                on(function(t)
+                    local v = coverAnimAt("frYou", t)
+                    you.Position = UDim2.fromOffset(40 + v[1], 112 + v[2])
+                end)
+                -- STORED blinks in while you hold it (frGot, 8 s)
+                local got = mk("TextLabel", { Name = "Stored", Size = UDim2.fromOffset(0, lookPx(9) + 6),
+                    AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(238, 66),
+                    BackgroundColor3 = Color3.fromRGB(143, 227, 181), BackgroundTransparency = 1, BorderSizePixel = 0,
+                    Font = LOOK.black, TextSize = lookPx(9), TextColor3 = C.base, TextTransparency = 1,
+                    Text = "STORED", Parent = stage })
+                corner(got, 5)
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = got })
+                on(function(t)
+                    local a = coverAnimAt("frGot", t)
+                    got.BackgroundTransparency, got.TextTransparency = a, a
+                end)
+            else
+                local art = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = stage })
+                local parts = R.art(art, f, W, 174)
+                on(function(t)
+                    local s = coverAnimAt("ffSwell", t)
+                    for _, p in ipairs(parts.pulse) do p.f.Size = UDim2.fromOffset(p.d * s, p.d * s) end
+                    local dy = coverAnimAt("frBob", t)
+                    for _, b in ipairs(parts.bob) do b.f.Position = UDim2.fromOffset(b.x, b.y + dy) end
+                end)
+            end
+
+            -- the four words, 2 s apart (ffWord, 8 s ease, fill both)
+            local wordBox = mk("Frame", { Size = UDim2.new(1, -32, 0, 40), Position = UDim2.fromOffset(16, 46),
+                BackgroundTransparency = 1, ZIndex = 2, Parent = card })
+            local words = {}
+            for i, w in ipairs(cv.words) do
+                local lab = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.fromOffset(0, 10),
+                    BackgroundTransparency = 1, Font = R.MICH, TextSize = lookPx(f == "fruits" and 18 or 20),
+                    TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left,
+                    TextYAlignment = Enum.TextYAlignment.Top, TextTransparency = 1, ZIndex = 2,
+                    Text = w, Parent = wordBox })
+                words[i] = lab
+                on(function(t)
+                    local v = coverAnimAt("ffWord", t, (i - 1) * 2)
+                    lab.TextTransparency = v[1]
+                    lab.Position = UDim2.fromOffset(0, v[2])
+                end)
+            end
+
+            -- PREVIEW, and the muted mark (the board's speaker with a cross)
+            local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 8), AutomaticSize = Enum.AutomaticSize.X,
+                Position = UDim2.fromOffset(12, 12), BackgroundColor3 = Color3.fromRGB(11, 10, 9),
+                BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(9), TextColor3 = C.text,
+                Text = "PREVIEW", ZIndex = 3, Parent = card })
+            corner(chip, 5)
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = chip })
+            local mute = mk("Frame", { Name = "Muted", Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -38, 0, 10),
+                BackgroundColor3 = Color3.fromRGB(11, 10, 9), BorderSizePixel = 0, ZIndex = 3, Parent = card })
+            corner(mute, 13)
+            local ink = LOOK.soft
+            mk("Frame", { Size = UDim2.fromOffset(2, 4), Position = UDim2.fromOffset(7, 11),
+                BackgroundColor3 = ink, BorderSizePixel = 0, ZIndex = 4, Parent = mute })
+            mk("Frame", { Size = UDim2.fromOffset(3, 8), Position = UDim2.fromOffset(9, 9),
+                BackgroundColor3 = ink, BorderSizePixel = 0, ZIndex = 4, Parent = mute })
+            for _, rot in ipairs({ 45, -45 }) do
+                local x = slab(mute, 17, 13, 1.5, 5, ink, rot)
+                x.ZIndex = 4
+            end
+
+            -- the four bars (ffS1-4, 8 s linear)
+            local trackC = TRACK[f] and rgb(TRACK[f]) or rgb((ACCENT[f] or ACCENT.none)[4])
+            local barBox = mk("Frame", { Size = UDim2.new(1, -24, 0, 3), Position = UDim2.new(0, 12, 1, -13),
+                BackgroundTransparency = 1, ZIndex = 3, Parent = card })
+            mk("UIGridLayout", { CellSize = UDim2.new(0.25, -3, 1, 0), CellPadding = UDim2.fromOffset(4, 0),
+                SortOrder = Enum.SortOrder.LayoutOrder, Parent = barBox })
+            for i = 1, 4 do
+                local track = mk("Frame", { BackgroundColor3 = trackC, BorderSizePixel = 0,
+                    ClipsDescendants = true, LayoutOrder = i, ZIndex = 3, Parent = barBox })
+                corner(track, 2)
+                local fill = mk("Frame", { Name = "Fill", Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.text,
+                    BorderSizePixel = 0, ZIndex = 3, Parent = track })
+                local nm = "ffS" .. i
+                on(function(t) fill.Size = UDim2.new(coverAnimAt(nm, t), 0, 1, 0) end)
+            end
+
+            local function step(t)
+                for _, fn in ipairs(layers) do fn(t) end
+            end
+            step(0)
+            return step, words
         end
 
         -- The store link, copied; true when it was.
@@ -19994,10 +20307,36 @@ local function buildUI()
             return false
         end
 
-        -- A cover in the Library's grid: pack tint, its picture, the lock (or
-        -- nothing, when it is yours), name, line, price or days left.
+        -- The boards' ink on each pack's tint: the line, then the "/ week".
+        R.INK = { farm = { { 194, 217, 203 }, { 157, 190, 170 } }, raid = { { 217, 194, 190 }, { 201, 169, 164 } },
+            sea = { { 195, 210, 222 }, { 157, 179, 196 } }, prehistoric = { { 220, 203, 178 }, { 196, 174, 142 } },
+            pvp = { { 207, 199, 234 }, { 173, 162, 214 } }, fruits = { { 227, 195, 213 }, { 201, 160, 184 } } }
+        function R.ink(f, i)
+            local t = R.INK[f]
+            return t and rgb(t[i]) or C.second
+        end
+        -- "$0.99 / week": the price 13 px ExtraBold ivory, the rest in the
+        -- label's own (11 px, the tint's ink).
+        function R.priceRich(price, rest)
+            return '<font size="' .. lookPx(13) .. '" weight="800" color="#F2EFEA">' .. price .. '</font>' .. rest
+        end
+        -- A lock badge: the board's 26 px black disc, a 13 px ivory padlock.
+        function R.badge(parent)
+            local badge = mk("Frame", { Name = "LockBadge", Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -36, 0, 10),
+                BackgroundColor3 = Color3.fromRGB(11, 10, 9), BorderSizePixel = 0, ZIndex = 3, Parent = parent })
+            corner(badge, 13)
+            R.lock(badge, 13, 12, C.text, 8)
+            return badge
+        end
+
+        -- A cover in the Library's grid (Main.dc.html): 196 px, the pack
+        -- tint and its 1 px rim, the picture in the top 92 px, the lock (or
+        -- nothing, when it is yours), then padding 8 12 12: the name
+        -- (Michroma 11, line-height 1.3), 5 px, the line (11, 1.35, the
+        -- tint's ink), and the price at the bottom (13 ExtraBold + "/ week"
+        -- 11) - or "on" and the days left.
         function R.cell(parent, f, order)
-            local tint, text, _, soft = R.acc(f)
+            local tint, _, _, soft = R.acc(f)
             local pk = PACKS[f]
             local when, open = R.packWhen(f)
             local b = mk("TextButton", {
@@ -20009,24 +20348,27 @@ local function buildUI()
             local art = mk("Frame", { Size = UDim2.new(1, 0, 0, 92), BackgroundTransparency = 1,
                 ClipsDescendants = true, Parent = b })
             R.art(art, f, 146, 92)
-            if not open then
-                local badge = mk("Frame", { Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -36, 0, 10),
-                    BackgroundColor3 = Color3.fromRGB(11, 10, 9), BorderSizePixel = 0, Parent = b })
-                corner(badge, 13)
-                R.lock(badge, 13, 11, C.text, 10)
-            end
-            mk("TextLabel", { Size = UDim2.new(1, -24, 0, 16), Position = UDim2.fromOffset(12, 100),
-                BackgroundTransparency = 1, Font = R.MICH, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.text, TextTruncate = Enum.TextTruncate.AtEnd, Text = pk.name, Parent = b })
-            mk("TextLabel", { Size = UDim2.new(1, -24, 0, 44), Position = UDim2.fromOffset(12, 119),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
+            if not open then R.badge(b) end
+            local words = mk("Frame", { Size = UDim2.new(1, 0, 1, -92), Position = UDim2.fromOffset(0, 92),
+                BackgroundTransparency = 1, Parent = b })
+            mk("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 12),
+                PaddingRight = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12), Parent = words })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = words })
+            mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = R.MICH, TextSize = lookPx(11), LineHeight = LOOK.lh(1.3),
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = C.text, Text = pk.name, LayoutOrder = 1, Parent = words })
+            mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.35),
                 TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-                TextWrapped = true, TextColor3 = text, Text = pk.line, Parent = b })
-            mk("TextLabel", { Size = UDim2.new(1, -24, 0, 18), Position = UDim2.new(0, 12, 1, -28),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-                Text = open and ('<font color="#3FD07E"><b>on</b></font>' .. ((when == "open") and "" or ("   " .. tostring(when))))
-                    or ('<font size="13" color="#F2EFEA"><b>' .. pk.price .. '</b></font> / week'),
+                TextWrapped = true, TextColor3 = R.ink(f, 1), Text = pk.line, LayoutOrder = 2, Parent = words })
+            mk("TextLabel", { Size = UDim2.new(1, -24, 0, lookPx(13)), AnchorPoint = Vector2.new(0, 1),
+                Position = UDim2.new(0, 12, 1, -12),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), RichText = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = R.ink(f, 2),
+                Text = open and ('<font weight="800" color="#3FD07E">on</font>' .. ((when == "open") and "" or (" · " .. tostring(when))))
+                    or R.priceRich(pk.price, " / week"),
                 Parent = b })
             pressable(b)
             b.Activated:Connect(function() show("cover_" .. f) end)
@@ -20288,8 +20630,11 @@ local function buildUI()
     do
         local R = P.r2
         local v = makeView("modes")
-        gap(v, 6)
-        -- The key in a line, to Key & packs.
+        -- The key in a line, to Key & packs (Main.dc.html: margin 12 16 2,
+        -- 44 px, radius 12, #1B1917, padding 0 10 0 12, 10 px apart: the
+        -- pack chip 10 px ExtraBold on the pack's colour, the sentence 13 px
+        -- #C9C3B9 taking the room, "Key" 13 px #9A958D, the chevron).
+        gap(v, 12)
         do
             local k0 = R.keyInfo()
             local b = mk("TextButton", {
@@ -20297,20 +20642,24 @@ local function buildUI()
                 Text = "", AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = v,
             })
             corner(b, 12)
-            local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X,
-                Position = UDim2.fromOffset(12, 12), BackgroundColor3 = C.ivory, BorderSizePixel = 0,
-                Font = LOOK.bold, TextSize = 9, TextColor3 = C.base, Text = k0.chip, Parent = b })
+            local line = mk("Frame", { Size = UDim2.new(1, -46, 1, 0), Position = UDim2.fromOffset(12, 0),
+                BackgroundTransparency = 1, Parent = b })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 10),
+                VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = line })
+            local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(10) + 8), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(10),
+                TextColor3 = C.base, Text = k0.chip, LayoutOrder = 1, Parent = line })
             corner(chip, 6)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7), Parent = chip })
-            -- the chip is as wide as its word: the sentence starts after it
-            local x0 = 12 + 14 + math.max(36, #k0.chip * 7) + 10
-            local sentence = mk("TextLabel", { Size = UDim2.new(1, -(x0 + 76), 1, 0), Position = UDim2.fromOffset(x0, 0),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
+            -- the sentence takes what the chip and "Key" leave (a flex item)
+            local sentence = mk("TextLabel", { Size = UDim2.new(0, 150, 1, 0),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                TextColor3 = C.second, Text = k0.text, Parent = b })
-            mk("TextLabel", { Size = UDim2.fromOffset(40, 44), Position = UDim2.new(1, -62, 0, 0),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "Key", Parent = b })
+                TextColor3 = LOOK.soft, Text = k0.text, LayoutOrder = 2, Parent = line })
+            pcall(function() mk("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill, Parent = sentence }) end)
+            mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
+                TextColor3 = C.second, Text = "Key", LayoutOrder = 3, Parent = line })
             chevron(b)
             pressable(b)
             b.Activated:Connect(function() show("key") end)
@@ -20320,8 +20669,10 @@ local function buildUI()
                 chip.Text, chip.BackgroundColor3, chip.TextColor3 = k.chip, ac2, t2
                 sentence.Text = k.text
             end)
-            gap(v, 2)
+            -- 2 px under it, then the 30 px section line (heading2 is 26)
+            gap(v, 6)
         end
+
         readout(v, function()
             local lv = P.seaev and P.seaev.levi
             if CFG.LeviFight and lv then
@@ -20435,12 +20786,14 @@ local function buildUI()
                 LayoutOrder = nextOrder(), Parent = v })
             mk("TextLabel", { Size = UDim2.new(1, -120, 0, 26), Position = UDim2.fromOffset(20, 8),
                 BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = LOOK.mute,
                 Text = (nMore > 0) and ("LIBRARY · " .. nMore .. (nMore == 1 and " MORE PACK" or " MORE PACKS"))
                     or "LIBRARY · EVERY PACK IS YOURS", Parent = h })
             mk("TextLabel", { Size = UDim2.fromOffset(90, 26), Position = UDim2.new(1, -110, 0, 8),
                 BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "tap a cover", Parent = h })
+                TextXAlignment = Enum.TextXAlignment.Right, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = LOOK.mute, Text = "tap a cover", Parent = h })
         end
         local grid = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v })
@@ -20457,161 +20810,137 @@ local function buildUI()
         end
         gap(v, 10)
 
-        -- FRUITS: the wide cover (the pack is not for sale yet).
-        do
-            local tint, text, _, soft = R.acc("fruits")
+        -- A wide cover (FRUITS, EVERYTHING): the picture on the left (aw
+        -- px), a column from x0 with padding 14: a top row, then lines;
+        -- the price at the bottom.
+        local function wide(h, aw, x0, bg, rim)
             local b = mk("TextButton", {
-                Size = UDim2.new(1, -40, 0, 104), BackgroundColor3 = tint, BorderSizePixel = 0,
+                Size = UDim2.new(1, -40, 0, h), BackgroundColor3 = bg, BorderSizePixel = 0,
                 Text = "", AutoButtonColor = false, ClipsDescendants = true, LayoutOrder = nextOrder(), Parent = v,
             })
             corner(b, 14)
-            mk("UIStroke", { Color = soft, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
-            local art = mk("Frame", { Size = UDim2.fromOffset(96, 104), BackgroundTransparency = 1,
+            mk("UIStroke", { Color = rim, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+            local art = mk("Frame", { Size = UDim2.fromOffset(aw, h), BackgroundTransparency = 1,
                 ClipsDescendants = true, Parent = b })
+            local col = mk("Frame", { Size = UDim2.new(1, -(x0 + 14), 1, -28), Position = UDim2.fromOffset(x0, 14),
+                BackgroundTransparency = 1, Parent = b })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = col })
+            return b, art, col
+        end
+        local function line(col, text, color, order)
+            return mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.35),
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = color, Text = text, LayoutOrder = order, Parent = col })
+        end
+        local function price(b, x0, rich, color)
+            return mk("TextLabel", { Size = UDim2.new(1, -(x0 + 14), 0, lookPx(13)), AnchorPoint = Vector2.new(0, 1),
+                Position = UDim2.new(0, x0, 1, -14), BackgroundTransparency = 1, Font = LOOK.regular,
+                TextSize = lookPx(11), RichText = true, TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Bottom, TextColor3 = color, Text = rich, Parent = b })
+        end
+
+        -- FRUITS: the wide cover (Main.dc.html: 104 px, #2A1024, rim
+        -- #4A1F3D, a 96 px picture; FRUITS in Michroma 12 and its chip -
+        -- SOON, the pack is not for sale yet - the line, the price).
+        do
+            local tint, text, _, soft = R.acc("fruits")
+            local b, art, col = wide(104, 96, 98, tint, soft)
             R.art(art, "fruits", 96, 104)
-            mk("TextLabel", { Size = UDim2.fromOffset(70, 18), Position = UDim2.fromOffset(98, 14),
-                BackgroundTransparency = 1, Font = R.MICH, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.text, Text = "FRUITS", Parent = b })
-            local soon = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-                Position = UDim2.fromOffset(170, 14), BackgroundTransparency = 1, Font = LOOK.bold,
-                TextSize = 9, TextColor3 = text, Text = "SOON", Parent = b })
+            local top = mk("Frame", { Size = UDim2.new(1, 0, 0, lookPx(12) + 4), BackgroundTransparency = 1,
+                LayoutOrder = 1, Parent = col })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
+                VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = top })
+            mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = R.MICH, TextSize = lookPx(12), TextColor3 = C.text,
+                Text = "FRUITS", LayoutOrder = 1, Parent = top })
+            local soon = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 4), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.black, TextSize = lookPx(9), TextColor3 = text,
+                Text = "SOON", LayoutOrder = 2, Parent = top })
             corner(soon, 5)
             mk("UIStroke", { Color = soft, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = soon })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = soon })
-            mk("TextLabel", { Size = UDim2.new(1, -112, 0, 32), Position = UDim2.fromOffset(98, 36),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
-                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-                TextWrapped = true, TextColor3 = text, Text = PACKS.fruits.line, Parent = b })
-            mk("TextLabel", { Size = UDim2.new(1, -112, 0, 18), Position = UDim2.new(0, 98, 1, -28),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-                Text = '<font size="13" color="#F2EFEA"><b>' .. PACKS.fruits.price .. '</b></font> lifetime · or $4.99 / month',
-                Parent = b })
-            if not fruitsOpen then
-                local badge = mk("Frame", { Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -36, 0, 10),
-                    BackgroundColor3 = Color3.fromRGB(11, 10, 9), BorderSizePixel = 0, Parent = b })
-                corner(badge, 13)
-                R.lock(badge, 13, 11, C.text, 10)
-            end
+            line(col, PACKS.fruits.line, R.ink("fruits", 1), 2)
+            price(b, 98, R.priceRich(PACKS.fruits.price, " lifetime · or $4.99 / month"), R.ink("fruits", 2))
+            if not fruitsOpen then R.badge(b) end
             pressable(b)
             b.Activated:Connect(function() show("cover_fruits") end)
             gap(v, 10)
         end
 
-        -- EVERYTHING: shown while any pack is still to buy.
+        -- EVERYTHING: shown while any pack is still to buy (120 px, #23201B,
+        -- rim #4A453D, a 104 px picture; BEST VALUE, EVERYTHING in Michroma
+        -- 13, the line, the price).
         if #locked > 0 then
-            local b = mk("TextButton", {
-                Size = UDim2.new(1, -40, 0, 120), BackgroundColor3 = C.raised, BorderSizePixel = 0,
-                Text = "", AutoButtonColor = false, ClipsDescendants = true, LayoutOrder = nextOrder(), Parent = v,
-            })
-            corner(b, 14)
-            mk("UIStroke", { Color = Color3.fromRGB(74, 69, 61), Thickness = 1,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
-            local art = mk("Frame", { Size = UDim2.fromOffset(104, 120), BackgroundTransparency = 1,
-                ClipsDescendants = true, Parent = b })
+            local b, art, col = wide(120, 104, 108, Color3.fromRGB(35, 32, 27), Color3.fromRGB(74, 69, 61))
             R.artAll(art)
-            local best = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-                Position = UDim2.fromOffset(108, 14), BackgroundColor3 = C.ivory, BorderSizePixel = 0,
-                Font = LOOK.bold, TextSize = 9, TextColor3 = C.base, Text = "BEST VALUE", Parent = b })
+            local best = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 6), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(9),
+                TextColor3 = C.base, Text = "BEST VALUE", LayoutOrder = 1, Parent = col })
             corner(best, 5)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = best })
-            mk("TextLabel", { Size = UDim2.new(1, -122, 0, 18), Position = UDim2.fromOffset(108, 38),
-                BackgroundTransparency = 1, Font = R.MICH, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.text, Text = "EVERYTHING", Parent = b })
-            mk("TextLabel", { Size = UDim2.new(1, -122, 0, 30), Position = UDim2.fromOffset(108, 60),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11,
-                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-                TextWrapped = true, TextColor3 = C.second, Text = "All 5 packs, plus seasonal events", Parent = b })
-            mk("TextLabel", { Size = UDim2.new(1, -122, 0, 18), Position = UDim2.new(0, 108, 1, -30),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 11, RichText = true,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                Text = '<font size="13" color="#F2EFEA"><b>$2.99</b></font> / week · $5.99 / month', Parent = b })
+            mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(13) + 2), BackgroundTransparency = 1, Font = R.MICH,
+                TextSize = lookPx(13), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "EVERYTHING", LayoutOrder = 2, Parent = col })
+            line(col, "All 5 packs, plus seasonal events", LOOK.soft, 3)
+            price(b, 108, R.priceRich("$2.99", " / week · $5.99 / month"), C.second)
             pressable(b)
             b.Activated:Connect(function() R.copyStore() end)
-            gap(v, 4)
         end
+        -- the board's footnote: 14 px under, 12 px, line-height 1.45
+        gap(v, 14)
         local foot = caption(v, "Prices are per week. A code from the store unlocks a pack on this key: open Key to redeem it.")
-        foot.TextSize = 12
+        foot.TextSize = lookPx(12)
     end
 
     -- =====================================================
-    -- COVERS (R2): a pack's page - a preview that moves, what is inside
-    -- (a lock on each mode you do not hold), and the price plate
+    -- COVERS (R2; R3 Task 2: SeaCover / FruitCover .dc.html): a pack's page
+    -- - a preview that moves (R.preview: one Heartbeat driver while the
+    -- page is on screen), what is inside (a lock on each mode you do not
+    -- hold), and the price plate. Locked covers stay visible, the preview
+    -- muted; the owner's key opens everything (the plate says so).
     -- =====================================================
     do
         local R = P.r2
+        local GREEN_BG, GREEN_FG = Color3.fromRGB(24, 59, 42), Color3.fromRGB(155, 232, 189)
         for _, f in ipairs({ "farm", "raid", "sea", "prehistoric", "pvp", "fruits" }) do
             local pk, cv = PACKS[f], R.COVER[f]
             local tint, text = R.acc(f)
-            local A = ACCENT[f][1]
             local when, open = R.packWhen(f)
             local v = makeView("cover_" .. f)
             gap(v, 4)
 
-            -- THE PREVIEW: four words, four bars, the pack's shapes breathing.
-            local W = 310
+            -- THE PREVIEW (margin 4 16 0, 174 px, radius 14, its own ground)
             local card = mk("Frame", {
-                Size = UDim2.new(1, -32, 0, 174), BackgroundColor3 = Color3.fromRGB(
-                    math.floor(A[1] * 0.6), math.floor(A[2] * 0.6), math.floor(A[3] * 0.6)),
+                Name = "Preview", Size = UDim2.new(1, -32, 0, 174), BackgroundColor3 = R.previewBg(f),
                 BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = nextOrder(), Parent = v,
             })
             corner(card, 14)
-            local parts = R.art(card, f, W, 174, true)
-            local words = {}
-            for i, w in ipairs(cv.words) do
-                words[i] = mk("TextLabel", {
-                    Size = UDim2.new(1, -32, 0, 40), Position = UDim2.fromOffset(16, 46),
-                    BackgroundTransparency = 1, Font = R.MICH, TextSize = 18, TextColor3 = C.text,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 1, Text = w, Parent = card,
-                })
-            end
-            local chip = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-                Position = UDim2.fromOffset(12, 12), BackgroundColor3 = Color3.fromRGB(11, 10, 9),
-                BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9, TextColor3 = C.text,
-                Text = "PREVIEW", Parent = card })
-            corner(chip, 5)
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = chip })
-            if not open then
-                local badge = mk("Frame", { Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -38, 0, 10),
-                    BackgroundColor3 = Color3.fromRGB(11, 10, 9), BorderSizePixel = 0, Parent = card })
-                corner(badge, 13)
-                R.lock(badge, 13, 11, C.text, 10)
-            end
-            local barBox = mk("Frame", { Size = UDim2.new(1, -24, 0, 3), Position = UDim2.new(0, 12, 1, -13),
-                BackgroundTransparency = 1, Parent = card })
-            local bars = {}
-            for i = 1, 4 do
-                local track = mk("Frame", {
-                    Size = UDim2.new(0.25, -3, 1, 0), Position = UDim2.new((i - 1) / 4, 0, 0, 0),
-                    BackgroundColor3 = Color3.fromRGB(A[1] + 30, A[2] + 30, A[3] + 30),
-                    BorderSizePixel = 0, ClipsDescendants = true, Parent = barBox,
-                })
-                corner(track, 2)
-                bars[i] = mk("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.text,
-                    BorderSizePixel = 0, Parent = track })
-            end
-            addLive(R.stepper(parts, words, bars, W))
+            P.motions["cover_" .. f] = R.preview(card, f)
 
-            -- name + line
+            -- name + line (padding 16 20 4, 5 apart: Michroma 20, 13 px #9A958D)
             local head = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v })
             mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = head })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
-                PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 2), Parent = head })
-            mk("TextLabel", { Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1, Font = R.MICH,
-                TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 4), Parent = head })
+            mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(20) + 2), BackgroundTransparency = 1, Font = R.MICH,
+                TextSize = lookPx(20), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
                 Text = pk.name, LayoutOrder = 1, Parent = head })
             mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small, TextWrapped = true,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13), TextWrapped = true,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = cv.sub,
                 LayoutOrder = 2, Parent = head })
 
             -- INSIDE: the modes. Held: a row that opens the mode. Not held:
-            -- the same words, a lock on the right, nothing to tap.
+            -- the same words (52 px, 15 SemiBold over 13 #847E75), a 14 px
+            -- lock on the right, nothing to tap. Sea: a hairline between;
+            -- Fruits: a line under each (the boards).
+            gap(v, 4)
             heading2(v, "inside")
             for i, r in ipairs(cv.inside) do
-                if i > 1 then hairline(v) end
                 local id = r[1]
+                if i > 1 and f ~= "fruits" then hairline(v) end
                 if id and open then
                     modeRow(v, r[2], r[3], function()
                         if id == "volcano" then
@@ -20624,21 +20953,30 @@ local function buildUI()
                 else
                     local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
                         LayoutOrder = nextOrder(), Parent = v })
-                    mk("TextLabel", { Size = UDim2.new(1, -60, 0, 20), Position = UDim2.fromOffset(20, 8),
-                        BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
+                    mk("TextLabel", { Size = UDim2.new(1, -60, 0, lookPx(15)), Position = UDim2.fromOffset(20, 8),
+                        BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(15),
                         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                         TextColor3 = C.text, Text = r[2], Parent = row })
-                    mk("TextLabel", { Size = UDim2.new(1, -60, 0, 16), Position = UDim2.fromOffset(20, 28),
-                        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.small,
+                    mk("TextLabel", { Size = UDim2.new(1, -60, 0, lookPx(13)), Position = UDim2.fromOffset(20, 11 + lookPx(15)),
+                        BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
                         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                        TextColor3 = C.third, Text = r[3], Parent = row })
-                    if not open then R.lock(row, 322, 20, C.third, 11) end
+                        TextColor3 = LOOK.mute, Text = r[3], Parent = row })
+                    if not open then
+                        local lk = mk("Frame", { Name = "Lock", Size = UDim2.fromOffset(14, 52),
+                            Position = UDim2.new(1, -34, 0, 0), BackgroundTransparency = 1, Parent = row })
+                        R.lock(lk, 7, 25, LOOK.mute, 8)
+                    end
+                    if f == "fruits" then
+                        mk("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1),
+                            BackgroundColor3 = C.line, BorderSizePixel = 0, Parent = row })
+                    end
                 end
             end
             gap(v, 14)
 
-            -- THE PLATE: what it costs and how to get it - or that you hold it.
-            local plate = mk("Frame", { Size = UDim2.new(1, -32, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            -- THE PLATE (margin 16 16 0, padding 16, radius 16, #1F1D1B, 10
+            -- apart): what it costs and how to get it - or that you hold it.
+            local plate = mk("Frame", { Name = "Plate", Size = UDim2.new(1, -32, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundColor3 = C.raised, BorderSizePixel = 0, LayoutOrder = nextOrder(), Parent = v })
             corner(plate, 16)
             mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10), Parent = plate })
@@ -20646,62 +20984,80 @@ local function buildUI()
                 PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16), Parent = plate })
             local order = 0
             local function nx() order += 1 return order end
-            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1,
+            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
                 LayoutOrder = nx(), Parent = plate })
             if open then
-                local dot = mk("Frame", { Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(0, 7),
+                local dot = mk("Frame", { Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(0, 6),
                     BackgroundColor3 = C.live, BorderSizePixel = 0, Parent = row })
                 corner(dot, 4)
                 mk("TextLabel", { Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(18, 0),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.body,
+                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14),
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "On your key", Parent = row })
-                mk("TextLabel", { Size = UDim2.fromOffset(120, 22), Position = UDim2.new(1, -120, 0, 0),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
+                mk("TextLabel", { Size = UDim2.fromOffset(120, 20), Position = UDim2.new(1, -120, 0, 0),
+                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(13),
                     TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.live,
                     Text = (when == "open") and "" or tostring(when), Parent = row })
             else
-                R.lock(row, 6, 7, C.second, 11)
-                mk("TextLabel", { Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(22, 0),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.body,
+                -- a 15 px ivory lock, 8 px, "Not on your key yet" 14 SemiBold
+                R.lock(row, 7.5, 9, C.text, 9)
+                mk("TextLabel", { Size = UDim2.new(1, -110, 1, 0), Position = UDim2.fromOffset(23, 0),
+                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14),
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "Not on your key yet", Parent = row })
                 if pk.soon then
-                    local c2 = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-                        AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 2),
-                        BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9,
-                        TextColor3 = text, Text = "COMING SOON", Parent = row })
+                    local c2 = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 6), AutomaticSize = Enum.AutomaticSize.X,
+                        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
+                        BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(9),
+                        TextColor3 = text, Text = "LIFETIME", Parent = row })
                     corner(c2, 5)
                     mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = c2 })
                 end
-                mk("TextLabel", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Font = LOOK.bold,
-                    TextSize = 14, RichText = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-                    Text = '<font size="28" color="#F2EFEA"><b>' .. pk.price .. '</b></font>  '
-                        .. (pk.soon and "once, yours for good" or "/ week"),
-                    LayoutOrder = nx(), Parent = plate })
+                -- the price (28 ExtraBold) and its unit (13 #9A958D) on one
+                -- baseline, the line under it 6 px off (the board's -4)
+                local pb = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1, LayoutOrder = nx(), Parent = plate })
+                mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = pb })
+                local pr = mk("Frame", { Size = UDim2.new(1, 0, 0, lookPx(28)), BackgroundTransparency = 1,
+                    LayoutOrder = 1, Parent = pb })
+                mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+                    VerticalAlignment = Enum.VerticalAlignment.Bottom, SortOrder = Enum.SortOrder.LayoutOrder, Parent = pr })
+                mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 1, Font = LOOK.black, TextSize = lookPx(28), TextColor3 = C.text,
+                    Text = pk.price, LayoutOrder = 1, Parent = pr })
+                local unit = mk("TextLabel", { Size = UDim2.new(0, 0, 0, lookPx(13) + 4), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13), TextColor3 = C.second,
+                    TextYAlignment = Enum.TextYAlignment.Bottom,
+                    Text = pk.soon and "once, yours for good" or "/ week", LayoutOrder = 2, Parent = pr })
+                mk("UIPadding", { PaddingBottom = UDim.new(0, 4), Parent = unit })
                 mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12, TextWrapped = true,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, LayoutOrder = nx(),
-                    Text = pk.soon and "or $4.99 / month. The game's own notifier is 2,700 Robux, and it only tells you. Not in EVERYTHING."
-                        or "or every pack: EVERYTHING, $2.99 / week", Parent = plate })
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12), TextWrapped = true,
+                    LineHeight = LOOK.lh(pk.soon and 1.5 or 1.2),
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, LayoutOrder = 2,
+                    Text = pk.soon and "or $4.99 / month. The game's own notifier is 2,700 Robux, and it only tells you."
+                        or "or every pack: EVERYTHING, $2.99 / week", Parent = pb })
+                -- Get (52 px, ivory, 15 Bold) - FRUITS: Coming soon
                 local get = mk("TextButton", { Size = UDim2.new(1, 0, 0, 52),
                     BackgroundColor3 = pk.soon and C.pressed or C.ivory, BorderSizePixel = 0,
-                    Font = LOOK.bold, TextSize = 15, TextColor3 = pk.soon and C.second or C.base,
+                    Font = LOOK.bold, TextSize = lookPx(15), TextColor3 = pk.soon and C.second or C.base,
                     Text = pk.soon and "Coming soon" or ("Get " .. R.NICE[f] .. " · copy store link"),
                     AutoButtonColor = false, LayoutOrder = nx(), Parent = plate })
                 corner(get, 14)
                 get.Activated:Connect(function()
                     if pk.soon then say(pk.name .. " is not for sale yet - soon") return end
                     if R.copyStore() then
+                        -- the board's copied state: green, 14 SemiBold
                         get.Text = "Link copied: paste it in your browser"
-                        get.BackgroundColor3 = Color3.fromRGB(24, 59, 42)
-                        get.TextColor3 = Color3.fromRGB(155, 232, 189)
+                        get.BackgroundColor3, get.TextColor3 = GREEN_BG, GREEN_FG
+                        get.TextSize = lookPx(14)
+                        setFont(get, LOOK.semi)
                     end
                 end)
+                -- I have a code (44 px, radius 14, a #3A3632 rim, 14 SemiBold)
                 local code = mk("TextButton", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
-                    BorderSizePixel = 0, Font = LOOK.semi, TextSize = F.body, TextColor3 = C.text,
+                    BorderSizePixel = 0, Font = LOOK.semi, TextSize = lookPx(14), TextColor3 = C.text,
                     Text = pk.soon and "Back to the Library" or "I have a code", AutoButtonColor = false,
                     LayoutOrder = nx(), Parent = plate })
                 corner(code, 14)
-                mk("UIStroke", { Color = Color3.fromRGB(58, 54, 50), Thickness = 1,
+                mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
                     ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = code })
                 code.Activated:Connect(function()
                     if pk.soon then show(table.remove(trail) or "modes", true) else show("key") end
@@ -20711,7 +21067,8 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- KEY & PACKS (R2): the key, every pack and what it says, Redeem a code
+    -- KEY & PACKS (R2; R3 Task 2: Key.dc.html): the key, every pack and
+    -- what it says, Redeem a code, the executor's checks
     -- =====================================================
     do
         local R = P.r2
@@ -20727,21 +21084,24 @@ local function buildUI()
                 if not (ok and okj and type(r) == "table") then P.redeemNote = "no answer from the gate - try again" return end
                 if not r.ok then P.redeemNote = tostring(r.error) return end
                 if type(r.ent) == "table" then _G.BFF_ENT = r.ent end
+                P.redeemedPack = r.feature
                 P.redeemNote = tostring(r.feature) .. ": " .. tostring(r.days) .. " days added - hop once to open it everywhere"
             end)
         end
 
         local v = makeView("key")
-        gap(v, 6)
-        -- The key card: who holds it, the key with its middle hidden, Copy.
+        gap(v, 12)
+        -- The key card (margin 12 16 0, padding 14 8 12 16, radius 16,
+        -- #1F1D1B, 6 apart): who holds it, the key with its middle hidden
+        -- (Roboto Mono 13) and the copy mark, keep it private.
         local card = mk("Frame", { Size = UDim2.new(1, -32, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundColor3 = C.raised, BorderSizePixel = 0, LayoutOrder = nextOrder(), Parent = v })
         corner(card, 16)
         mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = card })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 8),
             PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 12), Parent = card })
-        local who = mk("TextLabel", { Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
-            BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.bold, TextSize = 9,
+        local who = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 6), AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(9),
             TextColor3 = C.base, Text = "", LayoutOrder = 1, Parent = card })
         corner(who, 5)
         mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = who })
@@ -20757,12 +21117,18 @@ local function buildUI()
             for i = 3, #parts - 1 do parts[i] = "····" end
             return table.concat(parts, "-")
         end
-        mk("TextLabel", { Size = UDim2.new(1, -60, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Code,
-            TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        mk("TextLabel", { Size = UDim2.new(1, -48, 1, 0), BackgroundTransparency = 1, Font = R.MONO,
+            TextSize = lookPx(13), TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
             TextColor3 = C.text, Text = masked(), Parent = keyRow })
-        local copy = mk("TextButton", { Size = UDim2.fromOffset(52, 36), Position = UDim2.new(1, -52, 0, 0),
-            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small, TextColor3 = C.second,
-            Text = "Copy", AutoButtonColor = false, Parent = keyRow })
+        -- the copy mark: two rounded squares, #C9C3B9 (44 x 36 target)
+        local copy = mk("TextButton", { Name = "CopyKey", Size = UDim2.fromOffset(44, 36), Position = UDim2.new(1, -44, 0, 0),
+            BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = keyRow })
+        for _, sq in ipairs({ { 20, 14 }, { 16, 10 } }) do
+            local s = mk("Frame", { Size = UDim2.fromOffset(7, 7), Position = UDim2.fromOffset(sq[1], sq[2]),
+                BackgroundTransparency = 1, BorderSizePixel = 0, Parent = copy })
+            corner(s, 1)
+            mk("UIStroke", { Color = LOOK.soft, Thickness = 1.2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = s })
+        end
         copy.Activated:Connect(function()
             local k = _G.BFF_KEY
             if k and setclipboard then
@@ -20772,46 +21138,69 @@ local function buildUI()
                 say("no key to copy")
             end
         end)
-        mk("TextLabel", { Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
-            TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-            Text = "Keep it private.", LayoutOrder = 3, Parent = card })
-        gap(v, 2)
+        mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(12) + 2), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
+            Text = (type(_G.BFF_ENT) == "table" and _G.BFF_KIND ~= "owner")
+                and "Keep it private. It works on 3 Roblox accounts." or "Keep it private.",
+            LayoutOrder = 3, Parent = card })
 
-        -- YOUR PACKS: a coloured dot, the name, then what the key says - days
-        -- left in green, or a lock and the price. A tap opens the cover.
+        -- YOUR PACKS (42 px rows, hairlines 38 px in): an 8 px dot, the
+        -- name 14 SemiBold, then what the key says - days left 13 SemiBold
+        -- green (NEW on the pack a code just opened), or a 12 px lock and
+        -- the price 13 #9A958D. A tap opens the cover.
+        gap(v, 4)
         heading2(v, "your packs")
+        local function rule()
+            local holder = mk("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v })
+            mk("Frame", { Size = UDim2.new(1, -38, 0, 1), Position = UDim2.fromOffset(38, 0),
+                BackgroundColor3 = C.line, BorderSizePixel = 0, Parent = holder })
+        end
         local function packRowKey(f, name, price, dotColor, target)
             local b = mk("TextButton", { Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = C.base, BorderSizePixel = 0,
                 Text = "", AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = v })
             local dot = mk("Frame", { Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(20, 17),
                 BackgroundColor3 = dotColor, BorderSizePixel = 0, Parent = b })
             corner(dot, 4)
-            mk("TextLabel", { Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(38, 0),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.body,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b })
-            local state = mk("TextLabel", { Size = UDim2.fromOffset(110, 42), Position = UDim2.new(1, -130, 0, 0),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = b })
-            local lockHolder = mk("Frame", { Size = UDim2.fromOffset(20, 42), Position = UDim2.new(1, -156, 0, 0),
+            mk("TextLabel", { Size = UDim2.new(1, -200, 1, 0), Position = UDim2.fromOffset(38, 0),
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14),
+                TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                TextColor3 = C.text, Text = name, Parent = b })
+            -- the right side, right-aligned, 10 apart: [NEW] [lock] state
+            local side = mk("Frame", { Size = UDim2.new(0, 170, 1, 0), Position = UDim2.new(1, -190, 0, 0),
                 BackgroundTransparency = 1, Parent = b })
-            R.lock(lockHolder, 10, 15, C.third, 11)
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 10),
+                HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder, Parent = side })
+            local tint, _, accent = R.acc(f or "none")
+            local new = mk("TextLabel", { Name = "New", Size = UDim2.fromOffset(0, lookPx(9) + 6),
+                AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = accent, BorderSizePixel = 0,
+                Font = LOOK.black, TextSize = lookPx(9), TextColor3 = tint, Text = "NEW", Visible = false,
+                LayoutOrder = 1, Parent = side })
+            corner(new, 5)
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = new })
+            local lockHolder = mk("Frame", { Name = "Lock", Size = UDim2.fromOffset(12, 42), BackgroundTransparency = 1,
+                LayoutOrder = 2, Parent = side })
+            R.lock(lockHolder, 6, 21, LOOK.mute, 7)
+            local state = mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
+                TextColor3 = C.second, Text = "", LayoutOrder = 3, Parent = side })
             pressable(b)
             if target then b.Activated:Connect(function() show(target) end) end
             addLive(function()
-                if f then
-                    local when, open = R.packWhen(f)
-                    if open then
-                        if when == "open" then when = (_G.BFF_KIND == "owner") and "for ever" or "open" end
-                        state.Text, state.TextColor3 = when, C.live
-                        lockHolder.Visible = false
-                    else
-                        state.Text, state.TextColor3 = price .. " / wk", C.second
-                        lockHolder.Visible = true
-                    end
+                local openNow, when = false, nil
+                if f then when, openNow = R.packWhen(f) end
+                if openNow then
+                    if when == "open" then when = (_G.BFF_KIND == "owner") and "for ever" or "open" end
+                    state.Text, state.TextColor3 = when, C.live
+                    setFont(state, LOOK.semi)
+                    lockHolder.Visible = false
                 else
                     state.Text, state.TextColor3 = price .. " / wk", C.second
-                    lockHolder.Visible = false
+                    setFont(state, LOOK.regular)
+                    lockHolder.Visible = f ~= nil
                 end
+                new.Visible = openNow and f ~= nil and P.redeemedPack == f
             end)
             return b
         end
@@ -20819,34 +21208,46 @@ local function buildUI()
             caption(v, "No key: every mode is open, as before the gate.")
         end
         for i, f in ipairs(PACK_ORDER) do
-            if i > 1 then hairline(v) end
+            if i > 1 then rule() end
             local _, _, accent = R.acc(f)
             packRowKey(f, R.NICE[f], PACKS[f].price, accent, "cover_" .. f)
         end
         if _G.BFF_KIND ~= "owner" and type(_G.BFF_ENT) == "table" then
-            hairline(v)
+            rule()
             local b = packRowKey(nil, "Everything", "$2.99", C.ivory, nil)
             b.Activated:Connect(function() R.copyStore() end)
         end
+        -- A trial key: what you used, to the recap.
+        do
+            local hold = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Visible = _G.BFF_KIND == "trial", Parent = v })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = hold })
+            hairline(hold)
+            navRow(hold, "Your trial", function() return P.trialEnded and P.trialEnded() and "ended · what you used" or "what you use most" end, "recap")
+        end
 
-        -- REDEEM: a code from the store adds days to its pack, on this key.
+        -- REDEEM A CODE: the label 12 #9A958D, the box (44, radius 12,
+        -- #1B1917, a #35322E rim, Roboto Mono 13) and Redeem (92 x 44,
+        -- ivory, 14 Bold), 8 apart.
+        gap(v, 4)
         heading2(v, "redeem a code")
-        local lab = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.regular,
-            TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
-            Text = "Code from the store", LayoutOrder = nextOrder(), Parent = v })
+        local lab = mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(12) + 8), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+            TextColor3 = C.second, Text = "Code from the store", LayoutOrder = nextOrder(), Parent = v })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 20), Parent = lab })
         do
-            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
+            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v })
-            local tb = mk("TextBox", { Size = UDim2.new(1, -124, 0, 44), Position = UDim2.fromOffset(16, 4),
-                BackgroundColor3 = C.row, BorderSizePixel = 0, ClearTextOnFocus = false, Font = Enum.Font.Code,
-                TextSize = 13, TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left,
-                PlaceholderText = "BFV-XXXX-XXXX-XXXX-XXXX-XXXX", PlaceholderColor3 = C.third, Text = "", Parent = row })
+            local tb = mk("TextBox", { Size = UDim2.new(1, -132, 0, 44), Position = UDim2.fromOffset(16, 0),
+                BackgroundColor3 = C.row, BorderSizePixel = 0, ClearTextOnFocus = false, Font = R.MONO,
+                TextSize = lookPx(13), TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left,
+                PlaceholderText = "BFV-XXXX-XXXX-XXXX-XXXX-XXXX", PlaceholderColor3 = Color3.fromRGB(111, 106, 98),
+                Text = "", Parent = row })
             corner(tb, 12)
             mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = tb })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 12), Parent = tb })
-            local go = mk("TextButton", { Size = UDim2.fromOffset(92, 44), Position = UDim2.new(1, -108, 0, 4),
-                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.bold, TextSize = F.body,
+            local go = mk("TextButton", { Size = UDim2.fromOffset(92, 44), Position = UDim2.new(1, -108, 0, 0),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(14),
                 TextColor3 = C.base, Text = "Redeem", AutoButtonColor = false, Parent = row })
             corner(go, 12)
             local function run(val)
@@ -20858,27 +21259,271 @@ local function buildUI()
             go.Activated:Connect(function() run(tb.Text) end)
             tb.FocusLost:Connect(function(enter) if enter then run(tb.Text) end end)
         end
-        -- The answer: green when days were added, red on a refusal.
+        -- The answer: days added = the board's green card (44, radius 12,
+        -- #183B2A, 13 SemiBold #9BE8BD); checking / a refusal = a line;
+        -- nothing yet = the help (12, line-height 1.45, #847E75).
+        gap(v, 10)
+        local okCard = mk("Frame", { Name = "Redeemed", Size = UDim2.new(1, -32, 0, 44),
+            BackgroundColor3 = Color3.fromRGB(24, 59, 42), BorderSizePixel = 0, Visible = false,
+            LayoutOrder = nextOrder(), Parent = v })
+        corner(okCard, 12)
+        local okText = mk("TextLabel", { Size = UDim2.new(1, -24, 1, 0), Position = UDim2.fromOffset(12, 0),
+            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(13), TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.fromRGB(155, 232, 189), Text = "", Parent = okCard })
         local note = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1, BorderSizePixel = 0, Font = LOOK.regular,
-            TextSize = 12, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+            BackgroundTransparency = 1, BorderSizePixel = 0, Font = LOOK.regular, LineHeight = LOOK.lh(1.45),
+            TextSize = lookPx(12), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
             Text = "", LayoutOrder = nextOrder(), Parent = v })
-        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
-            PaddingTop = UDim.new(0, 10), Parent = note })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = note })
         addLive(function()
             local n = P.redeemNote
-            if not n then
+            local added = n and string.find(n, "added", 1, true)
+            okCard.Visible = added and true or false
+            note.Visible = not added
+            if added then
+                local f = P.redeemedPack
+                local days = string.match(n, ": (%d+) days added")
+                okText.Text = (f and R.NICE[f] or tostring(f or "Pack")) .. " unlocked: "
+                    .. tostring(days or "the") .. " days added to this key"
+            elseif not n then
                 note.Text = "One code adds one pack, for its days, to this key. Packs you already have get the days added on top."
-                note.TextColor3 = C.third
+                note.TextColor3 = LOOK.mute
             else
                 note.Text = tostring(n)
-                note.TextColor3 = string.find(n, "added", 1, true) and C.live
-                    or (string.find(n, "checking", 1, true) and C.second or C.stop)
+                note.TextColor3 = string.find(n, "checking", 1, true) and C.second or C.stop
             end
+        end)
+
+        -- EXECUTOR: its name, and the seven things the farm asks of it
+        -- (a green tick and "all 7 checks pass", or what is missing).
+        gap(v, 4)
+        heading2(v, "executor")
+        do
+            local name = "Your executor"
+            pcall(function()
+                if identifyexecutor then name = tostring((identifyexecutor())) end
+            end)
+            local have = {
+                writefile = writefile ~= nil, readfile = readfile ~= nil, isfile = isfile ~= nil,
+                queue_on_teleport = (queue_on_teleport or queueonteleport) ~= nil,
+                hookmetamethod = hookmetamethod ~= nil, fireproximityprompt = fireproximityprompt ~= nil,
+                firetouchinterest = firetouchinterest ~= nil,
+            }
+            local nOk, miss = execChecks(have)
+            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v })
+            mk("TextLabel", { Size = UDim2.new(1, -190, 1, 0), Position = UDim2.fromOffset(20, 0),
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(15), TextTruncate = Enum.TextTruncate.AtEnd,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = row })
+            local all = nOk == #EXEC_NEEDS
+            local side = mk("Frame", { Size = UDim2.new(0, 170, 1, 0), Position = UDim2.new(1, -190, 0, 0),
+                BackgroundTransparency = 1, Parent = row })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
+                HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder, Parent = side })
+            if all then
+                -- the tick: two strokes, 14 px, green
+                local tick = mk("Frame", { Size = UDim2.fromOffset(14, 14), BackgroundTransparency = 1,
+                    LayoutOrder = 1, Parent = side })
+                R.slab(tick, 4, 9, 2.4, 6, C.live, -45, 1)
+                R.slab(tick, 9, 7, 2.4, 11, C.live, 40, 1)
+            end
+            mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
+                TextColor3 = all and C.live or C.warn,
+                Text = all and ("all " .. #EXEC_NEEDS .. " checks pass")
+                    or (nOk .. " of " .. #EXEC_NEEDS .. " · no " .. tostring(miss[1])),
+                LayoutOrder = 2, Parent = side })
+        end
+    end
+
+    -- =====================================================
+    -- TRIAL RECAP (R3 Task 2: Recap.dc.html): when a trial key's days run
+    -- out, the panel opens here once - the modes used most (time from
+    -- this PC's own count), what keeping them costs, EVERYTHING beside it.
+    -- The count: while a trial key farms, the live loop adds the seconds
+    -- to the mode on (P.trialTick), into bff_trial_<UserId>.json.
+    -- =====================================================
+    do
+        local R = P.r2
+        local FILE = "bff_trial_" .. tostring(player.UserId) .. ".json"
+        P.trialUse = P.trialUse or {}
+        pcall(function()
+            if readfile and isfile and isfile(FILE) then
+                local t = game:GetService("HttpService"):JSONDecode(readfile(FILE))
+                if type(t) == "table" and type(t.use) == "table" then P.trialUse = t.use end
+            end
+        end)
+        local last, saved = os.clock(), os.clock()
+        P.trialTick = function()
+            local now = os.clock()
+            local dt = math.min(5, now - last)
+            last = now
+            if _G.BFF_KIND ~= "trial" or not P.running then return end
+            local m = modeNow()
+            if not m or m == "none" then return end
+            P.trialUse[m] = (P.trialUse[m] or 0) + dt
+            if now - saved > 30 and writefile then
+                saved = now
+                pcall(function()
+                    writefile(FILE, game:GetService("HttpService"):JSONEncode({ v = 1, use = P.trialUse }))
+                end)
+            end
+        end
+        P.trialEnded = function()
+            return _G.BFF_KIND == "trial" and not R.keyInfo().on
+        end
+
+        local v = makeView("recap")
+        -- the title (Michroma 18, line-height 1.35) and the line under it
+        local head = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = head })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+            PaddingTop = UDim.new(0, 14), Parent = head })
+        mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Font = R.MICH, TextSize = lookPx(18), LineHeight = LOOK.lh(1.35),
+            TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+            Text = "3 DAYS OF EVERYTHING.", LayoutOrder = 1, Parent = head })
+        local sub = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13), LineHeight = LOOK.lh(1.45),
+            TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
+            Text = "This is what you used most. Your settings stay; these modes wait for you.", LayoutOrder = 2, Parent = head })
+
+        -- the card: three modes, a 6 px bar each in its pack's colour
+        gap(v, 16)
+        local card = mk("Frame", { Size = UDim2.new(1, -32, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = C.raised, BorderSizePixel = 0, LayoutOrder = nextOrder(), Parent = v })
+        corner(card, 16)
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 14), Parent = card })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
+            PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 14), Parent = card })
+        local slots = {}
+        for i = 1, 3 do
+            local it = mk("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = i, Visible = false, Parent = card })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = it })
+            local top = mk("Frame", { Size = UDim2.new(1, 0, 0, lookPx(14) + 2), BackgroundTransparency = 1,
+                LayoutOrder = 1, Parent = it })
+            local nm = mk("TextLabel", { Size = UDim2.new(1, -80, 1, 0), BackgroundTransparency = 1, Font = LOOK.semi,
+                TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                TextColor3 = C.text, Text = "", Parent = top })
+            local du = mk("TextLabel", { Size = UDim2.new(0, 80, 1, 0), Position = UDim2.new(1, -80, 0, 0),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13),
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "", Parent = top })
+            local track = mk("Frame", { Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = Color3.fromRGB(42, 39, 36),
+                BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 2, Parent = it })
+            corner(track, 3)
+            local fill = mk("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.live, BorderSizePixel = 0,
+                Parent = track })
+            corner(fill, 3)
+            local inn = mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(11) + 2), BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = C.second, Text = "", LayoutOrder = 3, Parent = it })
+            slots[i] = { it = it, nm = nm, du = du, fill = fill, inn = inn }
+        end
+        local none = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(13), TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, LayoutOrder = 4,
+            Text = "Nothing ran long enough to count yet.", Parent = card })
+
+        -- KEEP THEM: the packs you used, and EVERYTHING beside them
+        gap(v, 10)
+        heading2(v, "keep them")
+        local keep = mk("Frame", { Size = UDim2.new(1, -32, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = keep })
+        local function offer(h, order, rimC, rimT, bg)
+            local o = mk("Frame", { Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = bg or C.base,
+                BackgroundTransparency = bg and 0 or 1, BorderSizePixel = 0, LayoutOrder = order, Parent = keep })
+            corner(o, 14)
+            mk("UIStroke", { Color = rimC, Thickness = rimT, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = o })
+            local col = mk("Frame", { Size = UDim2.new(1, -120, 1, 0), Position = UDim2.fromOffset(14, 0),
+                BackgroundTransparency = 1, Parent = o })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3),
+                VerticalAlignment = Enum.VerticalAlignment.Center, Parent = col })
+            local pr = mk("TextLabel", { Size = UDim2.new(0, 100, 1, 0), Position = UDim2.new(1, -114, 0, 0),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11), RichText = true,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = o })
+            return o, col, pr
+        end
+        local used, usedCol, usedPr = offer(56, 1, C.hair, 1)
+        local usedT = mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(14) + 2), BackgroundTransparency = 1,
+            Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+            Text = "", LayoutOrder = 1, Parent = usedCol })
+        local usedS = mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(12) + 2), BackgroundTransparency = 1,
+            Font = LOOK.regular, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = usedCol })
+        local _, allCol, allPr = offer(64, 2, C.ivory, 2, Color3.fromRGB(35, 32, 27))
+        local allTop = mk("Frame", { Size = UDim2.new(1, 0, 0, lookPx(12) + 4), BackgroundTransparency = 1,
+            LayoutOrder = 1, Parent = allCol })
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+            VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = allTop })
+        mk("TextLabel", { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+            Font = R.MICH, TextSize = lookPx(12), TextColor3 = C.text, Text = "EVERYTHING", LayoutOrder = 1, Parent = allTop })
+        local less = mk("TextLabel", { Size = UDim2.fromOffset(0, lookPx(9) + 4), AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = C.ivory, BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(9), TextColor3 = C.base,
+            Text = "LESS", LayoutOrder = 2, Parent = allTop })
+        corner(less, 5)
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = less })
+        local allS = mk("TextLabel", { Size = UDim2.new(1, 0, 0, lookPx(12) + 2), BackgroundTransparency = 1,
+            Font = LOOK.regular, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left,
+            TextColor3 = LOOK.soft, Text = "", LayoutOrder = 2, Parent = allCol })
+        allPr.Text = '<font size="' .. lookPx(16) .. '" weight="800" color="#F2EFEA">$2.99</font> / wk'
+
+        -- Copy store link (52, ivory, 15 Bold) and I have a code (44, ghost)
+        gap(v, 14)
+        local copyB = mk("TextButton", { Size = UDim2.new(1, -32, 0, 52), BackgroundColor3 = C.ivory, BorderSizePixel = 0,
+            Font = LOOK.bold, TextSize = lookPx(15), TextColor3 = C.base, Text = "Copy store link",
+            AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = v })
+        corner(copyB, 14)
+        copyB.Activated:Connect(function() R.copyStore() end)
+        gap(v, 8)
+        local codeB = mk("TextButton", { Size = UDim2.new(1, -32, 0, 44), BackgroundTransparency = 1, BorderSizePixel = 0,
+            Font = LOOK.semi, TextSize = lookPx(14), TextColor3 = C.text, Text = "I have a code",
+            AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = v })
+        corner(codeB, 14)
+        mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = codeB })
+        codeB.Activated:Connect(function() show("key") end)
+        gap(v, 10)
+        caption(v, "Times come from your own trial, counted on this PC.")
+
+        local names = {}
+        for id, t in pairs(TITLES) do names[id] = t end
+        addLive(function()
+            TITLES.recap = P.trialEnded() and "Trial ended" or "Your trial"
+            if currentView == "recap" then heading.Text = TITLES.recap end
+            sub.Text = P.trialEnded() and "This is what you used most. Your settings stay; these modes wait for you."
+                or "What you use most so far. When the days run out, your settings stay."
+            local rc = trialRecapOf(P.trialUse, names, PACK_OF, PACKS)
+            for i, s in ipairs(slots) do
+                local r = rc.rows[i]
+                s.it.Visible = r ~= nil
+                if r then
+                    local _, _, accent = R.acc(r.pack)
+                    s.nm.Text, s.du.Text = r.name, r.dur
+                    s.fill.Size = UDim2.new(r.frac, 0, 1, 0)
+                    s.fill.BackgroundColor3 = accent
+                    s.inn.Text = "in " .. PACKS[r.pack].name
+                end
+            end
+            none.Visible = #rc.rows == 0
+            used.Visible = #rc.packs > 0
+            local nice = {}
+            for _, f in ipairs(rc.packs) do table.insert(nice, R.NICE[f]) end
+            usedT.Text = "The " .. #rc.packs .. " you used"
+            usedS.Text = table.concat(nice, ", ")
+            usedPr.Text = '<font size="' .. lookPx(14) .. '" weight="700" color="#F2EFEA">'
+                .. string.format("$%.2f", rc.sum) .. '</font> / wk'
+            less.Visible = #rc.packs > 0 and rc.save > 0
+            allS.Text = (#rc.packs == 0) and "all 5 packs, plus seasonal events"
+                or (rc.save > 0) and string.format("all 5 packs for $%.2f less", rc.save)
+                or string.format("all 5 packs for $%.2f more", -rc.save)
         end)
     end
 
     -- =====================================================
+
     -- CIRCUIT FARM (the Targets page). R2 Task 4: BY MY LEVEL | MY LIST is
     -- one explicit choice over CFG.Quests; the species chooser, the type-a-name
     -- row and Clear the circuit are the list's, shown with it.
@@ -26042,21 +26687,29 @@ local function buildUI()
             P.stop()
             sweepSet(false)
             if gui then gui:Destroy() end
+            P.motionSync()
         end)
     end
 
     show("home")
     sweepSet(true)
+    -- a trial whose days ran out: the recap, once a session
+    if P.trialEnded and P.trialEnded() and not P.recapShown then
+        P.recapShown = true
+        show("recap")
+    end
 
     task.spawn(function()
         while gui and gui.Parent do
             dot.BackgroundColor3 = P.running and C.live or C.third
+            if P.trialTick then pcall(P.trialTick) end
             for _, e in ipairs(live) do
                 if (not e.v or e.v.Visible) and (not e.w or e.w.Visible) then pcall(e.f) end
             end
             task.wait(0.3)
         end
         sweepSet(false)
+        pcall(P.motionSync)
     end)
 end
 
