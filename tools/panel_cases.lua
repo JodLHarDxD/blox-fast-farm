@@ -1042,5 +1042,111 @@ do
     goHome()
 end
 
+-- ---------- R2 Task 7: PREHISTORIC pages, Prehistoric and Volcano ----------
+do
+    local was = { cap = CFG_REAL.SeaSearchMinutes, mag = CFG_REAL.SeaMagnet, loot = CFG_REAL.VolcanoLoot,
+        after = CFG_REAL.VolcanoAfter, guitar = CFG_REAL.VentGuitar, home = CFG_REAL.RespawnHome,
+        volcano = CFG_REAL.Volcano, hunt = CFG_REAL.Hunt, kind = CFG_REAL.HuntKind }
+    for _, page in ipairs({ "prehistoric", "volcano" }) do
+        check(modePill(page) ~= nil and isStrip(modePill(page)), page .. ": a mode strip")
+        check(button(page, "Fights with") ~= nil, page .. ": a Fights with row")
+        check(button(page, "Fine-tune") ~= nil, page .. ": Fine-tune")
+    end
+    check(button("prehistoric", "Volcano event") ~= nil and button("prehistoric", "Searching the sea") ~= nil,
+        "prehistoric: nav rows to Volcano and Travel")
+    -- the 4-step loop track lights the step the hunt is in
+    local function lit()
+        local out
+        each(VIEWS.prehistoric, function(k)
+            if k.ClassName == "TextLabel" and k.Size and k.Size.X.Offset == 28 and k.BackgroundColor3
+                and k.BackgroundColor3.R == 240 and k.BackgroundColor3.G == 166 then out = tostring(k.Text) end
+        end)
+        return out
+    end
+    goHome() tap("home", "Mode") tap("modes", "Prehistoric")
+    CFG_REAL.Hunt, CFG_REAL.HuntKind = false, "prehistoric"
+    pcall(LIVE0)
+    check(lit() == nil, "prehistoric: hunt off, no loop step lit")
+    CFG_REAL.Hunt = true
+    local ev0 = P.sea.ev
+    P.sea.ev = nil
+    pcall(LIVE0)
+    check(lit() == "1", "prehistoric: hunt sailing, step 1 lit: " .. tostring(lit()))
+    P.sea.ev = { vents = 0, golems = 0, bones = 0, eggs = 0 }
+    pcall(LIVE0)
+    check(lit() == "2", "prehistoric: event running, step 2 lit: " .. tostring(lit()))
+    P.sea.ev.overAt = 1
+    pcall(LIVE0)
+    check(lit() == "3", "prehistoric: event over, loot, step 3 lit: " .. tostring(lit()))
+    P.sea.ev.complete = true
+    pcall(LIVE0)
+    check(lit() == "4", "prehistoric: complete, step 4 lit: " .. tostring(lit()))
+    P.sea.ev = ev0
+    CFG_REAL.Hunt, CFG_REAL.HuntKind = was.hunt, was.kind
+    -- the give-up dial over SeaSearchMinutes
+    tap("prehistoric", "OFF")
+    check(CFG_REAL.SeaSearchMinutes == 0, "prehistoric: OFF = no cap")
+    tap("prehistoric", "10")
+    check(CFG_REAL.SeaSearchMinutes == 10, "prehistoric: 10 min")
+    tap("prehistoric", "60")
+    check(CFG_REAL.SeaSearchMinutes == 60, "prehistoric: 60 min")
+    tap("prehistoric", "40")
+    check(CFG_REAL.SeaSearchMinutes == 40, "prehistoric: 40 min")
+    tap("prehistoric", "15")
+    check(CFG_REAL.SeaSearchMinutes == 15, "prehistoric: 15 min")
+    tap("prehistoric", "21")
+    check(CFG_REAL.SeaSearchMinutes == P.cfgDefaults.SeaSearchMinutes and P.cfgDefaults.SeaSearchMinutes == 21,
+        "prehistoric: 21 min is today's")
+    -- Volcanic Magnet first
+    local function pillOf(page, label)
+        local found
+        each(VIEWS[page], function(k) if not found and isPill(k) and switchLabel(k) == label then found = k end end)
+        check(found ~= nil, "a \"" .. label .. "\" switch on " .. page)
+        return found or { Activated = { Fire = function() end } }
+    end
+    CFG_REAL.SeaMagnet = true
+    pillOf("prehistoric", "Volcanic Magnet first").Activated:Fire()
+    check(CFG_REAL.SeaMagnet == false, "prehistoric: the magnet switch writes SeaMagnet")
+    pillOf("prehistoric", "Volcanic Magnet first").Activated:Fire()
+    check(CFG_REAL.SeaMagnet == true, "prehistoric: and back")
+    tap("prehistoric", "Volcano event")
+    check(current() == "volcano", "prehistoric: Volcano event opens Volcano")
+    goHome()
+    tap("prehistoric", "Searching the sea")
+    check(current() == "travel", "prehistoric: Searching the sea opens Travel")
+    goHome()
+    -- Volcano: the strip is the alongside one (it turns CFG.Volcano)
+    CFG_REAL.Volcano = false
+    modePill("volcano").Activated:Fire()
+    check(CFG_REAL.Volcano == true, "volcano: the strip turns the event on, alongside")
+    modePill("volcano").Activated:Fire()
+    check(CFG_REAL.Volcano == false, "volcano: and off")
+    -- AFTER THE WIN: VolcanoLoot + VolcanoAfter
+    tap("volcano", "LOOT + AGAIN")
+    check(CFG_REAL.VolcanoLoot == true and CFG_REAL.VolcanoAfter == "again", "volcano: loot + again")
+    tap("volcano", "NO LOOT")
+    check(CFG_REAL.VolcanoLoot == false and CFG_REAL.VolcanoAfter == "hop", "volcano: no loot, next server")
+    tap("volcano", "LOOT + HOP")
+    check(CFG_REAL.VolcanoLoot == P.cfgDefaults.VolcanoLoot and CFG_REAL.VolcanoAfter == P.cfgDefaults.VolcanoAfter,
+        "volcano: loot + hop is today's")
+    -- the two switches
+    CFG_REAL.VentGuitar, CFG_REAL.RespawnHome = true, true
+    pillOf("volcano", "Skull Guitar M1 on the vents").Activated:Fire()
+    check(CFG_REAL.VentGuitar == false, "volcano: Skull Guitar switch")
+    pillOf("volcano", "Home by respawn after the loot").Activated:Fire()
+    check(CFG_REAL.RespawnHome == false, "volcano: Home by respawn switch")
+    -- every raw value is still in Fine-tune
+    local lab = table.concat(labelsOf(VIEWS.volcano), "|")
+    for _, l in ipairs({ "Stay after the loot, then the next server", "Egg: stand still after E", "Each bone, at least",
+        "Each bone, at most", "Seconds between shots", "Vent keys", "Stand off a vent", "Held off the relic",
+        "Held up in the air", "Keep the relic over", "Pressure that comes first" }) do
+        check(string.find(lab, l, 1, true) ~= nil, "volcano: Fine-tune keeps \"" .. l .. "\"")
+    end
+    CFG_REAL.SeaSearchMinutes, CFG_REAL.SeaMagnet = was.cap, was.mag
+    CFG_REAL.VolcanoLoot, CFG_REAL.VolcanoAfter, CFG_REAL.VentGuitar = was.loot, was.after, was.guitar
+    CFG_REAL.RespawnHome, CFG_REAL.Volcano = was.home, was.volcano
+    goHome()
+end
+
 print(string.format("%d passed, %d failed", pass, fail))
 if fail == 0 then print("ALL PASS") end

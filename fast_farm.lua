@@ -21769,54 +21769,145 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- PREHISTORIC
+    -- PREHISTORIC. R2 Task 7 (board Prehistoric): a 4-step loop track that
+    -- lights the step the hunt is in, the give-up dial over
+    -- CFG.SeaSearchMinutes, Volcanic Magnet first, two nav rows.
     -- =====================================================
     do
         local v = makeView("prehistoric")
         gap(v, 6)
-        readout(v, function()
-            local s = P.sea
-            local t = s.tally
-            return table.concat({
-                "now       " .. tostring(s.note),
-                "boat      " .. tostring(s.boatNote)
-                    .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
-                string.format("where     %s  ·  danger %s",
-                    s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
-                        math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
-                    tostring(s.danger or "-")),
-                string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
-            }, "\n")
-        end)
-        modeSwitch(v, "prehistoric")
-        heading2(v, "the trip")
+        P.kit.pageTop(v, "prehistoric")
+        P.kit.modeStrip(v, "prehistoric")
+        local AMBER = Color3.fromRGB(240, 166, 60)
+        -- Which step of the loop the hunt is in: 1 sailing (no island read
+        -- yet), 2 the volcano event runs, 3 the event is over and the loot
+        -- is taken, 4 done: the next server. nil = the hunt is not running.
+        local function loopStep()
+            if not (CFG.Hunt and CFG.HuntKind == "prehistoric") then return nil end
+            local ev = P.sea and P.sea.ev
+            if not ev then return 1 end
+            if ev.complete then return 4 end
+            if ev.overAt then return 3 end
+            return 2
+        end
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 78), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            local WORDS = { "Sail to it", "Volcano event", "Bones + egg", "Next server" }
+            local dots, words = {}, {}
+            for i, w in ipairs(WORDS) do
+                local col = mk("Frame", {
+                    Size = UDim2.new(0.25, 0, 1, 0), Position = UDim2.new((i - 1) / 4, 0, 0, 0),
+                    BackgroundTransparency = 1, Parent = card,
+                })
+                if i < 4 then
+                    mk("Frame", {
+                        Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0.5, 14, 0, 26),
+                        BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = col,
+                    })
+                end
+                local d = mk("TextLabel", {
+                    Size = UDim2.fromOffset(28, 28), AnchorPoint = Vector2.new(0.5, 0),
+                    Position = UDim2.new(0.5, 0, 0, 12), BackgroundColor3 = C.row, BorderSizePixel = 0,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Text = tostring(i), ZIndex = 2, Parent = col,
+                })
+                corner(d, 14)
+                mk("UIStroke", { Color = C.hair, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = d })
+                dots[i] = d
+                words[i] = mk("TextLabel", {
+                    Size = UDim2.new(1, -4, 0, 30), Position = UDim2.fromOffset(2, 44),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextWrapped = true, TextColor3 = C.second, Text = w, Parent = col,
+                })
+            end
+            addLive(function()
+                local at = loopStep()
+                for i, d in ipairs(dots) do
+                    local on = (i == at)
+                    d.BackgroundColor3 = on and AMBER or C.row
+                    d.TextColor3 = on and C.base or C.second
+                    words[i].TextColor3 = on and C.text or C.second
+                end
+            end)
+            gap(v, 6)
+        end
+        -- The give-up dial: no island found this long, the next server.
+        local CAPS = {
+            { 0, "OFF", "OFF", "Sails until it finds the island", "No cap: the hunt never gives up in a server.", "Safety cap off." },
+            { 10, "10", "10 MIN", "Next server after 10 min with no island", "Short tries, more server hops.", "Cap 10 min." },
+            { 15, "15", "15 MIN", "Next server after 15 min with no island", "Quick tries.", "Cap 15 min." },
+            { 21, "21", "21 MIN", "Next server after 21 min with no island",
+                "Sail to the island, run the volcano, loot, next server: the loop.", "Cap 21 min (today's setting)." },
+            { 40, "40", "40 MIN", "Next server after 40 min with no island", "Long, patient searches.", "Cap 40 min." },
+            { 60, "60", "60 MIN", "Next server after 60 min with no island", "The longest search.", "Cap 60 min, the most." },
+        }
+        local steps = {}
+        for _, c in ipairs(CAPS) do
+            table.insert(steps, { name = c[3], short = c[2], set = { SeaSearchMinutes = c[1] },
+                line = c[6], today = (c[1] == 21) or nil })
+        end
+        P.kit.dial(v, "No island found: give up after", steps, "prehistoric")
+        P.kit.truthCard(v, function()
+            local i = dialStepOf(steps, CFG)
+            if i then return CAPS[i][4] end
+            local m = tonumber(CFG.SeaSearchMinutes) or 0
+            return m <= 0 and CAPS[1][4] or ("Next server after " .. m .. " min with no island")
+        end, function()
+            local i = dialStepOf(steps, CFG)
+            return i and CAPS[i][5] or "Your own cap, set under Fine-tune."
+        end, "prehistoric")
+        hairline(v)
+        P.kit.fightsWith(v, "prehistoric")
+        heading2(v, "also")
         switchRow(v, "Volcanic Magnet first",
-            "Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
+            "Buys the magnet that pulls the island to you, before the hunt. Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
             function() return CFG.SeaMagnet end,
             function(x) CFG.SeaMagnet = x end)
-        readout(v, function()
-            local g = P.magnet
-            if not g then return "-" end
-            local c = g.inv
-            return string.format("magnet     %s\nhave       %s", tostring(g.note),
-                c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
-                    or "not read yet")
-        end)
-        sliderRow(v, "Safety cap: no island this long (0 = off)", 0, 60, 1,
-            function() return CFG.SeaSearchMinutes end,
-            function(x) CFG.SeaSearchMinutes = x end, " min")
-        link(v, "Travel & boat", function()
+        link(v, "Volcano event", function() return CFG.Volcano and "On" or "bones + egg, next server" end, "volcano")
+        link(v, "Searching the sea", function()
             return CFG.SeaSteer == "manual" and "you steer" or ("auto  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m")
         end, "travel")
-        link(v, "Volcano event", function() return CFG.Volcano and "On" or "runs on the island" end, "volcano")
-        fold(v, "How it works", function(v)
+        P.kit.fineTune(v, function(v)
+            sliderRow(v, "Safety cap: no island this long, exact (0 = off)", 0, 60, 1,
+                function() return CFG.SeaSearchMinutes end,
+                function(x) CFG.SeaSearchMinutes = x end, " min")
+            readout(v, function()
+                local s = P.sea
+                local t = s.tally
+                return table.concat({
+                    "now       " .. tostring(s.note),
+                    "boat      " .. tostring(s.boatNote)
+                        .. (s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or ""),
+                    string.format("where     %s  ·  danger %s",
+                        s.meters and string.format("%d m from Tiki (%d studs)", math.floor(s.meters),
+                            math.floor(s.meters * (CFG.SeaStudsPerM or 10))) or "not sailing",
+                        tostring(s.danger or "-")),
+                    string.format("found     %d islands  ·  %d boats bought", t.found, t.buys),
+                }, "\n")
+            end)
+            readout(v, function()
+                local g = P.magnet
+                if not g then return "-" end
+                local c = g.inv
+                return string.format("magnet     %s\nhave       %s", tostring(g.note),
+                    c and string.format("%d magnet  ·  %d / 15 Blaze Ember  ·  %d / 10 Scrap Metal", c.magnet, c.ember, c.scrap)
+                        or "not read yet")
+            end)
             caption(v, "Sail to the island, run the volcano event, loot, next server - the loop.")
             caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
                 .. "dealer, puts you at the wheel and drives west through the sea "
                 .. "events. Island up: off the boat, onto the island, and it never "
                 .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
                 .. "or nothing by the far edge: the next server.")
-        end)
+        end, 1)
     end
 
     -- =====================================================
@@ -22071,163 +22162,207 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- VOLCANO EVENT: alongside any mode
+    -- VOLCANO EVENT: alongside any mode. R2 Task 7 (board Volcano): the
+    -- "alongside" strip, AFTER THE WIN (VolcanoLoot + VolcanoAfter), the two
+    -- switches, everything else in Fine-tune and Details.
     -- =====================================================
     do
         local v = makeView("volcano")
         gap(v, 6)
-        readout(v, function()
-            local ev = P.sea.ev
-            local t = P.sea.tally
-            local lines = {}
-            if ev then
-                table.insert(lines, "now       " .. tostring(ev.note))
-                table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
-                    tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
-                    ev.counted and "COUNTED" or "not counted (not there at the start)"))
-                table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
-                    ev.vents, ev.golems, ev.bones, ev.eggs))
-                table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
-                    ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
-                    ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
-                    ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
-                table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
-                table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
-                    tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
-                table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
+        P.kit.pageTop(v, "prehistoric")
+        P.kit.modeStrip(v, "volcano")
+        -- Three outcomes over two keys: loot + hop (today), loot + again, no loot.
+        local WIN = {
+            hop = { "Wins, takes bones + egg, then the next server",
+                "Stays 20 s after the loot, home by respawn, then hops: the hunt goes on there." },
+            again = { "Wins, takes bones + egg, then again on this island",
+                "Starts the event again here instead of hopping." },
+            none = { "Wins, then the next server", "Skips the bones and the egg." },
+        }
+        local function winNow()
+            if not CFG.VolcanoLoot then return "none" end
+            return CFG.VolcanoAfter == "again" and "again" or "hop"
+        end
+        P.kit.segmented(v, "after the win", {
+            { "hop", "Loot + hop" }, { "again", "Loot + again" }, { "none", "No loot" },
+        }, winNow, function(x)
+            if x == "none" then
+                CFG.VolcanoLoot = false
+                CFG.VolcanoAfter = "hop"
             else
-                table.insert(lines, "no Prehistoric Island in this server")
+                CFG.VolcanoLoot = true
+                CFG.VolcanoAfter = x
             end
-            table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
-                t.events, t.vents, t.golems, t.bones, t.eggs))
-            return table.concat(lines, "\n")
         end)
-        switchRow(v, "Volcano event",
-            "Alongside any mode, whenever a Prehistoric Island is up (the Prehistoric hunt runs it anyway)",
-            function() return CFG.Volcano end,
-            function(x)
-                CFG.Volcano = x
-                say(x and "volcano event on - whenever a Prehistoric Island is up" or "volcano event off")
-            end)
-        heading2(v, "after the win")
-        switchRow(v, "Bones and the egg after a win", nil,
-            function() return CFG.VolcanoLoot end,
-            function(x) CFG.VolcanoLoot = x end)
-        radio(v, 82, {
-            { "hop",   "The next server", "the loop" },
-            { "again", "Again, on this island", "no cooldown" },
-        }, function() return CFG.VolcanoAfter end, function(x) CFG.VolcanoAfter = x end)
-        sliderRow(v, "Stay after the loot, then the next server", 0, 300, 5,
-            function() return CFG.LootStay end,
-            function(x) CFG.LootStay = x end, " s")
-        switchRow(v, "Home by respawn after the loot",
-            "The stay over: reset - back at your spawn (Tiki), then the next server. Never with the chalice",
-            function() return CFG.RespawnHome end,
-            function(x) CFG.RespawnHome = x end)
-        sliderRow(v, "Egg: stand still after E", 0, 10, 0.5,
-            function() return CFG.EggStay end,
-            function(x) CFG.EggStay = x end, " s")
-        sliderRow(v, "Each bone, at least", 0, 2, 0.1,
-            function() return CFG.BoneMin end,
-            function(x)
-                CFG.BoneMin = x
-                CFG.BoneMax = math.max(tonumber(CFG.BoneMax) or 1, x)
-            end, " s")
-        sliderRow(v, "Each bone, at most", 0, 3, 0.1,
-            function() return CFG.BoneMax end,
-            function(x)
-                CFG.BoneMax = x
-                CFG.BoneMin = math.min(tonumber(CFG.BoneMin) or 0.5, x)
-            end, " s")
-        readout(v, function()
-            local s = P.sea
-            local ev = s.ev
-            local lines = {}
-            local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
-            table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
-                b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
-            if ev and ev.base then
-                table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
-                    ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
-                    ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
+        P.kit.truthCard(v, function() return WIN[winNow()][1] end, function()
+            local r = WIN[winNow()][2]
+            if winNow() == "hop" then
+                r = "Stays " .. math.floor(tonumber(CFG.LootStay) or 20) .. " s after the loot"
+                    .. (CFG.RespawnHome and ", home by respawn" or "") .. ", then hops: the hunt goes on there."
             end
-            if s.lootCheck then table.insert(lines, "last hop  " .. tostring(s.lootCheck)) end
-            return table.concat(lines, "\n")
-        end)
-        heading2(v, "vents")
+            return r
+        end, "prehistoric")
+        hairline(v)
+        P.kit.fightsWith(v, "prehistoric")
+        heading2(v, "also")
         switchRow(v, "Skull Guitar M1 on the vents",
-            "Loaded if in your inventory, fired at the vent stood still - before any skill",
+            "Its M1 breaks vents. No guitar: every weapon you carry fires",
             function() return CFG.VentGuitar end,
             function(x) CFG.VentGuitar = x end)
-        sliderRow(v, "Seconds between shots", 0.1, 1, 0.05,
-            function() return CFG.VentM1Every end,
-            function(x) CFG.VentM1Every = x end, " s")
-        chips(v, "Keys", { "Z", "X", "C", "V" },
-            function(k) return (CFG.VentKeys or {})[k] end,
-            function(k, x)
-                CFG.VentKeys = CFG.VentKeys or {}
-                CFG.VentKeys[k] = x
-            end)
-        sliderRow(v, "Stand off a vent", 4, 30, 1,
-            function() return CFG.VentDistance end,
-            function(x) CFG.VentDistance = x end, " studs")
-        readout(v, function()
-            local S = P.sea
-            local g = S.ventGun and S.ventGun()
-            if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
-            local L = S.learn[g .. " M1"]
-            return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
-                tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
-        end)
-        heading2(v, "lava golems")
-        local gbox = chooser(v, 130)
-        local gsig = nil
-        local function grefresh()
-            local names = {}
-            for _, t in ipairs(toolNames()) do
-                local ty = toolType(t)
-                if ty == "Sword" or ty == "Melee" then table.insert(names, t.Name) end
-            end
-            table.sort(names)
-            local cur = CFG.GolemWeapon or ""
-            if cur ~= "" and not table.find(names, cur) then table.insert(names, 1, cur) end
-            local sig = cur .. "|" .. table.concat(names, ",")
-            if sig == gsig then return end
-            gsig = sig
-            for _, c in ipairs(gbox:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            chooserRow(gbox, 1, "The Attack page's M1 pick", "", cur == "", function()
-                CFG.GolemWeapon = ""
-                gsig = nil
-                grefresh()
-            end)
-            for i, n in ipairs(names) do
-                local t = findTool(n)
-                chooserRow(gbox, i + 1, n, t and toolType(t) or "inventory", cur == n, function()
-                    CFG.GolemWeapon = n
+        switchRow(v, "Home by respawn after the loot",
+            "A respawn takes you home fast. The stay over: reset, back at your spawn (Tiki), then the next server. Never with the chalice",
+            function() return CFG.RespawnHome end,
+            function(x) CFG.RespawnHome = x end)
+        caption(v, "The egg needs the Dragon Tether and a hit on a golem or vent. Lava golems are held off the relic by the magnet.")
+        P.kit.fineTune(v, function(v)
+            sliderRow(v, "Stay after the loot, then the next server", 0, 300, 5,
+                function() return CFG.LootStay end,
+                function(x) CFG.LootStay = x end, " s")
+            sliderRow(v, "Egg: stand still after E", 0, 10, 0.5,
+                function() return CFG.EggStay end,
+                function(x) CFG.EggStay = x end, " s")
+            sliderRow(v, "Each bone, at least", 0, 2, 0.1,
+                function() return CFG.BoneMin end,
+                function(x)
+                    CFG.BoneMin = x
+                    CFG.BoneMax = math.max(tonumber(CFG.BoneMax) or 1, x)
+                end, " s")
+            sliderRow(v, "Each bone, at most", 0, 3, 0.1,
+                function() return CFG.BoneMax end,
+                function(x)
+                    CFG.BoneMax = x
+                    CFG.BoneMin = math.min(tonumber(CFG.BoneMin) or 0.5, x)
+                end, " s")
+            heading2(v, "vents")
+            sliderRow(v, "Seconds between shots", 0.1, 1, 0.05,
+                function() return CFG.VentM1Every end,
+                function(x) CFG.VentM1Every = x end, " s")
+            chips(v, "Vent keys", { "Z", "X", "C", "V" },
+                function(k) return (CFG.VentKeys or {})[k] end,
+                function(k, x)
+                    CFG.VentKeys = CFG.VentKeys or {}
+                    CFG.VentKeys[k] = x
+                end)
+            sliderRow(v, "Stand off a vent", 4, 30, 1,
+                function() return CFG.VentDistance end,
+                function(x) CFG.VentDistance = x end, " studs")
+            heading2(v, "lava golems")
+            local gbox = chooser(v, 130)
+            local gsig = nil
+            local function grefresh()
+                local names = {}
+                for _, t in ipairs(toolNames()) do
+                    local ty = toolType(t)
+                    if ty == "Sword" or ty == "Melee" then table.insert(names, t.Name) end
+                end
+                table.sort(names)
+                local cur = CFG.GolemWeapon or ""
+                if cur ~= "" and not table.find(names, cur) then table.insert(names, 1, cur) end
+                local sig = cur .. "|" .. table.concat(names, ",")
+                if sig == gsig then return end
+                gsig = sig
+                for _, c in ipairs(gbox:GetChildren()) do
+                    if c:IsA("GuiObject") then c:Destroy() end
+                end
+                chooserRow(gbox, 1, "The Attack page's M1 pick", "", cur == "", function()
+                    CFG.GolemWeapon = ""
                     gsig = nil
                     grefresh()
                 end)
+                for i, n in ipairs(names) do
+                    local t = findTool(n)
+                    chooserRow(gbox, i + 1, n, t and toolType(t) or "inventory", cur == n, function()
+                        CFG.GolemWeapon = n
+                        gsig = nil
+                        grefresh()
+                    end)
+                end
             end
-        end
-        grefresh()
-        addLive(grefresh)
-        readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
-        sliderRow(v, "Held off the relic", 30, 150, 5,
-            function() return CFG.GolemCage end,
-            function(x) CFG.GolemCage = x end, " studs")
-        sliderRow(v, "Held up in the air", 0, 150, 5,
-            function() return CFG.GolemLift end,
-            function(x) CFG.GolemLift = x end, " studs")
-        heading2(v, "priority")
-        sliderRow(v, "Keep the relic over", 50, 100, 1,
-            function() return CFG.RelicMin end,
-            function(x) CFG.RelicMin = x end, " %")
-        sliderRow(v, "Pressure that comes first", 20, 100, 5,
-            function() return CFG.PressureMax end,
-            function(x) CFG.PressureMax = x end, " %")
-        fold(v, "How it works", function(v)
+            grefresh()
+            addLive(grefresh)
+            sliderRow(v, "Held off the relic", 30, 150, 5,
+                function() return CFG.GolemCage end,
+                function(x) CFG.GolemCage = x end, " studs")
+            sliderRow(v, "Held up in the air", 0, 150, 5,
+                function() return CFG.GolemLift end,
+                function(x) CFG.GolemLift = x end, " studs")
+            heading2(v, "priority")
+            sliderRow(v, "Keep the relic over", 50, 100, 1,
+                function() return CFG.RelicMin end,
+                function(x) CFG.RelicMin = x end, " %")
+            sliderRow(v, "Pressure that comes first", 20, 100, 5,
+                function() return CFG.PressureMax end,
+                function(x) CFG.PressureMax = x end, " %")
+        end, 15)
+        fold(v, "Details", function(v)
+            readout(v, function()
+                local ev = P.sea.ev
+                local t = P.sea.tally
+                local lines = {}
+                if ev then
+                    table.insert(lines, "now       " .. tostring(ev.note))
+                    table.insert(lines, string.format("this one  %s  ·  live vents %s  ·  golems %s  ·  you %s",
+                        tostring(ev.phase or "-"), tostring(ev.liveVents or "-"), tostring(ev.liveGolems or "-"),
+                        ev.counted and "COUNTED" or "not counted (not there at the start)"))
+                    table.insert(lines, string.format("          %d vents closed  ·  %d golems down  ·  %d bones  ·  %d eggs",
+                        ev.vents, ev.golems, ev.bones, ev.eggs))
+                    table.insert(lines, string.format("meters    relic %s  ·  pressure %s  ·  relic lowest %s",
+                        ev.relicPct and string.format("%.0f%%", ev.relicPct) or "not found",
+                        ev.pressurePct and string.format("%.0f%%", ev.pressurePct) or "not found",
+                        ev.relicLow and string.format("%.0f%%", ev.relicLow) or "-"))
+                    table.insert(lines, "read from " .. tostring(ev.relicSrc or "-") .. "  /  " .. tostring(ev.pressureSrc or "-"))
+                    table.insert(lines, string.format("golems    %s held up in the air  ·  %s NOT held",
+                        tostring(ev.caged or 0), tostring(ev.freeGolems or 0)))
+                    table.insert(lines, "last key  " .. tostring(P.sea.lastVent or "-"))
+                else
+                    table.insert(lines, "no Prehistoric Island in this server")
+                end
+                table.insert(lines, string.format("all       %d events  ·  %d vents  ·  %d golems  ·  %d bones  ·  %d eggs",
+                    t.events, t.vents, t.golems, t.bones, t.eggs))
+                return table.concat(lines, "\n")
+            end)
+            readout(v, function()
+                local s = P.sea
+                local ev = s.ev
+                local lines = {}
+                local b, e = s.peek("Dinosaur Bones"), s.peek("Dragon Egg")
+                table.insert(lines, "you have  " .. ((b and e) and string.format("%d Dinosaur Bones  ·  %d Dragon Egg  (%s)",
+                    b, e, tostring(s.invSrc)) or ("not readable - " .. tostring(s.invWhy or "not asked yet"))))
+                if ev and ev.base then
+                    table.insert(lines, string.format("this one  bones %d confirmed%s  ·  egg %d confirmed%s  ·  before: %s",
+                        ev.bones, ((ev.bonesGone or 0) > 0) and string.format(", %d went WITHOUT reaching you", ev.bonesGone) or "",
+                        ev.eggs, ev.eggGone and ", one went WITHOUT reaching you" or "", s.lootText(ev.base)))
+                end
+                if s.lootCheck then table.insert(lines, "last hop  " .. tostring(s.lootCheck)) end
+                return table.concat(lines, "\n")
+            end)
+            readout(v, function()
+                local S = P.sea
+                local g = S.ventGun and S.ventGun()
+                if not g then return "vent gun   none carried (Skull Guitar / Bazooka / Cannon)" end
+                local L = S.learn[g .. " M1"]
+                return string.format("vent gun   %s  ·  %s  ·  closed %d of %d turns", g,
+                    tostring(S.gunWay[g] or "not fired yet"), L and L.closed or 0, L and L.casts or 0)
+            end)
+            readout(v, function() return "golems   " .. tostring(P.sea.golemNote or "the event loads it when it starts") end)
+            heading2(v, "which keys close vents (learned)")
+            readout(v, function()
+                local rows = {}
+                for key, L in pairs(P.sea.learn or {}) do table.insert(rows, { key = key, L = L }) end
+                table.sort(rows, function(a, b)
+                    local sa, sb = P.sea.keyScore(a.key), P.sea.keyScore(b.key)
+                    if sa ~= sb then return sa > sb end
+                    return a.key < b.key
+                end)
+                if #rows == 0 then return "nothing fired at a vent yet" end
+                local out = {}
+                for i, r in ipairs(rows) do
+                    if i > 10 then break end
+                    table.insert(out, string.format("%-24s closed %d of %d%s", r.key, r.L.closed, r.L.casts,
+                        (r.L.closed == 0 and r.L.casts >= 4) and "  - does not close them" or ""))
+                end
+                return table.concat(out, "\n")
+            end)
             caption(v, "Prehistoric Island up: start it, vents + Lava Golems, bones + egg.")
             caption(v, "After the loot: the next server = the hunt goes on there - the loop. "
                 .. "Again, on this island = the wiki: the event has no cooldown.")
@@ -22253,26 +22388,6 @@ local function buildUI()
                 .. "its limit AND the relic is still over yours does a vent go first "
                 .. "instead. The meters are read off the game; the first seconds of "
                 .. "each event write what was found to workspace/bff_volcano_probe.txt.")
-        end)
-        fold(v, "Details", function(v)
-            heading2(v, "which keys close vents (learned)")
-            readout(v, function()
-                local rows = {}
-                for key, L in pairs(P.sea.learn or {}) do table.insert(rows, { key = key, L = L }) end
-                table.sort(rows, function(a, b)
-                    local sa, sb = P.sea.keyScore(a.key), P.sea.keyScore(b.key)
-                    if sa ~= sb then return sa > sb end
-                    return a.key < b.key
-                end)
-                if #rows == 0 then return "nothing fired at a vent yet" end
-                local out = {}
-                for i, r in ipairs(rows) do
-                    if i > 10 then break end
-                    table.insert(out, string.format("%-24s closed %d of %d%s", r.key, r.L.closed, r.L.casts,
-                        (r.L.closed == 0 and r.L.casts >= 4) and "  - does not close them" or ""))
-                end
-                return table.concat(out, "\n")
-            end)
         end)
     end
 
@@ -22694,7 +22809,7 @@ local function buildUI()
             if prevOnView then pcall(prevOnView, name) end
             if name == "attack" then
                 local from = trail[#trail]
-                ctxFrom = FIGHTABLE[from] and from or (from == "seafight" and "seaevents") or nil
+                ctxFrom = FIGHTABLE[from] and from or (from == "seafight" and "seaevents") or (from == "volcano" and "prehistoric") or nil
                 if ctxFrom then ctxSel = ctxFrom end
             end
         end
