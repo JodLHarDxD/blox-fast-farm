@@ -231,11 +231,14 @@ cfg = src[a:src.index("\n}\n", a) + 3]
 p = src.index("-- PANEL\n")
 panel = src[p:src.index("-- API\n", p)]
 
+pa = src.index("-- PACKS (2026-11-22)")
+packs = src[pa:src.index("-- PACKS END", pa)]     # the real pack table, as the panel reads it
+
 stubs = read("panel_stubs.lua")
 cut = stubs.index("-- @@CFG@@")
 cut_end = stubs.index("\n", cut) + 1
 lua = (stubs[:cut] + cfg + "local CFG_REAL = CFG\nCFG = proxy(CFG_REAL, \"\")\n" + stubs[cut_end:]
-       + panel
+       + packs + panel
        + "\nlocal RUN = " + ('"census"' if census else '"full"') + "\n"
        + "local OLD_KEYS = {" + ", ".join('"%s"' % k for k in OLD_KEYS) + "}\n"
        + read("panel_cases.lua"))

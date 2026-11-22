@@ -9113,6 +9113,12 @@ do
         -- one on turns the others off. Off: the next server's copy does not
         -- start by itself.
         function P.setHunt(x, kind)
+            -- A hunt on a pack this key does not hold stays off (Plan 2 R1).
+            local want = kind or CFG.HuntKind
+            if x and want and P.packState(want) ~= "open" then
+                say("locked on this key: " .. tostring(want) .. " - Key & packs")
+                return
+            end
             if kind then CFG.HuntKind = kind end
             P.handsOff = false           -- a hunt changed: the farm drives again
             CFG.Hunt = x and true or false
@@ -9135,6 +9141,21 @@ do
                 E.note = "hunt off"
             end
             say(E.note)
+        end
+
+        function P.enforcePacks()
+            local off = {}
+            local function check(id, turnOff)
+                if P.packState(id) ~= "open" then turnOff() table.insert(off, id) end
+            end
+            if CFG.Hunt and CFG.HuntKind then check(CFG.HuntKind, function() CFG.Hunt = false end) end
+            if CFG.RandomMode then check("random", function() CFG.RandomMode = false end) end
+            if CFG.RaidMode then check("raid", function() CFG.RaidMode = false end) end
+            if CFG.Pvp then check("pvp", function() CFG.Pvp = false end) end
+            if CFG.LeviFight then check("levi", function() CFG.LeviFight = false end) end
+            if CFG.Volcano then check("volcano", function() CFG.Volcano = false end) end
+            if CFG.Circuit then check("circuit", function() CFG.Circuit = false end) end
+            if #off > 0 then say("locked on this key, turned off: " .. table.concat(off, ", ")) end
         end
     end
     build()
@@ -18096,6 +18117,10 @@ local function buildUI()
     end
 
     local function setMode(id, on)
+        if on and P.packState(id) ~= "open" then
+            say((TITLES[id] or id) .. " is locked on this key - Key & packs")
+            return
+        end
         if not on then
             -- Only the one that is on goes off; off = no mode (the circuit
             -- too, since 2026-10-12).
@@ -24309,6 +24334,8 @@ do
                 print("[BFF] settings lock: " .. n .. " of your settings back (" .. FILE .. ")")
             end
         end
+        -- A restored setting on a pack this key does not hold goes off (Plan 2 R1).
+        if P.enforcePacks then P.enforcePacks() end
         task.spawn(function()
             while _G.BFF == P do
                 task.wait(2)
