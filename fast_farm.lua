@@ -729,6 +729,41 @@ local CFG = {
 -- on the panel's title, and in the hop carry - bumped with every change.
 local P = { running = false, config = CFG, handsOff = false, build = "2026-11-21.1" }
 _G.BFF = P
+-- PACKS (2026-11-22): what a key opens. The gate sets _G.BFF_ENT (feature ->
+-- expiry, 0 = for ever) and _G.BFF_KIND before this runs. No key (the raw
+-- loader) = every mode open, as before the gate. Globals: the main chunk is
+-- at Luau's 200-local limit.
+PACK_OF = {
+    circuit = "farm", random = "farm",
+    raid = "raid", elite = "raid", sword = "raid",
+    sail = "sea", seaevents = "sea", levi = "sea", mirage = "sea",
+    dealer = "sea", mchest = "sea", gear = "sea",          -- the Mirage jobs (CFG.HuntKind)
+    prehistoric = "prehistoric", volcano = "prehistoric",
+    pvp = "pvp",
+}
+OWNER_ONLY = { fruit = true, berry = true, recipe = true, flower = true, ember = true, halloween = true }
+PACKS = {
+    farm = { name = "GRIND", price = "$0.99", line = "Circuit farm and Random: your level or your list" },
+    raid = { name = "BOSSES + RAIDS", price = "$0.99", line = "Raids, Elite pirates, the Legendary sword dealer" },
+    sea = { name = "SEA", price = "$1.49", line = "Sea travel, sea events, the Leviathan, Mirage" },
+    prehistoric = { name = "PREHISTORIC", price = "$1.99", line = "The island, the volcano, bones and the egg" },
+    pvp = { name = "PVP", price = "$1.99", line = "Aim, Ken and speed when you fight" },
+}
+PACK_ORDER = { "farm", "raid", "sea", "prehistoric", "pvp" }
+function packState(id, ent, kind, now)
+    if type(ent) ~= "table" then return "open" end
+    if kind == "owner" then return "open" end
+    local function active(f)
+        local e = ent[f]
+        return type(e) == "number" and (e == 0 or e > now)
+    end
+    if OWNER_ONLY[id] then return active("fruits") and "open" or "hidden" end
+    local f = PACK_OF[id]
+    if not f then return "open" end
+    return active(f) and "open" or "locked"
+end
+P.packState = function(id) return packState(id, _G.BFF_ENT, _G.BFF_KIND, os.time()) end
+-- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
 -- what you changed from these is saved - a default changed in a later build
