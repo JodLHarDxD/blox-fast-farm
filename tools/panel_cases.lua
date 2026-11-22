@@ -14,6 +14,7 @@ if not P.cfgDefaults then
 end
 check(built, "the panel builds  " .. table.concat(WARNED, " | "))
 local gui = PG:FindFirstChild("BFFHUD")
+local LIVE0 = SPAWNED[#SPAWNED]       -- the panel's live loop: later spawns come after it
 
 -- ---------- finding things ----------
 local VIEWS = {}
@@ -375,7 +376,7 @@ if RUN == "full" then
     check(called("setHunt true dealer"), "Mirage on runs the picked job")
     showModes()
     check(onRows() == "Mirage", "Mirage alone On: " .. onRows())
-    button("mirage", "Every chest on it").Activated:Fire()
+    button("mirage", "Every chest").Activated:Fire()
     check(called("setHunt true mchest") and CFG_REAL.MirageJob == "mchest", "job changed while on: that job now")
     goHome() livePass()
     check(string.find(tostring(button("home", "·  Mirage").Text), "Mirage", 1, true) ~= nil,
@@ -387,15 +388,15 @@ if RUN == "full" then
     goHome()
     tap("home", "Mode")
     tap("modes", "Sea events")
-    tap("seaevents", "Fighting at sea")
-    check(current() == "seafight", "Sea events -> Fighting at sea")
+    tap("seaevents", "Dodging & heights")
+    check(current() == "seafight", "Sea events -> Sea fight")
     backBtn.Activated:Fire()
     check(current() == "seaevents", "Back -> Sea events, got " .. current())
     backBtn.Activated:Fire()
     check(current() == "modes", "Back -> Modes, got " .. current())
     backBtn.Activated:Fire()
     check(current() == "home", "Back -> Home, got " .. current())
-    tap("levi", "Fighting at sea")
+    tap("levi", "Dodging & form")
     backBtn.Activated:Fire()
     check(current() == "home", "a link from elsewhere, Back = where you were")
 
@@ -921,6 +922,124 @@ do
     check(CFG_REAL.SwordWant.Shizu == was.want, "sword: and back")
     CFG_REAL.RaidLoop, CFG_REAL.RaidChip, CFG_REAL.RaidFruitMax = was.loop, was.chip, was.fruit
     CFG_REAL.EliteLook, CFG_REAL.SwordWant.Shizu = was.look, was.want
+end
+
+-- ---------- R2 Task 6: SEA pages, Sea travel, Sea events, Sea fight, Leviathan, Mirage ----------
+do
+    local was = { fight = CFG_REAL.SeaEvFight["Shark"], goal = CFG_REAL.SeaEvGoal, form = CFG_REAL.SeaEvForm,
+        lh = CFG_REAL.LeviHeight, ls = CFG_REAL.LeviShare, job = CFG_REAL.MirageJob, need = CFG_REAL.MirageNeed }
+    local DODGE = { "SeaDodge", "BeastDodgeMin", "BeastDodgeMax", "BeastDodgeSpeed", "BeastHeight",
+        "SharkDodgeMin", "SharkDodgeMax", "SharkDodgeSpeed", "DodgeRadius", "DodgeSpeed", "FishHeight",
+        "DodgeUp", "DodgeTime" }
+    local function snap() local t = {} for _, k in ipairs(DODGE) do t[k] = CFG_REAL[k] end return t end
+    local before = snap()
+    for _, page in ipairs({ "sail", "seaevents", "levi", "mirage" }) do
+        check(modePill(page) ~= nil and isStrip(modePill(page)), page .. ": a mode strip")
+    end
+    check(not (modePill("seafight") and isStrip(modePill("seafight"))), "seafight: a settings page, no mode strip")
+    for _, page in ipairs({ "seaevents", "levi", "mirage", "seafight" }) do
+        check(button(page, "Fights with") ~= nil, page .. ": a Fights with row")
+    end
+    check(button("sail", "Fights with") == nil, "sail: only sails, no Fights with row")
+    for _, page in ipairs({ "seaevents", "levi", "seafight" }) do
+        check(button(page, "Fine-tune") ~= nil, page .. ": Fine-tune")
+    end
+    -- Sea travel: the two boat numbers open Travel
+    tap("sail", "Boat speed")
+    check(current() == "travel", "sail: Boat speed opens Travel")
+    goHome()
+    tap("sail", "Turn speed")
+    check(current() == "travel", "sail: Turn speed opens Travel")
+    goHome()
+    -- Sea events: a chip moves between FIGHT and SAIL AWAY
+    CFG_REAL.SeaEvFight["Shark"] = false
+    tap("seaevents", "Shark")
+    check(CFG_REAL.SeaEvFight["Shark"] == true, "seaevents: tapping Shark moves it to FIGHT")
+    tap("seaevents", "Shark")
+    check(CFG_REAL.SeaEvFight["Shark"] == false, "seaevents: and back to SAIL AWAY")
+    CFG_REAL.SeaEvGoal = 20
+    tap("seaevents", "+")
+    check(CFG_REAL.SeaEvGoal == 21, "seaevents: + raises the goal")
+    tap("seaevents", "-")
+    tap("seaevents", "-")
+    check(CFG_REAL.SeaEvGoal == 19, "seaevents: - lowers it")
+    check(button("seaevents", "Ask the Spy now") ~= nil and button("seaevents", "Reset to 0") ~= nil,
+        "seaevents: Ask the Spy now, Reset to 0")
+    check(string.find(table.concat(labelsOf(VIEWS.seaevents), "|"), "Stop at the goal", 1, true) ~= nil,
+        "seaevents: Stop at the goal")
+    goHome() tap("home", "Mode") tap("modes", "Sea events")
+    tap("seaevents", "Dodging & heights")
+    check(current() == "seafight", "seaevents: Dodging & heights opens Sea fight")
+    backBtn.Activated:Fire()
+    check(current() == "seaevents", "seafight: Back goes to Sea events")
+    goHome()
+    -- Sea fight: DODGE OFF + 1-5; step 3 = today's CFG; the form choice
+    tap("seafight", "5")
+    check(CFG_REAL.BeastHeight == 150 and CFG_REAL.DodgeUp == 80 and CFG_REAL.SharkDodgeSpeed == 500
+        and CFG_REAL.DodgeRadius == 50 and CFG_REAL.DodgeTime == 1.8, "seafight: dodge 5 = safest")
+    tap("seafight", "1")
+    check(CFG_REAL.BeastDodgeMin == 25 and CFG_REAL.FishHeight == 15 and CFG_REAL.DodgeTime == 0.6,
+        "seafight: dodge 1 = close")
+    tap("seafight", "OFF")
+    check(CFG_REAL.SeaDodge == false and CFG_REAL.BeastHeight == 90 and CFG_REAL.FishHeight == 30,
+        "seafight: OFF = no dodge, today's heights")
+    tap("seafight", "5")
+    check(CFG_REAL.SeaDodge == true, "seafight: a step turns dodging back on")
+    tap("seafight", "3")
+    for _, k in ipairs(DODGE) do
+        check(CFG_REAL[k] == P.cfgDefaults[k], "seafight: step 3 " .. k .. " is today's " .. tostring(P.cfgDefaults[k]))
+    end
+    tap("seafight", "ALWAYS")
+    check(CFG_REAL.SeaEvForm == "form", "seafight: Always -> SeaEvForm form")
+    tap("seafight", "NEVER")
+    check(CFG_REAL.SeaEvForm == "base", "seafight: Never -> SeaEvForm base")
+    tap("seafight", "WHEN IT HURTS")
+    check(CFG_REAL.SeaEvForm == "auto", "seafight: When it hurts -> SeaEvForm auto")
+    tap("seafight", "Fights with")
+    check(current() == "attack", "seafight: Fights with opens Attack")
+    goHome()
+    -- Leviathan: one dial over its two numbers, today = step 3
+    tap("levi", "1")
+    check(CFG_REAL.LeviHeight == 120 and CFG_REAL.LeviShare == 10, "levi: step 1 = spread (120, 10%)")
+    tap("levi", "5")
+    check(CFG_REAL.LeviHeight == 45 and CFG_REAL.LeviShare == 40, "levi: step 5 = carry (45, 40%)")
+    tap("levi", "3")
+    check(CFG_REAL.LeviHeight == P.cfgDefaults.LeviHeight and CFG_REAL.LeviShare == P.cfgDefaults.LeviShare,
+        "levi: step 3 is today's values")
+    tap("levi", "The Spy's count")
+    check(current() == "seaevents", "levi: the Spy's count opens Sea events")
+    goHome()
+    -- Mirage: the job is the main control; which Mirage only for Blue Gear
+    local function whichShown()
+        local shown
+        each(VIEWS.mirage, function(k)
+            if k.ClassName == "TextLabel" and tostring(k.Text) == "BLUE GEAR: WHICH MIRAGE" then shown = k.Parent.Visible end
+        end)
+        return shown
+    end
+    goHome() tap("home", "Mode") tap("modes", "Mirage") pcall(LIVE0)
+    tap("mirage", "Onto it")
+    pcall(LIVE0)
+    check(CFG_REAL.MirageJob == "mirage" and whichShown() == false, "mirage: which Mirage hidden for Onto it")
+    tap("mirage", "Blue Gear")
+    pcall(LIVE0)
+    check(CFG_REAL.MirageJob == "gear" and whichShown() == true, "mirage: which Mirage shown for Blue Gear ")
+    tap("mirage", "FULL MOON")
+    check(CFG_REAL.MirageNeed == "full", "mirage: Full moon -> MirageNeed full")
+    tap("mirage", "EVERY ONE")
+    check(CFG_REAL.MirageNeed == "any", "mirage: Every one -> MirageNeed any")
+    tap("mirage", "SEES NIGHT")
+    check(CFG_REAL.MirageNeed == "night", "mirage: Sees night -> MirageNeed night")
+    tap("mirage", "Advanced Fruit Dealer")
+    pcall(LIVE0)
+    check(CFG_REAL.MirageJob == "dealer" and whichShown() == false, "mirage: hidden again for the dealer")
+    check(button("mirage", "Sea fight") ~= nil and button("mirage", "Searching the sea") ~= nil, "mirage: the two links")
+    -- put it all back
+    for k, v in pairs(before) do CFG_REAL[k] = v end
+    CFG_REAL.SeaEvFight["Shark"], CFG_REAL.SeaEvGoal, CFG_REAL.SeaEvForm = was.fight, was.goal, was.form
+    CFG_REAL.LeviHeight, CFG_REAL.LeviShare = was.lh, was.ls
+    CFG_REAL.MirageJob, CFG_REAL.MirageNeed = was.job, was.need
+    goHome()
 end
 
 print(string.format("%d passed, %d failed", pass, fail))

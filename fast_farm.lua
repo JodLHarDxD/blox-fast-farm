@@ -17578,7 +17578,7 @@ local function buildUI()
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
         ember = "Blaze Ember", halloween = "Halloween", sail = "Sea travel", seaevents = "Sea events",
         prehistoric = "Prehistoric", mirage = "Mirage", levi = "Leviathan", pvp = "PvP",
-        volcano = "Volcano event", seafight = "Fighting at sea",
+        volcano = "Volcano event", seafight = "Sea fight",
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
         stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu", trades = "Trades",
@@ -21208,155 +21208,563 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- SEA TRAVEL
+    -- SEA TRAVEL. R2 Task 6 (board SeaTravel): you steer; the keys shown,
+    -- what the boat is doing, and the two boat numbers set in Travel.
     -- =====================================================
     do
         local v = makeView("sail")
         gap(v, 6)
+        P.kit.pageTop(v, "sea")
+        P.kit.modeStrip(v, "sail")
+        heading2(v, "you steer  ·  your keyboard, at the wheel")
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 140), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            local function key(txt, x, y)
+                local k = mk("TextLabel", {
+                    Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(x, y),
+                    BackgroundColor3 = C.raised, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    TextSize = F.label, TextColor3 = C.text, Text = txt, Parent = card,
+                })
+                corner(k, 9)
+            end
+            key("W", 58, 14) key("A", 14, 60) key("S", 58, 60) key("D", 102, 60)
+            mk("TextLabel", {
+                Size = UDim2.fromOffset(140, 18), Position = UDim2.fromOffset(14, 108),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Text = "arrow keys work too", Parent = card,
+            })
+            local rows = {}
+            for i = 1, 4 do
+                rows[i] = mk("TextLabel", {
+                    Size = UDim2.new(1, -170, 0, 26), Position = UDim2.fromOffset(156, 8 + (i - 1) * 30),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = card,
+                })
+            end
+            addLive(function()
+                local sp = math.floor(tonumber(CFG.SeaSpeed) or 300)
+                local tr = math.floor(tonumber(CFG.SeaTurnRate) or 60)
+                rows[1].Text = "W  go  ·  " .. sp .. " studs/s"
+                rows[2].Text = "A  left  ·  " .. tr .. "°/s"
+                rows[3].Text = "D  right  ·  " .. tr .. "°/s"
+                rows[4].Text = "S  stop  ·  W goes again"
+            end)
+            gap(v, 8)
+        end
         readout(v, function()
             local s = P.sea
-            return (s.driving and s.meters) and string.format("%d m from Tiki  ·  danger %s",
+            return (s.driving and s.meters) and string.format("at sea  ·  %d m from Tiki  ·  danger %s",
                 math.floor(s.meters), tostring(s.danger or "?")) or "not sailing"
         end)
-        modeSwitch(v, "sail")
-        link(v, "Travel & boat", function() return math.floor(CFG.SeaSpeed) .. " studs/s" end, "travel")
-        fold(v, "How it works", function(v)
-            caption(v, "Your boat at sea speed, you steer (A/D turn, W go, S stop) - no island, never the next server.")
-        end)
+        P.kit.truthCard(v, function()
+            return "You steer. Boat at " .. math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s."
+        end, function()
+            return "No island, no timer, never the next server. Lose the boat far out and Sea travel turns off."
+                .. "\n\nThird Sea. Your boat, or a Beast Hunter bought at Tiki Outpost."
+        end, "sea")
+        heading2(v, "the boat  ·  set in Travel, every sea mode")
+        navRow(v, "Boat speed", function() return math.floor(tonumber(CFG.SeaSpeed) or 300) .. " studs/s" end, "travel")
+        hairline(v)
+        navRow(v, "Turn speed", function() return math.floor(tonumber(CFG.SeaTurnRate) or 60) .. "°/s" end, "travel")
     end
 
     -- =====================================================
-    -- SEA EVENTS
+    -- SEA EVENTS. R2 Task 6 (board SeaEvents): fight or sail away (tap a kind
+    -- to move it), the count and the Spy, the two actions; the dodging and the
+    -- weapon live one tap away.
     -- =====================================================
     do
         local v = makeView("seaevents")
         gap(v, 6)
-        readout(v, function()
-            local s, e = P.sea, P.seaev
-            local c = e.count
-            local goal = math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
-            local kinds = {}
-            for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark", "Leviathan" }) do
-                if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
-            end
-            local spy = e.spy
-            return table.concat({
-                "now       " .. tostring(e.note),
-                string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
-                "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
-                "spy       " .. (spy and string.format("%s  ·  asked %d min ago%s", tostring(spy.text),
-                    math.floor((os.clock() - spy.at) / 60),
-                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "") or "not asked yet"),
-                "last      " .. tostring(e.last),
-                string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
-                    s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
-            }, "\n")
-        end)
-        modeSwitch(v, "seaevents")
-        heading2(v, "fight these  ·  the rest sailed away from")
-        local items = {}
-        for _, row in ipairs({
-            { "Sea Beast", "every key, aimed" },
-            { "Rumbling Waters", "three at once" },
-            { "Terrorshark", "round it, dodging" },
-            { "Piranha", "one per school" },
-            { "Shark", "off: sailed away" },
-        }) do
-            local k = row[1]
-            table.insert(items, { k, row[2],
-                function() return (CFG.SeaEvFight or {})[k] == true end,
-                function(x)
-                    CFG.SeaEvFight = CFG.SeaEvFight or {}
-                    CFG.SeaEvFight[k] = x
-                end })
+        P.kit.pageTop(v, "sea")
+        P.kit.modeStrip(v, "seaevents")
+        heading2(v, "fight or sail away  ·  tap one to move it")
+        local KINDS = { "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark" }
+        local MANY = { ["Sea Beast"] = "Sea Beasts", ["Rumbling Waters"] = "Rumbling Waters",
+            Terrorshark = "Terrorsharks", Piranha = "Piranhas", Shark = "Sharks" }
+        local function fights(k) return (CFG.SeaEvFight or {})[k] == true end
+        local function join(a)
+            if #a < 2 then return table.concat(a) end
+            return table.concat(a, ", ", 1, #a - 1) .. " and " .. a[#a]
         end
-        ticks(v, items)
-        sliderRow(v, "Ship raid: sail away to", 500, 4000, 100,
-            function() return CFG.FleeTo end,
-            function(x) CFG.FleeTo = x end, " studs off")
-        heading2(v, "the count")
-        sliderRow(v, "Count goal (the Spy: 20 or more)", 1, 60, 1,
-            function() return CFG.SeaEvGoal end,
-            function(x) CFG.SeaEvGoal = x end, " events")
-        switchRow(v, "Stop at the goal", "The hunt and the farm stop the moment the count reaches it",
-            function() return CFG.SeaEvStopAtGoal end,
+        local function split()
+            local f, a = {}, {}
+            for _, k in ipairs(KINDS) do table.insert(fights(k) and f or a, k) end
+            return f, a
+        end
+        local BLUE = Color3.fromRGB(159, 203, 239)
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = card,
+            })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = card,
+            })
+            local function head(txt, color, order)
+                mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
+                    Font = Enum.Font.GothamBold, TextSize = F.tiny, TextColor3 = color,
+                    TextXAlignment = Enum.TextXAlignment.Left, Text = txt, LayoutOrder = order, Parent = card,
+                })
+            end
+            local function wrapBox(order)
+                local b = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1, LayoutOrder = order, Parent = card,
+                })
+                mk("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal, Wraps = true,
+                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = b,
+                })
+                return b
+            end
+            head("FIGHT", BLUE, 1)
+            local fightBox = wrapBox(2)
+            local empty = mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                TextColor3 = C.warn or C.second, Text = "  Nothing here: the boat only sails  ",
+                LayoutOrder = 99, Parent = fightBox,
+            })
+            local rule = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = C.line, BorderSizePixel = 0,
+                LayoutOrder = 3, Parent = card,
+            })
+            head("SAIL AWAY", C.second, 4)
+            local awayBox = wrapBox(5)
+            local locked = mk("TextLabel", {
+                Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                TextColor3 = C.third, Text = "  Ship raids (always)  ", LayoutOrder = 99, Parent = awayBox,
+            })
+            local btns = {}
+            local function refresh()
+                for i, k in ipairs(KINDS) do
+                    local on = fights(k)
+                    local b = btns[i]
+                    b.Parent = on and fightBox or awayBox
+                    b.BackgroundColor3 = on and C.ivory or C.row
+                    b.TextColor3 = on and C.base or C.second
+                end
+                local f = split()
+                empty.Visible = (#f == 0)
+            end
+            for i, k in ipairs(KINDS) do
+                local b = mk("TextButton", {
+                    Size = UDim2.fromOffset(0, 44), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    Text = k, LayoutOrder = i, Parent = fightBox,
+                })
+                corner(b, 12)
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = b })
+                b.Activated:Connect(function()
+                    CFG.SeaEvFight = CFG.SeaEvFight or {}
+                    CFG.SeaEvFight[k] = not fights(k)
+                    refresh()
+                end)
+                btns[i] = b
+            end
+            refresh()
+            addLive(refresh)
+        end
+        caption(v, "Ship raids always: slow, and they break the boat. The Leviathan is its own mode.")
+        P.kit.truthCard(v, function()
+            local f = split()
+            if #f == 0 then return "Fights nothing, only sails" end
+            if #f == 5 then return "Fights all 5 kinds" end
+            if #f <= 2 then
+                local n = {}
+                for _, k in ipairs(f) do table.insert(n, MANY[k]) end
+                return "Fights " .. join(n)
+            end
+            return "Fights " .. #f .. " kinds, sails away from the rest"
+        end, function()
+            local f, a = split()
+            local fled = {}
+            for _, k in ipairs(a) do table.insert(fled, MANY[k]) end
+            table.insert(fled, "every ship raid")
+            return "Sailed away from: " .. join(fled) .. ". You steer the boat; it never hops to the next server."
+                .. ((#f == 0) and " Nothing can be counted." or "")
+        end, "sea")
+        -- THE COUNT, for the Spy.
+        local function goalNow() return math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20)) end
+        do
+            local h = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(20, 6),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, Text = "FOR THE SPY", Parent = h,
+            })
+            local note = mk("TextLabel", {
+                Size = UDim2.new(0.5, -20, 1, -6), Position = UDim2.new(0.5, 0, 0, 6),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = h,
+            })
+            addLive(function()
+                note.Text = goalNow() < 20 and "under the Spy's 20" or "the Spy asks for 20 or more"
+            end)
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = card,
+            })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
+            })
+            local top = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, LayoutOrder = 1, Parent = card,
+            })
+            local big = mk("TextLabel", {
+                Size = UDim2.fromOffset(60, 46), BackgroundTransparency = 1, Font = Enum.Font.Code,
+                TextSize = 30, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "0", Parent = top,
+            })
+            local ofg = mk("TextLabel", {
+                Size = UDim2.new(1, -230, 0, 46), Position = UDim2.fromOffset(62, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second,
+                TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = top,
+            })
+            local function stepBtn(txt, x, d)
+                local b = mk("TextButton", {
+                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 1),
+                    BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = C.text, Text = txt, Parent = top,
+                })
+                corner(b, 12)
+                b.Activated:Connect(function()
+                    CFG.SeaEvGoal = math.clamp(goalNow() + d, 1, 60)
+                end)
+                return b
+            end
+            stepBtn("-", -152, -1)
+            stepBtn("+", -44, 1)
+            local gl = mk("TextLabel", {
+                Size = UDim2.fromOffset(60, 46), Position = UDim2.new(1, -104, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 15,
+                TextColor3 = C.text, Text = "", Parent = top,
+            })
+            local track = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = C.line, BorderSizePixel = 0,
+                LayoutOrder = 2, Parent = card,
+            })
+            corner(track, 3)
+            local fill = mk("Frame", {
+                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accentSea or Color3.fromRGB(74, 163, 232),
+                BorderSizePixel = 0, Parent = track,
+            })
+            corner(fill, 3)
+            local spyL = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.second,
+                Text = "", LayoutOrder = 3, Parent = card,
+            })
+            addLive(function()
+                local c = P.seaev.count
+                local goal = goalNow()
+                big.Text = tostring(c.total)
+                ofg.Text = "of " .. goal .. " counted"
+                gl.Text = "GOAL\n" .. goal
+                fill.Size = UDim2.new(math.clamp(c.total / goal, 0, 1), 0, 1, 0)
+                fill.BackgroundColor3 = (c.total >= goal) and C.live or Color3.fromRGB(74, 163, 232)
+                local spy = P.seaev.spy
+                spyL.Text = spy and string.format("The Spy: %s  ·  asked %d min ago%s", tostring(spy.text),
+                    math.floor((os.clock() - spy.at) / 60),
+                    spy.overAt and string.format("  ·  past the cooldown at %d", spy.overAt) or "")
+                    or "The Spy: not asked yet"
+            end)
+        end
+        switchRow(v, "Stop at the goal", function()
+            local goal, total = goalNow(), P.seaev.count.total
+            if not CFG.SeaEvStopAtGoal then return "Keeps fighting past " .. goal end
+            if total >= goal then return "Reached " .. goal .. ": the hunt stops now" end
+            return "The hunt stops at " .. goal .. ", " .. (goal - total) .. " to go"
+        end, function() return CFG.SeaEvStopAtGoal end,
             function(x) CFG.SeaEvStopAtGoal = x end)
-        actionRow(v, "Ask the Spy now", nil, function() P.seaev.spyAsk() end)
-        actionRow(v, "Reset the count to 0", "danger", function() P.seaev.reset() end)
-        link(v, "Fighting at sea", function() return tostring(CFG.SeaEvForm) end, "seafight")
-        link(v, "Travel & boat", function() return math.floor(CFG.SeaSpeed) .. " studs/s" end, "travel")
-        fold(v, "How it works", function(v)
-            caption(v, "Beasts, Rumbling Waters, Terrorshark, Piranha fought - ship raids fled - counted.")
-            caption(v, "Sea Beast: hovered over, every key aimed at it (M1 only in Kitsune form). "
-                .. "Rumbling Waters: three beasts at once - one at a time, the nearest first. "
-                .. "Terrorshark: round it, dodging - every key (M1 only in Kitsune form). "
-                .. "Piranha: a school of them = one sea event. Shark: off = sailed away from.")
-            caption(v, "Off = sailed away from. Ship raids (the pirate brigades, the Fish "
-                .. "Boat and its crew, the haunted ships) are always sailed away from - "
-                .. "slow, and they break the boat - then, until the ship is twice that "
-                .. "far or gone, the boat goes on but never toward it. The Leviathan: its "
-                .. "own mode. The boat ALWAYS travels, steered as the Prehistoric and "
-                .. "Mirage hunts steer it (Travel & boat: you steer, or auto - which here "
-                .. "never ends: at each leg's end it turns left again and sails on, round "
-                .. "a big triangle far out, all Danger 6). Sea events come to a boat that "
-                .. "is near; a fight takes you off the seat and holds the boat up out of "
-                .. "the waves; then back to the wheel and on. Never the next server.")
-            caption(v, "One sea event = one group of the same kind (five piranhas count "
-                .. "once - the wiki; three beasts = Rumbling Waters = once), counted when "
-                .. "every one of it is gone and at least one was KILLED. Escaped or "
-                .. "despawned = not counted. Kept across joins - reset it after each Frozen "
-                .. "Dimension. The Spy's own answer (asked from anywhere, read only, every "
-                .. "5 min and after each count) is the truth; the count is the guide.")
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 4), Parent = s,
+            })
+            local function btn(x, txt)
+                local b = mk("TextButton", {
+                    Size = UDim2.new(0.5, -4, 0, 44), Position = UDim2.new(x, x == 0 and 0 or 4, 0, 0),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.text,
+                    Text = txt, Parent = s,
+                })
+                corner(b, 12)
+                mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                return b
+            end
+            local ask = btn(0, "Ask the Spy now")
+            ask.Activated:Connect(function() task.spawn(function() pcall(function() P.seaev.spyAsk() end) end) end)
+            local reset = btn(0.5, "Reset to 0")
+            local armedAt = nil
+            reset.Activated:Connect(function()
+                local c = P.seaev.count
+                if c.total == 0 then armedAt = nil return end
+                if armedAt and os.clock() - armedAt < 4 then
+                    armedAt = nil
+                    task.spawn(function() pcall(function() P.seaev.reset() end) end)
+                else
+                    armedAt = os.clock()
+                end
+            end)
+            addLive(function()
+                local armed = armedAt and os.clock() - armedAt < 4
+                reset.Text = armed and ("Tap again: " .. P.seaev.count.total .. " to 0") or "Reset to 0"
+                reset.TextColor3 = armed and C.base or C.stop
+                reset.BackgroundColor3 = armed and C.stop or C.row
+            end)
+        end
+        fold(v, "How it counts", function(v)
+            caption(v, "One group is one sea event: three beasts, or a school of Piranhas, count once.")
+            caption(v, "It counts when all of it is gone and at least one was killed. Escaped: not counted.")
+            caption(v, "Kept across joins, back to 0 when a Leviathan dies. The Spy's own answer is the truth.")
+        end)
+        heading2(v, "how it fights")
+        P.kit.fightsWith(v, "seaevents")
+        link(v, "Dodging & heights", function()
+            return CFG.SeaDodge and ("On  ·  " .. math.floor(tonumber(CFG.BeastHeight) or 90) .. " up") or "Off"
+        end, "seafight")
+        link(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "auto" end, "travel")
+        P.kit.fineTune(v, function(v)
+            sliderRow(v, "Ship raid: sail away to", 500, 4000, 100,
+                function() return CFG.FleeTo end,
+                function(x) CFG.FleeTo = x end, " studs off")
+        end, 1)
+        fold(v, "Details", function(v)
+            readout(v, function()
+                local s, e = P.sea, P.seaev
+                local c = e.count
+                local goal = goalNow()
+                local kinds = {}
+                for _, k in ipairs({ "Sea Beast", "Rumbling Waters", "Terrorshark", "Piranha", "Shark", "Leviathan" }) do
+                    if (c.kinds[k] or 0) > 0 then table.insert(kinds, k .. " " .. c.kinds[k]) end
+                end
+                return table.concat({
+                    "now       " .. tostring(e.note),
+                    string.format("count     %d of %d sea events  ·  since %s", c.total, goal, os.date("%d %b %H:%M", c.since)),
+                    "          " .. ((#kinds > 0) and table.concat(kinds, "  ·  ") or "none yet"),
+                    "last      " .. tostring(e.last),
+                    string.format("boat      %s%s  ·  %d fights  ·  %d fled", tostring(s.boatNote),
+                        s.hp and string.format("  ·  %d / %s HP", s.hp, tostring(s.maxHp or "?")) or "", e.fights, e.flees),
+                }, "\n")
+            end)
         end)
     end
 
     -- =====================================================
-    -- LEVIATHAN
+    -- LEVIATHAN. R2 Task 6 (board Leviathan): one dial over the two numbers
+    -- (how high, what share of each segment), the picture of it.
     -- =====================================================
     do
         local v = makeView("levi")
         gap(v, 6)
-        readout(v, function()
-            local lv = P.seaev.levi
-            local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills),
-                string.format("dodged    %d (last: %s)  ·  out of now: %s", P.seaev.dodges or 0,
-                    tostring(P.seaev.lastDodge or "-"), (#lv.now > 0) and table.concat(lv.now, ", ") or "nothing") }
-            local ok, list = pcall(P.seaev._t.leviParts)
-            for _, x in ipairs((ok and list) or {}) do
-                local m = x.max or x.maxSeen
-                table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
-                    x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
-                    x.enabled and "takes damage" or "not now",
-                    m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
+        P.kit.pageTop(v, "sea")
+        P.kit.modeStrip(v, "levi")
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = card,
+            })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+                TextSize = F.body, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
+                Text = "Needs the Frozen Dimension", LayoutOrder = 1, Parent = card,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = C.third,
+                Text = "Turn it on inside, with your group. It starts at once; until the Leviathan shows, you play.",
+                LayoutOrder = 2, Parent = card,
+            })
+            gap(v, 8)
+        end
+        heading2(v, "how much you take")
+        -- The picture: three segments and the head, you over the one being
+        -- hit, the 8% line the reward needs on each.
+        do
+            local DEEP, WATER, LINE = Color3.fromRGB(7, 22, 33), Color3.fromRGB(12, 30, 44), Color3.fromRGB(29, 62, 87)
+            local BLUE, PALE = Color3.fromRGB(74, 163, 232), Color3.fromRGB(159, 203, 239)
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 156), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = DEEP, BorderSizePixel = 0,
+                ClipsDescendants = true, Parent = s,
+            })
+            corner(box, 14)
+            local function rect(x, y, w, h, color, r)
+                local f = mk("Frame", {
+                    Size = UDim2.fromOffset(w, h), Position = UDim2.fromOffset(x, y),
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = box,
+                })
+                if r then corner(f, r) end
+                return f
             end
-            return table.concat(lines, "\n")
-        end)
-        modeSwitch(v, "levi")
-        heading2(v, "the fight")
-        sliderRow(v, "Over the part being hit", 30, 300, 5,
-            function() return CFG.LeviHeight end,
-            function(x) CFG.LeviHeight = x end, " studs")
-        sliderRow(v, "Your share of each segment", 8, 50, 1,
-            function() return CFG.LeviShare end,
-            function(x) CFG.LeviShare = x end, " %")
-        link(v, "Fighting at sea", function() return tostring(CFG.SeaEvForm) end, "seafight")
-        fold(v, "How it works", function(v)
-            caption(v, "On = only the Leviathan: segments, then the head; its attacks dodged; starts the run.")
-            caption(v, "On = ONLY the Leviathan: switch it on inside the Frozen Dimension (it "
-                .. "starts the run); nothing else runs, and until it shows the character is "
-                .. "yours. Its segments first, the head LAST (segments respawn: back to them). "
-                .. "Fought like a Sea Beast - every ready key aimed at the part, no M1 out of "
-                .. "Kitsune form, round it, the water a floor, dives waited out. ITS ATTACKS, "
-                .. "read off the game's own effects: the tail's red area - out of it sideways "
-                .. "(up does not save you); the mouth beam's charge and the beam - off its "
-                .. "line; the tornadoes - away; the roar's ice spears - up the moment one "
-                .. "flies; any other attack animation - up. The reward needs 8% of the damage "
-                .. "on EACH segment: yours is read off its HP while your keys land (others' "
-                .. "hits in that moment count too), so the next one at your share. Its HEART: "
-                .. "the character is yours - the Beast Hunter's harpoon, tow it to Tiki. "
-                .. "Killed: the sea event count back to 0 (the Spy's cooldown starts). No "
-                .. "boat is touched. The first one writes its parts and each attack's size "
-                .. "to workspace/bff_beast_probe.txt.")
+            local function text(x, y, w, str, color, align, mono)
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
+                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or Enum.Font.Gotham,
+                    TextSize = 11, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
+                    Text = str, Parent = box,
+                })
+            end
+            text(14, 12, 130, "Segments first, the head last", Color3.fromRGB(127, 149, 166))
+            rect(30, 92, 26, 13, LINE, 13)
+            rect(84, 86, 38, 19, LINE, 19)
+            rect(142, 86, 38, 19, Color3.fromRGB(44, 106, 153), 19)
+            rect(222, 76, 56, 29, LINE, 28)
+            rect(0, 104, 400, 60, WATER)
+            rect(0, 104, 400, 1, LINE)
+            local line = rect(160, 60, 2, 20, Color3.fromRGB(44, 106, 153))
+            local you = rect(155, 40, 12, 12, C.ivory, 6)
+            local youL = text(173, 39, 30, "you", C.second)
+            local hL = text(70, 60, 82, "", PALE, Enum.TextXAlignment.Right, true)
+            local bars = {}
+            for i, left in ipairs({ 23, 83, 141 }) do
+                rect(left, 116, 40, 5, LINE, 3)
+                local fill = rect(left, 116, (i == 3) and 22 or 40, 5, BLUE, 3)
+                bars[i] = rect(left + 20, 113, 2, 11, C.ivory, 1)
+            end
+            text(230, 112, 40, "last", Color3.fromRGB(127, 149, 166), Enum.TextXAlignment.Center)
+            rect(14, 135, 2, 11, C.ivory, 1)
+            text(22, 134, 120, "8% gets the reward", Color3.fromRGB(157, 179, 196))
+            rect(160, 138, 12, 5, BLUE, 3)
+            local leg = text(176, 134, 130, "", Color3.fromRGB(157, 179, 196))
+            addLive(function()
+                local h = tonumber(CFG.LeviHeight) or 75
+                local sh = math.max(1, tonumber(CFG.LeviShare) or 15)
+                local px = math.min(78, math.floor(h * 0.5 + 0.5))
+                local youTop = math.max(4, 86 - px - 6)
+                local lineTop = youTop + 14
+                local lineH = math.max(4, 83 - lineTop)
+                you.Position = UDim2.fromOffset(155, youTop)
+                youL.Position = UDim2.fromOffset(173, youTop - 1)
+                line.Position = UDim2.fromOffset(160, lineTop)
+                line.Size = UDim2.fromOffset(2, lineH)
+                hL.Position = UDim2.fromOffset(70, math.floor(lineTop + lineH / 2 - 7))
+                hL.Text = math.floor(h) .. " studs"
+                local tick = math.min(37, math.floor(40 * 8 / sh + 0.5) - 1)
+                for i, left in ipairs({ 23, 83, 141 }) do bars[i].Position = UDim2.fromOffset(left + tick, 113) end
+                leg.Text = math.floor(sh) .. "%, then the next"
+            end)
+            gap(v, 8)
+        end
+        do
+            local STEPS = {}
+            for _, d in ipairs({
+                { "1  SPREAD", 120, 10, ". For a big group: every segment touched fast." },
+                { "2  LIGHT", 95, 12, "." },
+                { "3  BALANCED", 75, 15, " (today's setting)." },
+                { "4  STRONG", 60, 25, "." },
+                { "5  CARRY", 45, 40, ". For a small group: you do the heavy hitting." },
+            }) do
+                table.insert(STEPS, { name = d[1], set = { LeviHeight = d[2], LeviShare = d[3] },
+                    line = d[2] .. " studs over the part being hit, " .. d[3] .. "% of each segment, then the next" .. d[4],
+                    today = (d[1] == "3  BALANCED") or nil })
+            end
+            P.kit.dial(v, "How much you take", STEPS, "sea")
+        end
+        P.kit.truthCard(v, function()
+            return "Each segment to " .. math.floor(tonumber(CFG.LeviShare) or 15) .. "%, then the head"
+        end, function()
+            local sh = tonumber(CFG.LeviShare) or 15
+            local thin = sh <= 12
+            return "The reward needs 8% of every segment, so " .. math.floor(sh) .. "% "
+                .. (thin and "is close to the line." or "leaves room.")
+                .. " Its attacks are dodged. When it dies, its heart is yours to harpoon and tow to Tiki."
+                .. (thin and "\n\nThin margin: other players' hits in the same moment count as yours." or "")
+        end, "sea")
+        heading2(v, "before and during")
+        navRow(v, "The Spy's count", function()
+            local c = P.seaev.count
+            return c.total .. " of " .. math.max(1, math.floor(tonumber(CFG.SeaEvGoal) or 20))
+        end, "seaevents")
+        hairline(v)
+        P.kit.fightsWith(v, "levi")
+        hairline(v)
+        navRow(v, "Dodging & form", function() return "as Sea events" end, "seafight")
+        P.kit.fineTune(v, function(v)
+            sliderRow(v, "Over the part being hit", 30, 300, 5,
+                function() return CFG.LeviHeight end,
+                function(x) CFG.LeviHeight = x end, " studs")
+            sliderRow(v, "Your share of each segment", 8, 50, 1,
+                function() return CFG.LeviShare end,
+                function(x) CFG.LeviShare = x end, " %")
+        end, 2)
+        fold(v, "Details", function(v)
+            readout(v, function()
+                local lv = P.seaev.levi
+                local lines = { "now       " .. tostring(lv.note), string.format("down      %d Leviathans", lv.kills),
+                    string.format("dodged    %d (last: %s)  ·  out of now: %s", P.seaev.dodges or 0,
+                        tostring(P.seaev.lastDodge or "-"), (#lv.now > 0) and table.concat(lv.now, ", ") or "nothing") }
+                local ok, list = pcall(P.seaev._t.leviParts)
+                for _, x in ipairs((ok and list) or {}) do
+                    local m = x.max or x.maxSeen
+                    table.insert(lines, string.format("  %-18s HP %s%s  ·  %s  ·  your share %s", x.label,
+                        x.hp and tostring(math.floor(x.hp)) or "?", m and (" / " .. math.floor(m)) or "",
+                        x.enabled and "takes damage" or "not now",
+                        m and string.format("%.1f%%", (lv.share[x.model] or 0) / m * 100) or "?"))
+                end
+                return table.concat(lines, "\n")
+            end)
         end)
     end
 
@@ -21412,63 +21820,90 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- MIRAGE: four jobs, one mode
+    -- MIRAGE: four jobs, one mode. R2 Task 6 (board Mirage): the job is the
+    -- main control; "which Mirage" is asked only of the Blue Gear job.
     -- =====================================================
     do
         local v = makeView("mirage")
         gap(v, 6)
-        readout(v, function()
-            local s = P.sea
-            local m = s.mirage
-            local lines = {
-                string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
-                    s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
-            }
-            if m then
-                table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
-                    m.fits and "" or "  - sailed past"))
-                if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
-                if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
-            end
-            if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours") end
-            return table.concat(lines, "\n")
-        end)
-        modeSwitch(v, "mirage")
+        P.kit.pageTop(v, "sea")
+        P.kit.modeStrip(v, "mirage")
         heading2(v, "the job")
         -- Which of the four Mirage hunts. Kept in CFG.MirageJob while the
         -- Mirage is off; picked while it runs = that job from now on.
-        radio(v, 164, {
-            { "mirage", "Onto it - nothing else" },
-            { "dealer", "Advanced Fruit Dealer", "his shop open" },
-            { "mchest", "Every chest on it" },
-            { "gear", "Blue Gear", "you at the moon" },
-        }, function()
+        local function jobNow()
             if CFG.Hunt and MIRAGE[CFG.HuntKind] then return CFG.HuntKind end
             return CFG.MirageJob
-        end, function(x)
+        end
+        local JOBS = {
+            mirage = { "Puts you on the Mirage", "Finds the Mirage and lands you on it. Nothing else." },
+            dealer = { "Shops at the Advanced Fruit Dealer", "Lands on the Mirage and opens his shop for you." },
+            mchest = { "Opens every chest on the Mirage", "Lands, then takes every chest on the island." },
+            gear = { "Hunts the Blue Gear", "The gear needs night." },
+        }
+        local NEEDS = {
+            night = "Takes a Mirage that will see night.",
+            full = "Only a full-moon night.",
+            any = "Takes every Mirage.",
+        }
+        radio(v, 164, {
+            { "mirage", "Onto it", "just land" },
+            { "dealer", "Advanced Fruit Dealer", "the dealer" },
+            { "mchest", "Every chest", "chests" },
+            { "gear", "Blue Gear", "needs night" },
+        }, jobNow, function(x)
             CFG.MirageJob = x
             if CFG.Hunt and MIRAGE[CFG.HuntKind] then P.setHunt(true, x) end
         end)
-        heading2(v, "blue gear: which mirage")
-        radio(v, 122, {
-            { "night", "One that sees night", "gear needs it" },
-            { "full",  "A full-moon night only", "" },
-            { "any",   "Every Mirage", "" },
-        }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
-        link(v, "Travel & boat", function()
-            return CFG.SeaSteer == "manual" and "you steer" or ("auto  ·  to " .. math.floor(CFG.SeaSearchTo) .. " m")
-        end, "travel")
-        fold(v, "How it works", function(v)
-            caption(v, "Four jobs, each only its job: onto it puts you on the Mirage; the dealer "
-                .. "job puts you in front of the Advanced Fruit Dealer with his shop open (he "
-                .. "stands at a random spot - not read = the island searched until he is); the "
-                .. "chest job takes every chest; the Blue Gear job gives you the moon (a high "
-                .. "point, face it, T) and runs over the gear the moment it shows. A Mirage "
-                .. "already up = straight to the job, else the boat sails for one. Done = the "
-                .. "farm stops and leaves you on it. A Mirage lives 15 min; dying or leaving "
-                .. "makes it go.")
-            caption(v, "Only the Blue Gear hunt asks this (the gear needs night, 2 min "
-                .. "to climb); the other Mirage hunts take every one.")
+        -- Only the gear asks which Mirage: the box is there, hidden, for the others.
+        do
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = box })
+            heading2(box, "blue gear: which mirage")
+            P.kit.segmented(box, nil, {
+                { "night", "Sees night" }, { "full", "Full moon" }, { "any", "Every one" },
+            }, function() return CFG.MirageNeed end, function(x) CFG.MirageNeed = x end)
+            box.Visible = (jobNow() == "gear")
+            addLive(function() box.Visible = (jobNow() == "gear") end)
+        end
+        P.kit.truthCard(v, function()
+            return (JOBS[jobNow()] or JOBS.mirage)[1]
+        end, function()
+            local j = jobNow()
+            local r = (JOBS[j] or JOBS.mirage)[2]
+            if j == "gear" then r = r .. " " .. (NEEDS[CFG.MirageNeed] or NEEDS.night) end
+            return r
+        end, "sea")
+        hairline(v)
+        P.kit.fightsWith(v, "mirage")
+        link(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "auto" end, "travel")
+        link(v, "Sea fight", function()
+            local st = P.seaDodge and P.seaDodge.steps
+            local i = st and dialStepOf(st, CFG)
+            return i and P.seaDodge.word(i) or "your own values"
+        end, "seafight")
+        fold(v, "Details", function(v)
+            readout(v, function()
+                local s = P.sea
+                local m = s.mirage
+                local lines = {
+                    string.format("found     %d Mirages  ·  %d dealers  ·  %d chests  ·  %d Blue Gears",
+                        s.tally.mirages, s.tally.dealers, s.tally.chests, s.tally.gears),
+                }
+                if m then
+                    table.insert(lines, string.format("this one  %s hunt  ·  %s%s", tostring(m.kind), tostring(m.why),
+                        m.fits and "" or "  - sailed past"))
+                    if m.dealerFrom then table.insert(lines, "dealer    read in " .. tostring(m.dealerFrom)) end
+                    if m.note then table.insert(lines, "now       " .. tostring(m.note)) end
+                end
+                if P.handsOff then table.insert(lines, "YOUR TURN - the character is yours") end
+                return table.concat(lines, "\n")
+            end)
+            caption(v, "A Mirage already up = straight to the job, else the boat sails for one. Done = the farm "
+                .. "stops and leaves you on it. A Mirage lives 15 min; dying or leaving makes it go.")
         end)
     end
 
@@ -21842,128 +22277,333 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- FIGHTING AT SEA: shared by Sea events and the Leviathan
+    -- SEA FIGHT: shared by Sea events and the Leviathan. R2 Task 6 (board
+    -- SeaFight): one DODGE dial with a side view that moves, the weapon row,
+    -- the form choice, the exact values in Fine-tune. A settings page: no mode
+    -- strip; Back walks to the page you came from (Sea events or the
+    -- Leviathan).
     -- =====================================================
     do
         local v = makeView("seafight")
         gap(v, 6)
-        readout(v, function()
-            local e = P.seaev
-            local lines = {}
-            for _, cls in ipairs({ "beast", "fish" }) do
-                local f = e.form[cls]
-                local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
-                local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
-                    or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
-                    or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
-                table.insert(lines, string.format("%-17s %s", name, what))
-            end
-            table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
-                .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
-            return table.concat(lines, "\n")
-        end)
-        heading2(v, "the loadout")
-        radio(v, 122, {
-            { "auto", "Kitsune form first, its M1 tested", "" },
-            { "form", "Kitsune form, always", "" },
-            { "base", "Never transformed", "" },
-        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
-        sliderRow(v, "Test the form's M1 for at most", 10, 60, 5,
-            function() return CFG.SeaEvTrial end,
-            function(x) CFG.SeaEvTrial = x end, " s")
-        heading2(v, "weapons out of form")
-        local items = {}
-        for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
-            table.insert(items, { ty, nil,
-                function() return (CFG.SeaEvWeapons or {})[ty] == true end,
-                function(x)
-                    CFG.SeaEvWeapons = CFG.SeaEvWeapons or {}
-                    CFG.SeaEvWeapons[ty] = x
-                end })
+        P.kit.pageTop(v, "sea")
+        caption(v, "Every sea fight uses this page: Sea events and the Leviathan.")
+        -- Step 3 = today's CFG defaults. OFF = SeaDodge off: hover still at
+        -- today's heights. Every other step sets every dodge number.
+        local ROWS = {
+            -- n, short, name, bMin, bMax, bSpd, bH, tMin, tMax, tSpd, fR, fSpd, fH, up, upT
+            { 1, "1", "1  CLOSE", 25, 40, 200, 50, 25, 40, 200, 20, 35, 15, 25, 0.6 },
+            { 2, "2", "2  NEAR", 30, 50, 280, 70, 30, 50, 280, 25, 40, 20, 30, 0.8 },
+            { 3, "3", "3  BALANCED", 40, 60, 350, 90, 40, 60, 350, 30, 50, 30, 40, 1.0 },
+            { 4, "4", "4  WIDE", 55, 80, 420, 120, 55, 80, 420, 40, 70, 45, 60, 1.4 },
+            { 5, "5", "5  SAFEST", 70, 100, 500, 150, 70, 100, 500, 50, 90, 60, 80, 1.8 },
+        }
+        local STEPS = {
+            { name = "DODGE OFF", short = "OFF", set = { SeaDodge = false, BeastHeight = 90, FishHeight = 30 },
+                line = "Hovers still: 90 up over a beast, 30 over the rest. No circle, no jump when one attacks." },
+        }
+        for _, r in ipairs(ROWS) do
+            table.insert(STEPS, {
+                name = r[3], short = r[2],
+                set = { SeaDodge = true, BeastDodgeMin = r[4], BeastDodgeMax = r[5], BeastDodgeSpeed = r[6],
+                    BeastHeight = r[7], SharkDodgeMin = r[8], SharkDodgeMax = r[9], SharkDodgeSpeed = r[10],
+                    DodgeRadius = r[11], DodgeSpeed = r[12], FishHeight = r[13], DodgeUp = r[14], DodgeTime = r[15] },
+                line = "Beasts, Terrorsharks " .. r[4] .. "–" .. r[5] .. " out; Piranhas, Sharks " .. r[11] .. ". "
+                    .. r[7] .. " up over a beast, " .. r[13] .. " over the rest. Up " .. r[14] .. " for "
+                    .. string.format("%.1f", r[15]) .. " s when one attacks" .. ((r[1] == 3) and " (today's setting)." or "."),
+                today = (r[1] == 3) or nil,
+            })
         end
-        ticks(v, items)
-        heading2(v, "keys fired at a sea event")
-        chips(v, "Keys", { "Z", "X", "C", "V", "F" },
-            function(k) return (CFG.SeaEvKeys or {})[k] end,
-            function(k, x)
-                CFG.SeaEvKeys = CFG.SeaEvKeys or {}
-                CFG.SeaEvKeys[k] = x
+        -- Other pages say where it stands: "Balanced", "Off", "Close".
+        P.seaDodge = { steps = STEPS, word = function(i)
+            if i == 1 then return "Off" end
+            local w = string.gsub(tostring(STEPS[i].name), "^%d+%s+", "")
+            return string.upper(string.sub(w, 1, 1)) .. string.lower(string.sub(w, 2))
+        end }
+        local STEPWORD = {
+            "Attacks can hit you: nothing is dodged, not even the Leviathan's beam.",
+            "The most of your moves land, and the most of theirs.",
+            "More of your moves land, and a few more of theirs.",
+            "Most of your moves land, most of theirs miss.",
+            "Fewer attacks reach you; kills take a little longer.",
+            "Almost nothing reaches you; kills take longest.",
+        }
+
+        -- THE SIDE VIEW: 0.5 px a stud both ways, the water at y 132. It reads
+        -- CFG, so your own values move it too.
+        do
+            local WY, CX, SC = 132, 170, 0.5
+            local DEEP, WATER, LINE = Color3.fromRGB(12, 30, 44), Color3.fromRGB(7, 22, 33), Color3.fromRGB(29, 62, 87)
+            local BLUE, PALE, DIM = Color3.fromRGB(74, 163, 232), Color3.fromRGB(159, 203, 239), Color3.fromRGB(127, 149, 166)
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 164), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = DEEP, BorderSizePixel = 0,
+                ClipsDescendants = true, Parent = s,
+            })
+            corner(box, 14)
+            mk("UIStroke", { Color = LINE, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box })
+            local function rect(x, y, w, h, color, r)
+                local f = mk("Frame", {
+                    Size = UDim2.fromOffset(w, h), Position = UDim2.fromOffset(x, y),
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = box,
+                })
+                if r then corner(f, r) end
+                return f
+            end
+            local function text(x, y, w, str, color, align, mono)
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
+                    BackgroundTransparency = 1, Font = mono and Enum.Font.Code or Enum.Font.GothamBold,
+                    TextSize = mono and 10 or 9, TextColor3 = color,
+                    TextXAlignment = align or Enum.TextXAlignment.Left, Text = str, Parent = box,
+                })
+            end
+            rect(0, WY, 400, 40, WATER)
+            rect(0, WY, 400, 1, Color3.fromRGB(44, 106, 153))
+            rect(29, 57, 1, 75, Color3.fromRGB(53, 96, 127))          -- the boat's height
+            rect(14, 48, 2, 12, DIM)                                   -- the boat: mast and hull
+            rect(0 + 14, 56, 30, 8, DIM, 4)
+            rect(138, 110, 64, 22, Color3.fromRGB(18, 48, 73), 11)     -- the beast
+            local ringO = rect(CX, 100, 0, 0, Color3.fromRGB(21, 54, 79), 100)
+            mk("UIStroke", { Color = BLUE, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ringO })
+            local ringI = rect(CX, 100, 0, 0, DEEP, 100)
+            mk("UIStroke", { Color = Color3.fromRGB(44, 106, 153), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ringI })
+            local hLine = rect(CX, 100, 1, 20, Color3.fromRGB(60, 110, 148))
+            local upLine = rect(CX, 90, 1, 10, PALE)
+            local you = rect(CX, 100, 12, 12, C.ivory, 6)
+            local distL = text(0, 100, 90, "", PALE, Enum.TextXAlignment.Right, true)
+            local upL = text(CX + 8, 90, 80, "", PALE, nil, true)
+            local hL = text(CX + 7, 110, 70, "", PALE, nil, true)
+            local offL = text(CX + 9, 90, 100, "nothing dodged", Color3.fromRGB(240, 166, 60))
+            local boatL = text(10, 141, 130, "", DIM)
+            text(130, 141, 80, "SEA BEAST", DIM, Enum.TextXAlignment.Center)
+            text(200, 141, 96, "SIDE VIEW", Color3.fromRGB(79, 115, 145), Enum.TextXAlignment.Right)
+            addLive(function()
+                local off = not CFG.SeaDodge
+                local bMin, bMax = tonumber(CFG.BeastDodgeMin) or 40, tonumber(CFG.BeastDodgeMax) or 60
+                local bH = tonumber(CFG.BeastHeight) or 90
+                local up, upT = tonumber(CFG.DodgeUp) or 40, tonumber(CFG.DodgeTime) or 1
+                local cy = math.max(16, WY - bH * SC)
+                local youX = off and (CX + 50 * SC) or (CX + (bMin + bMax) / 2 * SC)
+                local rxo = off and 0 or bMax * SC
+                local rxi = off and 0 or bMin * SC
+                local ryo, ryi = rxo * 0.25, rxi * 0.25
+                local upPx = off and 0 or up * SC
+                local upTop = math.max(2, cy - upPx)
+                ringO.Visible, ringI.Visible = not off, not off
+                ringO.Position = UDim2.fromOffset(math.floor(CX - rxo), math.floor(cy - ryo))
+                ringO.Size = UDim2.fromOffset(math.max(1, math.floor(rxo * 2)), math.max(1, math.floor(ryo * 2)))
+                ringI.Position = UDim2.fromOffset(math.floor(CX - rxi), math.floor(cy - ryi))
+                ringI.Size = UDim2.fromOffset(math.max(1, math.floor(rxi * 2)), math.max(1, math.floor(ryi * 2)))
+                distL.Visible = not off
+                distL.Position = UDim2.fromOffset(math.floor(math.max(0, CX - rxo - 96)), math.floor(cy - 7))
+                distL.Text = off and "" or (math.floor(bMin) .. "–" .. math.floor(bMax) .. " out")
+                upLine.Visible, upL.Visible = not off, not off
+                upLine.Position = UDim2.fromOffset(math.floor(youX), math.floor(upTop + 2))
+                upLine.Size = UDim2.fromOffset(1, math.max(2, math.floor(upPx - 8)))
+                upL.Position = UDim2.fromOffset(math.floor(youX + 8), math.floor(upTop - 6))
+                upL.Text = off and "" or ("+" .. math.floor(up) .. " · " .. string.format("%.1f", upT) .. " s")
+                offL.Visible = off
+                offL.Position = UDim2.fromOffset(math.floor(youX + 9), math.floor(cy - 20))
+                you.Position = UDim2.fromOffset(math.floor(youX - 6), math.floor(cy - 6))
+                hLine.Position = UDim2.fromOffset(math.floor(youX), math.floor(cy + 6))
+                hLine.Size = UDim2.fromOffset(1, math.max(2, math.floor(WY - cy - 6)))
+                hL.Position = UDim2.fromOffset(math.floor(math.max(youX + 7, 208)), math.floor((cy + 6 + WY) / 2 - 7))
+                hL.Text = math.floor(bH) .. " up"
+                boatL.Text = "YOUR BOAT, " .. math.floor(tonumber(CFG.BoatLift) or 150) .. " UP"
             end)
-        heading2(v, "dodging  ·  each attacker its own circle")
-        switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
-            function() return CFG.SeaDodge end,
-            function(x) CFG.SeaDodge = x end)
-        sliderRow(v, "Sea Beast: moving at", 50, 500, 10,
-            function() return CFG.BeastDodgeSpeed end,
-            function(x) CFG.BeastDodgeSpeed = x end, " studs/s")
-        sliderRow(v, "Sea Beast: never nearer than", 20, 150, 5,
-            function() return CFG.BeastDodgeMin end,
-            function(x) CFG.BeastDodgeMin = x end, " studs")
-        sliderRow(v, "Sea Beast: never farther than", 20, 150, 5,
-            function() return CFG.BeastDodgeMax end,
-            function(x) CFG.BeastDodgeMax = x end, " studs")
-        sliderRow(v, "Terrorshark: moving at", 50, 500, 10,
-            function() return CFG.SharkDodgeSpeed end,
-            function(x) CFG.SharkDodgeSpeed = x end, " studs/s")
-        sliderRow(v, "Terrorshark: never nearer than", 10, 150, 5,
-            function() return CFG.SharkDodgeMin end,
-            function(x) CFG.SharkDodgeMin = x end, " studs")
-        sliderRow(v, "Terrorshark: never farther than", 10, 150, 5,
-            function() return CFG.SharkDodgeMax end,
-            function(x) CFG.SharkDodgeMax = x end, " studs")
-        sliderRow(v, "Piranha / Shark: round it at", 10, 80, 5,
-            function() return CFG.DodgeRadius end,
-            function(x) CFG.DodgeRadius = x end, " studs")
-        sliderRow(v, "Piranha / Shark: moving at", 10, 150, 5,
-            function() return CFG.DodgeSpeed end,
-            function(x) CFG.DodgeSpeed = x end, " studs/s")
-        sliderRow(v, "Up when it attacks", 10, 120, 5,
-            function() return CFG.DodgeUp end,
-            function(x) CFG.DodgeUp = x end, " studs")
-        sliderRow(v, "Stay up for", 0.3, 3, 0.1,
-            function() return CFG.DodgeTime end,
-            function(x) CFG.DodgeTime = x end, " s")
-        readout(v, function()
-            local e = P.seaev
-            return string.format("dodged    %d times  ·  last: %s\nwater     %s", e.dodges or 0, tostring(e.lastDodge or "-"),
-                P.floorY and string.format("a floor at Y %.0f - you never go under it (swimming off, knockback refused)", P.floorY)
-                    or "a floor during every sea fight")
-        end)
-        heading2(v, "heights")
-        sliderRow(v, "Over a Sea Beast", 30, 250, 5,
-            function() return CFG.BeastHeight end,
-            function(x) CFG.BeastHeight = x end, " studs")
-        sliderRow(v, "Over a Terrorshark / Piranha / Shark", 10, 100, 5,
-            function() return CFG.FishHeight end,
-            function(x) CFG.FishHeight = x end, " studs")
-        sliderRow(v, "Boat held up while you fight", 0, 300, 10,
-            function() return CFG.BoatLift end,
-            function(x) CFG.BoatLift = x end, " studs")
-        fold(v, "How it works", function(v)
-            caption(v, "Kitsune form first, its M1 tested: hurts them = form; else Kitsune + fighting style. "
-                .. "Never transformed: Kitsune + fighting style (the weapons below).")
-            caption(v, "Out of form, only these weapons fight at sea (your points: fruit + melee). "
-                .. "In form, the game takes only the fruit's moves anyway.")
-            caption(v, "V: never on a transformation fruit (Kitsune's V transforms) - on for the rest. "
-                .. "Boat held up: 0 = left on the water.")
-            caption(v, "Every key the INSTANT it is ready (the moment the game takes it - not "
-                .. "during another move - and the next one the frame it fires) - your "
-                .. "Attack page is left for the normal farm. NO M1 at a sea event (an "
-                .. "untransformed M1 does nothing to one): only Kitsune's, in Kitsune form. "
-                .. "Which key hurts it is learned from its HP.")
-            caption(v, "Dodging per attacker: a Sea Beast (each of Rumbling Waters' three) "
-                .. "and a Terrorshark are big - circled fast, the distance kept between "
-                .. "the two sliders (a new one at random each time the direction flips). "
-                .. "Rumbling Waters: the circle round one beast is kept out of the other "
-                .. "two's reach, but never nearer the one you fight than its \"never "
-                .. "nearer\". A dived beast: circled 200 over the water until it is back. "
-                .. "Piranha / Shark: the small circle. The Leviathan keeps its own.")
-            caption(v, "It starts an attack (a new animation), charges at you or leaps: up "
-                .. "for a moment, then back. The water is a floor in every sea fight: you "
-                .. "are never under it, whatever the target does, and a knockback or a "
-                .. "pull is undone the next frame.")
-        end)
+        end
+
+        P.kit.dial(v, "Dodge", STEPS, "sea")
+        caption(v, "closer, hits harder  ·  wider, safer")
+        P.kit.truthCard(v, function()
+            return CFG.SeaDodge and "Circling every attacker" or "Hovering still"
+        end, function()
+            local i = dialStepOf(STEPS, CFG)
+            local form = CFG.SeaEvForm
+            local fw = (form == "form") and "Always in Kitsune form: its moves and its M1."
+                or (form == "base") and "Never transformed: no M1 at sea."
+                or "Kitsune form only where its M1 hurts them."
+            return (i and STEPWORD[i] or "Your own values: the circles are the ones set in Fine-tune.")
+                .. " " .. fw .. " No hit for 6 s: in close for that one."
+        end, "sea")
+
+        heading2(v, "weapon")
+        P.kit.fightsWith(v, "seaevents")
+
+        heading2(v, "fight in kitsune form")
+        caption(v, "A normal M1 does nothing at sea. Kitsune form's M1 might. V is pressed for you, off the boat.")
+        P.kit.segmented(v, nil, {
+            { "auto", "When it hurts" }, { "form", "Always" }, { "base", "Never" },
+        }, function() return CFG.SeaEvForm end, function(x) CFG.SeaEvForm = x end)
+        do
+            local t = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, TextWrapped = true,
+                Text = "", LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = t })
+            addLive(function()
+                local x = CFG.SeaEvForm
+                t.Text = (x == "form") and "Always Kitsune form at sea, V pressed for you off the boat. Its own moves and M1 fire."
+                    or (x == "base") and "Never transformed: Kitsune's moves only, so no M1 at sea."
+                    or ("Tried for up to " .. math.floor(tonumber(CFG.SeaEvTrial) or 20)
+                        .. " s on each kind of attacker, kept only where its M1 hurts them. Tried again every 5th one.")
+            end)
+            gap(v, 8)
+        end
+        -- What the test found, per kind of attacker (the "when it hurts" choice only).
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 68), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, -8), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 12)
+            local rows = {}
+            for i, who in ipairs({ "Sea Beasts", "Terrorshark, Piranha, Shark" }) do
+                local dot = mk("Frame", {
+                    Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(12, 15 + (i - 1) * 26),
+                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = card,
+                })
+                corner(dot, 3)
+                mk("TextLabel", {
+                    Size = UDim2.new(0.5, -26, 0, 26), Position = UDim2.fromOffset(26, (i - 1) * 26 + 2),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = C.text, Text = who, Parent = card,
+                })
+                local what = mk("TextLabel", {
+                    Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, (i - 1) * 26 + 2),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = C.second, Text = "", Parent = card,
+                })
+                rows[i] = { dot = dot, what = what }
+            end
+            addLive(function()
+                s.Visible = (CFG.SeaEvForm == "auto")
+                for i, cls in ipairs({ "beast", "fish" }) do
+                    local f = P.seaev.form[cls]
+                    local w, on
+                    if f.verdict == "form" then w, on = string.format("%d of %d: in form", f.hits, f.casts), true
+                    elseif f.verdict == "base" then w = string.format("%d of %d: plain", f.hits, f.casts)
+                    elseif f.casts > 0 then w = string.format("testing: %d of %d", f.hits, f.casts)
+                    else w = "not tested yet" end
+                    rows[i].what.Text = w
+                    rows[i].dot.BackgroundColor3 = on and C.live or C.third
+                end
+            end)
+        end
+
+        P.kit.fineTune(v, function(v)
+            heading2(v, "dodging")
+            switchRow(v, "Dodge", "Round it all the time, the aim locked on it; up the moment it attacks",
+                function() return CFG.SeaDodge end,
+                function(x) CFG.SeaDodge = x end)
+            heading2(v, "sea beast")
+            sliderRow(v, "Circle it, never nearer than", 20, 150, 5,
+                function() return CFG.BeastDodgeMin end,
+                function(x) CFG.BeastDodgeMin = x end, " studs")
+            sliderRow(v, "Circle it, never farther than", 20, 150, 5,
+                function() return CFG.BeastDodgeMax end,
+                function(x) CFG.BeastDodgeMax = x end, " studs")
+            sliderRow(v, "Speed", 50, 500, 10,
+                function() return CFG.BeastDodgeSpeed end,
+                function(x) CFG.BeastDodgeSpeed = x end, " studs/s")
+            sliderRow(v, "Over the sea", 30, 250, 5,
+                function() return CFG.BeastHeight end,
+                function(x) CFG.BeastHeight = x end, " studs")
+            heading2(v, "terrorshark")
+            sliderRow(v, "Circle it, never nearer than", 10, 150, 5,
+                function() return CFG.SharkDodgeMin end,
+                function(x) CFG.SharkDodgeMin = x end, " studs")
+            sliderRow(v, "Circle it, never farther than", 10, 150, 5,
+                function() return CFG.SharkDodgeMax end,
+                function(x) CFG.SharkDodgeMax = x end, " studs")
+            sliderRow(v, "Speed", 50, 500, 10,
+                function() return CFG.SharkDodgeSpeed end,
+                function(x) CFG.SharkDodgeSpeed = x end, " studs/s")
+            heading2(v, "piranha, shark, leviathan")
+            sliderRow(v, "Circle it at", 10, 80, 5,
+                function() return CFG.DodgeRadius end,
+                function(x) CFG.DodgeRadius = x end, " studs")
+            sliderRow(v, "Speed", 10, 150, 5,
+                function() return CFG.DodgeSpeed end,
+                function(x) CFG.DodgeSpeed = x end, " studs/s")
+            heading2(v, "terrorshark, piranha, shark")
+            sliderRow(v, "Over it", 10, 100, 5,
+                function() return CFG.FishHeight end,
+                function(x) CFG.FishHeight = x end, " studs")
+            heading2(v, "when one attacks")
+            sliderRow(v, "Up", 10, 120, 5,
+                function() return CFG.DodgeUp end,
+                function(x) CFG.DodgeUp = x end, " studs")
+            sliderRow(v, "Stay up for", 0.3, 3, 0.1,
+                function() return CFG.DodgeTime end,
+                function(x) CFG.DodgeTime = x end, " s")
+            heading2(v, "boat and form")
+            sliderRow(v, "Boat held up while you fight", 0, 300, 10,
+                function() return CFG.BoatLift end,
+                function(x) CFG.BoatLift = x end, " studs")
+            sliderRow(v, "Test the form's M1 for at most", 10, 60, 5,
+                function() return CFG.SeaEvTrial end,
+                function(x) CFG.SeaEvTrial = x end, " s")
+            -- Attack's "Fights with" decides the weapon now; these two lists
+            -- are read only when it is on Mix.
+            heading2(v, "mix only  ·  weapons out of form")
+            local items = {}
+            for _, ty in ipairs({ "Blox Fruit", "Melee", "Sword", "Gun" }) do
+                table.insert(items, { ty, nil,
+                    function() return (CFG.SeaEvWeapons or {})[ty] == true end,
+                    function(x)
+                        CFG.SeaEvWeapons = CFG.SeaEvWeapons or {}
+                        CFG.SeaEvWeapons[ty] = x
+                    end })
+            end
+            ticks(v, items)
+            heading2(v, "mix only  ·  keys fired at a sea event")
+            chips(v, "Keys", { "Z", "X", "C", "V", "F" },
+                function(k) return (CFG.SeaEvKeys or {})[k] end,
+                function(k, x)
+                    CFG.SeaEvKeys = CFG.SeaEvKeys or {}
+                    CFG.SeaEvKeys[k] = x
+                end)
+        end, 24)
+
         fold(v, "Details", function(v)
+            heading2(v, "how it works")
+            caption(v, "Off the boat (held up out of the waves), then round the attacker, the aim locked on it.")
+            caption(v, "The water is a floor: you never go under it, knockback is undone. A dived beast: you wait 200 over the water.")
+            caption(v, "Rumbling Waters: your circle stays clear of the other two beasts. Piranha / Shark: the small circle. The Leviathan keeps its own.")
+            heading2(v, "right now")
+            readout(v, function()
+                local e = P.seaev
+                local lines = {}
+                for _, cls in ipairs({ "beast", "fish" }) do
+                    local f = e.form[cls]
+                    local name = (cls == "beast") and "Sea Beasts" or "Terrorshark etc."
+                    local what = (f.verdict == "form") and string.format("FORM - its M1 hurt them %d of %d", f.hits, f.casts)
+                        or (f.verdict == "base") and string.format("Kitsune + fighting style - the form's M1 hurt them %d of %d", f.hits, f.casts)
+                        or ((f.casts > 0) and string.format("testing the form's M1: %d of %d, %.0f s", f.hits, f.casts, f.up) or "not tested yet")
+                    table.insert(lines, string.format("%-17s %s", name, what))
+                end
+                table.insert(lines, "you now          " .. (e.inForm() and "KITSUNE FORM" or "not transformed")
+                    .. (e.kitsune() and "" or "  ·  no Kitsune fruit carried") .. (e.formNote and ("  ·  " .. tostring(e.formNote)) or ""))
+                table.insert(lines, string.format("dodged           %d times  ·  last: %s", e.dodges or 0, tostring(e.lastDodge or "-")))
+                table.insert(lines, "water            " .. (P.floorY
+                    and string.format("a floor at Y %.0f - you never go under it", P.floorY)
+                    or "a floor during every sea fight"))
+                return table.concat(lines, "\n")
+            end)
             heading2(v, "what hurts a sea beast (learned)")
             readout(v, function()
                 local rows = {}
@@ -22054,7 +22694,7 @@ local function buildUI()
             if prevOnView then pcall(prevOnView, name) end
             if name == "attack" then
                 local from = trail[#trail]
-                ctxFrom = FIGHTABLE[from] and from or nil
+                ctxFrom = FIGHTABLE[from] and from or (from == "seafight" and "seaevents") or nil
                 if ctxFrom then ctxSel = ctxFrom end
             end
         end
