@@ -1141,12 +1141,131 @@ do
         check(S.has("sword", "Not your mode") == false and S.has("sword", "Your mode"), "pill: the bold line says Your mode")
         P.setHunt(false)
         -- type scale: board px through lookPx (Montserrat in Roblox is 1.21x smaller)
-        local navLabel = S.find("sword", function(k) return k.ClassName == "TextLabel" and k.Text == "Fights with" end)
+        local navLabel = S.find("sword", function(k) return k.ClassName == "TextLabel" and k.Text == "Servers & team" end)
         check(navLabel and navLabel.TextSize == 18, "type: a row label is the board's 15 px = TextSize 18")
         local help = S.find("sword", function(k)
             return k.ClassName == "TextLabel" and string.find(tostring(k.Text), "^For True Triple Katana") ~= nil end)
         check(help and help.TextSize == 13 and help.LineHeight and help.LineHeight > 1.15,
             "type: help text is the board's 11 px, line-height 1.45")
+    end
+
+    -- ---------- R3 Task 4: GRIND (Circuit, Random) and BOSSES (Raid, Elite, Swords) ----------
+    do
+        local T = build({ fruits = 0 }, "owner", nil)
+        local was = { want = {}, quests = CFG_REAL.Quests, loop = CFG_REAL.RaidLoop, chip = CFG_REAL.RaidChip,
+            fruit = CFG_REAL.RaidFruitMax, bf = CFG_REAL.BossFirst, targets = CFG_REAL.Targets }
+        for k, x in pairs(CFG_REAL.SwordWant) do was.want[k] = x end
+        local function txt(page, t)
+            return T.find(page, function(k) return k.ClassName == "TextLabel" and k.Text == t end)
+        end
+        local function top(k, view)
+            while k and k.Parent ~= view do k = k.Parent end
+            return k
+        end
+        local function open(row)
+            T.home()
+            T.tap("home", "Mode")
+            T.tap("modes", row)
+        end
+
+        -- Swords: three tiles, YOURS from the owned list, the money box, "Swords"
+        open("Legendary swords")
+        check(T.cur() == "sword", "swords: open, got " .. T.cur())
+        local head
+        walk(T.g, function(k) if k.ClassName == "TextLabel" and k.Text == "Swords" then head = k end end)
+        check(head ~= nil, "swords: the header says Swords (the board's)")
+        local tiles = {}
+        walk(T.V.sword, function(k) if k.Name == "Tile" then table.insert(tiles, k) end end)
+        check(#tiles == 3 and tiles[1].Position.X.Scale == 0 and math.abs(tiles[2].Position.X.Scale - 1 / 3) < 1e-6
+            and math.abs(tiles[3].Position.X.Scale - 2 / 3) < 1e-6 and tiles[1].Size.Y.Offset == 0,
+            "swords: three tiles side by side")
+        CFG_REAL.SwordWant.Shizu, CFG_REAL.SwordWant.Saishi, CFG_REAL.SwordWant.Oroshi = true, true, true
+        local hadOwned = P.elite.swordsOwned
+        P.elite.swordsOwned = { Oroshi = true }
+        P.swordBeli = function() return 4850000 end
+        T.live()
+        local function pill(t) return t:FindFirstChild("Pill") end
+        check(pill(tiles[1]).Text == "BUY" and pill(tiles[2]).Text == "BUY" and pill(tiles[3]).Text == "YOURS",
+            "swords: BUY on a wanted sword, YOURS on the one you own")
+        check(T.has("sword", "Buys Shizu or Saishi, whichever he sells"), "swords: the title is built from what is wanted")
+        check(T.has("sword", "$4,850,000") and T.has("sword", "enough for 2 swords"), "swords: the money box")
+        tiles[3].Activated:Fire()
+        check(CFG_REAL.SwordWant.Oroshi == true, "swords: a sword you own takes no tap")
+        tiles[1].Activated:Fire()
+        T.live()
+        check(CFG_REAL.SwordWant.Shizu == false and pill(tiles[1]).Text == "SKIP"
+            and T.has("sword", "Buys Saishi when he sells it"), "swords: a tap skips, the title follows")
+        P.elite.swordsOwned = { Shizu = true, Saishi = true, Oroshi = true }
+        T.live()
+        local money = T.find("sword", function(k) return k.Name == "Money" end)
+        check(T.has("sword", "All three are yours") and money and money.Visible == false,
+            "swords: all three yours, no money box")
+        P.elite.swordsOwned, P.swordBeli = hadOwned, nil
+
+        -- Raid: NEXT RAID says how; the guard rests at the board's opacity
+        CFG_REAL.RaidFruitMax = 200000
+        open("Raid")
+        CFG_REAL.RaidLoop = false
+        T.live()
+        local gl = txt("raid", "Never pays with a fruit over $200,000")
+        check(T.has("raid", "you start it") and gl and gl.TextTransparency == 0.55,
+            "raid: you start it, the guard rests (opacity .45)")
+        T.tap("raid", "Flame")
+        T.live()
+        check(CFG_REAL.RaidLoop == true and T.has("raid", "nonstop") and gl.TextTransparency == 0,
+            "raid: a chip = nonstop, the guard awake")
+        check(T.has("raid", "4 expert settings") and T.has("raid", "set on Attack"), "raid: the board's words")
+
+        -- Elite: the lanes between the dial's head and its buttons; the chalice box
+        open("Elite pirates")
+        local hd = top(txt("elite", "PATIENCE IN EACH SERVER"), T.V.elite)
+        local ln = top(txt("elite", "After a join, the Elite Hunter is asked:"), T.V.elite)
+        local bt = top(T.btn("elite", "3"), T.V.elite)
+        check(hd and ln and bt and hd.LayoutOrder < ln.LayoutOrder and ln.LayoutOrder < bt.LayoutOrder,
+            "elite: the answers sit between the dial's head and its buttons")
+        check(T.find("elite", function(k) return k.Name == "Chalice" end) ~= nil
+            and T.has("elite", "The God's Chalice ends the hunt"), "elite: the chalice box in the truth card")
+        check(T.has("elite", "hop and the chalice guard") and T.has("elite", "1 exact value"), "elite: the board's words")
+
+        -- Circuit: the list is the card - numbered rows, x, Clear, Bosses first, the search
+        table.insert(P.bosses, { names = { "Cake Queen" }, lv = 2175 })
+        CFG_REAL.Targets = { "Reborn Skeleton", "Cake Queen" }
+        CFG_REAL.Quests = false
+        open("Circuit farm")
+        T.live()
+        local list = T.find("circuit", function(k) return k.Name == "List" end)
+        local rows = 0
+        for _, k in ipairs(list and list:GetChildren() or {}) do if k:IsA("GuiObject") then rows += 1 end end
+        check(rows == 2 and T.has("circuit", "Your list, in order") and T.has("circuit", "BOSS"),
+            "circuit: the card lists the picks in order, the boss tagged (" .. rows .. ")")
+        local clear = T.find("circuit", function(k) return k.Name == "Clear" end)
+        check(clear and clear.Visible, "circuit: Clear on the card")
+        CFG_REAL.BossFirst = false
+        T.tap("circuit", "Bosses first")
+        check(CFG_REAL.BossFirst == true and T.has("circuit", "Cake Queen goes first whenever it is up"),
+            "circuit: Bosses first in the card, with a boss and a species")
+        local x = T.find("circuit", function(k) return k.Name == "Remove" end)
+        x.Activated:Fire()
+        check(called("toggleTarget Reborn Skeleton"), "circuit: x takes a pick off the list")
+        T.tap("circuit", "BY MY LEVEL")
+        T.live()
+        local search = T.find("circuit", function(k) return k.Name == "Search" end)
+        check(CFG_REAL.Quests == true and search and search.Visible == false
+            and T.has("circuit", "Quests by your level, one after another"), "circuit: BY MY LEVEL = the quest card, no search")
+        check(T.has("circuit", "decided on Attack, for Circuit farm") and T.has("circuit", "1 expert setting"),
+            "circuit: Fights with is the board's card")
+        table.remove(P.bosses)
+
+        -- Random: Fights with, a hairline, then the help line
+        open("Random")
+        local fw = top(T.btn("random", "Fights with"), T.V.random)
+        local help = top(txt("random", "A far enemy that takes no damage when pulled is fought where it stands."), T.V.random)
+        check(fw and help and fw.LayoutOrder < help.LayoutOrder and fw.Size.Y.Offset == 50,
+            "random: Fights with (50 px) before the help line")
+
+        for k, x2 in pairs(was.want) do CFG_REAL.SwordWant[k] = x2 end
+        CFG_REAL.Quests, CFG_REAL.RaidLoop, CFG_REAL.RaidChip = was.quests, was.loop, was.chip
+        CFG_REAL.RaidFruitMax, CFG_REAL.BossFirst, CFG_REAL.Targets = was.fruit, was.bf, was.targets
     end
 
     -- The owner: nothing locked, every pack a cover that opens its modes, owner tools in their own section.
@@ -1243,7 +1362,7 @@ do
     check(CFG_REAL.Quests == true, "circuit: BY MY LEVEL -> Quests true")
     tap("circuit", "MY LIST")
     check(CFG_REAL.Quests == false, "circuit: MY LIST -> Quests false (the list never silently waits)")
-    check(button("circuit", "Clear the circuit") ~= nil, "circuit: Clear the circuit reachable")
+    check(button("circuit", "Clear") ~= nil, "circuit: Clear (the list's) reachable")
     local typed
     each(VIEWS.circuit, function(k) if not typed and k.ClassName == "TextBox" then typed = k end end)
     check(typed ~= nil, "circuit: the type-a-name row is there")
@@ -1268,8 +1387,10 @@ do
         look = CFG_REAL.EliteLook, want = CFG_REAL.SwordWant.Shizu }
     for _, page in ipairs({ "raid", "elite", "sword" }) do
         check(modePill(page) ~= nil and isStrip(modePill(page)), page .. ": a mode strip")
-        check(button(page, "Fights with") ~= nil, page .. ": a Fights with row")
     end
+    -- R3 Task 4: the Swords board has no Fights with row (Attack keeps FightWith.sword)
+    check(button("raid", "Fights with") ~= nil and button("elite", "Fights with") ~= nil, "raid and elite: a Fights with row")
+    check(button("sword", "Fights with") == nil, "sword: no Fights with row (the board's)")
     check(button("raid", "Fine-tune") ~= nil and button("elite", "Fine-tune") ~= nil, "raid and elite: Fine-tune")
     -- Raid: a chip is the next raid (loop on); "I start each raid myself" = no loop
     tap("raid", "Quake")
