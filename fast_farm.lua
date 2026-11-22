@@ -21999,156 +21999,488 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- PVP
+    -- PVP. R2 Task 8 (board PvP): one AIM dial over five old controls (OFF
+    -- also turns PvpFace off), the catch-circle picture, a truth card with a
+    -- NOW row, Vision / Run / Dash tiles, the aimed-moves cards, LEAD as one
+    -- explicit choice, busy servers, Details, a Lab fold (amber when a test is
+    -- on) and Fine-tune with every exact value. You fight by hand: no
+    -- "Fights with" row.
     -- =====================================================
     do
         local v = makeView("pvp")
         local S = P.pvp
+        local VIOLET = Color3.fromRGB(166, 140, 255)
+        local AMBER = Color3.fromRGB(240, 166, 60)
+        local GREEN = Color3.fromRGB(63, 208, 126)
         gap(v, 6)
-        readout(v, function()
-            if not CFG.Pvp then return "off" end
-            return "PLAYER  " .. S.targetText()
-        end)
-        modeSwitch(v, "pvp")
-        heading2(v, "vision")
-        switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
-            function() return CFG.PvpVision end,
-            function(x) CFG.PvpVision = x end)
-        switchRow(v, "See far", "Players and enemies outlined this far, whatever you wear - past the Pale Scarf",
-            function() return CFG.PvpFar end,
-            function(x) CFG.PvpFar = x end)
-        sliderRow(v, "Vision range", 3000, 100000, 1000,
-            function() return CFG.PvpFarTo end,
-            function(x) CFG.PvpFarTo = x end, " studs")
-        switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
-            function() return CFG.PvpClean end,
-            function(x) CFG.PvpClean = x end)
-        switchRow(v, "No camera shake", nil,
-            function() return CFG.PvpNoShake end,
-            function(x) CFG.PvpNoShake = x end)
-        switchRow(v, "Ken back by itself", "The dodges: 2 s after, every 0.5 s, the moment the game allows",
-            function() return CFG.PvpKenBack end,
-            function(x) CFG.PvpKenBack = x end)
-        readout(v, function()
-            if not CFG.Pvp then return "PvP mode is off" end
-            return "view    " .. tostring(S.view.note)
-                .. "\nfar     " .. tostring(S.far.note)
-                .. "\nken     " .. tostring(S.ken.note)
-                .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
-                .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
-        end)
-        heading2(v, "aim")
-        switchRow(v, "Aim at the player", "The one nearest your mouse - skills, fruit M1, gun land on him",
-            function() return CFG.PvpAim end,
-            function(x) CFG.PvpAim = x end)
-        sliderRow(v, "Mouse catch area", 50, 500, 10,
-            function() return CFG.PvpCatchPx end,
-            function(x) CFG.PvpCatchPx = x end, " px")
-        switchRow(v, "Highlight him", "Red over every attack effect, a marker over his head - only your screen",
-            function() return CFG.PvpMark end,
-            function(x) CFG.PvpMark = x end)
-        switchRow(v, "Face him on every attack", "Any weapon, the fox too - your body turns to him",
-            function() return CFG.PvpFace end,
-            function(x) CFG.PvpFace = x end)
-        sliderRow(v, "Face him within", 25, 150, 5,
-            function() return CFG.PvpFaceRange end,
-            function(x) CFG.PvpFaceRange = x end, " studs")
-        sliderRow(v, "Players count within", 50, 1000, 25,
-            function() return CFG.PvpRange end,
-            function(x) CFG.PvpRange = x end, " studs")
-        -- (user, 2026-10-14) per weapon: the sword's Z is not the fruit's Z.
-        heading2(v, "aim takes  ·  each weapon its own")
-        for _, w in ipairs({ { "Blox Fruit", "Fruit" }, { "Melee", "Fighting" },
-            { "Sword", "Sword" }, { "Gun", "Gun" } }) do
-            local kind = w[1]
-            chips(v, w[2], { "M1", "Z", "X", "C", "V", "F" },
-                function(k)
-                    local t = (CFG.PvpAimKeys or {})[kind]
-                    return not (type(t) == "table" and t[k] == false)
-                end,
-                function(k, x)
+        P.kit.pageTop(v, "pvp")
+        P.kit.modeStrip(v, "pvp")
+
+        local function hasLine(parent, text, order)
+            local l = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                TextWrapped = true, Text = text, LayoutOrder = order or nextOrder(), Parent = parent,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+                PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = l,
+            })
+            return l
+        end
+        -- A line under a control whose words follow the CFG.
+        local function liveLine(parent, fn)
+            local l = hasLine(parent, "")
+            addLive(function()
+                local ok, t = pcall(fn)
+                l.Text = ok and tostring(t or "") or ""
+            end)
+            return l
+        end
+        -- - value + : a stepper row. fmt turns the value into text.
+        local function stepRow(parent, label, get, set, lo, hi, stp, fmt)
+            local r = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = parent,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -190, 1, 0), Position = UDim2.fromOffset(20, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = label, Parent = r,
+            })
+            local function btn(x, txt)
+                local b = mk("TextButton", {
+                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 4),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.body, TextColor3 = C.text, Text = txt, Parent = r,
+                })
+                corner(b, 10)
+                pressable(b)
+                return b
+            end
+            local minus, plus = btn(-148, "-"), btn(-64, "+")
+            local val = mk("TextLabel", {
+                Size = UDim2.fromOffset(40, 52), Position = UDim2.new(1, -104, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                TextColor3 = C.text, Text = "", Parent = r,
+            })
+            local function show() val.Text = fmt(get()) end
+            local function nudge(d)
+                local x = (tonumber(get()) or 0) + d * stp
+                set(math.floor(math.clamp(x, lo, hi) * 100 + 0.5) / 100)
+                show()
+            end
+            minus.Activated:Connect(function() nudge(-1) end)
+            plus.Activated:Connect(function() nudge(1) end)
+            show()
+            addLive(show)
+            return r
+        end
+
+        -- ---------- THE AIM DIAL: OFF + 5 steps, each sets 5 old controls ----------
+        -- { short, name, catch px, players within, keep aiming, face, face within, line }
+        local AIM = {
+            { "OFF", "OFF", nil, nil, nil, nil, nil,
+                "Nothing is aimed and your body is never turned. Every attack goes where your mouse points." },
+            { "1", "1  TOUCH", 60, 150, false, false, nil,
+                "Only right at your mouse: 60 px, up to 150 studs away. Aimed as you press; your body is not turned." },
+            { "2", "2  LIGHT", 120, 200, true, true, 50,
+                "120 px from your mouse, up to 200 studs away. Held on him through the move; turns you to him within 50 studs." },
+            { "3", "3  STEADY", 200, 300, true, true, 100,
+                "200 px from your mouse, up to 300 studs away. Held on him through the move; turns you to him within 100 studs (today's setting)." },
+            { "4", "4  STRONG", 320, 500, true, true, 125,
+                "320 px from your mouse, up to 500 studs away. Held on him through the move; turns you to him within 125 studs." },
+            { "5", "5  STICKY", 500, 1000, true, true, 150,
+                "500 px, most of your screen, up to 1,000 studs away. Held on him through the move; turns you to him within 150 studs." },
+        }
+        local STEPS = {}
+        for i, a in ipairs(AIM) do
+            local set
+            if i == 1 then
+                set = { PvpAim = false, PvpFace = false }
+            else
+                set = { PvpAim = true, PvpCatchPx = a[3], PvpRange = a[4], PvpStream = a[5], PvpFace = a[6] }
+                if a[7] then set.PvpFaceRange = a[7] end
+            end
+            table.insert(STEPS, { name = a[2], short = a[1], set = set, line = a[8], today = (i == 4) or nil })
+        end
+
+        -- The picture: your screen, the catch circle round your mouse, five
+        -- players. It reads CFG, so your own values move it too.
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 150), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0,
+                ClipsDescendants = true, Parent = s,
+            })
+            corner(box, 14)
+            mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box })
+            local stage = mk("Frame", {
+                Size = UDim2.fromOffset(300, 140), AnchorPoint = Vector2.new(0.5, 0),
+                Position = UDim2.new(0.5, 0, 0, 5), BackgroundTransparency = 1, Parent = box,
+            })
+            local CX, CY = 150, 70
+            local function text(x, y, w, str, color, align)
+                return mk("TextLabel", {
+                    Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 9,
+                    TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
+                    Text = str, Parent = stage,
+                })
+            end
+            text(6, 2, 100, "YOUR SCREEN", C.third)
+            local ring = mk("Frame", {
+                Size = UDim2.fromOffset(0, 0), Position = UDim2.fromOffset(CX, CY),
+                BackgroundTransparency = 1, BorderSizePixel = 0, Parent = stage,
+            })
+            corner(ring, 500)
+            mk("UIStroke", { Color = VIOLET, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ring })
+            local ringL = text(CX, CY, 60, "", VIOLET)
+            local PEOPLE = { { 166, 58 }, { 100, 44 }, { 228, 104 }, { 286, 30 }, { 34, 108 } }
+            local folk = {}
+            for i, p in ipairs(PEOPLE) do
+                local head = mk("Frame", {
+                    Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(p[1] - 4, p[2] - 10),
+                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = stage,
+                })
+                corner(head, 4)
+                local body = mk("Frame", {
+                    Size = UDim2.fromOffset(14, 12), Position = UDim2.fromOffset(p[1] - 7, p[2] - 1),
+                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = stage,
+                })
+                corner(body, 4)
+                folk[i] = { head, body }
+            end
+            local cursor = mk("Frame", {
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(CX - 4, CY - 4),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage,
+            })
+            corner(cursor, 4)
+            local nameL = text(PEOPLE[1][1] + 10, PEOPLE[1][2] - 12, 60, "Player1", VIOLET)
+            local note = text(0, 124, 300, "", C.second, Enum.TextXAlignment.Center)
+            local DIM = Color3.fromRGB(74, 69, 61)
+            addLive(function()
+                local on = CFG.PvpAim and true or false
+                local r = (tonumber(CFG.PvpCatchPx) or 200) / 5
+                ring.Visible = on
+                ring.Position = UDim2.fromOffset(math.floor(CX - r), math.floor(CY - r))
+                ring.Size = UDim2.fromOffset(math.floor(2 * r), math.floor(2 * r))
+                ringL.Visible = on
+                ringL.Position = UDim2.fromOffset(math.floor(math.min(262, CX + r + 5)), CY - 7)
+                ringL.Text = math.floor(tonumber(CFG.PvpCatchPx) or 200) .. " px"
+                local nIn, picked = 0, false
+                for i, p in ipairs(PEOPLE) do
+                    local dx, dy = p[1] - CX, p[2] - CY
+                    local inn = on and math.sqrt(dx * dx + dy * dy) <= r
+                    if inn then nIn += 1 end
+                    if i == 1 and inn then picked = true end
+                    local col = (i == 1 and inn) and VIOLET or (inn and C.second or DIM)
+                    folk[i][1].BackgroundColor3, folk[i][2].BackgroundColor3 = col, col
+                end
+                nameL.Visible = picked
+                if not on then note.Text = "Aim off: your mouse decides"
+                elseif nIn == 0 then note.Text = "Nobody this close: your mouse decides"
+                elseif nIn == 1 then note.Text = "Player1 is inside: he gets it"
+                else note.Text = nIn .. " inside: the one nearest your mouse gets it" end
+            end)
+            gap(v, 8)
+        end
+        P.kit.dial(v, "Aim", STEPS, "pvp")
+
+        -- ---------- THE TRUTH CARD ----------
+        local KINDS = { { "Blox Fruit", "Fruit" }, { "Melee", "Fighting" }, { "Sword", "Sword" }, { "Gun", "Gun" } }
+        local KEYS = { "M1", "Z", "X", "C", "V", "F" }
+        local function aimedKey(kind, k)
+            local t = (CFG.PvpAimKeys or {})[kind]
+            return not (type(t) == "table" and t[k] == false)
+        end
+        local function darkOf(kind)
+            local d = {}
+            for _, k in ipairs(KEYS) do if not aimedKey(kind, k) then table.insert(d, k) end end
+            return d
+        end
+        local function mineList()
+            local out = {}
+            for _, kd in ipairs(KINDS) do
+                local d = darkOf(kd[1])
+                if #d == #KEYS then table.insert(out, kd[2] .. "'s moves")
+                elseif #d > 0 then table.insert(out, kd[2] .. "'s " .. table.concat(d, " ")) end
+            end
+            return out
+        end
+        local function visCount()
+            local n = 0
+            for _, k in ipairs({ "PvpVision", "PvpFar", "PvpClean", "PvpNoShake", "PvpKenBack" }) do
+                if CFG[k] then n += 1 end
+            end
+            return n
+        end
+        -- LEAD is one choice over three old controls that overrode each other.
+        local function leadNow()
+            if CFG.PvpLeadAuto then return "learn" end
+            return CFG.PvpLead and "fixed" or "off"
+        end
+        local function scaleText() return string.format("x%.1f", tonumber(CFG.PvpLeadScale) or 1) end
+        local LEADSETS = {
+            learn = function() return "Each move tries 5 amounts and keeps the one that hits him most, from your own hits (today's setting)." end,
+            off = function() return "Every move aimed where he is now. Swings and ray guns always are." end,
+            fixed = function() return "Skills and slow guns aimed ahead of him by your ping and their flight, " .. scaleText() .. " for every move." end,
+        }
+        local LEADTRUTH = {
+            learn = function() return "Each move learns how far ahead of him to aim." end,
+            off = function() return "Aimed where he is, no lead." end,
+            fixed = function() return "Skills aimed ahead of him, " .. scaleText() .. " for every move." end,
+        }
+        P.kit.truthCard(v, function()
+            if not CFG.PvpAim then return "Every attack goes where your mouse points" end
+            return (tonumber(CFG.PvpCatchPx) or 200) <= 60 and "Your attacks land on him only when your mouse is on him"
+                or "Your attacks land on the player nearest your mouse"
+        end, function()
+            if not CFG.PvpAim then
+                local helps = {}
+                if visCount() > 0 then table.insert(helps, "Vision") end
+                if CFG.PvpSpeed then table.insert(helps, "run") end
+                if CFG.PvpDash then table.insert(helps, "dash") end
+                local hs = "Nothing else is on either."
+                if #helps == 1 then hs = helps[1] .. " still helps." end
+                if #helps > 1 then
+                    hs = table.concat(helps, ", ", 1, #helps - 1) .. " and " .. helps[#helps] .. " still help."
+                end
+                return "Your body is never turned. " .. string.upper(string.sub(hs, 1, 1)) .. string.sub(hs, 2)
+            end
+            local mine = mineList()
+            local ms = "Every move of every weapon is aimed."
+            if #mine == 1 then ms = mine[1] .. " stays yours." end
+            if #mine == 2 then ms = mine[1] .. " and " .. mine[2] .. " stay yours." end
+            if #mine > 2 then ms = "Moves of " .. #mine .. " weapons stay yours." end
+            return ms .. " " .. LEADTRUTH[leadNow()]()
+        end, "pvp")
+        -- NOW: the player under your mouse, live, while PvP runs.
+        do
+            local row = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingBottom = UDim.new(0, 6), Parent = row,
+            })
+            local dot = mk("Frame", {
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(0, 6),
+                BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = row,
+            })
+            corner(dot, 4)
+            local line = mk("TextLabel", {
+                Size = UDim2.new(1, -60, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                Position = UDim2.fromOffset(16, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+                TextColor3 = C.text, Text = "", Parent = row,
+            })
+            mk("TextLabel", {
+                Size = UDim2.fromOffset(40, 16), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "NOW", Parent = row,
+            })
+            addLive(function()
+                row.Visible = CFG.Pvp and true or false
+                local ok, t = pcall(S.targetText)
+                line.Text = ok and tostring(t) or "-"
+                dot.BackgroundColor3 = (CFG.PvpAim and S.target) and VIOLET or C.third
+            end)
+        end
+
+        -- ---------- ALSO: three one-tap tiles ----------
+        heading2(v, "also  ·  one tap each")
+        do
+            local VIS = { "PvpVision", "PvpFar", "PvpClean", "PvpNoShake", "PvpKenBack" }
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 66), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local function tile(i, name, stateFn, valFn, tap)
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1 / 3, -6, 1, 0), Position = UDim2.new((i - 1) / 3, (i - 1) * 2, 0, 0),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false, Text = "", Parent = s,
+                })
+                corner(b, 12)
+                local st = mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                local dot = mk("Frame", {
+                    Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -16, 0, 14),
+                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = b,
+                })
+                corner(dot, 3)
+                local nm = mk("TextLabel", {
+                    Size = UDim2.new(1, -30, 0, 20), Position = UDim2.fromOffset(12, 8),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
+                })
+                local val = mk("TextLabel", {
+                    Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(12, 34),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = C.third, Text = "", Parent = b,
+                })
+                pressable(b)
+                b.Activated:Connect(tap)
+                addLive(function()
+                    local state = stateFn()
+                    dot.BackgroundColor3 = (state == "on") and GREEN or (state == "mixed" and AMBER or C.third)
+                    nm.TextColor3 = (state == "off") and C.second or C.text
+                    st.Color = (state == "off") and C.hair or C.raised
+                    val.Text = valFn()
+                end)
+            end
+            tile(1, "Vision", function()
+                local n = visCount()
+                return n == 5 and "on" or (n > 0 and "mixed" or "off")
+            end, function()
+                local n = visCount()
+                if n == 0 then return "game's own" end
+                return n < 5 and (n .. " of 5 on") or "Ken view kept"
+            end, function()
+                local on = visCount() < 5
+                for _, k in ipairs(VIS) do CFG[k] = on end
+            end)
+            tile(2, "Run", function() return CFG.PvpSpeed and "on" or "off" end,
+                function() return CFG.PvpSpeed and (tostring(CFG.PvpSpeedTo) .. " speed") or "game's own" end,
+                function() CFG.PvpSpeed = not CFG.PvpSpeed end)
+            tile(3, "Dash", function() return CFG.PvpDash and "on" or "off" end,
+                function() return CFG.PvpDash and (string.format("x%g faster", tonumber(CFG.PvpDashX) or 1.5)) or "game's own" end,
+                function() CFG.PvpDash = not CFG.PvpDash end)
+            gap(v, 8)
+        end
+
+        -- ---------- AIMED MOVES: which attacks the aim takes, per weapon ----------
+        heading2(v, "aimed moves  ·  lit = at him, dark = your mouse")
+        for _, kd in ipairs(KINDS) do
+            local kind = kd[1]
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 98), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, -6), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 12)
+            mk("TextLabel", {
+                Size = UDim2.new(0.5, 0, 0, 26), Position = UDim2.fromOffset(12, 6),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = kd[2], Parent = card,
+            })
+            local state = mk("TextLabel", {
+                Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, 6),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = card,
+            })
+            local btns = {}
+            for i, k in ipairs(KEYS) do
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1 / 6, -6, 0, 44), Position = UDim2.new((i - 1) / 6, 3, 0, 36),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second, Text = k, Parent = card,
+                })
+                corner(b, 10)
+                mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                b.Activated:Connect(function()
                     CFG.PvpAimKeys = CFG.PvpAimKeys or {}
                     CFG.PvpAimKeys[kind] = CFG.PvpAimKeys[kind] or {}
-                    CFG.PvpAimKeys[kind][k] = x
+                    CFG.PvpAimKeys[kind][k] = not aimedKey(kind, k)
                 end)
+                btns[i] = b
+            end
+            addLive(function()
+                for i, k in ipairs(KEYS) do
+                    local lit = aimedKey(kind, k)
+                    btns[i].BackgroundColor3 = lit and VIOLET or C.row
+                    btns[i].TextColor3 = lit and C.base or C.second
+                end
+                local d = darkOf(kind)
+                if not CFG.PvpAim then state.Text = "aim is off"
+                elseif #d == #KEYS then state.Text = "all yours"
+                elseif #d > 0 then state.Text = table.concat(d, " ") .. " yours"
+                else state.Text = "all at him" end
+            end)
         end
-        caption(v, "Lit = that attack goes at him. Dark = yours: it goes where your mouse points. "
-            .. "Only that weapon's key - the sword's Z dark leaves your fruit's Z aimed.")
-        switchRow(v, "Lead learns per move", "Each move keeps the lead that hits him most - from your own hits",
-            function() return CFG.PvpLeadAuto end,
-            function(x) CFG.PvpLeadAuto = x end)
-        switchRow(v, "Lead a moving player", "Only with learning off: one lead for every move",
-            function() return CFG.PvpLead end,
-            function(x) CFG.PvpLead = x end)
-        sliderRow(v, "Lead strength", 0, 2, 0.1,
-            function() return CFG.PvpLeadScale end,
-            function(x) CFG.PvpLeadScale = x end, "x")
-        switchRow(v, "Keep aiming while the move plays", "Your aim sent again during the windup, not only at the press",
-            function() return CFG.PvpStream end,
-            function(x) CFG.PvpStream = x end)
-        switchRow(v, "Gun shots straight", "Dragonstorm (any ray gun): no spread while you aim at him",
-            function() return CFG.PvpNoSpread end,
-            function(x) CFG.PvpNoSpread = x end)
-        readout(v, function()
-            if not CFG.Pvp then return "" end
-            return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
-                .. "\n" .. S.leadText()
+        hasLine(v, "You hold the weapon and press the keys. A key counts for its whole kind: the sword's Z is every sword's Z, not your fruit's.")
+
+        -- ---------- LEAD: Learns | Off | Fixed ----------
+        P.kit.segmented(v, "lead  ·  aim ahead of him", {
+            { "learn", "Learns" }, { "off", "Off" }, { "fixed", "Fixed" },
+        }, leadNow, function(x)
+            if x == "learn" then
+                CFG.PvpLeadAuto = true
+            else
+                CFG.PvpLeadAuto = false
+                CFG.PvpLead = (x == "fixed")
+            end
         end)
-        heading2(v, "your moves  ·  hit or miss")
-        readout(v, function() return S.tuneText and S.tuneText() or "" end)
-        actionRow(v, "Forget what the moves learned", nil, function()
-            table.clear(S.tune.moves)
-            table.clear(S.tune.tries)
-            S.tune.closed, S.tune.kens = 0, 0
-            pcall(S.tuneSave)
-        end)
-        heading2(v, "movement")
-        switchRow(v, "Faster dash", "Every dash moves 0.3 s - faster is also farther",
-            function() return CFG.PvpDash end,
-            function(x) CFG.PvpDash = x end)
-        sliderRow(v, "Dash", 1, 5, 0.1,
-            function() return CFG.PvpDashX end,
-            function(x) CFG.PvpDashX = x end, "x")
-        sliderRow(v, "Dash animation", 1, 3, 0.1,
-            function() return CFG.PvpDashAnim end,
-            function(x) CFG.PvpDashAnim = x end, "x")
-        switchRow(v, "Legs at a normal pace", "The run animation as at a 50 run, however fast you go - the look only",
-            function() return CFG.PvpLegs end,
-            function(x) CFG.PvpLegs = x end)
-        readout(v, function() return "dash   " .. S.dashNote() end)
-        -- (user, 2026-10-15) cooldowns - both tests, off by default.
-        heading2(v, "cooldowns  ·  tests")
-        sliderRow(v, "Flash Step cooldown cut", 0, 95, 5,
-            function() return CFG.PvpSoruCut end,
-            function(x) CFG.PvpSoruCut = x end, " %")
-        switchRow(v, "Skills off cooldown (test)", "The server most likely refuses - spam one key and read the line",
-            function() return CFG.PvpCdTest end,
-            function(x) CFG.PvpCdTest = x end)
-        readout(v, function()
-            if not CFG.Pvp then return "" end
-            return S.soruNote() .. "\n" .. S.cdNote()
-        end)
-        switchRow(v, "Faster run", "This speed whatever you wear - every form, V4 too",
-            function() return CFG.PvpSpeed end,
-            function(x) CFG.PvpSpeed = x end)
-        sliderRow(v, "Run speed", 40, 400, 1,
-            function() return CFG.PvpSpeedTo end,
-            function(x) CFG.PvpSpeedTo = x end)
-        readout(v, function() return "speed  " .. tostring(S.speed.note) end)
-        heading2(v, "servers")
-        switchRow(v, "Busy servers", "In PvP every hop goes where the most players are - in a region fast for you",
+        liveLine(v, function() return LEADSETS[leadNow()]() end)
+        do
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = box })
+            stepRow(box, "How far ahead", function() return CFG.PvpLeadScale end,
+                function(x) CFG.PvpLeadScale = x end, 0, 2, 0.1, function(x) return string.format("x%.1f", tonumber(x) or 1) end)
+            box.Visible = (leadNow() == "fixed")
+            addLive(function() box.Visible = (leadNow() == "fixed") end)
+        end
+
+        -- ---------- BUSY SERVERS ----------
+        heading2(v, "busy servers")
+        switchRow(v, "Busy servers",
+            "In PvP every hop goes where the most players are - in a region fast for you. Off: hops keep Servers' order, fewest first",
             function() return CFG.PvpHopBusy end,
             function(x) CFG.PvpHopBusy = x end)
-        sliderRow(v, "Ping at most", 60, 400, 10,
-            function() return CFG.PvpPingMax end,
-            function(x) CFG.PvpPingMax = x end, " ms")
-        actionRow(v, "Hop to a busy server", nil, function() P.hopNow() end)
-        readout(v, function()
-            local el = P.elite
-            return "hop    " .. tostring(el and el.note or "-")
-                .. "\n" .. (P.pingNote and P.pingNote() or "")
-        end)
-        fold(v, "How it works", function(v)
+        do
+            local hop = actionRow(v, "Hop to a busy server", nil, function() P.hopNow() end)
+            addLive(function()
+                hop.Text = (CFG.Pvp and CFG.PvpHopBusy) and "Hop to a busy server" or "Hop now"
+            end)
+        end
+
+        -- ---------- DETAILS: what the moves learned, the live readings ----------
+        fold(v, "Details", function(v)
+            heading2(v, "what your moves learned  ·  hit or miss")
+            readout(v, function() return S.tuneText and S.tuneText() or "" end)
+            actionRow(v, "Forget what the moves learned", nil, function()
+                table.clear(S.tune.moves)
+                table.clear(S.tune.tries)
+                S.tune.closed, S.tune.kens = 0, 0
+                pcall(S.tuneSave)
+            end)
+            heading2(v, "live  ·  while PvP is on")
+            readout(v, function()
+                if not CFG.Pvp then return "PvP mode is off" end
+                return "PLAYER  " .. S.targetText()
+            end)
+            readout(v, function()
+                if not CFG.Pvp then return "PvP mode is off" end
+                return "view    " .. tostring(S.view.note)
+                    .. "\nfar     " .. tostring(S.far.note)
+                    .. "\nken     " .. tostring(S.ken.note)
+                    .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
+                    .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
+            end)
+            readout(v, function()
+                if not CFG.Pvp then return "" end
+                return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
+                    .. "\n" .. S.leadText()
+            end)
+            readout(v, function() return "dash   " .. S.dashNote() end)
+            readout(v, function() return "speed  " .. tostring(S.speed.note) end)
+            readout(v, function()
+                local el = P.elite
+                return "hop    " .. tostring(el and el.note or "-")
+                    .. "\n" .. (P.pingNote and P.pingNote() or "")
+            end)
             caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")
             caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
                 .. "ends your Ken; your screen kept clear of other players' effects.")
@@ -22159,6 +22491,148 @@ local function buildUI()
                 .. "swings hit what you see - aimed at him as he is. Hits land behind him: Lead strength up; "
                 .. "ahead of him: down. His Ken dodges whatever the aim - the PLAYER line says when it is on.")
         end)
+
+        -- ---------- LAB: tests, amber while one is on ----------
+        do
+            local holder = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
+            })
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base, BorderSizePixel = 0,
+                Text = "", AutoButtonColor = false, LayoutOrder = 1, Parent = holder,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(20, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.body,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "Lab  ·  TEST", Parent = b,
+            })
+            local word = mk("TextLabel", {
+                Size = UDim2.fromOffset(140, 44), Position = UDim2.new(1, -160, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = b,
+            })
+            pressable(b)
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Visible = false, LayoutOrder = 2, Parent = holder,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
+            })
+            local function testsOn()
+                return ((tonumber(CFG.PvpSoruCut) or 0) > 0 and 1 or 0) + (CFG.PvpCdTest and 1 or 0)
+            end
+            local function headline()
+                local n = testsOn()
+                if box.Visible then word.Text, word.TextColor3 = "hide", C.third return end
+                word.Text = (n == 0) and "2 tests, both off" or (n .. (n == 1 and " test on" or " tests on"))
+                word.TextColor3 = (n > 0) and AMBER or C.third
+            end
+            local outer = buildingFold
+            buildingFold = box
+            caption(box, "Tests, both off unless you turn them on. They bend the game's cooldowns, so they may not hold.")
+            stepRow(box, "Flash Step cooldown cut", function() return CFG.PvpSoruCut end,
+                function(x) CFG.PvpSoruCut = x end, 0, 95, 5, function(x) return math.floor(tonumber(x) or 0) .. "%" end)
+            liveLine(box, function()
+                local c = tonumber(CFG.PvpSoruCut) or 0
+                local r = (c == 0) and "the game's 15 s" or string.format("15 s  ->  %.1f s", 15 * (1 - c / 100))
+                return "Your own game checks this one, so it may hold. " .. r
+            end)
+            switchRow(box, "Skills off cooldown (test)",
+                "The server most likely refuses. Turn on, spam one key, read the count",
+                function() return CFG.PvpCdTest end,
+                function(x) CFG.PvpCdTest = x end)
+            readout(box, function()
+                if not CFG.Pvp then return "" end
+                return S.soruNote() .. "\n" .. S.cdNote()
+            end)
+            buildingFold = outer
+            b.Activated:Connect(function()
+                box.Visible = not box.Visible
+                headline()
+                if box.Visible then
+                    for _, e in ipairs(live) do
+                        if e.w == box then pcall(e.f) end
+                    end
+                end
+            end)
+            headline()
+            addLive(headline)
+        end
+
+        -- ---------- FINE-TUNE: every exact value ----------
+        P.kit.fineTune(v, function(v)
+            heading2(v, "aim")
+            switchRow(v, "Aim at the player", "The one nearest your mouse - skills, fruit M1, gun land on him",
+                function() return CFG.PvpAim end,
+                function(x) CFG.PvpAim = x end)
+            sliderRow(v, "Mouse catch area", 50, 500, 10,
+                function() return CFG.PvpCatchPx end,
+                function(x) CFG.PvpCatchPx = x end, " px")
+            sliderRow(v, "Players count within", 50, 1000, 25,
+                function() return CFG.PvpRange end,
+                function(x) CFG.PvpRange = x end, " studs")
+            switchRow(v, "Face him on every attack", "Any weapon, the fox too - your body turns to him",
+                function() return CFG.PvpFace end,
+                function(x) CFG.PvpFace = x end)
+            sliderRow(v, "Face him within", 25, 150, 5,
+                function() return CFG.PvpFaceRange end,
+                function(x) CFG.PvpFaceRange = x end, " studs")
+            switchRow(v, "Keep aiming while the move plays", "Your aim sent again during the windup, not only at the press",
+                function() return CFG.PvpStream end,
+                function(x) CFG.PvpStream = x end)
+            switchRow(v, "Highlight him", "Red over every attack effect, a marker over his head - only your screen",
+                function() return CFG.PvpMark end,
+                function(x) CFG.PvpMark = x end)
+            switchRow(v, "Ray guns shoot straight", "Dragonstorm (any ray gun): no spread while you aim at him",
+                function() return CFG.PvpNoSpread end,
+                function(x) CFG.PvpNoSpread = x end)
+            sliderRow(v, "Lead strength", 0, 2, 0.1,
+                function() return CFG.PvpLeadScale end,
+                function(x) CFG.PvpLeadScale = x end, "x")
+            heading2(v, "vision  ·  the tile sets all five")
+            switchRow(v, "Observation view always on", "Out of dodges no longer turns it off",
+                function() return CFG.PvpVision end,
+                function(x) CFG.PvpVision = x end)
+            switchRow(v, "See far", "Players and enemies outlined this far, whatever you wear - past the Pale Scarf",
+                function() return CFG.PvpFar end,
+                function(x) CFG.PvpFar = x end)
+            sliderRow(v, "Vision range", 3000, 100000, 1000,
+                function() return CFG.PvpFarTo end,
+                function(x) CFG.PvpFarTo = x end, " studs")
+            switchRow(v, "Clean screen", "Ghoul / Angel V4 darkness, grey and red tints, the Dark screen - off",
+                function() return CFG.PvpClean end,
+                function(x) CFG.PvpClean = x end)
+            switchRow(v, "No camera shake", nil,
+                function() return CFG.PvpNoShake end,
+                function(x) CFG.PvpNoShake = x end)
+            switchRow(v, "Ken back by itself", "The dodges: 2 s after, every 0.5 s, the moment the game allows",
+                function() return CFG.PvpKenBack end,
+                function(x) CFG.PvpKenBack = x end)
+            heading2(v, "move")
+            switchRow(v, "Legs at a normal pace", "The run animation as at a 50 run, however fast you go - the look only",
+                function() return CFG.PvpLegs end,
+                function(x) CFG.PvpLegs = x end)
+            sliderRow(v, "Run speed", 40, 400, 1,
+                function() return CFG.PvpSpeedTo end,
+                function(x) CFG.PvpSpeedTo = x end)
+            sliderRow(v, "Dash", 1, 5, 0.1,
+                function() return CFG.PvpDashX end,
+                function(x) CFG.PvpDashX = x end, "x")
+            sliderRow(v, "Dash animation", 1, 3, 0.1,
+                function() return CFG.PvpDashAnim end,
+                function(x) CFG.PvpDashAnim = x end, "x")
+            heading2(v, "servers")
+            sliderRow(v, "Ping at most, any most-players hop", 60, 400, 10,
+                function() return CFG.PvpPingMax end,
+                function(x) CFG.PvpPingMax = x end, " ms")
+        end, 20)
     end
 
     -- =====================================================

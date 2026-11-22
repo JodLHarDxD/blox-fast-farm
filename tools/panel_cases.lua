@@ -184,8 +184,9 @@ if RUN == "full" then
     check(onRows() == "Haki berries", "berry alone On: " .. onRows())
 
     goHome() button("modes", "PvP").Activated:Fire() livePass()
-    check(string.find(table.concat(labelsOf(VIEWS.pvp), "|"), "Off brings Haki berries back", 1, true) ~= nil,
-        "PvP switch says Off brings the berries back")
+    -- R2: the page's mode strip replaced the switch and its sentence; the behaviour
+    -- (Off brings the berries back) is checked below.
+    check(modePill("pvp") ~= nil and isStrip(modePill("pvp")), "PvP page: a mode strip")
     modePill("pvp").Activated:Fire()
     check(CFG_REAL.Pvp == true and CFG_REAL.Hunt == true, "PvP on top: berry hunt kept underneath")
     showModes()
@@ -432,7 +433,10 @@ if RUN == "full" then
             local isFold = (ls[1] == "How it works" or ls[1] == "Details") and (ls[2] == "Show" or ls[2] == "Hide")
             local isGap = k.ClassName == "Frame" and #rawget(k, "_kids") == 0
             if isFold then seenFold = true
-            elseif seenFold and not isGap then after = ls[1] or k.ClassName end
+            elseif seenFold and not isGap and ls[1] ~= "Fine-tune" and not string.find(tostring(ls[1]), "^Lab") then
+                -- (R2 boards: Details, then the Lab fold, then Fine-tune, in that order)
+                after = ls[1] or k.ClassName
+            end
         end
         check(after == nil, name .. ": nothing after How it works / Details (" .. tostring(after) .. ")")
     end
@@ -1145,6 +1149,129 @@ do
     CFG_REAL.SeaSearchMinutes, CFG_REAL.SeaMagnet = was.cap, was.mag
     CFG_REAL.VolcanoLoot, CFG_REAL.VolcanoAfter, CFG_REAL.VentGuitar = was.loot, was.after, was.guitar
     CFG_REAL.RespawnHome, CFG_REAL.Volcano = was.home, was.volcano
+    goHome()
+end
+
+-- ---------- R2 Task 8: PvP, one aim dial ----------
+do
+    local KEYS = { "PvpAim", "PvpFace", "PvpCatchPx", "PvpRange", "PvpStream", "PvpFaceRange", "PvpVision", "PvpFar",
+        "PvpClean", "PvpNoShake", "PvpKenBack", "PvpSpeed", "PvpDash", "PvpLeadAuto", "PvpLead", "PvpLeadScale",
+        "PvpHopBusy", "PvpSoruCut", "PvpCdTest" }
+    local was = {}
+    for _, k in ipairs(KEYS) do was[k] = CFG_REAL[k] end
+    local wasKeys = {}
+    for kind, t in pairs(CFG_REAL.PvpAimKeys) do wasKeys[kind] = {} for k2, x in pairs(t) do wasKeys[kind][k2] = x end end
+    local function buttonsOf(page, text)
+        local out = {}
+        each(VIEWS[page], function(k)
+            if k.ClassName == "TextButton" and tostring(k.Text) == text then table.insert(out, k) end
+        end)
+        return out
+    end
+    local function nth(page, text, n)
+        local b = buttonsOf(page, text)[n]
+        check(b ~= nil, "button #" .. n .. " \"" .. text .. "\" on " .. page)
+        return b or { Activated = { Fire = function() end } }
+    end
+    local function pillOf(page, label)
+        local found
+        each(VIEWS[page], function(k) if not found and isPill(k) and switchLabel(k) == label then found = k end end)
+        check(found ~= nil, "a \"" .. label .. "\" switch on " .. page)
+        return found or { Activated = { Fire = function() end } }
+    end
+    check(modePill("pvp") ~= nil and isStrip(modePill("pvp")), "pvp: a mode strip")
+    check(button("pvp", "Fights with") == nil, "pvp: no Fights with row (you fight by hand)")
+    check(button("pvp", "Fine-tune") ~= nil and button("pvp", "Details") ~= nil, "pvp: Details and Fine-tune")
+    -- AIM dial: OFF also turns Face off; step 3 = today's CFG
+    CFG_REAL.PvpAim, CFG_REAL.PvpFace = true, true
+    tap("pvp", "OFF")
+    check(CFG_REAL.PvpAim == false and CFG_REAL.PvpFace == false, "pvp: dial OFF turns the aim and Face off")
+    tap("pvp", "1")
+    check(CFG_REAL.PvpAim == true and CFG_REAL.PvpCatchPx == 60 and CFG_REAL.PvpRange == 150
+        and CFG_REAL.PvpStream == false and CFG_REAL.PvpFace == false, "pvp: dial 1 = touch")
+    tap("pvp", "2")
+    check(CFG_REAL.PvpCatchPx == 120 and CFG_REAL.PvpRange == 200 and CFG_REAL.PvpFace == true
+        and CFG_REAL.PvpFaceRange == 50, "pvp: dial 2 = light")
+    tap("pvp", "4")
+    check(CFG_REAL.PvpCatchPx == 320 and CFG_REAL.PvpRange == 500 and CFG_REAL.PvpFaceRange == 125, "pvp: dial 4 = strong")
+    tap("pvp", "5")
+    check(CFG_REAL.PvpCatchPx == 500 and CFG_REAL.PvpRange == 1000 and CFG_REAL.PvpFaceRange == 150, "pvp: dial 5 = sticky")
+    tap("pvp", "3")
+    for _, k in ipairs({ "PvpAim", "PvpFace", "PvpCatchPx", "PvpRange", "PvpStream", "PvpFaceRange" }) do
+        check(CFG_REAL[k] == P.cfgDefaults[k], "pvp: dial 3 " .. k .. " is today's " .. tostring(P.cfgDefaults[k]))
+    end
+    -- tiles: Vision sets its 5 keys at once; Run, Dash one each
+    local VIS = { "PvpVision", "PvpFar", "PvpClean", "PvpNoShake", "PvpKenBack" }
+    for _, k in ipairs(VIS) do CFG_REAL[k] = true end
+    tap("pvp", "Vision")
+    for _, k in ipairs(VIS) do check(CFG_REAL[k] == false, "pvp: Vision tile off sets " .. k) end
+    tap("pvp", "Vision")
+    for _, k in ipairs(VIS) do check(CFG_REAL[k] == true, "pvp: Vision tile on sets " .. k) end
+    CFG_REAL.PvpSpeed, CFG_REAL.PvpDash = true, true
+    tap("pvp", "Run")
+    check(CFG_REAL.PvpSpeed == false, "pvp: Run tile writes PvpSpeed")
+    tap("pvp", "Dash")
+    check(CFG_REAL.PvpDash == false, "pvp: Dash tile writes PvpDash")
+    -- aimed moves: Fruit, Fighting, Sword, Gun cards, Z is the third
+    check(#buttonsOf("pvp", "Z") == 4, "pvp: four weapon cards each with a Z chip")
+    local zWas, m1Was = CFG_REAL.PvpAimKeys.Sword.Z ~= false, CFG_REAL.PvpAimKeys.Gun.M1 ~= false
+    nth("pvp", "Z", 3).Activated:Fire()
+    check((CFG_REAL.PvpAimKeys.Sword.Z ~= false) == (not zWas), "pvp: the Sword's Z chip flips")
+    nth("pvp", "M1", 4).Activated:Fire()
+    check((CFG_REAL.PvpAimKeys.Gun.M1 ~= false) == (not m1Was), "pvp: the Gun's M1 chip flips")
+    -- LEAD: Learns | Off | Fixed over three old controls
+    nth("pvp", "OFF", 2).Activated:Fire()
+    check(CFG_REAL.PvpLeadAuto == false and CFG_REAL.PvpLead == false, "pvp: lead Off")
+    tap("pvp", "FIXED")
+    check(CFG_REAL.PvpLeadAuto == false and CFG_REAL.PvpLead == true, "pvp: lead Fixed")
+    CFG_REAL.PvpLeadScale = 1.0
+    nth("pvp", "+", 1).Activated:Fire()
+    check(CFG_REAL.PvpLeadScale == 1.1, "pvp: the Fixed stepper + raises the lead strength: " .. tostring(CFG_REAL.PvpLeadScale))
+    nth("pvp", "-", 1).Activated:Fire()
+    nth("pvp", "-", 1).Activated:Fire()
+    check(CFG_REAL.PvpLeadScale == 0.9, "pvp: and - lowers it: " .. tostring(CFG_REAL.PvpLeadScale))
+    tap("pvp", "LEARNS")
+    check(CFG_REAL.PvpLeadAuto == true, "pvp: lead Learns")
+    -- busy servers
+    CFG_REAL.PvpHopBusy = true
+    pillOf("pvp", "Busy servers").Activated:Fire()
+    check(CFG_REAL.PvpHopBusy == false, "pvp: Busy servers switch")
+    table.clear(CALLS)
+    tap("pvp", "Hop")
+    livePass()
+    check(called("hopNow"), "pvp: the hop row hops")
+    -- Lab: a test on turns the header amber
+    local function labHint()
+        local b = button("pvp", "Lab  ·  TEST")
+        local kids = b and rawget(b, "_kids") or {}
+        return kids[2]
+    end
+    goHome() tap("home", "Mode") tap("modes", "PvP")
+    CFG_REAL.PvpSoruCut, CFG_REAL.PvpCdTest = 0, false
+    pcall(LIVE0)
+    if labHint() and tostring(labHint().Text) == "hide" then tap("pvp", "Lab  ·  TEST") end   -- folds start shut
+    check(labHint() ~= nil and tostring(labHint().Text) == "2 tests, both off" and labHint().TextColor3.R ~= 240,
+        "pvp: Lab header, both off, is not amber")
+    nth("pvp", "+", 2).Activated:Fire()
+    check(CFG_REAL.PvpSoruCut == 5, "pvp: Lab Flash Step cut + steps 5")
+    pcall(LIVE0)
+    check(labHint() ~= nil and tostring(labHint().Text) == "1 test on" and labHint().TextColor3.R == 240,
+        "pvp: Lab header turns amber when a test is on")
+    pillOf("pvp", "Skills off cooldown (test)").Activated:Fire()
+    check(CFG_REAL.PvpCdTest == true, "pvp: Lab skills-off-cooldown switch")
+    pcall(LIVE0)
+    check(labHint() ~= nil and tostring(labHint().Text) == "2 tests on", "pvp: both tests on")
+    -- Fine-tune keeps every exact value
+    local lab = table.concat(labelsOf(VIEWS.pvp), "|")
+    for _, l in ipairs({ "Aim at the player", "Mouse catch area", "Players count within", "Face him on every attack",
+        "Face him within", "Keep aiming while the move plays", "Highlight him", "Ray guns shoot straight", "Lead strength",
+        "Observation view always on", "See far", "Vision range", "Clean screen", "No camera shake", "Ken back by itself",
+        "Legs at a normal pace", "Run speed", "Dash", "Dash animation", "Ping at most, any most-players hop" }) do
+        check(string.find(lab, l, 1, true) ~= nil, "pvp: keeps \"" .. l .. "\"")
+    end
+    check(button("pvp", "Forget what the moves learned") ~= nil, "pvp: Details keeps Forget what the moves learned")
+    for _, k in ipairs(KEYS) do CFG_REAL[k] = was[k] end
+    for kind, t in pairs(wasKeys) do for k2, x in pairs(t) do CFG_REAL.PvpAimKeys[kind][k2] = x end end
     goHome()
 end
 
