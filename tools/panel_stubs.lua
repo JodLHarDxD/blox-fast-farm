@@ -221,9 +221,17 @@ local SAID = {}
 local function say(s) table.insert(SAID, tostring(s)) end
 local function circuit() return {} end
 local function setupKey() return "a setup" end
-local function toolNames() return { { Name = "Godhuman" }, { Name = "Hallow Scythe" } } end
-local function toolType(t) return (t and t.Name == "Hallow Scythe") and "Sword" or "Melee" end
-local function findTool(n) if n == "Godhuman" or n == "Hallow Scythe" then return { Name = n } end return nil end
+-- the backpack: STUB_TOOLS in order, STUB_TYPES = their game labels (Melee by
+-- default); the cases add tools (a non-weapon, a big bag) and take them out again
+local STUB_TOOLS = { "Godhuman", "Hallow Scythe" }
+local STUB_TYPES = { ["Hallow Scythe"] = "Sword" }
+local function toolNames()
+    local out = {}
+    for _, n in ipairs(STUB_TOOLS) do table.insert(out, { Name = n }) end
+    return out
+end
+local function toolType(t) return (t and STUB_TYPES[t.Name]) or "Melee" end
+local function findTool(n) if table.find(STUB_TOOLS, n) then return { Name = n } end return nil end
 local function heldTool() return nil end
 local function wSummary() return "M1 Z" end
 local function syncWeapons() end

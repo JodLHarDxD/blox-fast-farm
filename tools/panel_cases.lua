@@ -369,6 +369,132 @@ if RUN == "full" then
         end
         check(string.find(texts(), "Fine-tune", 1, true) ~= nil, "a Fine-tune button")
         check(string.find(texts(), "Aim", 1, true) ~= nil, "an Aim row")
+        -- ---------- R3 Task 3: the board's Attack ----------
+        local function named(n)
+            local out = {}
+            each(VIEWS.attack, function(k)
+                if k.Name == n and not k._destroyed then table.insert(out, k) end
+            end)
+            return out
+        end
+        local function stopTexts()
+            local t = {}
+            for _, k in ipairs(named("Stop")) do table.insert(t, tostring(k.Text)) end
+            return table.concat(t, "|")
+        end
+        local function anyButton(text)
+            local found = false
+            each(VIEWS.attack, function(k)
+                if k.ClassName == "TextButton" and k.Text == text and not k._destroyed then found = true end
+            end)
+            return found
+        end
+        table.clear(CFG_REAL.FightWith)
+        openAttack()
+        -- two tabs, side by side: For Random | For Sea events
+        local tR, tS = pillNamed("For Random"), pillNamed("For Sea events")
+        check(tR and tS and tR.Visible and tS.Visible and tR.Size.X.Scale == 0.5 and tS.Position.X.Scale == 0.5,
+            "the mode tabs are a 2-way segmented control")
+        -- only real fight weapons on the wheel and the cards
+        table.insert(STUB_TOOLS, "Dojo Belt (Black)")
+        table.insert(STUB_TOOLS, "Heightened Senses")
+        STUB_TYPES["Dojo Belt (Black)"], STUB_TYPES["Heightened Senses"] = "?", ""
+        livePass()
+        check(stopTexts() == "MIX|Godhuman|Hallow Scythe", "the wheel: MIX and the fight weapons only: " .. stopTexts())
+        check(not anyButton("Dojo Belt (Black)") and not anyButton("Heightened Senses"),
+            "no card for a non-weapon")
+        -- a non-weapon that is the pick stays, so it can be turned back
+        CFG_REAL.FightWith.random = "Dojo Belt (Black)"
+        livePass()
+        check(string.find(stopTexts(), "Dojo Belt (Black)", 1, true) ~= nil, "a non-weapon pick stays on the wheel")
+        CFG_REAL.FightWith.random = nil
+        livePass()
+        check(stopTexts() == "MIX|Godhuman|Hallow Scythe", "and leaves it when the pick moves: " .. stopTexts())
+        -- the needle: in its own clipped frame, under the labels
+        local clip = named("NeedleClip")[1]
+        check(clip ~= nil and clip.ClipsDescendants == true and #named("Needle") == 1
+            and named("Needle")[1].Parent == clip, "the needle turns inside its own clipped frame")
+        local zOk = true
+        for _, p in ipairs(named("Stop")) do if not (p.ZIndex > clip.ZIndex) then zOk = false end end
+        check(zOk, "every label sits above the needle's frame")
+        -- the lit stop and the needle take the type colour (Godhuman: melee red)
+        pillNamed("Godhuman").Activated:Fire()
+        livePass()
+        local red = ACCENT.raid[3]
+        local lit = pillNamed("Godhuman")
+        local needle = rawget(named("Needle")[1], "_kids")[1]
+        check(lit.BackgroundColor3.R == red[1] and lit.BackgroundColor3.G == red[2]
+            and needle.BackgroundColor3.R == red[1], "the lit stop and the needle are melee red")
+        check(named("Needle")[1].Rotation < 0, "the needle points left, at Godhuman: " .. tostring(named("Needle")[1].Rotation))
+        -- the chosen card: Using only this filled in the type colour; M1 filled too
+        local using = pillNamed("Using only this")
+        check(using ~= nil and using.Parent.BackgroundTransparency == 0
+            and using.Parent.BackgroundColor3.R == red[1], "Using only this is filled melee red")
+        local useOnly = pillNamed("Use only this")
+        check(useOnly ~= nil and useOnly.Parent.BackgroundTransparency == 1, "Use only this is a ghost pill")
+        local m1s = {}
+        each(VIEWS.attack, function(k)
+            if k.ClassName == "TextButton" and k.Text == "M1" and not k._destroyed and k.Parent
+                and k.Parent.Size and k.Parent.Size.Y.Offset == 34 then table.insert(m1s, k) end
+        end)
+        check(#m1s == 2 and m1s[1].Parent.BackgroundTransparency == 0 and m1s[1].Parent.BackgroundColor3.R == red[1]
+            and m1s[2].Parent.BackgroundTransparency == 1, "M1 filled on the chosen card, outlined on the other")
+        check(string.find(texts(), "resting: Random uses Godhuman only", 1, true) ~= nil, "the other card is resting")
+        table.clear(CFG_REAL.FightWith)
+        -- a big bag: 9 weapons = the 5 most used and +4
+        local extra = { "Dragon Talon", "Electric Claw", "Tushita", "Yama", "Kitsune-Kitsune", "Dragonstorm", "Soul Guitar" }
+        local types = { "Melee", "Melee", "Sword", "Sword", "Blox Fruit", "Gun", "Gun" }
+        for i, n in ipairs(extra) do
+            table.insert(STUB_TOOLS, n)
+            STUB_TYPES[n] = types[i]
+        end
+        livePass()
+        local nStops = #named("Stop")
+        check(nStops == 7 and anyButton("+4"), "9 weapons: MIX, 5 most used and +4 (" .. stopTexts() .. ")")
+        check(string.find(stopTexts(), "Godhuman", 1, true) and string.find(stopTexts(), "Hallow Scythe", 1, true),
+            "the most used stay (the two with moves lit): " .. stopTexts())
+        -- the labels never overlap each other or the dial
+        local ps = named("Stop")
+        local overlapFree = true
+        for i = 1, #ps do
+            local a = ps[i]
+            local ax, ay, aw = a.Position.X.Offset, a.Position.Y.Offset, a.Size.X.Offset
+            local nx = math.max(ax, math.min(WHEEL_CX, ax + aw))
+            local ny = math.max(ay, math.min(WHEEL_CY, ay + 30))
+            if math.sqrt((nx - WHEEL_CX) ^ 2 + (ny - WHEEL_CY) ^ 2) < 55 then overlapFree = false end
+            for j = i + 1, #ps do
+                local b = ps[j]
+                local bx, by, bw = b.Position.X.Offset, b.Position.Y.Offset, b.Size.X.Offset
+                if ax < bx + bw and bx < ax + aw and ay < by + 30 and by < ay + 30 then overlapFree = false end
+            end
+        end
+        check(overlapFree, "7 labels: none overlaps another or the dial")
+        -- +4 opens the full list; a pick from it lands on the wheel
+        check(#named("MorePick") == 9, "the full list has all 9 weapons")
+        local plus
+        each(VIEWS.attack, function(k) if k.Name == "Stop" and k.Text == "+4" then plus = k end end)
+        local box = named("MorePick")[1].Parent.Parent
+        check(box.Visible == false, "the full list starts shut")
+        plus.Activated:Fire()
+        check(box.Visible == true, "+4 opens the full list")
+        local hiddenOne
+        for _, k in ipairs(named("MorePick")) do
+            if not string.find(stopTexts(), k.Text, 1, true) then hiddenOne = hiddenOne or k end
+        end
+        local hn = hiddenOne and hiddenOne.Text
+        if hiddenOne then hiddenOne.Activated:Fire() end
+        check(hn ~= nil and CFG_REAL.FightWith.random == hn, "a pick from the list sets the wheel: " .. tostring(hn))
+        check(box.Visible == false, "and shuts the list")
+        livePass()
+        check(hn ~= nil and string.find(stopTexts(), hn, 1, true) ~= nil and #named("Stop") == 7,
+            "the picked weapon is now on the wheel: " .. stopTexts())
+        -- the bag back as it was
+        for _, n in ipairs(extra) do table.remove(STUB_TOOLS, table.find(STUB_TOOLS, n)) STUB_TYPES[n] = nil end
+        table.remove(STUB_TOOLS, table.find(STUB_TOOLS, "Dojo Belt (Black)"))
+        table.remove(STUB_TOOLS, table.find(STUB_TOOLS, "Heightened Senses"))
+        table.clear(CFG_REAL.FightWith)
+        livePass()
+        check(stopTexts() == "MIX|Godhuman|Hallow Scythe", "the bag back: " .. stopTexts())
         table.clear(CFG_REAL.FightWith)
         table.clear(CFG_REAL.FightGoal)
         CFG_REAL.RandomMode = false

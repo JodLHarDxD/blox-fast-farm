@@ -978,6 +978,119 @@ function lookPx(css) return math.floor((tonumber(css) or 0) * LOOK_EM + 0.5) end
 -- TYPE COLOURS (R3 Task S): a weapon's type borrows a pack accent, as on the
 -- Attack board: melee red, sword blue, fruit orange, gun violet.
 TYPE_ACCENT = { Melee = "raid", Sword = "sea", ["Blox Fruit"] = "prehistoric", Gun = "pvp" }
+-- THE WHEEL'S WEAPONS (R3 Task 3, pure: tools/wheel_test.py). A fight weapon
+-- is a tool whose game label (toolType: the ToolTip, else the WeaponType
+-- attribute) is one of the four the farm fights with - the same four the
+-- race and the sea filters accept. Heightened Senses, Awakening, a Dojo
+-- Belt, a fishing rod or a plain "Tool" carry no such label: not a weapon.
+FIGHT_TYPES = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
+function fightType(ty)
+    if type(ty) == "string" and FIGHT_TYPES[ty] then return ty end
+    return nil
+end
+-- list = { { name, ty }, ... }; keep = names shown even when not weapons
+-- (the mode's pick, a tool already in the mix: you can still switch it off).
+function fightWeapons(list, keep)
+    local out = {}
+    for _, w in ipairs(list or {}) do
+        if fightType(w.ty) or (keep and keep[w.name]) then table.insert(out, w) end
+    end
+    return out
+end
+-- More than WHEEL_ALL weapons: the wheel shows the WHEEL_TOP most used (the
+-- pick always among them), in turning order, and a "+N" chip for the rest.
+-- weapons = { { name, ty, used } } in turning order. Returns shown, hidden.
+WHEEL_ALL, WHEEL_TOP = 6, 5
+function wheelShown(weapons, pick)
+    weapons = weapons or {}
+    if #weapons <= WHEEL_ALL then return weapons, {} end
+    local idx = {}
+    for i = 1, #weapons do idx[i] = i end
+    table.sort(idx, function(a, b)
+        local wa, wb = weapons[a], weapons[b]
+        local pa, pb = wa.name == pick, wb.name == pick
+        if pa ~= pb then return pa end
+        local ua, ub = tonumber(wa.used) or 0, tonumber(wb.used) or 0
+        if ua ~= ub then return ua > ub end
+        return a < b
+    end)
+    local keep = {}
+    for i = 1, WHEEL_TOP do keep[idx[i]] = true end
+    local shown, hidden = {}, {}
+    for i, w in ipairs(weapons) do table.insert(keep[i] and shown or hidden, w) end
+    return shown, hidden
+end
+-- Where the wheel's labels sit (the board: a 302 x 196 box, the dial's
+-- centre at 151,118, 110 across; labels 30 high). widths[1] is MIX, at the
+-- top; the rest split into a left column (the first half, top to bottom)
+-- and a right one, each label on the wheel's radius at an even angle. Then
+-- labels keep WHEEL_GAP apart down a column and clear MIX, and slide out
+-- (or shrink) until they clear the dial by WHEEL_DIAL. Returns
+-- { { left, top, w, deg } }: deg = where the needle points, the label's centre.
+WHEEL_W, WHEEL_H, WHEEL_CX, WHEEL_CY = 302, 196, 151, 118
+WHEEL_R, WHEEL_DIAL, WHEEL_PILL, WHEEL_GAP, WHEEL_WMAX = 104, 57, 30, 4, 104
+function wheelLayout(widths)
+    local out, n = {}, #widths
+    if n == 0 then return out end
+    local function round(x) return math.floor(x + 0.5) end
+    local mw = math.min(widths[1], WHEEL_W)
+    out[1] = { left = round(WHEEL_CX - mw / 2), top = 2, w = mw, deg = 0 }
+    local mixL, mixR, mixB = out[1].left, out[1].left + mw, 2 + WHEEL_PILL
+    local nl = math.ceil((n - 1) / 2)
+    for _, col in ipairs({ { 2, 1 + nl, -1 }, { 2 + nl, n, 1 } }) do
+        local from, to, sign = col[1], col[2], col[3]
+        local cnt = to - from + 1
+        if cnt > 0 then
+            -- on the radius
+            for j = 0, cnt - 1 do
+                local a = (cnt == 1 and 90) or (cnt == 2 and 60 + 60 * j) or (50 + 80 * j / (cnt - 1))
+                local r = math.rad(sign * a)
+                local cx, cy = WHEEL_CX + WHEEL_R * math.sin(r), WHEEL_CY - WHEEL_R * math.cos(r)
+                local w = math.max(1, math.min(widths[from + j], WHEEL_WMAX))
+                out[from + j] = { left = round(cx - w / 2), top = round(cy - WHEEL_PILL / 2), w = w }
+            end
+            -- down the column: inside the box, clear of MIX, WHEEL_GAP apart
+            for j = 0, cnt - 1 do
+                local o = out[from + j]
+                local minTop = 0
+                if j == 0 and o.left < mixR + WHEEL_GAP and o.left + o.w > mixL - WHEEL_GAP then
+                    minTop = mixB + WHEEL_GAP
+                elseif j > 0 then
+                    minTop = out[from + j - 1].top + WHEEL_PILL + WHEEL_GAP
+                end
+                o.top = math.max(o.top, minTop)
+            end
+            for j = cnt - 1, 0, -1 do
+                local o = out[from + j]
+                local maxTop = WHEEL_H - WHEEL_PILL
+                if j < cnt - 1 then maxTop = math.min(maxTop, out[from + j + 1].top - WHEEL_PILL - WHEEL_GAP) end
+                o.top = math.min(o.top, maxTop)
+            end
+            -- across: clear of the dial, inside the box
+            for j = 0, cnt - 1 do
+                local o = out[from + j]
+                local ny = math.max(o.top, math.min(WHEEL_CY, o.top + WHEEL_PILL))
+                local dy = math.abs(WHEEL_CY - ny)
+                local reach = dy < WHEEL_DIAL and math.sqrt(WHEEL_DIAL * WHEEL_DIAL - dy * dy) or 0
+                if sign < 0 then
+                    local maxR = math.floor(WHEEL_CX - reach)
+                    if o.left + o.w > maxR then o.left = maxR - o.w end
+                    if o.left < 0 then o.left = 0 o.w = math.min(o.w, maxR) end
+                else
+                    local minL = math.ceil(WHEEL_CX + reach)
+                    if o.left < minL then o.left = minL end
+                    if o.left + o.w > WHEEL_W then
+                        o.left = math.max(minL, WHEEL_W - o.w)
+                        o.w = math.min(o.w, WHEEL_W - o.left)
+                    end
+                end
+                local cx, cy = o.left + o.w / 2, o.top + WHEEL_PILL / 2
+                o.deg = round(math.deg(math.atan2(cx - WHEEL_CX, WHEEL_CY - cy)))
+            end
+        end
+    end
+    return out
+end
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -19259,95 +19372,138 @@ local function buildUI()
             return holder
         end
 
-        -- WHEEL: Attack's FIGHT WITH. stops = { { id, label, deg?, left?, top?,
-        -- w?, accent? }, ... } in turning order; get() = the lit id, set(id).
-        -- Missing places come from a ring (the board's five, then evenly).
-        local BOARD_DEG = { 0, -60, -120, 60, 120 }
+        -- WHEEL: Attack's FIGHT WITH (R3 Task 3, Attack.dc.html). stops = { {
+        -- id, label, accent?, more? }, ... }: MIX first (the top), then the
+        -- left column top to bottom, then the right one; a stop with more =
+        -- a function is the "+N" chip (it opens the full list, never lit).
+        -- get() = the lit id, set(id). Places come from wheelLayout (pure,
+        -- tested: labels never overlap each other or the dial). The needle
+        -- turns inside its own clipped dial frame, under the labels; the
+        -- rotation tween is the only animation.
+        local WHEEL_TURN = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        local function wheelWidth(st)
+            if st.id == "MIX" then return 64 end
+            if st.more then return 48 end
+            return math.max(60, math.min(WHEEL_WMAX, #tostring(st.label) * 7 + 24))
+        end
         function K.wheel(view, stops, get, set)
-            local n = #stops
-            local s = slot(view, 196)
+            local s = slot(view, WHEEL_H)
+            -- the board's 20 px margin: the slot's 16 plus 4
             local box = mk("Frame", {
-                Size = UDim2.fromOffset(302, 196), BackgroundTransparency = 1, Parent = s,
+                Size = UDim2.fromOffset(WHEEL_W, WHEEL_H), Position = UDim2.fromOffset(4, 0),
+                BackgroundTransparency = 1, Parent = s,
             })
-            local function disc(size, color)
+            local D = 110                             -- the dial, across
+            local dial = mk("Frame", {
+                Size = UDim2.fromOffset(D, D), Position = UDim2.fromOffset(WHEEL_CX - D / 2, WHEEL_CY - D / 2),
+                BackgroundTransparency = 1, ZIndex = 1, Parent = box,
+            })
+            local function disc(size, color, line, th)
                 local c = mk("Frame", {
-                    Size = UDim2.fromOffset(size, size),
-                    Position = UDim2.fromOffset(151 - size / 2, 118 - size / 2),
-                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = box,
+                    Size = UDim2.fromOffset(size - 2 * th, size - 2 * th),
+                    Position = UDim2.fromOffset((D - size) / 2 + th, (D - size) / 2 + th),
+                    BackgroundColor3 = color or C.raised, BackgroundTransparency = color and 0 or 1,
+                    BorderSizePixel = 0, ZIndex = 1, Parent = dial,
                 })
                 corner(c, size / 2)
+                mk("UIStroke", { Color = line, Thickness = th,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = c })
                 return c
             end
-            stroke(disc(110, C.raised), C.hair)
-            local inner = disc(90, C.raised)
-            inner.BackgroundTransparency = 1
-            stroke(inner, C.line)
-            -- The pointer: a 4x88 carrier turning about its middle (the pivot),
-            -- its lit half the top 44.
+            disc(110, C.raised, C.hair, 2)            -- #1F1D1B, 2 px #35322E
+            disc(90, nil, C.pressed, 1)               -- the inner ring, 1 px #2A2724
+            -- the needle's own frame: clipped to the dial, nothing over a label
+            local clip = mk("Frame", {
+                Name = "NeedleClip", Size = UDim2.fromOffset(D, D),
+                Position = UDim2.fromOffset(WHEEL_CX - D / 2, WHEEL_CY - D / 2),
+                BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 2, Parent = box,
+            })
+            -- a 4 x 88 carrier turning about its middle (the pivot); the lit
+            -- half is its top 44
             local carrier = mk("Frame", {
-                Size = UDim2.fromOffset(4, 88), AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromOffset(151, 118), BackgroundTransparency = 1,
-                Rotation = 0, Parent = box,
+                Name = "Needle", Size = UDim2.fromOffset(4, 88), AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromOffset(D / 2, D / 2), BackgroundTransparency = 1,
+                Rotation = 0, ZIndex = 2, Parent = clip,
             })
             local needle = mk("Frame", {
                 Size = UDim2.fromOffset(4, 44), BackgroundColor3 = C.ivory,
-                BorderSizePixel = 0, Parent = carrier,
+                BorderSizePixel = 0, ZIndex = 2, Parent = carrier,
             })
             corner(needle, 2)
-            disc(14, C.ivory)
-            local pills = {}
+            local pivot = mk("Frame", {
+                Size = UDim2.fromOffset(14, 14), Position = UDim2.fromOffset(D / 2 - 7, D / 2 - 7),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, ZIndex = 3, Parent = clip,
+            })
+            corner(pivot, 7)
+            -- the labels
+            local widths = {}
+            for i, st in ipairs(stops) do widths[i] = wheelWidth(st) end
+            local places = wheelLayout(widths)
+            local pills, lines = {}, {}
             local refresh
             for i, st in ipairs(stops) do
-                local deg = st.deg or (n <= 5 and BOARD_DEG[i]) or (((i - 1) * 360 / n + 180) % 360 - 180)
-                st.deg = deg
-                local w = st.w or math.max(60, math.min(104, #tostring(st.label) * 7 + 24))
-                local rad = math.rad(deg)
-                local cx, cy = 151 + 104 * math.sin(rad), 118 - 104 * math.cos(rad)
-                if i == 1 and deg == 0 then cy = 17 end
-                local left = st.left or math.max(0, math.min(302 - w, math.floor(cx - w / 2 + 0.5)))
-                local top = st.top or math.max(0, math.min(166, math.floor(cy - 15 + 0.5)))
+                local at = places[i]
+                st.deg = at.deg
                 local p = mk("TextButton", {
-                    Size = UDim2.fromOffset(w, 30), Position = UDim2.fromOffset(left, top),
+                    Name = "Stop", Size = UDim2.fromOffset(at.w, WHEEL_PILL),
+                    Position = UDim2.fromOffset(at.left, at.top),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft,
+                    Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft, ZIndex = 4,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(st.label), Parent = box,
                 })
-                corner(p, 15)
-                stroke(p, C.hair)
+                corner(p, WHEEL_PILL / 2)
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = p })
+                lines[i] = stroke(p, C.hair)
                 p.Activated:Connect(function()
+                    if st.more then pcall(st.more) return end
                     set(st.id)
                     refresh()
                 end)
                 pills[i] = p
             end
+            -- turning order: by where the label sits, lower left -> top -> lower right
+            local turn = {}
+            for i, st in ipairs(stops) do if not st.more then table.insert(turn, i) end end
+            table.sort(turn, function(a, b) return stops[a].deg < stops[b].deg end)
             local lastDeg = nil
             refresh = function()
+                if box.Parent == nil then return 1 end
                 local cur = get()
                 local lit = 1
-                for i, st in ipairs(stops) do if st.id == cur then lit = i end end
+                for i, st in ipairs(stops) do if st.id == cur and not st.more then lit = i end end
                 local st = stops[lit]
                 local acc = C.ivory
                 if st and st.accent then local _, _, a = accentColors(st.accent) acc = a end
                 for i, p in ipairs(pills) do
-                    p.BackgroundColor3 = (i == lit) and acc or C.row
-                    p.TextColor3 = (i == lit) and C.base or LOOK.soft
+                    local on = i == lit
+                    p.BackgroundColor3 = on and acc or C.row
+                    p.TextColor3 = on and C.base or LOOK.soft
+                    lines[i].Color = on and acc or C.hair
                 end
                 needle.BackgroundColor3 = acc
                 if st and st.deg ~= lastDeg then
                     lastDeg = st.deg
-                    tween(carrier, { Rotation = st.deg })
+                    tween(carrier, { Rotation = st.deg }, WHEEL_TURN)
                 end
                 return lit
             end
             local inside = false
             box.MouseEnter:Connect(function() inside = true end)
             box.MouseLeave:Connect(function() inside = false end)
-            -- The mouse wheel over it turns through the stops, in order.
-            UIS.InputChanged:Connect(function(i)
-                if inside and i.UserInputType == Enum.UserInputType.MouseWheel and n > 0 then
+            -- The mouse wheel over it turns through the stops as the board's
+            -- does: down toward the lower left, up toward the lower right,
+            -- stopping at the ends.
+            local conn
+            conn = UIS.InputChanged:Connect(function(i)
+                if box.Parent == nil then
+                    if conn then conn:Disconnect() end
+                    return
+                end
+                if inside and i.UserInputType == Enum.UserInputType.MouseWheel and #turn > 0 then
                     local at = refresh()
-                    local to = ((at + (i.Position.Z < 0 and 1 or -1) - 1) % n) + 1
-                    set(stops[to].id)
+                    local k = table.find(turn, at) or 1
+                    local to = math.max(1, math.min(#turn, k + (i.Position.Z < 0 and -1 or 1)))
+                    set(stops[turn[to]].id)
                     refresh()
                 end
             end)
@@ -19355,7 +19511,6 @@ local function buildUI()
             addLive(refresh)
             return box
         end
-
         -- PAGE TOP (R2 Task 4): the pack's chip, small, above the mode strip.
         -- Task S: the boards put it in the header, right after the title (show
         -- draws it there); the page itself starts with its mode strip.
@@ -23896,31 +24051,41 @@ local function buildUI()
 
     do
         local v = makeView("attack")
-        gap(v, 6)
+        -- R3 Task 3: the page is Attack.dc.html, px for px: the mode tabs, the
+        -- wheel, the truth card, YOUR WEAPONS, then PACE, ALSO, Fine-tune.
 
         -- ---------- WHICH MODE THE WHEEL IS FOR ----------
-        -- One pick per mode (CFG.FightWith[mode]). Tabs: the mode you are in,
-        -- the one whose "Fights with" row brought you here, and Sea events if
-        -- the key owns it - three at most. A mode that fights with no weapon
-        -- (PvP aims by itself, Sea travel only sails) has no tab.
+        -- One pick per mode (CFG.FightWith[mode]). The board's segmented
+        -- control, a tab per mode that keeps its own pick: the mode you are
+        -- in, the one whose "Fights with" row brought you here, Random, and
+        -- Sea events if the key owns it - three at most, in the Modes order.
+        -- A mode that fights with no weapon (PvP aims by itself, Sea travel
+        -- only sails) has no tab.
         local FIGHTABLE = { circuit = true, random = true, raid = true, elite = true, fruit = true,
             berry = true, recipe = true, sword = true, flower = true, ember = true, halloween = true,
             seaevents = true, prehistoric = true, mirage = true, levi = true }
+        local TAB_ORDER = { "circuit", "random", "raid", "elite", "fruit", "berry", "recipe", "sword",
+            "flower", "ember", "halloween", "seaevents", "prehistoric", "mirage", "levi" }
         local ctxSel, ctxFrom = nil, nil
         local function ctxList()
-            local list = {}
+            local want, n = {}, 0
             local function add(m)
-                if m and FIGHTABLE[m] and #list < 3 and not table.find(list, m) then table.insert(list, m) end
+                if m and FIGHTABLE[m] and not want[m] and n < 3 then want[m] = true n += 1 end
             end
             add(modeNow())
             add(ctxFrom)
+            add("random")
             if P.packState("seaevents") == "open" then add("seaevents") end
-            if #list == 0 then list[1] = "random" end
+            local list = {}
+            for _, m in ipairs(TAB_ORDER) do if want[m] then table.insert(list, m) end end
             return list
         end
         local function ctx()
             local list = ctxList()
             if ctxSel and table.find(list, ctxSel) then return ctxSel end
+            if ctxFrom and table.find(list, ctxFrom) then return ctxFrom end
+            local now = modeNow()
+            if now and table.find(list, now) then return now end
             return list[1]
         end
         -- The wheel's value for a mode: "MIX" or a weapon name.
@@ -23959,6 +24124,34 @@ local function buildUI()
             end
         end
 
+        -- The board's section line: 11 px SemiBold caps #847E75, sitting on
+        -- the bottom of an h px row (pb px above its bottom), 20 px in; an
+        -- optional muted note at the right.
+        local function sectionLine(text, h, pb, note)
+            local f = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, h), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(0.6, -20, 0, 14), Position = UDim2.new(0, 20, 1, -pb - 14),
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = LOOK.mute, Text = text, Parent = f,
+            })
+            if note then
+                mk("TextLabel", {
+                    Size = UDim2.new(0.5, -20, 0, 14), Position = UDim2.new(0.5, 0, 1, -pb - 14),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = LOOK.size.help,
+                    TextXAlignment = Enum.TextXAlignment.Right, TextYAlignment = Enum.TextYAlignment.Bottom,
+                    TextColor3 = LOOK.mute, Text = note, Parent = f,
+                })
+            end
+            return f
+        end
+
+        -- the tabs: 16 px in, 4 px padding, radius 12, #1B1917; each tab 36
+        -- high, radius 9, Bold 13; the lit one #2E2B27 and white, the rest
+        -- bare and #9A958D
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
@@ -23972,9 +24165,9 @@ local function buildUI()
             local tabs = {}
             for i = 1, 3 do
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1, -8, 1, -8), Position = UDim2.fromOffset(4, 4),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
+                    Size = UDim2.new(1, -8, 0, 36), Position = UDim2.fromOffset(4, 4),
+                    BackgroundColor3 = P.kit.SEG_ON, BackgroundTransparency = 1, BorderSizePixel = 0,
+                    AutoButtonColor = false, Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = C.second,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Visible = false, Parent = strip,
                 })
                 corner(b, 9)
@@ -23987,25 +24180,29 @@ local function buildUI()
             addLive(function()
                 local list, at = ctxList(), ctx()
                 local n = #list
+                -- n equal tabs, 4 px apart, 4 px from the strip's edges
+                local lost = 8 + 4 * (n - 1)
                 for i, b in ipairs(tabs) do
                     b.Visible = i <= n
                     if i <= n then
-                        b.Size = UDim2.new(1 / n, -8, 1, -8)
-                        b.Position = UDim2.new((i - 1) / n, 4, 0, 4)
+                        b.Size = UDim2.new(1 / n, -lost / n, 0, 36)
+                        b.Position = UDim2.new((i - 1) / n, 4 + (i - 1) * (4 - lost / n), 0, 4)
                         b.Text = "For " .. tostring(TITLES[list[i]] or list[i])
-                        b.BackgroundColor3 = (list[i] == at) and C.pressed or C.row
+                        b.BackgroundTransparency = (list[i] == at) and 0 or 1
                         b.TextColor3 = (list[i] == at) and C.text or C.second
                     end
                 end
             end)
         end
+        gap(v, 6)
         caption(v, "Each mode keeps its own pick. Set Random to Dragon Talon and Sea events keeps Tiger.")
 
         -- ---------- THE WHEEL ----------
-        local RANK = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
+        local RANK = FIGHT_TYPES        -- melee, sword, fruit, gun: the wheel's turning order
         local ACC = TYPE_ACCENT       -- melee red, sword blue, fruit orange, gun violet
         local TYPE_WORD = { Melee = "MELEE", Sword = "SWORD", ["Blox Fruit"] = "FRUIT", Gun = "GUN" }
         local function rgbOf(t) return Color3.fromRGB(t[1], t[2], t[3]) end
+        -- every tool you carry (the truth card's mix reads it as the farm does)
         local function carriedSorted()
             local out, seen = {}, {}
             for _, t in ipairs(toolNames()) do
@@ -24021,7 +24218,30 @@ local function buildUI()
             end)
             return out
         end
-        heading2(v, "fight with")
+        -- how much a weapon is in use: on, its M1, its lit moves, the M1 pick
+        local function usedOf(name)
+            local wc = CFG.Weapons[name]
+            local n = 0
+            if wc then
+                if wc.use then n += 1 end
+                if wc.M1 then n += 1 end
+                for _, k in ipairs(KEYS) do if wc[k] then n += 1 end end
+            end
+            if (CFG.M1Weapon or "") == name then n += 2 end
+            return n
+        end
+        -- the wheel's weapons: only real fight weapons (fightWeapons: the
+        -- game's own type label), plus the mode's pick if it is something
+        -- else, so it can still be turned back
+        local function wheelWeapons()
+            local pick = fwOf(ctx())
+            local keep = {}
+            if pick ~= "MIX" then keep[pick] = true end
+            local list = fightWeapons(carriedSorted(), keep)
+            for _, w in ipairs(list) do w.used = usedOf(w.name) end
+            return list, pick
+        end
+        sectionLine("FIGHT WITH", 26, 4)
         local wheelHolder = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
@@ -24030,22 +24250,94 @@ local function buildUI()
             SortOrder = Enum.SortOrder.LayoutOrder,
             HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = wheelHolder,
         })
-        -- MIX and the weapons you carry. Rebuilt when what you carry changes.
+        -- "+N": the full list, under the wheel (never over it), shut until asked
+        local moreBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, Visible = false, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIPadding", {
+            PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 6),
+            Parent = moreBox,
+        })
+        local moreCard = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = moreBox,
+        })
+        corner(moreCard, 14)
+        mk("UIStroke", { Color = C.hair, Thickness = 1,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = moreCard })
+        mk("UIPadding", {
+            PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+            PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), Parent = moreCard,
+        })
+        mk("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal, Wraps = true,
+            Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = moreCard,
+        })
+        local moreOpen, moreLit = false, {}
+        addLive(function()
+            local cur = fwOf(ctx())
+            for _, e in ipairs(moreLit) do
+                local on = e.id == cur
+                local a = rgbOf((ACCENT[e.acc] or ACCENT.none)[3])
+                e.b.BackgroundColor3 = on and a or C.row
+                e.b.TextColor3 = on and C.base or LOOK.soft
+                e.line.Color = on and a or C.hair
+            end
+        end)
+        -- MIX and your fight weapons; past 6, the 5 most used and "+N".
+        -- Rebuilt when that set changes.
         local wheelSig = nil
         local function buildWheel()
-            local list = carriedSorted()
-            local names = {}
-            for _, w in ipairs(list) do table.insert(names, w.name) end
-            local sig = table.concat(names, "|")
+            local list, pick = wheelWeapons()
+            local shown, hidden = wheelShown(list, pick)
+            local parts = {}
+            for _, w in ipairs(shown) do table.insert(parts, w.name) end
+            table.insert(parts, "#")
+            for _, w in ipairs(hidden) do table.insert(parts, w.name) end
+            local sig = table.concat(parts, "|")
             if sig == wheelSig then return end
             wheelSig = sig
             for _, c in ipairs(wheelHolder:GetChildren()) do
                 if c:IsA("GuiObject") then c:Destroy() end
             end
+            for _, c in ipairs(moreCard:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            table.clear(moreLit)
             local stops = { { id = "MIX", label = "MIX" } }
-            for _, w in ipairs(list) do
+            for _, w in ipairs(shown) do
                 table.insert(stops, { id = w.name, label = w.name, accent = ACC[w.ty] })
             end
+            if #hidden > 0 then
+                table.insert(stops, { id = "+N", label = "+" .. #hidden, more = function()
+                    moreOpen = not moreOpen
+                    moreBox.Visible = moreOpen
+                end })
+                -- the full list: every fight weapon, the lit one in its type colour
+                for i, w in ipairs(list) do
+                    local b = mk("TextButton", {
+                        Name = "MorePick",
+                        Size = UDim2.fromOffset(math.max(60, math.min(WHEEL_WMAX, #w.name * 7 + 24)), 30),
+                        BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                        Font = LOOK.black, TextSize = lookPx(12), TextColor3 = LOOK.soft,
+                        TextTruncate = Enum.TextTruncate.AtEnd, Text = w.name, LayoutOrder = i, Parent = moreCard,
+                    })
+                    corner(b, 15)
+                    mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = b })
+                    local line = mk("UIStroke", { Color = C.hair, Thickness = 1,
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                    b.Activated:Connect(function()
+                        setFW(w.name)
+                        moreOpen = false
+                        moreBox.Visible = false
+                    end)
+                    table.insert(moreLit, { id = w.name, acc = ACC[w.ty] or "none", b = b, line = line })
+                end
+            else
+                moreOpen = false
+            end
+            moreBox.Visible = moreOpen
             local ov, of = buildingView, buildingFold
             buildingView, buildingFold = v, nil
             P.kit.wheel(wheelHolder, stops, function() return fwOf(ctx()) end, setFW)
@@ -24054,6 +24346,7 @@ local function buildUI()
         buildingFold = nil
         buildWheel()
         addLive(buildWheel)
+        gap(v, 4)
 
         -- ---------- THE TRUTH ----------
         -- What the mode really fights with, and why.
@@ -24126,21 +24419,28 @@ local function buildUI()
             return "M1 and its moves, for " .. modeWord(m) .. ". No other M1 pick, weapon order or mastery "
                 .. "setting can change it. Turn the wheel to MIX to use several."
         end, pickAcc)
+        -- the mastery goal row: 6 px under the reason, min 44 high, radius
+        -- 10, #151413; words 12 px #C9C3B9 line-height 1.4; a 40 x 24 switch
+        local goalHold = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1,
+            LayoutOrder = 3, Visible = false, Parent = card,
+        })
         local goalBtn = mk("TextButton", {
-            Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base, BorderSizePixel = 0,
-            AutoButtonColor = false, Text = "", LayoutOrder = 3, Visible = false, Parent = card,
+            Size = UDim2.new(1, 0, 0, 44), Position = UDim2.fromOffset(0, 6),
+            BackgroundColor3 = Color3.fromRGB(21, 20, 19), BorderSizePixel = 0,
+            AutoButtonColor = false, Text = "", Visible = false, Parent = goalHold,
         })
         corner(goalBtn, 10)
         pressable(goalBtn)
         local goalTxt = mk("TextLabel", {
-            Size = UDim2.new(1, -64, 1, 0), Position = UDim2.fromOffset(10, 0),
-            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-            TextColor3 = C.second, Text = "", Parent = goalBtn,
+            Size = UDim2.new(1, -70, 1, 0), Position = UDim2.fromOffset(10, 0),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
+            LineHeight = LOOK.lh(1.4), TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+            TextColor3 = LOOK.soft, Text = "", Parent = goalBtn,
         })
         local goalTrack = mk("Frame", {
             Size = UDim2.fromOffset(40, 24), Position = UDim2.new(1, -50, 0.5, -12),
-            BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = goalBtn,
+            BackgroundColor3 = LOOK.ghost, BorderSizePixel = 0, Parent = goalBtn,
         })
         corner(goalTrack, 12)
         local goalKnob = mk("Frame", {
@@ -24157,6 +24457,7 @@ local function buildUI()
         addLive(function()
             local m = ctx()
             local one = forceOf(m)
+            goalHold.Visible = one ~= nil
             goalBtn.Visible = one ~= nil
             if not one then return end
             local stop = tonumber(CFG.MasteryStop) or 0
@@ -24170,29 +24471,17 @@ local function buildUI()
             else
                 goalTxt.Text = "Mastery goal: off. Turn on to stop at " .. stop .. ", then back to MIX"
             end
-            goalTrack.BackgroundColor3 = on and C.warn or C.hair
+            goalTrack.BackgroundColor3 = on and C.warn or LOOK.ghost
             goalKnob.Position = UDim2.fromOffset(on and 19 or 3, 3)
         end)
 
         -- ---------- YOUR WEAPONS ----------
-        do
-            local h = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
-            })
-            mk("TextLabel", {
-                Size = UDim2.new(0.5, 0, 1, -4), Position = UDim2.fromOffset(20, 4),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                Text = "YOUR WEAPONS", Parent = h,
-            })
-            mk("TextLabel", {
-                Size = UDim2.new(0.5, -20, 1, -4), Position = UDim2.new(0.5, 0, 0, 4),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third,
-                Text = "tap the moves to use", Parent = h,
-            })
-        end
+        -- The board's cards: radius 14, padding 10 8 10 12, 8 apart. A card
+        -- in use is #1B1917, the rest #151413 at half strength (the board's
+        -- opacity .5, mixed into the colours: Roblox has no group opacity
+        -- short of a CanvasGroup). The chosen card: a type-colour outline,
+        -- "Using only this" filled in it, its sub line tinted.
+        sectionLine("YOUR WEAPONS", 26, 6, "tap the moves to use")
         local cardsBox = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
@@ -24202,13 +24491,27 @@ local function buildUI()
             HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = cardsBox,
         })
         mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = cardsBox })
+        -- the board's colours as RGB, so a resting card can take half of each
+        local RGB = { row = { 27, 25, 23 }, off = { 21, 20, 19 }, hair = { 53, 50, 46 }, line = { 36, 34, 31 },
+            ghost = { 58, 54, 50 }, soft = { 201, 195, 185 }, text = { 242, 239, 234 }, mute = { 132, 126, 117 },
+            ivory = { 232, 224, 212 }, base = { 18, 17, 16 }, live = { 63, 208, 126 } }
+        local function col(t, full)
+            if full then return rgbOf(t) end
+            local u = RGB.base
+            return Color3.fromRGB(math.floor((t[1] + u[1]) / 2 + 0.5), math.floor((t[2] + u[2]) / 2 + 0.5),
+                math.floor((t[3] + u[3]) / 2 + 0.5))
+        end
         local cardSig = nil
         local function buildCards()
             pcall(syncWeapons)
             local m = ctx()
-            local list = carriedSorted()
             local x = forceOf(m)
             local mixSet = select(2, mixNames())
+            -- your fight weapons, plus anything else in use here (it can be switched off)
+            local keep = {}
+            for n in pairs(mixSet) do keep[n] = true end
+            if fwOf(m) ~= "MIX" then keep[fwOf(m)] = true end
+            local list = fightWeapons(carriedSorted(), keep)
             local m1Pick = CFG.M1Weapon or ""
             local sig = m .. "|" .. tostring(x) .. "|" .. m1Pick .. "|" .. tostring(CFG.AutoAttack)
                 .. "|" .. tostring(P.m1Now)
@@ -24224,67 +24527,78 @@ local function buildUI()
             for i, w in ipairs(list) do
                 local name = w.name
                 local acc = ACC[w.ty] or "none"
-                local tint, text, accent = rgbOf(ACCENT[acc][1]), rgbOf(ACCENT[acc][2]), rgbOf(ACCENT[acc][3])
+                local A = ACCENT[acc] or ACCENT.none        -- tint, text on tint, accent, soft
                 local wc = CFG.Weapons[name] or {}
                 local chosen = x == name
                 local isOn = x and chosen or (not x and mixSet[name] == true)
+                local on = isOn and true or false
                 local m1Name = x or m1NameMix()
                 local m1Lit = m1Name == name
                 local c = mk("Frame", {
                     Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                    BackgroundColor3 = isOn and C.row or C.base, BorderSizePixel = 0,
+                    BackgroundColor3 = on and col(RGB.row, true) or col(RGB.off, false), BorderSizePixel = 0,
                     LayoutOrder = i, Parent = cardsBox,
                 })
                 corner(c, 14)
                 mk("UIStroke", {
-                    Color = chosen and accent or (isOn and C.hair or C.line), Thickness = 1,
-                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = c,
+                    Color = chosen and col(A[3], true) or (on and col(RGB.hair, true) or col(RGB.line, false)),
+                    Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = c,
                 })
                 mk("UIListLayout", {
-                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = c,
+                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = c,
                 })
                 mk("UIPadding", {
-                    PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 10),
+                    PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
                     PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 8), Parent = c,
                 })
-                -- the title row: type, name (opens the weapon's own page), Use only this
+                -- the title row (30 high): type tag, name (opens the weapon's
+                -- own page), Use only this
                 local top = mk("Frame", {
-                    Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = 1, Parent = c,
+                    Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, LayoutOrder = 1, Parent = c,
                 })
-                local chip = mk("TextLabel", {
-                    Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(0, 13),
-                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = LOOK.black,
-                    TextSize = LOOK.size.chip, TextColor3 = text, Text = TYPE_WORD[w.ty] or string.upper(tostring(w.ty)),
+                local word = TYPE_WORD[w.ty] or "TOOL"
+                local tagW = math.floor(#word * 7.2 + 12 + 0.5)
+                local tag = mk("TextLabel", {
+                    Size = UDim2.fromOffset(tagW, 17), AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = col(A[1], on), BorderSizePixel = 0,
+                    Font = LOOK.black, TextSize = LOOK.size.chip, TextColor3 = col(A[2], on), Text = word,
                     Parent = top,
                 })
-                corner(chip, 5)
+                corner(tag, 5)
+                local onlyW = chosen and 108 or 94
                 local nameBtn = mk("TextButton", {
-                    Size = UDim2.new(1, -176, 1, 0), Position = UDim2.fromOffset(58, 0),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
+                    Size = UDim2.new(1, -(tagW + 8 + onlyW + 8), 1, 0), Position = UDim2.fromOffset(tagW + 8, 0),
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = lookPx(15),
                     TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                    TextColor3 = isOn and C.text or C.second, Text = name, AutoButtonColor = false,
+                    TextColor3 = col(RGB.text, on), Text = name, AutoButtonColor = false,
                     Parent = top,
                 })
                 nameBtn.Activated:Connect(function() openWeapon(name) end)
-                local only = mk("TextButton", {
-                    Size = UDim2.fromOffset(112, 40), AnchorPoint = Vector2.new(1, 0.5),
-                    Position = UDim2.new(1, 0, 0.5, 0),
-                    BackgroundColor3 = chosen and accent or C.base, BorderSizePixel = 0,
-                    BackgroundTransparency = chosen and 0 or 1,
-                    AutoButtonColor = false, Font = LOOK.bold, TextSize = lookPx(11),
-                    TextColor3 = chosen and C.base or LOOK.soft,
-                    Text = chosen and "Using only this" or "Use only this", Parent = top,
+                -- the pill: drawn 30 high (radius 9, Bold 11), its target 44
+                local face = mk("Frame", {
+                    Size = UDim2.fromOffset(onlyW, 30), AnchorPoint = Vector2.new(1, 0),
+                    Position = UDim2.new(1, 0, 0, 0), BorderSizePixel = 0,
+                    BackgroundColor3 = col(A[3], true), BackgroundTransparency = chosen and 0 or 1,
+                    Parent = top,
                 })
-                corner(only, 9)
+                corner(face, 9)
                 mk("UIStroke", {
-                    Color = chosen and accent or LOOK.ghost, Thickness = 1,
-                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = only,
+                    Color = chosen and col(A[3], true) or col(RGB.ghost, on), Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = face,
+                })
+                local only = mk("TextButton", {
+                    Size = UDim2.new(1, 0, 0, 44), Position = UDim2.fromOffset(0, -7),
+                    BackgroundTransparency = 1, AutoButtonColor = false, Font = LOOK.bold, TextSize = lookPx(11),
+                    TextColor3 = chosen and C.base or col(RGB.soft, on),
+                    Text = chosen and "Using only this" or "Use only this", Parent = face,
                 })
                 only.Activated:Connect(function()
                     CFG.FightWith = CFG.FightWith or {}
                     if chosen then CFG.FightWith[m] = nil else CFG.FightWith[m] = name end
                 end)
-                -- the chips: M1, then the moves
+                -- the keys: 34 high (radius 10, ExtraBold 13), 6 apart, each
+                -- a 44 target; lit = filled (M1 in the type colour, a move
+                -- ivory), unlit = outlined
                 local row = mk("Frame", {
                     Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1, LayoutOrder = 2, Parent = c,
@@ -24293,22 +24607,27 @@ local function buildUI()
                     FillDirection = Enum.FillDirection.Horizontal, Wraps = true,
                     Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = row,
                 })
-                local function chipBtn(order, word, width, lit, litColor, cb)
-                    local b = mk("TextButton", {
-                        Size = UDim2.fromOffset(width, 44), BackgroundColor3 = lit and litColor or C.base,
-                        BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.black,
-                        TextSize = lookPx(13), TextColor3 = lit and C.base or LOOK.soft,
-                        Text = word, LayoutOrder = order, Parent = row,
+                local function keyBtn(order, k, width, lit, litRGB, cb)
+                    local f = mk("Frame", {
+                        Size = UDim2.fromOffset(width, 34), BorderSizePixel = 0,
+                        BackgroundColor3 = col(litRGB, on), BackgroundTransparency = lit and 0 or 1,
+                        LayoutOrder = order, Parent = row,
                     })
-                    corner(b, 10)
+                    corner(f, 10)
                     mk("UIStroke", {
-                        Color = lit and litColor or LOOK.ghost, Thickness = 1,
-                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+                        Color = lit and col(litRGB, on) or col(RGB.ghost, on), Thickness = 1,
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = f,
+                    })
+                    local b = mk("TextButton", {
+                        Size = UDim2.new(1, 0, 0, 44), Position = UDim2.fromOffset(0, -5),
+                        BackgroundTransparency = 1, AutoButtonColor = false, Font = LOOK.black,
+                        TextSize = lookPx(13), TextColor3 = lit and C.base or col(RGB.soft, on),
+                        Text = k, Parent = f,
                     })
                     b.Activated:Connect(function() pcall(cb) end)
                     return b
                 end
-                chipBtn(0, "M1", 46, m1Lit, accent, function()
+                keyBtn(0, "M1", 40, m1Lit, A[3], function()
                     -- The M1 pick (the same setting the old picker wrote); the
                     -- weapon is switched on so the farm has it in its list.
                     local w2 = wcfg(name)
@@ -24323,33 +24642,34 @@ local function buildUI()
                 local keys = { "Z", "X", "C", "V" }
                 if w.ty == "Blox Fruit" or wc.F then table.insert(keys, "F") end
                 for ki, k in ipairs(keys) do
-                    chipBtn(ki, k, 40, wc[k] == true, C.ivory, function()
+                    keyBtn(ki, k, 38, wc[k] == true, RGB.ivory, function()
                         local w2 = wcfg(name)
                         w2[k] = not w2[k]
                         if w2[k] then w2.use = true end
                     end)
                 end
-                -- the state line
-                local state, stateColor
+                -- the sub line: tinted on the chosen card, muted "resting: ..." on the rest
+                local state, stateRGB
                 if x then
                     if chosen then
                         local lit = {}
                         for _, k in ipairs(KEYS) do if wc[k] then table.insert(lit, k) end end
                         state = "Everything uses this one in " .. modeWord(m)
                             .. (#lit == 0 and " - M1 only, tap a move to add it" or "")
-                        stateColor = accent
+                        stateRGB = A[3]
                     else
                         state = "resting: " .. modeWord(m) .. " uses " .. x .. " only"
-                        stateColor = C.third
+                        stateRGB = RGB.mute
                     end
                 else
                     state = isOn and ("in the mix" .. (m1Lit and ", swings M1" or "")) or "no move lit: skipped"
-                    stateColor = isOn and C.live or C.third
+                    stateRGB = isOn and RGB.live or RGB.mute
                 end
                 mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
-                    TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
-                    TextColor3 = stateColor, Text = state, LayoutOrder = 3, Parent = c,
+                    Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = LOOK.regular,
+                    TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = col(stateRGB, on), Text = state, LayoutOrder = 3, Parent = c,
                 })
             end
         end
