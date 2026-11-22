@@ -37,12 +37,17 @@ def cut(start, end):
 
 
 sec = cut("-- SEA EVENTS\n", "-- SERVER NEWS\n")
+# FIGHT WITH (Plan 2 R2): the sea's weapon filter asks P.fightWeapon - the real block.
+_fa = src.index("-- FIGHT WITH (Plan 2 R2, 2026-11-22): ONE decider per mode")
+_fa = src.index("\ndo\n", _fa) + 1
+_pa = src.index("-- FIGHT WITH (Plan 2 R2): the pure parts")
+FIGHTWITH = src[_pa:src.index("-- PACKS END", _pa)] + src[_fa:src.index("-- The weapons that are on AND in your backpack", _fa)]
 # The Prehistoric search's legs, as they are (SEA HUNT): what the travel's legs build on.
 legs = cut("        local function searchLeg(", "        -- Where the golems are held")
 
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
     f.write(read("seaev_stubs.lua") + "S.searchLeg = (function()\n" + legs + "return searchLeg end)()\n"
-            + "local function SECTION()\n" + sec + "\nend\n" + read("seaev_cases.lua"))
+            + FIGHTWITH + "local function SECTION()\n" + sec + "\nend\n" + read("seaev_cases.lua"))
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)

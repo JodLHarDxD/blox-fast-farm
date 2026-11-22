@@ -207,6 +207,15 @@ local CFG = {
     -- The farm stops when it reaches MasteryStop (0 = never). "" = off.
     MasteryWeapon      = "",
     MasteryStop        = 500,
+    -- FIGHT WITH (Plan 2 R2, 2026-11-22: "Random with Dragon Talon" could not
+    -- be had - the default sword, a mastery pick, an M1 picker and the weapon
+    -- order all decided). ONE wheel per mode: [mode id] = a weapon name, and
+    -- that weapon alone fights there, M1 and its lit moves; no other setting
+    -- can change it. Missing = "MIX" = every other setting as before. A weapon
+    -- not carried = the mix, said once. FightGoal[mode] = true: back to MIX
+    -- when that weapon reaches MasteryStop.
+    FightWith          = {},
+    FightGoal          = {},
     -- A GUN'S M1 (user, 2026-10-07: "for the gun to work best it should hold
     -- down"). On: a gun that fires while held (Dragonstorm) gets the button
     -- HELD like a player - the game's own fire loop, every shot silently aimed
@@ -806,6 +815,26 @@ ACCENT = {   -- pack accents: tint, text on tint, accent, soft border (RGB)
     fruits = { { 42, 16, 36 }, { 242, 166, 207 }, { 224, 85, 154 }, { 74, 31, 61 } },
     none = { { 27, 25, 23 }, { 232, 224, 212 }, { 232, 224, 212 }, { 53, 50, 46 } },
 }
+-- FIGHT WITH (Plan 2 R2): the pure parts (tools/fightwith_test.py).
+-- fw = the wheel's value for a mode ("MIX", nil or a weapon name); carried = the
+-- tool names you carry; mixList = whatever MIX means to the caller. A carried
+-- name = { name }; a name not carried = mixList and true (say so once).
+function fightPick(fw, carried, mixList)
+    if fw == nil or fw == "" or fw == "MIX" then return mixList, false end
+    for _, n in ipairs(carried) do
+        if n == fw then return { fw }, false end
+    end
+    return mixList, true
+end
+-- The mastery goal is reached (a mastery read and the stop value; 0 = never).
+function fightGoalDone(mastery, stop)
+    return type(mastery) == "number" and type(stop) == "number" and stop > 0 and mastery >= stop
+end
+-- Home's Attack row and the kit's "Fights with" rows.
+function fightLabel(single)
+    if single then return tostring(single) .. " only" end
+    return "Mix"
+end
 -- PACKS END
 
 -- THE DEFAULTS as written above, kept (SETTINGS LOCK, user 2026-10-14: only
@@ -4096,9 +4125,103 @@ function P.moveWeaponUp(name)
     return false
 end
 
+-- =========================================================
+-- FIGHT WITH (Plan 2 R2, 2026-11-22): ONE decider per mode
+-- =========================================================
+-- CFG.FightWith[mode] = a weapon name: that weapon alone fights in that mode
+-- (M1 and the moves lit on its card), and MasteryWeapon, the M1 pick, the
+-- weapon order, AutoAttack, V4's every-weapon and the inventory swap are all
+-- out of it. "MIX" / missing / not carried = nothing here acts: every call
+-- site below keeps its old code for that. P.weaponsFor(mode) is the one place
+-- that answers: "MIX", or a one-entry attack list {{ name, cfg, tool }}.
+-- mode nil = the mode running now (P.modeNow, set by the panel).
+do
+    local told = {}
+    local function carried()
+        local out = {}
+        for _, t in ipairs(toolNames()) do table.insert(out, t.Name) end
+        return out
+    end
+    -- The one weapon in force, or nil = MIX. quiet: no status line.
+    function P.fightWeapon(mode, quiet)
+        local tbl = CFG.FightWith
+        if type(tbl) ~= "table" or next(tbl) == nil then return nil end
+        if mode == nil then
+            local mn = (P :: any).modeNow
+            mode = mn and mn() or nil
+        end
+        local want = mode and tbl[mode]
+        if type(want) ~= "string" or want == "" or want == "MIX" then return nil end
+        local _, missing = fightPick(want, carried(), nil)
+        if missing then
+            local key = tostring(mode) .. "|" .. want
+            if not quiet and not told[key] then
+                told[key] = true
+                say(want .. " is not carried - " .. tostring(mode) .. " fights with the mix")
+            end
+            return nil
+        end
+        return want
+    end
+    function P.weaponsFor(mode)
+        local name = P.fightWeapon(mode)
+        if not name then return "MIX" end
+        local tool = findTool(name)
+        if not tool then return "MIX" end
+        local w = wcfg(name)
+        -- A move its mastery has not unlocked is never pressed (the rule the
+        -- mastery farm and V4 use).
+        local se = (P :: any).seaev
+        local function on(k)
+            if w[k] ~= true then return false end
+            if se and se.unlocked then return se.unlocked(name, k) ~= false end
+            return true
+        end
+        return { { name = name, tool = tool, cfg = {
+            use = true, M1 = true, hold = w.hold,
+            Z = on("Z"), X = on("X"), C = on("C"), V = on("V"), F = on("F"),
+        } } }
+    end
+    -- A weapon's mastery as far as it can be read without asking the server:
+    -- its tool's Level, else what the last tick read.
+    P.fightMasteryCache = {}
+    function P.fightMastery(name)
+        local t = findTool(name)
+        local lv = t and t:FindFirstChild("Level")
+        local v = lv and tonumber(lv.Value)
+        return v or P.fightMasteryCache[name]
+    end
+    -- Once a second (the side loop): a mode whose goal is on and whose weapon
+    -- reached MasteryStop goes back to MIX, goal off.
+    function P.fightGoalTick()
+        local goals, tbl = CFG.FightGoal, CFG.FightWith
+        if type(goals) ~= "table" or type(tbl) ~= "table" or next(goals) == nil then return end
+        local stop = tonumber(CFG.MasteryStop) or 0
+        for mode, on in pairs(goals) do
+            local name = tbl[mode]
+            if on and type(name) == "string" and name ~= "" and name ~= "MIX" and findTool(name) then
+                local m = P.fightMastery(name)
+                if m == nil and (P :: any).masteryOf then m = (P :: any).masteryOf(name) end
+                if m ~= nil then P.fightMasteryCache[name] = m end
+                if fightGoalDone(m, stop) then
+                    tbl[mode] = nil
+                    goals[mode] = nil
+                    local text = string.format("%s reached %d mastery - %s fights with the mix again",
+                        name, m, tostring(mode))
+                    print("[BFF] " .. text)
+                    say(text)
+                end
+            end
+        end
+    end
+end
+
 -- The weapons that are on AND in your backpack, in your order. AutoAttack:
 -- every one you carry (P.autoWeapons, WEAPON ROTATION).
 local function usedWeapons()
+    -- FIGHT WITH: the mode's one weapon, whatever else is set.
+    local fw = (P :: any).weaponsFor()
+    if fw ~= "MIX" then return fw end
     -- The mastery farm (THE GUN): that weapon alone, whatever else is set.
     local mu = (P :: any).masteryUsed
     local only = mu and mu()
@@ -4296,6 +4419,16 @@ do
             -- The fight's own weapon (the volcano's golems: CFG.GolemWeapon),
             -- then your pick; whichever you carry first.
             local own = pileCur and pileCur.m1Weapon and pileCur.m1Weapon() or nil
+            -- FIGHT WITH: the mode's one weapon (the fight's own first, as above);
+            -- no M1 pick or mastery pick below can change it.
+            local fw = (P :: any).weaponsFor()
+            if fw ~= "MIX" then
+                if type(own) == "string" and own ~= "" then
+                    local ot = findTool(own)
+                    if ot then return { name = own, cfg = wcfg(own), tool = ot } end
+                end
+                return fw[1]
+            end
             -- The mastery weapon before your pick: another weapon's swing
             -- would share its kills.
             for _, want in ipairs({ own or "", CFG.MasteryWeapon or "", CFG.M1Weapon or "" }) do
@@ -4432,6 +4565,8 @@ do
             if not vents and pileCur and pileCur.noRotate and pileCur.noRotate() then return false end
             -- The mastery farm: nothing else is put in your hands.
             if not vents and (CFG.MasteryWeapon or "") ~= "" then return false end
+            -- FIGHT WITH: one weapon, nothing is put in your hands.
+            if not vents and (P :: any).fightWeapon() then return false end
             local now = os.clock()
             if now - R.lastLoad < (CFG.InvSwapGap or 1.5) then return false end
             local carried = {}
@@ -4933,7 +5068,7 @@ local function castSkill(u, k)
     -- 1.5 s"): a fixed wait after each key was a third of a cooldown that short.
     local race = (P :: any).race
     local fast = (pileCur and pileCur.fastCast) or (race ~= nil and race.allNow())
-        or (CFG.MasteryWeapon or "") ~= ""
+        or ((CFG.MasteryWeapon or "") ~= "" and not (P :: any).fightWeapon())
     if fast then
         -- The move before still playing: wait for it (up to 3 s), never press into it.
         local tw = os.clock()
@@ -5042,7 +5177,7 @@ local function attackTick()
     if race then between = 0 end
     -- The mastery farm: the same - its one weapon's every key the moment it
     -- is ready, its M1 in the gaps (a Lightning M1 is also what refills its orbs).
-    if (CFG.MasteryWeapon or "") ~= "" then between = 0 end
+    if (CFG.MasteryWeapon or "") ~= "" and not (P :: any).fightWeapon() then between = 0 end
 
     if anySkill and (not m1u or m1Count >= between) then
         for _, u in ipairs(used) do
@@ -5123,10 +5258,14 @@ local function setupKey()
     -- The mastery farm is its own setup, and a gun's way of firing is part
     -- of one (held vs past the heat: kills per minute side by side).
     local mw = CFG.MasteryWeapon or ""
+    -- FIGHT WITH: the one weapon is its own setup, MasteryWeapon out of it.
+    local fwo = (P :: any).fightWeapon(nil, true)
+    if fwo then mw = "" anyGun = toolType(findTool(fwo)) == "Gun" end
     if mw ~= "" then anyGun = toolType(findTool(mw)) == "Gun" end
     local gun = not anyGun and ""
         or CFG.GunFast and string.format(",  gun past the heat %.2f s", CFG.GunFastEvery or 0.08)
         or (CFG.GunHold and ",  gun held" or ",  gun clicked")
+    if fwo then return "fight with: " .. fwo .. gun end
     if mw ~= "" then return "mastery: " .. mw .. gun end
     if #bits == 0 then return "nothing on" end
     local key = table.concat(bits, "  +  ")
@@ -5534,6 +5673,11 @@ do
         -- Once a second (the side loop): not carried = loaded from your
         -- inventory (every 10 s at most); its mastery read; the stop.
         function P.masteryTick()
+            -- FIGHT WITH decides the weapon: the mastery farm is out of it.
+            if (P :: any).fightWeapon(nil, true) then
+                P.masteryNote = "off - FIGHT WITH decides the weapon in this mode"
+                return
+            end
             local name = CFG.MasteryWeapon
             if type(name) ~= "string" or name == "" then
                 P.masteryNote = "off"
@@ -12839,6 +12983,7 @@ local function sideLoop()
             end
             pcall(syncWeapons)
             pcall((P :: any).masteryTick)
+            pcall((P :: any).fightGoalTick)
             if math.random() < 0.05 then
                 for m, t in pairs(countedDead) do
                     if now - t > 120 then countedDead[m] = nil end
@@ -13823,6 +13968,9 @@ do
 
         -- ---------- the smash ----------
         local function meleeTool()
+            -- FIGHT WITH: the smash takes a fighting style - the mode's pick if it is one.
+            local fw = (P :: any).fightWeapon()
+            if fw and toolType(findTool(fw)) == "Melee" then return fw end
             local pick = CFG.M1Weapon or ""
             local first = nil
             for _, t in ipairs(toolNames()) do
@@ -15681,6 +15829,10 @@ do
         end
         local function seaOk(name)
             if not toolOk(name) then return false end
+            -- FIGHT WITH: the mode's one weapon, and no other (the form's own
+            -- rule above still holds).
+            local fw = (P :: any).fightWeapon()
+            if fw then return name == fw end
             if formOf() then return true end
             return typeOk(name)
         end
@@ -15717,6 +15869,9 @@ do
         local function formWanted(cls)
             local mode = CFG.SeaEvForm or "auto"
             if mode == "base" or not kitsune() then return false end
+            -- FIGHT WITH names another weapon: no Kitsune form (it takes only its own moves).
+            local fw = (P :: any).fightWeapon()
+            if fw and fw ~= kitsune() then return false end
             if mode == "form" then return true end
             return SE.form[cls].verdict ~= "base"
         end
@@ -18147,6 +18302,8 @@ local function buildUI()
         id = id or modeNow()
         return TITLES[id] or tostring(id)
     end
+    -- The farm's weapon choice (P.weaponsFor) asks which mode is running.
+    P.modeNow = modeNow
 
     -- Raid, random and the Leviathan exactly as their Home switches did it.
     local function raidSet(x)
@@ -18329,9 +18486,10 @@ local function buildUI()
             return s
         end
 
-        -- FIGHTS WITH: a row to the Attack page. Task 3 replaces this default
-        -- P.fightWithText (mode -> "Dragon Talon only" / "Mix of 3").
-        P.fightWithText = P.fightWithText or function() return "Attack" end
+        -- FIGHTS WITH: a row to the Attack page. The Attack page (R2 Task 3)
+        -- overwrites P.fightWithText (mode -> "Dragon Talon only" / "Mix");
+        -- until it is built, every mode is a mix.
+        P.fightWithText = P.fightWithText or function() return "Mix" end
         function K.fightsWith(view, modeId)
             return navRow(view, "Fights with", function() return P.fightWithText(modeId) end, "attack")
         end
@@ -19199,6 +19357,9 @@ local function buildUI()
 
         heading2(v, "fight  ·  every mode")
         navRow(v, "Attack", function()
+            -- FIGHT WITH: one weapon decides this mode - say so.
+            local fwText = P.fightWithText(modeNow())
+            if fwText ~= "Mix" then return fwText end
             local race = (P :: any).race
             if race and race.allNow() then return "V4 - every weapon you carry" end
             local s = setupKey()
@@ -21544,219 +21705,762 @@ local function buildUI()
     do
         local v = makeView("attack")
         gap(v, 6)
-        readout(v, function()
-            return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
-        end)
-        -- RACE V3 / V4 (user, 2026-10-12): on by default - any mode, the farm
-        -- stopped, PvP too.
-        heading2(v, "race  ·  V4 and V3")
-        readout(v, function() return (P :: any).race and (P :: any).race.text() or "" end)
-        switchRow(v, "V4 when the meter is full", "Y the moment it is full - every mode, PvP too",
-            function() return CFG.RaceV4 end,
-            function(x) CFG.RaceV4 = x end)
-        switchRow(v, "Every weapon while V4", "Max stats: every key, every M1 of all you carry",
-            function() return CFG.RaceAll end,
-            function(x) CFG.RaceAll = x end)
-        sliderRow(v, "In V4: M1s of one weapon, then the next", 1, 10, 1,
-            function() return CFG.RaceM1Burst end,
-            function(x) CFG.RaceM1Burst = x end)
-        switchRow(v, "V3 when ready", "T after its cooldown, counted from when it went on",
-            function() return CFG.RaceV3 end,
-            function(x) CFG.RaceV3 = x end)
-        sliderRow(v, "V3: nothing for", 15, 40, 1,
-            function() return CFG.RaceV3Wait end,
-            function(x) CFG.RaceV3Wait = x end, " s")
-        sliderRow(v, "V3: then a T every", 0.2, 2, 0.1,
-            function() return CFG.RaceV3Every end,
-            function(x) CFG.RaceV3Every = x end, " s")
-        heading2(v, "M1 with")
-        local m1box = chooser(v, 130)
-        local m1sig = nil
-        local function m1refresh()
+
+        -- ---------- WHICH MODE THE WHEEL IS FOR ----------
+        -- One pick per mode (CFG.FightWith[mode]). Tabs: the mode you are in,
+        -- the one whose "Fights with" row brought you here, and Sea events if
+        -- the key owns it - three at most. A mode that fights with no weapon
+        -- (PvP aims by itself, Sea travel only sails) has no tab.
+        local FIGHTABLE = { circuit = true, random = true, raid = true, elite = true, fruit = true,
+            berry = true, recipe = true, sword = true, flower = true, ember = true, halloween = true,
+            seaevents = true, prehistoric = true, mirage = true, levi = true }
+        local ctxSel, ctxFrom = nil, nil
+        local function ctxList()
+            local list = {}
+            local function add(m)
+                if m and FIGHTABLE[m] and #list < 3 and not table.find(list, m) then table.insert(list, m) end
+            end
+            add(modeNow())
+            add(ctxFrom)
+            if P.packState("seaevents") == "open" then add("seaevents") end
+            if #list == 0 then list[1] = "random" end
+            return list
+        end
+        local function ctx()
+            local list = ctxList()
+            if ctxSel and table.find(list, ctxSel) then return ctxSel end
+            return list[1]
+        end
+        -- The wheel's value for a mode: "MIX" or a weapon name.
+        local function fwOf(m)
+            local t = CFG.FightWith
+            local x = t and t[m]
+            if type(x) ~= "string" or x == "" then return "MIX" end
+            return x
+        end
+        -- The one weapon really in force for a mode (carried), or nil = MIX.
+        local function forceOf(m)
+            local x = fwOf(m)
+            if x == "MIX" then return nil end
             local names = {}
             for _, t in ipairs(toolNames()) do table.insert(names, t.Name) end
-            table.sort(names)
-            local cur = CFG.M1Weapon or ""
-            local sig = cur .. "|" .. table.concat(names, ",") .. "|" .. tostring(P.m1Now)
-            if sig == m1sig then return end
-            m1sig = sig
-            for _, c in ipairs(m1box:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            chooserRow(m1box, 1, "Auto - your sword first", (cur == "" and P.m1Now) and tostring(P.m1Now) or "",
-                cur == "", function()
-                    CFG.M1Weapon = ""
-                    m1sig = nil
-                    m1refresh()
-                end)
-            for i, n in ipairs(names) do
-                chooserRow(m1box, i + 1, n, toolType(findTool(n)), cur == n, function()
-                    CFG.M1Weapon = n
-                    m1sig = nil
-                    m1refresh()
-                end)
-            end
-            if cur ~= "" and not table.find(names, cur) then
-                chooserRow(m1box, #names + 2, cur, "not carried", true, function() end)
+            local _, missing = fightPick(x, names, nil)
+            return (not missing) and x or nil
+        end
+        local function setFW(id)
+            local m = ctx()
+            CFG.FightWith = CFG.FightWith or {}
+            if id == "MIX" then CFG.FightWith[m] = nil else CFG.FightWith[m] = id end
+        end
+        -- Home's Attack row and every "Fights with" row.
+        P.fightWithText = function(m)
+            return fightLabel(forceOf(m or modeNow()))
+        end
+        -- Coming from a mode's page = that mode's tab first.
+        local prevOnView = P.onView
+        P.onView = function(name)
+            if prevOnView then pcall(prevOnView, name) end
+            if name == "attack" then
+                local from = trail[#trail]
+                ctxFrom = FIGHTABLE[from] and from or nil
+                if ctxFrom then ctxSel = ctxFrom end
             end
         end
-        m1refresh()
-        addLive(m1refresh)
-        heading2(v, "skills")
-        switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
-            function() return CFG.AutoAttack end,
-            function(x) CFG.AutoAttack = x end)
-        chips(v, "Keys", { "Z", "X", "C", "V" },
-            function(k) return CFG.AutoKeys[k] == true end,
-            function(k, x) CFG.AutoKeys[k] = x end)
-        switchRow(v, "Swords and guns from your inventory",
-            "Every skill cooling: the next one is put in your hands, no menu",
-            function() return CFG.InvSwap end,
-            function(x) CFG.InvSwap = x end)
-        heading2(v, "weapons  ·  when that is off")
-        local box = chooser(v, 170)
-        local signature = nil
-        local function refresh()
-            pcall(syncWeapons)
-            local sig = ""
-            for _, n in ipairs(CFG.WeaponOrder) do
-                sig = sig .. n .. "=" .. wSummary(n) .. (findTool(n) and "" or "?") .. ","
-            end
-            if sig == signature then return end
-            signature = sig
-            for _, c in ipairs(box:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            for i, n in ipairs(CFG.WeaponOrder) do
-                local carried = findTool(n) ~= nil
-                local s = wSummary(n)
-                local lit = carried and s ~= "off" and CFG.Weapons[n].use
-                chooserRow(box, i, n, carried and s or "not carried", lit, function()
-                    openWeapon(n)
+
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local strip = mk("Frame", {
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(strip, 12)
+            local tabs = {}
+            for i = 1, 3 do
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1, -8, 1, -8), Position = UDim2.fromOffset(4, 4),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = Enum.Font.GothamBold, TextSize = F.small, TextColor3 = C.second,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Visible = false, Parent = strip,
+                })
+                corner(b, 9)
+                b.Activated:Connect(function()
+                    local list = ctxList()
+                    if list[i] then ctxSel = list[i] end
                 end)
+                tabs[i] = b
             end
-        end
-        refresh()
-        addLive(refresh)
-        heading2(v, "rhythm  ·  M1 and skills both on")
-        radio(v, 82, {
-            { "Skills", "Skills first" },
-            { "M1", "M1 first" },
-        }, function() return CFG.StartWith end, function(x) CFG.StartWith = x end)
-        sliderRow(v, "M1 swings between skills", 0, 10, 1,
-            function() return CFG.M1Between end,
-            function(x) CFG.M1Between = x end)
-        sliderRow(v, "Wait after a skill", 0.1, 1.5, 0.05,
-            function() return CFG.CastWait end,
-            function(x) CFG.CastWait = x end, " s")
-        sliderRow(v, "Wait after a swap", 0.02, 0.5, 0.02,
-            function() return CFG.EquipWait end,
-            function(x) CFG.EquipWait = x end, " s")
-        heading2(v, "aim")
-        switchRow(v, "Lock the aim on the pile",
-            "Skills land on the pile wherever your cursor is",
-            function() return CFG.AimSkills end,
-            function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
-        switchRow(v, "Keep my camera free",
-            "Your view and cursor are never moved",
-            function() return CFG.AimHidden end,
-            function(x) CFG.AimHidden = x if x then releaseCamera() end end)
-        switchRow(v, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
-            function() return CFG.SilentAim end,
-            function(x) CFG.SilentAim = x end)
-        readout(v, function()
-            return "silent aim  " .. tostring(P.silentNote or "-") .. "  (guns)"
-                .. "\nskill aim   " .. tostring(P.gameAimText and P.gameAimText() or "-") .. "  (skills, a fruit's M1)"
-        end)
-        heading2(v, "a gun's M1")
-        switchRow(v, "Hold the button", "Dragonstorm: the game's own fire loop, every shot at one enemy",
-            function() return CFG.GunHold end,
-            function(x) CFG.GunHold = x P.reprobe() end)
-        switchRow(v, "Past the heat", "The game's own shot on the script's clock - no lockout. Loud",
-            function() return CFG.GunFast end,
-            function(x) CFG.GunFast = x P.reprobe() end)
-        sliderRow(v, "Past the heat: a shot every", 0.02, 0.2, 0.01,
-            function() return CFG.GunFastEvery end,
-            function(x) CFG.GunFastEvery = x end, " s")
-        readout(v, function()
-            return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
-                .. "\nsilent aim  " .. tostring(P.silentNote or "-")
-        end)
-        heading2(v, "mastery farm")
-        local mbox = chooser(v, 130)
-        local msig = nil
-        local function mrefresh()
-            local names, seen = {}, {}
-            for _, t in ipairs(toolNames()) do
-                if not seen[t.Name] then seen[t.Name] = true table.insert(names, t.Name) end
-            end
-            local R = (P :: any).rot
-            for _, it in ipairs(R and R.inv or {}) do
-                if not seen[it.name] then seen[it.name] = true table.insert(names, it.name) end
-            end
-            table.sort(names)
-            local cur = CFG.MasteryWeapon or ""
-            local sig = cur .. "|" .. table.concat(names, ",")
-            if sig == msig then return end
-            msig = sig
-            for _, c in ipairs(mbox:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
-            end
-            chooserRow(mbox, 1, "Off - every weapon as set", "", cur == "", function()
-                CFG.MasteryWeapon = ""
-                msig = nil
-                mrefresh()
+            addLive(function()
+                local list, at = ctxList(), ctx()
+                local n = #list
+                for i, b in ipairs(tabs) do
+                    b.Visible = i <= n
+                    if i <= n then
+                        b.Size = UDim2.new(1 / n, -8, 1, -8)
+                        b.Position = UDim2.new((i - 1) / n, 4, 0, 4)
+                        b.Text = "For " .. tostring(TITLES[list[i]] or list[i])
+                        b.BackgroundColor3 = (list[i] == at) and C.pressed or C.row
+                        b.TextColor3 = (list[i] == at) and C.text or C.second
+                    end
+                end
             end)
-            for i, n in ipairs(names) do
-                local t = findTool(n)
-                chooserRow(mbox, i + 1, n, t and toolType(t) or "in your inventory", cur == n, function()
-                    CFG.MasteryWeapon = n
+        end
+        caption(v, "Each mode keeps its own pick. Set Random to Dragon Talon and Sea events keeps Tiger.")
+
+        -- ---------- THE WHEEL ----------
+        local RANK = { Melee = 1, Sword = 2, ["Blox Fruit"] = 3, Gun = 4 }
+        local ACC = { Melee = "raid", Sword = "sea", ["Blox Fruit"] = "prehistoric", Gun = "pvp" }
+        local TYPE_WORD = { Melee = "MELEE", Sword = "SWORD", ["Blox Fruit"] = "FRUIT", Gun = "GUN" }
+        local function rgbOf(t) return Color3.fromRGB(t[1], t[2], t[3]) end
+        local function carriedSorted()
+            local out, seen = {}, {}
+            for _, t in ipairs(toolNames()) do
+                if not seen[t.Name] then
+                    seen[t.Name] = true
+                    table.insert(out, { name = t.Name, ty = toolType(t) })
+                end
+            end
+            table.sort(out, function(a, b)
+                local ra, rb = RANK[a.ty] or 9, RANK[b.ty] or 9
+                if ra ~= rb then return ra < rb end
+                return a.name < b.name
+            end)
+            return out
+        end
+        heading2(v, "fight with")
+        local wheelHolder = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = wheelHolder,
+        })
+        -- MIX and the weapons you carry. Rebuilt when what you carry changes.
+        local wheelSig = nil
+        local function buildWheel()
+            local list = carriedSorted()
+            local names = {}
+            for _, w in ipairs(list) do table.insert(names, w.name) end
+            local sig = table.concat(names, "|")
+            if sig == wheelSig then return end
+            wheelSig = sig
+            for _, c in ipairs(wheelHolder:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            local stops = { { id = "MIX", label = "MIX" } }
+            for _, w in ipairs(list) do
+                table.insert(stops, { id = w.name, label = w.name, accent = ACC[w.ty] })
+            end
+            local ov, of = buildingView, buildingFold
+            buildingView, buildingFold = v, nil
+            P.kit.wheel(wheelHolder, stops, function() return fwOf(ctx()) end, setFW)
+            buildingView, buildingFold = ov, of
+        end
+        buildingFold = nil
+        buildWheel()
+        addLive(buildWheel)
+
+        -- ---------- THE TRUTH ----------
+        -- What the mode really fights with, and why.
+        local function mixNames()
+            local carried = {}
+            for _, t in ipairs(toolNames()) do carried[t.Name] = true end
+            local out, set = {}, {}
+            local function add(n)
+                if carried[n] and not set[n] then set[n] = true table.insert(out, n) end
+            end
+            if CFG.AutoAttack then
+                for _, w in ipairs(carriedSorted()) do add(w.name) end
+            else
+                for _, n in ipairs(CFG.WeaponOrder) do
+                    local w = CFG.Weapons[n]
+                    if w and w.use then
+                        local any = w.M1
+                        for _, k in ipairs(KEYS) do if w[k] then any = true end end
+                        if any then add(n) end
+                    end
+                end
+            end
+            local pick = CFG.M1Weapon or ""
+            if pick ~= "" then add(pick) end
+            return out, set
+        end
+        local function m1NameMix()
+            local pick = CFG.M1Weapon or ""
+            if pick ~= "" then return pick end
+            return P.m1Now and tostring(P.m1Now) or "your sword first, else a fighting style"
+        end
+        local function goalOn(m)
+            local g = CFG.FightGoal
+            return g and g[m] == true
+        end
+        local function masteryOfW(name)
+            local f = (P :: any).fightMastery
+            return f and f(name) or nil
+        end
+        local function modeWord(m) return tostring(TITLES[m] or m) end
+        local card = P.kit.truthCard(v, function()
+            local m = ctx()
+            local x = fwOf(m)
+            if x == "MIX" then
+                local names = mixNames()
+                if #names == 0 then return "Nothing switched on" end
+                return "Mixing " .. table.concat(names, ", ")
+            end
+            if not forceOf(m) then return x .. " is not carried" end
+            return "Everything uses " .. x
+        end, function()
+            local m = ctx()
+            local x = fwOf(m)
+            if x == "MIX" then
+                return "For " .. modeWord(m) .. ": moves go weapon by weapon, top to bottom. M1 swings "
+                    .. m1NameMix() .. "."
+            end
+            if not forceOf(m) then
+                return modeWord(m) .. " fights with the mix until you carry " .. x .. "."
+            end
+            return "M1 and its moves, for " .. modeWord(m) .. ". No other M1 pick, weapon order or mastery "
+                .. "setting can change it. Turn the wheel to MIX to use several."
+        end, "none")
+        local goalBtn = mk("TextButton", {
+            Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base, BorderSizePixel = 0,
+            AutoButtonColor = false, Text = "", LayoutOrder = 3, Visible = false, Parent = card,
+        })
+        corner(goalBtn, 10)
+        pressable(goalBtn)
+        local goalTxt = mk("TextLabel", {
+            Size = UDim2.new(1, -64, 1, 0), Position = UDim2.fromOffset(10, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+            TextColor3 = C.second, Text = "", Parent = goalBtn,
+        })
+        local goalTrack = mk("Frame", {
+            Size = UDim2.fromOffset(40, 24), Position = UDim2.new(1, -50, 0.5, -12),
+            BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = goalBtn,
+        })
+        corner(goalTrack, 12)
+        local goalKnob = mk("Frame", {
+            Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(3, 3),
+            BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = goalTrack,
+        })
+        corner(goalKnob, 9)
+        goalBtn.Activated:Connect(function()
+            local m = ctx()
+            if not forceOf(m) then return end
+            CFG.FightGoal = CFG.FightGoal or {}
+            if goalOn(m) then CFG.FightGoal[m] = nil else CFG.FightGoal[m] = true end
+        end)
+        addLive(function()
+            local m = ctx()
+            local one = forceOf(m)
+            goalBtn.Visible = one ~= nil
+            if not one then return end
+            local stop = tonumber(CFG.MasteryStop) or 0
+            local on = goalOn(m)
+            if stop <= 0 then
+                goalTxt.Text = "Mastery goal needs a stop value above 0 (Fine-tune: Stop the farm at)"
+            elseif on then
+                local now = masteryOfW(one)
+                goalTxt.Text = "Stops at mastery " .. stop .. " (now " .. (now and tostring(now) or "?")
+                    .. "), then back to MIX"
+            else
+                goalTxt.Text = "Mastery goal: off. Turn on to stop at " .. stop .. ", then back to MIX"
+            end
+            goalTrack.BackgroundColor3 = on and C.warn or C.hair
+            goalKnob.Position = UDim2.fromOffset(on and 19 or 3, 3)
+        end)
+
+        -- ---------- YOUR WEAPONS ----------
+        do
+            local h = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(0.5, 0, 1, -4), Position = UDim2.fromOffset(20, 4),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Text = "YOUR WEAPONS", Parent = h,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(0.5, -20, 1, -4), Position = UDim2.new(0.5, 0, 0, 4),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third,
+                Text = "tap the moves to use", Parent = h,
+            })
+        end
+        local cardsBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8),
+            HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = cardsBox,
+        })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = cardsBox })
+        local cardSig = nil
+        local function buildCards()
+            pcall(syncWeapons)
+            local m = ctx()
+            local list = carriedSorted()
+            local x = forceOf(m)
+            local mixSet = select(2, mixNames())
+            local m1Pick = CFG.M1Weapon or ""
+            local sig = m .. "|" .. tostring(x) .. "|" .. m1Pick .. "|" .. tostring(CFG.AutoAttack)
+                .. "|" .. tostring(P.m1Now)
+            for _, w in ipairs(list) do
+                local wc = CFG.Weapons[w.name]
+                sig = sig .. "|" .. w.name .. "=" .. wSummary(w.name) .. (wc and wc.F and "F" or "")
+            end
+            if sig == cardSig then return end
+            cardSig = sig
+            for _, c in ipairs(cardsBox:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            for i, w in ipairs(list) do
+                local name = w.name
+                local acc = ACC[w.ty] or "none"
+                local tint, text, accent = rgbOf(ACCENT[acc][1]), rgbOf(ACCENT[acc][2]), rgbOf(ACCENT[acc][3])
+                local wc = CFG.Weapons[name] or {}
+                local chosen = x == name
+                local isOn = x and chosen or (not x and mixSet[name] == true)
+                local m1Name = x or m1NameMix()
+                local m1Lit = m1Name == name
+                local c = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundColor3 = isOn and C.row or C.base, BorderSizePixel = 0,
+                    LayoutOrder = i, Parent = cardsBox,
+                })
+                corner(c, 14)
+                mk("UIStroke", {
+                    Color = chosen and accent or (isOn and C.hair or C.line), Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = c,
+                })
+                mk("UIListLayout", {
+                    SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = c,
+                })
+                mk("UIPadding", {
+                    PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 10),
+                    PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 8), Parent = c,
+                })
+                -- the title row: type, name (opens the weapon's own page), Use only this
+                local top = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = 1, Parent = c,
+                })
+                local chip = mk("TextLabel", {
+                    Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(0, 13),
+                    BackgroundColor3 = tint, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    TextSize = 9, TextColor3 = text, Text = TYPE_WORD[w.ty] or string.upper(tostring(w.ty)),
+                    Parent = top,
+                })
+                corner(chip, 5)
+                local nameBtn = mk("TextButton", {
+                    Size = UDim2.new(1, -176, 1, 0), Position = UDim2.fromOffset(58, 0),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.label,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = isOn and C.text or C.second, Text = name, AutoButtonColor = false,
+                    Parent = top,
+                })
+                nameBtn.Activated:Connect(function() openWeapon(name) end)
+                local only = mk("TextButton", {
+                    Size = UDim2.fromOffset(112, 40), AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, 0, 0.5, 0),
+                    BackgroundColor3 = chosen and accent or C.row, BorderSizePixel = 0,
+                    AutoButtonColor = false, Font = Enum.Font.GothamBold, TextSize = F.tiny,
+                    TextColor3 = chosen and C.base or C.second,
+                    Text = chosen and "Using only this" or "Use only this", Parent = top,
+                })
+                corner(only, 9)
+                mk("UIStroke", {
+                    Color = chosen and accent or C.hair, Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = only,
+                })
+                only.Activated:Connect(function()
+                    CFG.FightWith = CFG.FightWith or {}
+                    if chosen then CFG.FightWith[m] = nil else CFG.FightWith[m] = name end
+                end)
+                -- the chips: M1, then the moves
+                local row = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1, LayoutOrder = 2, Parent = c,
+                })
+                mk("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal, Wraps = true,
+                    Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = row,
+                })
+                local function chipBtn(order, word, width, lit, litColor, cb)
+                    local b = mk("TextButton", {
+                        Size = UDim2.fromOffset(width, 44), BackgroundColor3 = lit and litColor or C.base,
+                        BorderSizePixel = 0, AutoButtonColor = false, Font = Enum.Font.GothamBold,
+                        TextSize = F.small, TextColor3 = lit and C.base or C.second,
+                        Text = word, LayoutOrder = order, Parent = row,
+                    })
+                    corner(b, 10)
+                    mk("UIStroke", {
+                        Color = lit and litColor or C.hair, Thickness = 1,
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+                    })
+                    b.Activated:Connect(function() pcall(cb) end)
+                    return b
+                end
+                chipBtn(0, "M1", 46, m1Lit, accent, function()
+                    -- The M1 pick (the same setting the old picker wrote); the
+                    -- weapon is switched on so the farm has it in its list.
+                    local w2 = wcfg(name)
+                    if (CFG.M1Weapon or "") == name then
+                        CFG.M1Weapon = ""
+                    else
+                        CFG.M1Weapon = name
+                        w2.M1 = true
+                        w2.use = true
+                    end
+                end)
+                local keys = { "Z", "X", "C", "V" }
+                if w.ty == "Blox Fruit" or wc.F then table.insert(keys, "F") end
+                for ki, k in ipairs(keys) do
+                    chipBtn(ki, k, 40, wc[k] == true, C.ivory, function()
+                        local w2 = wcfg(name)
+                        w2[k] = not w2[k]
+                        if w2[k] then w2.use = true end
+                    end)
+                end
+                -- the state line
+                local state, stateColor
+                if x then
+                    if chosen then
+                        local lit = {}
+                        for _, k in ipairs(KEYS) do if wc[k] then table.insert(lit, k) end end
+                        state = "Everything uses this one in " .. modeWord(m)
+                            .. (#lit == 0 and " - M1 only, tap a move to add it" or "")
+                        stateColor = accent
+                    else
+                        state = "resting: " .. modeWord(m) .. " uses " .. x .. " only"
+                        stateColor = C.third
+                    end
+                else
+                    state = isOn and ("in the mix" .. (m1Lit and ", swings M1" or "")) or "no move lit: skipped"
+                    stateColor = isOn and C.live or C.third
+                end
+                mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+                    TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
+                    TextColor3 = stateColor, Text = state, LayoutOrder = 3, Parent = c,
+                })
+            end
+        end
+        buildCards()
+        addLive(buildCards)
+        gap(v, 6)
+
+        -- ---------- PACE ----------
+        -- The rhythm when M1 and moves are both on. Step 3 is today's: moves
+        -- first, 4 swings between, 0.45 s after a move.
+        P.kit.dial(v, "Pace", {
+            { name = "1  STEADY", set = { StartWith = "M1", M1Between = 8, CastWait = 0.8 },
+                line = "M1 first, 8 swings between moves, 0.80 s after a move." },
+            { name = "2  CALM", set = { StartWith = "M1", M1Between = 6, CastWait = 0.6 },
+                line = "M1 first, 6 swings between moves, 0.60 s after a move." },
+            { name = "3  BALANCED", set = { StartWith = "Skills", M1Between = 4, CastWait = 0.45 },
+                line = "Moves first, 4 swings between moves, 0.45 s after a move (today's setting).",
+                today = true },
+            { name = "4  QUICK", set = { StartWith = "Skills", M1Between = 2, CastWait = 0.3 },
+                line = "Moves first, 2 swings between moves, 0.30 s after a move." },
+            { name = "5  BURST", set = { StartWith = "Skills", M1Between = 0, CastWait = 0.15 },
+                line = "Moves the moment they are ready, 0.15 s after a move." },
+        }, "none")
+
+        -- ---------- ALSO ----------
+        heading2(v, "also")
+        -- Race: V4 and V3 together; their timings are in Fine-tune.
+        switchRow(v, "Race", "V4 the moment it fills, V3 when ready",
+            function() return CFG.RaceV4 and CFG.RaceV3 end,
+            function(x) CFG.RaceV4 = x CFG.RaceV3 = x end)
+        -- Aim: a row that opens the three aim switches.
+        do
+            local holder = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
+            })
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C.base, BorderSizePixel = 0,
+                Text = "", AutoButtonColor = false, LayoutOrder = 1, Parent = holder,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -150, 0, 22), Position = UDim2.fromOffset(20, 8),
+                BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = F.label,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "Aim", Parent = b,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, -150, 0, 18), Position = UDim2.fromOffset(20, 30),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.small,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                Text = "skills land on the target", Parent = b,
+            })
+            local val = mk("TextLabel", {
+                Size = UDim2.fromOffset(100, 56), Position = UDim2.new(1, -128, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.body,
+                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = b,
+            })
+            local chev = mk("TextLabel", {
+                Size = UDim2.fromOffset(20, 56), Position = UDim2.new(1, -28, 0, 0),
+                BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 14,
+                TextColor3 = C.third, Text = ">", Parent = b,
+            })
+            pressable(b)
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, Visible = false, LayoutOrder = 2, Parent = holder,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
+            })
+            local outer = buildingFold
+            buildingFold = box
+            switchRow(box, "Lock the aim on the pile",
+                "Skills land on the pile wherever your cursor is",
+                function() return CFG.AimSkills end,
+                function(x) CFG.AimSkills = x if not x then releaseCamera() end end)
+            switchRow(box, "Keep my camera free",
+                "Your view and cursor are never moved",
+                function() return CFG.AimHidden end,
+                function(x) CFG.AimHidden = x if x then releaseCamera() end end)
+            switchRow(box, "Silent aim", "Skills and aimed M1 go AT the target - your mouse is not read",
+                function() return CFG.SilentAim end,
+                function(x) CFG.SilentAim = x end)
+            readout(box, function()
+                return "silent aim  " .. tostring(P.silentNote or "-") .. "  (guns)"
+                    .. "\nskill aim   " .. tostring(P.gameAimText and P.gameAimText() or "-") .. "  (skills, a fruit's M1)"
+            end)
+            buildingFold = outer
+            b.Activated:Connect(function()
+                box.Visible = not box.Visible
+                chev.Rotation = box.Visible and 90 or 0
+                if box.Visible then
+                    for _, e in ipairs(live) do
+                        if e.w == box then pcall(e.f) end
+                    end
+                end
+            end)
+            addLive(function()
+                val.Text = CFG.SilentAim and "Silent" or (CFG.AimHidden and "Camera free")
+                    or (CFG.AimSkills and "Pile lock") or "Off"
+            end)
+        end
+
+        -- ---------- FINE-TUNE: every other old control ----------
+        P.kit.fineTune(v, function(v)
+            readout(v, function()
+                return "now  " .. tostring(P.nextNote) .. "\nlast skill  " .. tostring(P.lastCast)
+            end)
+            -- RACE V3 / V4 (user, 2026-10-12): on by default - any mode, the farm
+            -- stopped, PvP too.
+            heading2(v, "race  ·  V4 and V3")
+            readout(v, function() return (P :: any).race and (P :: any).race.text() or "" end)
+            switchRow(v, "V4 when the meter is full", "Y the moment it is full - every mode, PvP too",
+                function() return CFG.RaceV4 end,
+                function(x) CFG.RaceV4 = x end)
+            switchRow(v, "Every weapon while V4", "Max stats: every key, every M1 of all you carry",
+                function() return CFG.RaceAll end,
+                function(x) CFG.RaceAll = x end)
+            sliderRow(v, "In V4: M1s of one weapon, then the next", 1, 10, 1,
+                function() return CFG.RaceM1Burst end,
+                function(x) CFG.RaceM1Burst = x end)
+            switchRow(v, "V3 when ready", "T after its cooldown, counted from when it went on",
+                function() return CFG.RaceV3 end,
+                function(x) CFG.RaceV3 = x end)
+            sliderRow(v, "V3: nothing for", 15, 40, 1,
+                function() return CFG.RaceV3Wait end,
+                function(x) CFG.RaceV3Wait = x end, " s")
+            sliderRow(v, "V3: then a T every", 0.2, 2, 0.1,
+                function() return CFG.RaceV3Every end,
+                function(x) CFG.RaceV3Every = x end, " s")
+            heading2(v, "m1 with  ·  when the wheel says mix")
+            local m1box = chooser(v, 130)
+            local m1sig = nil
+            local function m1refresh()
+                local names = {}
+                for _, t in ipairs(toolNames()) do table.insert(names, t.Name) end
+                table.sort(names)
+                local cur = CFG.M1Weapon or ""
+                local sig = cur .. "|" .. table.concat(names, ",") .. "|" .. tostring(P.m1Now)
+                if sig == m1sig then return end
+                m1sig = sig
+                for _, c in ipairs(m1box:GetChildren()) do
+                    if c:IsA("GuiObject") then c:Destroy() end
+                end
+                chooserRow(m1box, 1, "Auto - your sword first", (cur == "" and P.m1Now) and tostring(P.m1Now) or "",
+                    cur == "", function()
+                        CFG.M1Weapon = ""
+                        m1sig = nil
+                        m1refresh()
+                    end)
+                for i, n in ipairs(names) do
+                    chooserRow(m1box, i + 1, n, toolType(findTool(n)), cur == n, function()
+                        CFG.M1Weapon = n
+                        m1sig = nil
+                        m1refresh()
+                    end)
+                end
+                if cur ~= "" and not table.find(names, cur) then
+                    chooserRow(m1box, #names + 2, cur, "not carried", true, function() end)
+                end
+            end
+            m1refresh()
+            addLive(m1refresh)
+            heading2(v, "skills  ·  when the wheel says mix")
+            switchRow(v, "Every weapon you carry", "No setup: M1 as picked above, the keys below of all",
+                function() return CFG.AutoAttack end,
+                function(x) CFG.AutoAttack = x end)
+            chips(v, "Keys", { "Z", "X", "C", "V" },
+                function(k) return CFG.AutoKeys[k] == true end,
+                function(k, x) CFG.AutoKeys[k] = x end)
+            switchRow(v, "Swords and guns from your inventory",
+                "Every skill cooling: the next one is put in your hands, no menu",
+                function() return CFG.InvSwap end,
+                function(x) CFG.InvSwap = x end)
+            heading2(v, "hold each key, per weapon  ·  and the order")
+            local box = chooser(v, 170)
+            local signature = nil
+            local function refresh()
+                pcall(syncWeapons)
+                local sig = ""
+                for _, n in ipairs(CFG.WeaponOrder) do
+                    sig = sig .. n .. "=" .. wSummary(n) .. (findTool(n) and "" or "?") .. ","
+                end
+                if sig == signature then return end
+                signature = sig
+                for _, c in ipairs(box:GetChildren()) do
+                    if c:IsA("GuiObject") then c:Destroy() end
+                end
+                for i, n in ipairs(CFG.WeaponOrder) do
+                    local carried = findTool(n) ~= nil
+                    local s = wSummary(n)
+                    local lit = carried and s ~= "off" and CFG.Weapons[n].use
+                    chooserRow(box, i, n, carried and s or "not carried", lit, function()
+                        openWeapon(n)
+                    end)
+                end
+            end
+            refresh()
+            addLive(refresh)
+            heading2(v, "rhythm  ·  M1 and skills both on")
+            radio(v, 82, {
+                { "Skills", "Skills first" },
+                { "M1", "M1 first" },
+            }, function() return CFG.StartWith end, function(x) CFG.StartWith = x end)
+            sliderRow(v, "M1 swings between skills", 0, 10, 1,
+                function() return CFG.M1Between end,
+                function(x) CFG.M1Between = x end)
+            sliderRow(v, "Wait after a skill", 0.1, 1.5, 0.05,
+                function() return CFG.CastWait end,
+                function(x) CFG.CastWait = x end, " s")
+            sliderRow(v, "Wait after a swap", 0.02, 0.5, 0.02,
+                function() return CFG.EquipWait end,
+                function(x) CFG.EquipWait = x end, " s")
+            heading2(v, "a gun's M1")
+            switchRow(v, "Hold the button", "Dragonstorm: the game's own fire loop, every shot at one enemy",
+                function() return CFG.GunHold end,
+                function(x) CFG.GunHold = x P.reprobe() end)
+            switchRow(v, "Past the heat", "The game's own shot on the script's clock - no lockout. Loud",
+                function() return CFG.GunFast end,
+                function(x) CFG.GunFast = x P.reprobe() end)
+            sliderRow(v, "Past the heat: a shot every", 0.02, 0.2, 0.01,
+                function() return CFG.GunFastEvery end,
+                function(x) CFG.GunFastEvery = x end, " s")
+            readout(v, function()
+                return tostring(P.gunNote) .. "\nthe game's shot  " .. tostring(P.gunShotWhy)
+                    .. "\nsilent aim  " .. tostring(P.silentNote or "-")
+            end)
+            heading2(v, "mastery  ·  the goal's target, and the old farm")
+            local mbox = chooser(v, 130)
+            local msig = nil
+            local function mrefresh()
+                local names, seen = {}, {}
+                for _, t in ipairs(toolNames()) do
+                    if not seen[t.Name] then seen[t.Name] = true table.insert(names, t.Name) end
+                end
+                local R = (P :: any).rot
+                for _, it in ipairs(R and R.inv or {}) do
+                    if not seen[it.name] then seen[it.name] = true table.insert(names, it.name) end
+                end
+                table.sort(names)
+                local cur = CFG.MasteryWeapon or ""
+                local sig = cur .. "|" .. table.concat(names, ",")
+                if sig == msig then return end
+                msig = sig
+                for _, c in ipairs(mbox:GetChildren()) do
+                    if c:IsA("GuiObject") then c:Destroy() end
+                end
+                chooserRow(mbox, 1, "Off - every weapon as set", "", cur == "", function()
+                    CFG.MasteryWeapon = ""
                     msig = nil
                     mrefresh()
                 end)
+                for i, n in ipairs(names) do
+                    local t = findTool(n)
+                    chooserRow(mbox, i + 1, n, t and toolType(t) or "in your inventory", cur == n, function()
+                        CFG.MasteryWeapon = n
+                        msig = nil
+                        mrefresh()
+                    end)
+                end
             end
-        end
-        mrefresh()
-        addLive(mrefresh)
-        sliderRow(v, "Stop the farm at", 0, 600, 25,
-            function() return CFG.MasteryStop end,
-            function(x) CFG.MasteryStop = x end, " mastery")
-        readout(v, function() return tostring(P.masteryNote) end)
-        heading2(v, "how M1 lands")
-        radio(v, 205, {
-            { "auto", "Auto - keep what hurts" },
-            { "remote", "Remote hit - whole pile" },
-            { "click", "Fruit click" },
-            { "tap", "Fruit M1 - the game's own click" },
-            { "keys", "Key press" },
-        }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
-        actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)
-        sliderRow(v, "M1 every", 0.03, 1, 0.01,
-            function() return CFG.M1Every end,
-            function(x) CFG.M1Every = x end, " s")
-        sliderRow(v, "Remote hit reaches", 20, 100, 5,
-            function() return CFG.HitRange end,
-            function(x) CFG.HitRange = x end, " studs")
+            mrefresh()
+            addLive(mrefresh)
+            sliderRow(v, "Stop the farm at", 0, 600, 25,
+                function() return CFG.MasteryStop end,
+                function(x) CFG.MasteryStop = x end, " mastery")
+            readout(v, function() return tostring(P.masteryNote) end)
+            heading2(v, "how M1 lands")
+            radio(v, 205, {
+                { "auto", "Auto - keep what hurts" },
+                { "remote", "Remote hit - whole pile" },
+                { "click", "Fruit click" },
+                { "tap", "Fruit M1 - the game's own click" },
+                { "keys", "Key press" },
+            }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
+            actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)
+            sliderRow(v, "M1 every", 0.03, 1, 0.01,
+                function() return CFG.M1Every end,
+                function(x) CFG.M1Every = x end, " s")
+            sliderRow(v, "Remote hit reaches", 20, 100, 5,
+                function() return CFG.HitRange end,
+                function(x) CFG.HitRange = x end, " studs")
+        end, 23)
         fold(v, "How it works", function(v)
+            caption(v, "FIGHT WITH: each mode has its own pick. A weapon on the wheel is the ONLY "
+                .. "one that fights there - its M1 and the moves lit on its card. The M1 pick, the "
+                .. "weapon order, Every weapon you carry, the mastery farm, V4's every-weapon and the "
+                .. "inventory swap cannot change it. MIX = all of those, as before. A weapon you do "
+                .. "not carry = the mix. The mastery goal puts the wheel back to MIX when the weapon "
+                .. "reaches the Stop value (Fine-tune).")
             caption(v, "Race: V4 the moment its meter is full. V3 by your clock - from the "
                 .. "moment it went on (yours or the script's T), nothing for 28 s, then a T "
                 .. "every 0.5 s until it goes on again. While a mode runs or PvP is on - loaded "
                 .. "and idle, nothing; "
                 .. "no T while the Mirage gives you the moon.")
-            caption(v, "While V4 is on (max stats on every weapon) the farm fights with every "
+            caption(v, "While V4 is on (max stats on every weapon) a MIX fight uses every "
                 .. "weapon you carry: every key the moment it is ready (never a transformation "
                 .. "fruit's V), every M1 in turn. What is set below is for when you are not "
                 .. "transformed. Sea fights still swing no M1 out of Kitsune form, a fruit's "
-                .. "form fires only its moves, the mastery farm keeps its one weapon.")
+                .. "form fires only its moves.")
             caption(v, "Swings M1 in every fight - the farm, golems, Blaze Ember quests. "
                 .. "Auto: your sword (the strongest swing), else a fighting style, fruit, gun.")
             caption(v, "A key whose skill never fires (not this weapon's, not unlocked) "
                 .. "is left alone for a minute. Off: only what each weapon's own page fires.")
             caption(v, "V is often a transformation or a long hold - off by default.")
-            caption(v, "Tap a weapon to choose what it fires (used when \"Every weapon "
-                .. "you carry\" is off). The lit ones fire.")
-            caption(v, "4: a ready skill, then 4 M1, then the next ready skill, "
-                .. "and so on. 0: a skill whenever one is ready, M1 only while "
+            caption(v, "Tap a weapon's name to open what it fires and how long each key is "
+                .. "held. The lit ones fire.")
+            caption(v, "Pace 3: a ready skill, then 4 M1, then the next ready skill, "
+                .. "and so on. Pace 5: a skill whenever one is ready, M1 only while "
                 .. "every skill cools.")
             caption(v, "Camera free: at the instant a key is read, the camera is put "
                 .. "on the pile and back before the frame is drawn - you never see "
@@ -21766,9 +22470,8 @@ local function buildUI()
                 .. "in while it cools. Past the heat: no lockout; the wiki says long gun M1 "
                 .. "streams get kills marked suspicious. Stats page, \"which setup is "
                 .. "better\": kills per minute of each.")
-            caption(v, "The picked weapon alone hurts anything: its M1 and the keys under "
-                .. "\"Every weapon you carry\" (a key not unlocked yet is left alone). No "
-                .. "other weapon shares its kills. Stop at 0 = never.")
+            caption(v, "The old mastery farm (MIX only): the picked weapon alone hurts anything, "
+                .. "its M1 and the keys under \"Every weapon you carry\". Stop at 0 = never.")
             caption(v, "Auto fires each way at the pile for a moment and keeps the "
                 .. "first that takes HP off, per weapon. The remote hit names every "
                 .. "enemy in the pile, so one swing hits all of them.")

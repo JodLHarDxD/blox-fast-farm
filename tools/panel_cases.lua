@@ -225,6 +225,135 @@ if RUN == "full" then
     check(string.find(tostring(button("home", "Start").Text), "No mode", 1, true) ~= nil,
         "hero with no mode: Start  ·  No mode")
 
+    -- ---------- R2 Task 3: Attack - the FIGHT WITH wheel ----------
+    do
+        local function openAttack()
+            goHome()
+            button("home", "Attack").Activated:Fire()
+            livePass()
+        end
+        local function pillNamed(text)
+            local found
+            each(VIEWS.attack, function(k)
+                if not found and k.ClassName == "TextButton" and k.Text == text and not k._destroyed then found = k end
+            end)
+            return found
+        end
+        local function texts()
+            return table.concat(labelsOf(VIEWS.attack), "|")
+        end
+        check(type(P.modeNow) == "function", "P.modeNow is exposed for the farm")
+        check(type(P.fightWithText) == "function", "P.fightWithText exists")
+        CFG_REAL.Hunt, CFG_REAL.RaidMode, CFG_REAL.RandomMode, CFG_REAL.Pvp, CFG_REAL.LeviFight, CFG_REAL.Circuit =
+            false, false, false, false, false, false
+        CFG_REAL.RandomMode = true
+        table.clear(CFG_REAL.FightWith)
+        table.clear(CFG_REAL.FightGoal)
+        check(P.modeNow() == "random", "P.modeNow names the mode running: " .. tostring(P.modeNow()))
+        check(P.fightWithText("random") == "Mix", "default: Fights with = Mix: " .. P.fightWithText("random"))
+        openAttack()
+        check(current() == "attack", "Home > Attack opens the page")
+        check(pillNamed("For Random") ~= nil, "a tab for the mode you are in (For Random)")
+        check(pillNamed("For Sea events") ~= nil, "a tab for Sea events (the key owns it)")
+        check(pillNamed("MIX") ~= nil and pillNamed("Godhuman") ~= nil and pillNamed("Hallow Scythe") ~= nil,
+            "the wheel: MIX and the weapons you carry")
+        check(string.find(texts(), "Mixing", 1, true) ~= nil, "MIX: the truth card says Mixing: " .. texts())
+
+        -- a pick is per mode, and writes only FightWith
+        pillNamed("Godhuman").Activated:Fire()
+        check(CFG_REAL.FightWith.random == "Godhuman", "wheel: random fights with Godhuman")
+        check(CFG_REAL.FightWith.seaevents == nil, "wheel: another mode keeps its own pick (still MIX)")
+        check(P.fightWithText("random") == "Godhuman only", "Fights with: Godhuman only: " .. P.fightWithText("random"))
+        check(P.fightWithText("seaevents") == "Mix", "Fights with: the other mode is Mix")
+        livePass()
+        check(string.find(texts(), "Everything uses Godhuman", 1, true) ~= nil, "the truth card: Everything uses Godhuman")
+        goHome() livePass()
+        check(string.find(table.concat(labelsOf(VIEWS.home), "|"), "Godhuman only", 1, true) ~= nil,
+            "Home's Attack row says Godhuman only")
+        openAttack()
+
+        -- the sea tab keeps its own pick
+        pillNamed("For Sea events").Activated:Fire()
+        livePass()
+        pillNamed("Hallow Scythe").Activated:Fire()
+        check(CFG_REAL.FightWith.seaevents == "Hallow Scythe" and CFG_REAL.FightWith.random == "Godhuman",
+            "Sea events tab: its own pick, Random's kept")
+        pillNamed("For Random").Activated:Fire()
+        livePass()
+
+        -- mastery goal (visible with a single weapon)
+        local goalBtn
+        each(VIEWS.attack, function(k)
+            if not goalBtn and k.ClassName == "TextButton" and not k._destroyed and k.Visible ~= false then
+                for _, l in ipairs(labelsOf(k)) do
+                    if string.find(l, "Mastery goal", 1, true) then goalBtn = k end
+                end
+            end
+        end)
+        check(goalBtn ~= nil, "the truth card has a mastery goal switch with a single weapon")
+        if goalBtn then
+            goalBtn.Activated:Fire()
+            check(CFG_REAL.FightGoal.random == true, "goal on: FightGoal.random")
+            goalBtn.Activated:Fire()
+            check(CFG_REAL.FightGoal.random == nil, "goal off again")
+        end
+
+        -- the cards: Use only this, the M1 chip
+        pillNamed("Using only this").Activated:Fire()
+        check(CFG_REAL.FightWith.random == nil, "the chosen card's button puts the wheel back to MIX")
+        livePass()
+        pillNamed("Use only this").Activated:Fire()
+        check(CFG_REAL.FightWith.random == "Godhuman", "a card's Use only this sets the wheel")
+        local m1Chip = pillNamed("M1")
+        check(m1Chip ~= nil, "a card has an M1 chip")
+        CFG_REAL.M1Weapon = ""
+        if m1Chip then m1Chip.Activated:Fire() end
+        check(CFG_REAL.M1Weapon ~= "", "the M1 chip writes the M1 pick: " .. tostring(CFG_REAL.M1Weapon))
+        CFG_REAL.M1Weapon = ""
+
+        -- PACE: step 3 is today's, step 1 is M1 first and slower
+        local pace1, pace3
+        each(VIEWS.attack, function(k)
+            if k.ClassName == "TextButton" and not k._destroyed then
+                if k.Text == "1" and not pace1 then pace1 = k end
+                if k.Text == "3" and not pace3 then pace3 = k end
+            end
+        end)
+        check(pace1 ~= nil and pace3 ~= nil, "PACE is a 1-5 dial")
+        if pace1 and pace3 then
+            pace1.Activated:Fire()
+            check(CFG_REAL.StartWith == "M1" and CFG_REAL.M1Between == 8 and CFG_REAL.CastWait == 0.8,
+                "PACE 1 writes M1 first, 8, 0.80")
+            pace3.Activated:Fire()
+            check(CFG_REAL.StartWith == P.cfgDefaults.StartWith and CFG_REAL.M1Between == P.cfgDefaults.M1Between
+                and CFG_REAL.CastWait == P.cfgDefaults.CastWait, "PACE 3 is today's defaults")
+            CFG_REAL.CastWait = 0.51
+            livePass()
+            check(string.find(texts(), "your own values", 1, true) ~= nil, "an edited value lights no step: your own values")
+            pace3.Activated:Fire()
+        end
+
+        -- Race: one switch for V4 and V3
+        local raceOn = CFG_REAL.RaceV4 and CFG_REAL.RaceV3
+        local racePill
+        each(VIEWS.attack, function(k)
+            if not racePill and isPill(k) and switchLabel(k) == "Race" then racePill = k end
+        end)
+        check(racePill ~= nil, "a Race switch")
+        if racePill then
+            racePill.Activated:Fire()
+            check(CFG_REAL.RaceV4 == not raceOn and CFG_REAL.RaceV3 == not raceOn, "Race switches V4 and V3 together")
+            racePill.Activated:Fire()
+            check(CFG_REAL.RaceV4 == raceOn and CFG_REAL.RaceV3 == raceOn, "Race back")
+        end
+        check(string.find(texts(), "Fine-tune", 1, true) ~= nil, "a Fine-tune button")
+        check(string.find(texts(), "Aim", 1, true) ~= nil, "an Aim row")
+        table.clear(CFG_REAL.FightWith)
+        table.clear(CFG_REAL.FightGoal)
+        CFG_REAL.RandomMode = false
+        goHome()
+    end
+
     -- ---------- the fruit menu: Take, Skip, a second tap takes it off ----------
     table.clear(CFG_REAL.FruitMenu)
     tap("fruitmenu", "Take")
@@ -396,7 +525,9 @@ local NEW_OK = { MirageJob = true,
     ["NewsShow.trades"] = true }                -- 2026-11-08: your trades, left and back at
 for _, k in ipairs(keys) do
     -- 2026-11-07: the fruit menu, a mark per fruit.
-    check(old[k] or NEW_OK[k] or string.match(k, "^FruitMenu%."), "a key the old panel never changed: CFG." .. k)
+    -- 2026-11-22: FIGHT WITH, one wheel per mode, and its mastery goal (Attack).
+    check(old[k] or NEW_OK[k] or string.match(k, "^FruitMenu%.") or string.match(k, "^FightWith%.")
+        or string.match(k, "^FightGoal%."), "a key the old panel never changed: CFG." .. k)
 end
 
 -- The fruit menu: every fruit on it can be marked.
@@ -413,7 +544,10 @@ end
 -- turns the others off (that is the one-at-a-time rule), the bone pair keeps
 -- min <= max.
 local MANY = { Hunt = true, HuntKind = true, RaidMode = true, RandomMode = true, Pvp = true,
-    LeviFight = true, MirageJob = true, BoneMin = true, BoneMax = true, Circuit = true }
+    LeviFight = true, MirageJob = true, BoneMin = true, BoneMax = true, Circuit = true,
+    -- 2026-11-22: a weapon's moves are lit on its Attack card AND on its own page.
+    ["Weapons.*.M1"] = true, ["Weapons.*.Z"] = true, ["Weapons.*.X"] = true, ["Weapons.*.C"] = true,
+    ["Weapons.*.V"] = true, ["Weapons.*.F"] = true, ["Weapons.*.use"] = true }
 for _, k in ipairs(keys) do
     local pages = {}
     for ctrl in pairs(WRITES[k]) do pages[string.match(ctrl, "^(%w+):") or ctrl] = true end

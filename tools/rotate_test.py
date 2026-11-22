@@ -16,6 +16,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LUAU = sys.argv[1] if len(sys.argv) > 1 else \
     r"C:\Users\sarka\Downloads\scripts\tools\luau-0.735\luau.exe"
 src = open(os.path.join(HERE, "..", "fast_farm.lua"), encoding="utf-8").read()
+
+# FIGHT WITH (Plan 2 R2): the farm asks P.weaponsFor / P.fightWeapon, so the real
+# block is part of every harness that runs the farm's weapon code.
+_fa = src.index("-- FIGHT WITH (Plan 2 R2, 2026-11-22): ONE decider per mode")
+_fa = src.index("\ndo\n", _fa) + 1
+_pa = src.index("-- FIGHT WITH (Plan 2 R2): the pure parts")
+FIGHTWITH = src[_pa:src.index("-- PACKS END", _pa)] + src[_fa:src.index("-- The weapons that are on AND in your backpack", _fa)]
 SEP = "-- =========================================================\n"
 a = src.index("-- WEAPON ROTATION\n")
 rot = src[a:src.index(SEP + "-- M1: THREE WAYS", a)]
@@ -29,7 +36,7 @@ cases = open(os.path.join(HERE, "rotate_cases.lua"), encoding="utf-8").read()
 # The learn section: no files on this "executor" (it only defines the cleaner).
 learn_stubs = "local game = { GetService = function() return {} end }\nlocal readfile, isfile, writefile = nil, nil, nil\nlocal _G = {}\n"
 with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False, encoding="utf-8") as f:
-    f.write(stubs + rot + "\n" + used + "\n" + learn_stubs + learn + "\n" + cases)
+    f.write(stubs + FIGHTWITH + rot + "\n" + used + "\n" + learn_stubs + learn + "\n" + cases)
     path = f.name
 r = subprocess.run([LUAU, path], capture_output=True, text=True)
 os.unlink(path)
