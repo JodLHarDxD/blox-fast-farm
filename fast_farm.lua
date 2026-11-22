@@ -17377,6 +17377,8 @@ local function buildUI()
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
         stats = "Stats & debug", news = "Breaking news", fruitmenu = "Fruit menu", trades = "Trades",
+        cover_farm = "GRIND", cover_raid = "BOSSES + RAIDS", cover_sea = "SEA", cover_prehistoric = "PREHISTORIC",
+        cover_pvp = "PVP", key = "Key & packs",
     }
 
     local function show(name, back)
@@ -18424,6 +18426,30 @@ local function buildUI()
             if CFG.Volcano then return "On", true end
             return "Off"
         end)
+    end
+
+    -- =====================================================
+    -- LOCKED COVERS (Plan 2 R1): a pack you do not hold is shown, never hidden
+    -- =====================================================
+    do
+        for _, f in ipairs(PACK_ORDER) do
+            local pk = PACKS[f]
+            local v = makeView("cover_" .. f)
+            gap(v, 6)
+            heading2(v, pk.name .. "  ·  not on your key yet")
+            caption(v, pk.line)
+            readout(v, function() return pk.price .. " / week     or EVERYTHING  $2.99 / week" end)
+            actionRow(v, "Copy store link", nil, function()
+                local s = _G.BFF_STORE
+                if s and setclipboard then
+                    setclipboard(s)
+                    say("store link copied - paste it in your browser")
+                else
+                    say("the store link is not out yet")
+                end
+            end)
+            navRow(v, "I have a code", function() return "" end, "key")
+        end
     end
 
     -- =====================================================

@@ -130,14 +130,15 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 33 pages (2026-11-08: Trades) ----------
+    -- ---------- 38 pages (2026-11-08: Trades; 2026-11-22: five locked covers) ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
         "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
-        "servers", "stats", "news", "fruitmenu", "trades" }
+        "servers", "stats", "news", "fruitmenu", "trades",
+        "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "33 pages, got " .. n)
+    check(n == #EXPECT, "38 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -430,8 +431,11 @@ while #queue > 0 do
     end
 end
 for name in pairs(VIEWS) do
+  -- A locked cover is reached from a LOCKED Modes row; this harness holds every pack.
+  if string.sub(name, 1, 6) ~= "cover_" then
     check(depth[name] ~= nil and depth[name] <= 3,
         name .. " within 3 taps of Home (" .. tostring(depth[name]) .. ")")
+  end
 end
 
 print(string.format("%d passed, %d failed", pass, fail))
