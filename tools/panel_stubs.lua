@@ -146,6 +146,11 @@ local task = {
     defer = function(f, ...) f(...) end,
     wait = function() error("__ONE_PASS__") end,
 }
+-- luau.exe seals _G: the panel's _G is this table instead (the gate's _G.BFF_ENT
+-- / _G.BFF_KIND / _G.BFF_STORE / _G.BFF_KEY are set by the cases), and the
+-- executor's setclipboard is a local the cases assign.
+local _G = {}
+local setclipboard = nil
 local WARNED = {}
 local warn = function(...) table.insert(WARNED, table.concat({ ... }, " ")) end
 

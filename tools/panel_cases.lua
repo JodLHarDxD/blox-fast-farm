@@ -436,11 +436,19 @@ while #queue > 0 do
     end
 end
 for name in pairs(VIEWS) do
-  -- A locked cover is reached from a LOCKED Modes row; this harness holds every pack.
-  if string.sub(name, 1, 6) ~= "cover_" then
     check(depth[name] ~= nil and depth[name] <= 3,
         name .. " within 3 taps of Home (" .. tostring(depth[name]) .. ")")
-  end
+end
+-- R2: every mode this key holds is a row of the Library's MAIN JOB (or its
+-- owner tools): Home > Mode > the mode = 2 taps. A cover is 2 as well (Home >
+-- Mode > the cover is 2 taps from the Library), Key & packs is 1.
+for _, id in ipairs({ "circuit", "random", "raid", "elite", "sword", "sail", "seaevents", "prehistoric",
+    "mirage", "levi", "pvp", "fruit", "volcano", "berry", "recipe", "flower", "ember", "halloween" }) do
+    check(depth[id] ~= nil and depth[id] <= 2, id .. " within 2 taps of Home (" .. tostring(depth[id]) .. ")")
+end
+check(depth.key == 1, "Key & packs is one tap from Home")
+for _, f in ipairs({ "farm", "raid", "sea", "prehistoric", "pvp", "fruits" }) do
+    check(depth["cover_" .. f] == 2, "cover_" .. f .. " is Home > Mode > the cover (" .. tostring(depth["cover_" .. f]) .. ")")
 end
 
 -- ---------- R2 kit: every component builds on a scratch view; every dial's today step is today's CFG ----------
@@ -501,6 +509,207 @@ do
         table.remove(P.dials, nDials + 1)   -- the scratch dial leaves with the scratch view
         scratch:Destroy()
     end
+end
+
+-- ---------- R2: Home, the Library, the covers, Key & packs - by key kind ----------
+-- The panel is built again under each key; a page's rows are read from the
+-- fresh gui (views are built once per build, from what the key holds).
+do
+    local CLIP = nil
+    setclipboard = function(s) CLIP = s end
+    local function walk(o, f)
+        for _, k in ipairs(rawget(o, "_kids")) do f(k) walk(k, f) end
+    end
+    local function labelsIn(o)
+        local t = {}
+        walk(o, function(c) if c.ClassName == "TextLabel" then table.insert(t, tostring(c.Text)) end end)
+        return t
+    end
+    local function build(ent, kind, store)
+        _G.BFF_ENT, _G.BFF_KIND, _G.BFF_STORE, _G.BFF_KEY = ent, kind, store, "BFF-CC4V-AAAA-BBBB-CCCC-NQ0H"
+        P.hudExtra = 0
+        check(P.panel(), "the panel builds again (" .. tostring(kind) .. ")")
+        local g = PG:FindFirstChild("BFFHUD")
+        local V = {}
+        walk(g, function(o)
+            if o.ClassName == "ScrollingFrame" and o.Name ~= "ScrollingFrame" then V[o.Name] = o end
+        end)
+        local back
+        walk(g, function(o) if o.ClassName == "TextButton" and o.Text == "Back" then back = o end end)
+        local I = { V = V, g = g }
+        function I.has(page, needle)
+            for _, l in ipairs(labelsIn(V[page])) do if string.find(l, needle, 1, true) then return true end end
+            return false
+        end
+        function I.cur()
+            flush()
+            local vis = {}
+            for n, v in pairs(V) do if v.Visible then table.insert(vis, n) end end
+            return #vis == 1 and vis[1] or ("?" .. table.concat(vis, ","))
+        end
+        function I.btn(page, text)
+            local found
+            walk(V[page], function(k)
+                if found or k.ClassName ~= "TextButton" then return end
+                if tostring(k.Text) == text then found = k return end
+                for _, l in ipairs(labelsIn(k)) do if l == text then found = k return end end
+            end)
+            return found
+        end
+        function I.find(page, pred)
+            local out
+            walk(V[page], function(k) if not out and pred(k) then out = k end end)
+            return out
+        end
+        function I.tap(page, text)
+            local b = I.btn(page, text)
+            check(b ~= nil, "[" .. tostring(kind) .. "] a \"" .. text .. "\" button on " .. page)
+            if b then b.Activated:Fire() end
+            flush()
+        end
+        function I.home() for _ = 1, 8 do if I.cur() == "home" then return end back.Activated:Fire() end end
+        function I.live() flush() pcall(SPAWNED[#SPAWNED]) end
+        return I
+    end
+    local NOW = os.time()
+
+    -- A buyer with GRIND only.
+    local B = build({ farm = NOW + 5 * 86400 + 60 }, "buyer", "https://store.example/x")
+    B.tap("home", "Mode")
+    B.live()
+    check(B.has("modes", "5 days left on your key") and B.has("modes", "GRIND"), "buyer: the Library's key strip says GRIND, 5 days left")
+    check(B.btn("modes", "Circuit farm") and B.btn("modes", "Random"), "buyer: GRIND's modes are rows of MAIN JOB")
+    check(not B.btn("modes", "Raid") and not B.btn("modes", "Mirage") and not B.btn("modes", "PvP"),
+        "buyer: a locked pack's modes are not rows")
+    check(not B.btn("modes", "Haki berries") and not B.btn("modes", "Halloween"), "buyer: no owner tools")
+    check(B.has("modes", "LIBRARY  ·  5 MORE PACKS") and B.has("modes", "tap a cover"), "buyer: LIBRARY  ·  5 MORE PACKS (4 covers and Fruits)")
+    check(B.has("modes", "EVERYTHING") and B.has("modes", "BEST VALUE"), "buyer: the EVERYTHING card shows")
+    check(B.has("modes", "Diablo, Deandre, Urban, the sword dealer, raids"), "buyer: a cover carries its line")
+    local function coverText(line)
+        local b = B.btn("modes", line)
+        return b and table.concat(labelsIn(b), "|")
+    end
+    local rc, gc = coverText("Diablo, Deandre, Urban, the sword dealer, raids"),
+        coverText("Circuit farm and Random: your level or your list")
+    check(rc and string.find(rc, "$0.99", 1, true), "buyer: BOSSES + RAIDS cover shows its price: " .. tostring(rc))
+    check(gc and string.find(gc, ">on<", 1, true) and not string.find(gc, "$0.99", 1, true), "buyer: the GRIND cover says on, no price: " .. tostring(gc))
+    -- a locked cover's tap opens cover_<pack>; the plate has the price, copy and a code
+    B.tap("modes", "BOSSES + RAIDS")
+    check(B.cur() == "cover_raid", "buyer: the locked cover opens cover_raid, got " .. B.cur())
+    check(B.has("cover_raid", "Not on your key yet") and B.has("cover_raid", "$0.99") and B.has("cover_raid", "INSIDE"),
+        "buyer: cover page has the plate and INSIDE")
+    check(B.has("cover_raid", "Elite pirates") and B.has("cover_raid", "Legendary swords") and not B.btn("cover_raid", "Raid"),
+        "buyer: INSIDE lists the modes, not tappable")
+    B.tap("cover_raid", "Get Bosses + Raids  ·  copy store link")
+    check(CLIP == "https://store.example/x", "buyer: Get ... copies the store link")
+    check(B.btn("cover_raid", "Link copied: paste it in your browser") ~= nil, "buyer: the button says the link is copied")
+    B.tap("cover_raid", "I have a code")
+    check(B.cur() == "key", "buyer: I have a code opens Key & packs")
+    -- the motion: one live step puts word 1 in; it ticks only while the page is visible
+    B.home() B.tap("home", "Mode") B.tap("modes", "SEA")
+    check(B.cur() == "cover_sea", "buyer: SEA cover opens, got " .. B.cur())
+    B.live()
+    local w1 = B.find("cover_sea", function(k) return k.ClassName == "TextLabel" and k.Text == "SEA BEASTS." end)
+    check(w1 and w1.TextTransparency == 0, "SEA cover: the first word is in after a live step")
+    local w4 = B.find("cover_sea", function(k) return k.ClassName == "TextLabel" and k.Text == "FROM YOUR BOAT." end)
+    check(w4 and w4.TextTransparency == 1, "SEA cover: the fourth word waits")
+    w1.TextTransparency = 0.5
+    B.home()
+    flush()
+    B.live()
+    check(w1.TextTransparency == 0.5, "SEA cover: nothing ticks while the page is not on screen")
+    -- FRUITS: coming soon
+    B.tap("home", "Mode") B.tap("modes", "FRUITS")
+    check(B.cur() == "cover_fruits" and B.btn("cover_fruits", "Coming soon") and B.has("cover_fruits", "$14.99")
+        and B.has("cover_fruits", "Fruit notifier"), "FRUITS cover: coming soon, $14.99, what it does")
+    B.tap("cover_fruits", "Coming soon")
+    check(string.find(SAID[#SAID] or "", "not for sale yet", 1, true) ~= nil, "FRUITS: the plate says it is not for sale yet")
+    B.tap("cover_fruits", "Back to the Library")
+    check(B.cur() == "modes", "FRUITS: Back to the Library, got " .. B.cur())
+    -- Key & packs
+    B.home() B.tap("home", "Key & packs")
+    check(B.cur() == "key", "Key & packs opens from Home")
+    check(B.has("key", "BFF-CC4V-····-····-····-NQ0H"), "Key: the key with its middle hidden")
+    check(not B.has("key", "AAAA") and not B.has("key", "BBBB"), "Key: the middle groups are not shown")
+    B.live()
+    check(B.has("key", "Grind") and B.has("key", "Sea") and B.has("key", "$1.49 / wk") and B.has("key", "Everything"),
+        "Key: every pack and the price of the locked ones")
+    check(B.has("key", "5 days left"), "Key: GRIND says 5 days left")
+    B.home() B.live()
+    local keyRow = B.btn("home", "Key & packs")
+    local kv
+    for _, k in ipairs(rawget(keyRow, "_kids")) do
+        if k.ClassName == "TextLabel" and k.Text ~= ">" and k.Text ~= "Key & packs" then kv = k.Text end
+    end
+    check(kv == "Grind  ·  5d left", "Home Key row: Grind  ·  5d left (" .. tostring(kv) .. ")")
+    B.tap("home", "Key & packs")
+    -- Redeem: a tap with a code runs P.redeem; the answer shows
+    local nCalls = 0
+    local realRedeem = P.redeem
+    P.redeem = function(c) nCalls += 1 P.redeemNote = "that code is used" end
+    local tb = B.find("key", function(k) return k.ClassName == "TextBox" end)
+    tb.Text = "BFV-AAAA"
+    B.tap("key", "Redeem")
+    check(nCalls == 1, "Key: Redeem runs P.redeem with the code")
+    tb.Text = ""
+    B.tap("key", "Redeem")
+    check(nCalls == 1, "Key: Redeem with nothing typed does nothing")
+    B.live()
+    check(B.has("key", "that code is used"), "Key: the answer shows")
+    P.redeem = realRedeem
+    P.redeemNote = nil
+    -- the Home moment: the news says Mirage is up, SEA is locked
+    P.news = { headlines = function() return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" } } end }
+    B = build({ farm = NOW + 5 * 86400 + 60 }, "buyer", nil)
+    B.live()
+    check(B.has("home", "Mirage is up in this server") and B.has("home", "SEA runs it for you  ·  look inside"),
+        "Home: the live moment card shows for a locked pack")
+    check(P.hudExtra == 76, "Home: the panel grows by the card (" .. tostring(P.hudExtra) .. ")")
+    B.tap("home", "Mirage is up in this server")
+    check(B.cur() == "cover_sea", "Home: the moment card opens the SEA cover, got " .. B.cur())
+    check(P.hudExtra == 0, "Home: the panel is its own size again off Home")
+    B.home()
+    check(P.hudExtra == 76, "Home: the card is back when Home is")
+    B.tap("home", "x")
+    check(P.hudExtra == 0, "Home: x puts the card away")
+    -- a pack this key holds: no card at all
+    B = build({ farm = NOW + 86400, sea = 0 }, "buyer", nil)
+    B.live()
+    check(P.hudExtra == 0, "Home: no card when the pack is yours")
+    P.news = nil
+
+    -- The owner: nothing locked, every pack a cover that opens its modes, owner tools in their own section.
+    local O = build({ fruits = 0 }, "owner", nil)
+    O.tap("home", "Mode")
+    O.live()
+    check(O.has("modes", "OWNER") and O.has("modes", "everything is open on your key"), "owner: the key strip says OWNER")
+    for _, row in ipairs({ "Circuit farm", "Random", "Raid", "Elite pirates", "Legendary swords", "Sea travel", "Sea events",
+        "Prehistoric", "Mirage", "Leviathan", "PvP", "Fruits", "Haki berries", "Aura recipe", "Fire Flower", "Blaze Ember", "Halloween" }) do
+        check(O.btn("modes", row) ~= nil, "owner: a row for " .. row)
+    end
+    check(O.has("modes", "OWNER TOOLS  ·  HUNT, NEXT SERVER WHEN NOT HERE"), "owner: the owner tools have their own section")
+    check(O.has("modes", "LIBRARY  ·  EVERY PACK IS YOURS") and not O.has("modes", "BEST VALUE"), "owner: no shop, no EVERYTHING card")
+    O.tap("modes", "SEA")
+    check(O.cur() == "cover_sea", "owner: a pack's cover opens, got " .. O.cur())
+    check(O.has("cover_sea", "On your key") and not O.has("cover_sea", "Not on your key yet"), "owner: the plate says On your key, no price")
+    check(O.btn("cover_sea", "Mirage") ~= nil and O.btn("cover_sea", "Leviathan") ~= nil, "owner: INSIDE rows open the modes")
+    O.tap("cover_sea", "Mirage")
+    check(O.cur() == "mirage", "owner: a cover's row opens the mode, got " .. O.cur())
+    local anyLock = false
+    for _, name in ipairs({ "modes", "cover_sea", "cover_raid", "key" }) do
+        if O.has(name, "Not on your key yet") then anyLock = true end
+    end
+    check(not anyLock, "owner: no lock text anywhere")
+    O.home() O.tap("home", "Key & packs")
+    O.live()
+    check(O.has("key", "for ever") and O.has("key", "OWNER"), "owner: Key says OWNER, packs for ever")
+
+    -- No key at all: as before the gate - every mode open.
+    local N = build(nil, nil, nil)
+    N.tap("home", "Mode")
+    check(N.has("modes", "NO KEY") and N.btn("modes", "Raid") ~= nil and N.btn("modes", "Mirage") ~= nil, "no key: every mode is a row")
+    _G.BFF_ENT, _G.BFF_KIND, _G.BFF_STORE, _G.BFF_KEY = nil, nil, nil, nil
+    setclipboard = nil
 end
 
 print(string.format("%d passed, %d failed", pass, fail))
