@@ -18381,49 +18381,49 @@ local function buildUI()
                 return ""
             end
         end
+        -- One mode row by the key's packs: open = as before, locked = its
+        -- pack's price and a tap opens the cover, hidden = no row at all.
+        local function packRow(label, sub, id, valueFn)
+            local st = P.packState(id)
+            if st == "hidden" then return false end
+            if st == "locked" then
+                local pk = PACKS[PACK_OF[id]]
+                modeRow(v, label, "locked  ·  " .. pk.name, function() return pk.price, false end, "cover_" .. PACK_OF[id])
+                return true
+            end
+            modeRow(v, label, sub, valueFn or on(id), id)
+            return true
+        end
         heading2(v, "farm  ·  fights enemies")
-        modeRow(v, "Circuit farm", "your targets, by level", on("circuit"), "circuit")
-        hairline(v)
-        modeRow(v, "Random", "anything near you", on("random"), "random")
-        hairline(v)
-        modeRow(v, "Raid", "the raid's island", on("raid"), "raid")
+        if packRow("Circuit farm", "your targets, by level", "circuit") then hairline(v) end
+        if packRow("Random", "anything near you", "random") then hairline(v) end
+        packRow("Raid", "the raid's island", "raid")
 
         heading2(v, "hunt  ·  next server when not here")
-        modeRow(v, "Elite pirates", "Diablo · Deandre · Urban", on("elite"), "elite")
-        hairline(v)
-        modeRow(v, "Fruits", "on the ground, stored", on("fruit"), "fruit")
-        hairline(v)
-        modeRow(v, "Haki berries", "Legendary Aura colors", on("berry"), "berry")
-        hairline(v)
-        modeRow(v, "Aura recipe", "the Barista Cousin", on("recipe"), "recipe")
-        hairline(v)
-        modeRow(v, "Legendary swords", "Shizu · Saishi · Oroshi", on("sword"), "sword")
-        hairline(v)
-        modeRow(v, "Fire Flower", "Draco V2  ·  Third Sea", on("flower"), "flower")
-        hairline(v)
-        modeRow(v, "Blaze Ember", "Hydra Island quests", on("ember"), "ember")
-        hairline(v)
-        modeRow(v, "Halloween", "pumpkins · Harvest Moon doors", on("halloween"), "halloween")
+        if packRow("Elite pirates", "Diablo · Deandre · Urban", "elite") then hairline(v) end
+        if packRow("Fruits", "on the ground, stored", "fruit") then hairline(v) end
+        if packRow("Haki berries", "Legendary Aura colors", "berry") then hairline(v) end
+        if packRow("Aura recipe", "the Barista Cousin", "recipe") then hairline(v) end
+        if packRow("Legendary swords", "Shizu · Saishi · Oroshi", "sword") then hairline(v) end
+        if packRow("Fire Flower", "Draco V2  ·  Third Sea", "flower") then hairline(v) end
+        if packRow("Blaze Ember", "Hydra Island quests", "ember") then hairline(v) end
+        packRow("Halloween", "pumpkins · Harvest Moon doors", "halloween")
 
         heading2(v, "sea  ·  from a boat")
-        modeRow(v, "Sea travel", "your boat - you steer", on("sail"), "sail")
-        hairline(v)
-        modeRow(v, "Sea events", "beasts, sharks - counted", on("seaevents"), "seaevents")
-        hairline(v)
-        modeRow(v, "Prehistoric", "the island + volcano loop", on("prehistoric"), "prehistoric")
-        hairline(v)
-        modeRow(v, "Mirage", "onto it · dealer · chests · gear", on("mirage"), "mirage")
-        hairline(v)
-        modeRow(v, "Leviathan", "Frozen Dimension, a group", on("levi"), "levi")
+        if packRow("Sea travel", "your boat - you steer", "sail") then hairline(v) end
+        if packRow("Sea events", "beasts, sharks - counted", "seaevents") then hairline(v) end
+        if packRow("Prehistoric", "the island + volcano loop", "prehistoric") then hairline(v) end
+        if packRow("Mirage", "onto it · dealer · chests · gear", "mirage") then hairline(v) end
+        packRow("Leviathan", "Frozen Dimension, a group", "levi")
 
         heading2(v, "you fight")
-        modeRow(v, "PvP", "aim, Ken, speed - farm stops", on("pvp"), "pvp")
+        packRow("PvP", "aim, Ken, speed - farm stops", "pvp")
 
         heading2(v, "alongside any mode")
-        modeRow(v, "Volcano event", "when Prehistoric is up", function()
+        packRow("Volcano event", "when Prehistoric is up", "volcano", function()
             if CFG.Volcano then return "On", true end
             return "Off"
-        end, "volcano")
+        end)
     end
 
     -- =====================================================
