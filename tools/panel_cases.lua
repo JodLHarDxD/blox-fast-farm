@@ -884,5 +884,44 @@ do
     CFG_REAL.Quests, CFG_REAL.RandomRadius = was.q, was.r
 end
 
+-- ---------- R2 Task 5: BOSSES + RAIDS pages, Raid, Elite, Legendary swords ----------
+do
+    local was = { loop = CFG_REAL.RaidLoop, chip = CFG_REAL.RaidChip, fruit = CFG_REAL.RaidFruitMax,
+        look = CFG_REAL.EliteLook, want = CFG_REAL.SwordWant.Shizu }
+    for _, page in ipairs({ "raid", "elite", "sword" }) do
+        check(modePill(page) ~= nil and isStrip(modePill(page)), page .. ": a mode strip")
+        check(button(page, "Fights with") ~= nil, page .. ": a Fights with row")
+    end
+    check(button("raid", "Fine-tune") ~= nil and button("elite", "Fine-tune") ~= nil, "raid and elite: Fine-tune")
+    -- Raid: a chip is the next raid (loop on); "I start each raid myself" = no loop
+    tap("raid", "Quake")
+    check(CFG_REAL.RaidChip == "Quake" and CFG_REAL.RaidLoop == true, "raid: a chip sets RaidChip and turns the loop on")
+    tap("raid", "I start each raid myself")
+    check(CFG_REAL.RaidLoop == false, "raid: I start each raid myself -> RaidLoop off")
+    tap("raid", "Flame")
+    check(CFG_REAL.RaidChip == "Flame" and CFG_REAL.RaidLoop == true, "raid: Flame puts the loop back")
+    tap("raid", "1")
+    check(CFG_REAL.RaidFruitMax == 0, "raid: money guard step 1 = no fruit")
+    tap("raid", "5")
+    check(CFG_REAL.RaidFruitMax == 500000, "raid: money guard step 5 = 500,000")
+    tap("raid", "3")
+    check(CFG_REAL.RaidFruitMax == 200000, "raid: money guard step 3 is today's 200,000")
+    -- Elite: patience dial over EliteLook, today = step 3 (8 s)
+    tap("elite", "5")
+    check(CFG_REAL.EliteLook == 30, "elite: patience 5 = 30 s")
+    tap("elite", "1")
+    check(CFG_REAL.EliteLook == 3, "elite: patience 1 = 3 s")
+    tap("elite", "3")
+    check(CFG_REAL.EliteLook == 8, "elite: patience 3 is today's 8 s")
+    check(button("elite", "Servers & team") ~= nil, "elite: Servers & team link")
+    -- Swords: a card buys or skips
+    tap("sword", "Shizu")
+    check(CFG_REAL.SwordWant.Shizu == (not was.want), "sword: a card toggles SwordWant")
+    tap("sword", "Shizu")
+    check(CFG_REAL.SwordWant.Shizu == was.want, "sword: and back")
+    CFG_REAL.RaidLoop, CFG_REAL.RaidChip, CFG_REAL.RaidFruitMax = was.loop, was.chip, was.fruit
+    CFG_REAL.EliteLook, CFG_REAL.SwordWant.Shizu = was.look, was.want
+end
+
 print(string.format("%d passed, %d failed", pass, fail))
 if fail == 0 then print("ALL PASS") end

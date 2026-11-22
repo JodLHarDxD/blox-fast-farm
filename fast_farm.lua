@@ -20318,106 +20318,205 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- RAID
+    -- RAID. R2 Task 5: the next raid is one chip (or "I start each raid
+    -- myself" = no loop); the money guard is a dial; the three distances and
+    -- the exact guard are Fine-tune.
     -- =====================================================
     do
         local v = makeView("raid")
         gap(v, 6)
-        readout(v, function()
-            local rd = P.raid
-            if not rd then return "-" end
-            local rl = rd.loop
-            return table.concat({
-                "raid      " .. tostring(P.raidNote),
-                string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
-                    rd.note and ("  ·  last: " .. rd.note) or ""),
-                string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
-                    rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
-            }, "\n")
-        end)
-        modeSwitch(v, "raid")
-        heading2(v, "the raid")
-        sliderRow(v, "Pulls within", 100, 1500, 50,
-            function() return CFG.RaidRadius end,
-            function(x) CFG.RaidRadius = x end, " studs")
-        sliderRow(v, "A raid island counts within", 500, 5000, 100,
-            function() return CFG.RaidReach end,
-            function(x) CFG.RaidReach = x end, " studs of you")
-        sliderRow(v, "Stuck: relocate after", 5, 60, 1,
-            function() return CFG.RaidStuckSecs end,
-            function(x) CFG.RaidStuckSecs = x end, " s with no HP off")
-        heading2(v, "raid loop")
-        switchRow(v, "Raid loop",
-            "Raid over: a chip for your cheapest stored fruit, the button, again - else you stay",
-            function() return CFG.RaidLoop end,
-            function(x)
-                CFG.RaidLoop = x
-                if x and P.raid then P.raid.loop.nextAt = 0 end
+        P.kit.pageTop(v, "raid")
+        P.kit.modeStrip(v, "raid")
+        heading2(v, "next raid")
+        local CHIPS = { "Flame", "Ice", "Quake", "Light", "Dark", "Spider", "Magma", "Buddha", "Sand" }
+        local items = {}
+        for _, n in ipairs(CHIPS) do table.insert(items, { n, n }) end
+        P.kit.chipGrid(v, items, 3,
+            function() return CFG.RaidLoop and CFG.RaidChip or nil end,
+            function(n)
+                CFG.RaidChip = n
+                CFG.RaidLoop = true
+                if P.raid then P.raid.loop.nextAt = 0 end
+            end, "raid")
+        P.kit.chipGrid(v, { { "self", "I start each raid myself" } }, 1,
+            function() if not CFG.RaidLoop then return "self" end return nil end,
+            function() CFG.RaidLoop = false end, "raid")
+        caption(v, "Raids need level 1100 and the Second or Third Sea. Outside a raid nothing is fought: you stay where you are.")
+        P.kit.truthCard(v, function()
+            if CFG.RaidLoop then return tostring(CFG.RaidChip) .. " raids, nonstop" end
+            return "Only raids you start"
+        end, function()
+            if CFG.RaidLoop then
+                return "Raid over: a " .. tostring(CFG.RaidChip) .. " chip from the Mysterious Scientist, the raid button, "
+                    .. "the next raid. A chip already in your backpack goes first. Anything fails: you stay put, tried again soon."
+            end
+            return "Every enemy on the raid's island is fought. Raid over: you stay where you are and nothing is bought."
+        end, "raid")
+        P.kit.dial(v, "Pays for a chip with", {
+            { name = "1  NO FRUIT", set = { RaidFruitMax = 0 },
+                line = "Never pays with a fruit. Pays $100,000 Beli instead: the scientist takes that once every 2 hours." },
+            { name = "2  UP TO SMOKE", set = { RaidFruitMax = 100000 },
+                line = "Never pays with a fruit over $100,000. Rocket to Smoke may go, your cheapest stored one first. None that cheap: $100,000 Beli, every 2 hours at most." },
+            { name = "3  UP TO SPIKE", set = { RaidFruitMax = 200000 },
+                line = "Never pays with a fruit over $200,000. Rocket to Spike may go, your cheapest stored one first. None that cheap: $100,000 Beli, every 2 hours at most (today's setting).",
+                today = true },
+            { name = "4  UP TO ICE", set = { RaidFruitMax = 350000 },
+                line = "Never pays with a fruit over $350,000. Rocket to Ice may go, your cheapest stored one first. None that cheap: $100,000 Beli, every 2 hours at most." },
+            { name = "5  UP TO DARK", set = { RaidFruitMax = 500000 },
+                line = "Never pays with a fruit over $500,000. Rocket to Dark may go, your cheapest stored one first. None that cheap: $100,000 Beli, every 2 hours at most." },
+        }, "none")
+        caption(v, "A dearer fruit in your backpack stops the trade: store it first.")
+        heading2(v, "also")
+        P.kit.fightsWith(v, "raid")
+        P.kit.fineTune(v, function(v)
+            readout(v, function()
+                local rd = P.raid
+                if not rd then return "-" end
+                local rl = rd.loop
+                return table.concat({
+                    "raid      " .. tostring(P.raidNote),
+                    string.format("done      %d raids  ·  %d relocations%s", rd.done, rd.moves,
+                        rd.note and ("  ·  last: " .. rd.note) or ""),
+                    string.format("loop      %s  ·  %d chips  ·  %d presses%s", CFG.RaidLoop and tostring(rl.note) or "off",
+                        rl.chips, rl.presses, rl.paid and ("  ·  last paid " .. tostring(rl.paid)) or ""),
+                }, "\n")
             end)
-        heading2(v, "the chip")
-        radio(v, 164, {
-            { "Flame", "Flame", "" }, { "Ice", "Ice", "" }, { "Quake", "Quake", "" },
-            { "Light", "Light", "" }, { "Dark", "Dark", "" }, { "Spider", "Spider", "" },
-            { "Magma", "Magma", "" }, { "Buddha", "Buddha", "" }, { "Sand", "Sand", "" },
-        }, function() return CFG.RaidChip end, function(x) CFG.RaidChip = x end)
-        sliderRow(v, "Trade a stored fruit worth at most", 0, 1000000, 10000,
-            function() return CFG.RaidFruitMax end,
-            function(x) CFG.RaidFruitMax = x end, " Beli")
-        fold(v, "How it works", function(v)
-            caption(v, "Every enemy on the raid's island, any kind - outside a raid you stay where you are.")
-            caption(v, "Of the newest raid island (Island 1 to 5). Every kind of "
-                .. "enemy in that circle goes in the pile. Outside a raid nothing "
-                .. "is fought and you stay where you are.")
-            caption(v, "Raid loop: raid over, a chip for your cheapest stored fruit, the button, again - else you stay.")
-            caption(v, "The Mysterious Scientist takes a physical fruit for a chip (or "
-                .. "$100,000 every 2 hours): your cheapest stored one under this is "
-                .. "loaded into the backpack - never your hand - and traded. A "
-                .. "dearer fruit already in your backpack = nothing traded (he "
-                .. "could take it). Anything fails: you stay, tried again later.")
-        end)
+            sliderRow(v, "Pulls within", 100, 1500, 50,
+                function() return CFG.RaidRadius end,
+                function(x) CFG.RaidRadius = x end, " studs")
+            sliderRow(v, "A raid island counts within", 500, 5000, 100,
+                function() return CFG.RaidReach end,
+                function(x) CFG.RaidReach = x end, " studs of you")
+            sliderRow(v, "Stuck: relocate after", 5, 60, 1,
+                function() return CFG.RaidStuckSecs end,
+                function(x) CFG.RaidStuckSecs = x end, " s with no HP off")
+            sliderRow(v, "Money guard, exact: a stored fruit worth at most", 0, 1000000, 10000,
+                function() return CFG.RaidFruitMax end,
+                function(x) CFG.RaidFruitMax = x end, " Beli")
+        end, 4)
     end
 
     -- =====================================================
-    -- ELITE PIRATES
+    -- ELITE PIRATES. R2 Task 5: patience is a dial over "Look for an elite";
+    -- the quest is a switch under ALSO; the chalice is in the truth card.
     -- =====================================================
     do
         local v = makeView("elite")
         gap(v, 6)
-        readout(v, function()
-            local el = P.elite
-            local t = el.tally
-            local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
-            return table.concat({
-                "Elite Hunter  " .. tostring(el.reply or "not asked")
-                    .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
-                string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
-                "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
-                "last      " .. tostring(el.lastKill or "-"),
-            }, "\n")
-        end)
-        modeSwitch(v, "elite")
-        heading2(v, "the quest")
-        switchRow(v, "Take the Elite Hunter's quest",
-            "Progress toward Yama - the chalice does not need it",
-            function() return CFG.EliteQuest end,
+        P.kit.pageTop(v, "raid")
+        P.kit.modeStrip(v, "elite")
+        local PAT = {
+            { 3, "1  QUICK" }, { 5, "2  BRISK" }, { 8, "3  STEADY" },
+            { 15, "4  PATIENT" }, { 30, "5  THOROUGH" },
+        }
+        local steps = {}
+        for _, p in ipairs(PAT) do
+            table.insert(steps, { name = p[2], set = { EliteLook = p[1] },
+                line = "No answer from the Elite Hunter: the next server after " .. p[1] .. " s"
+                    .. (p[1] == 8 and " (today's setting)." or ".")
+                    .. " An elite in sight is fought at once.",
+                today = (p[1] == 8) or nil })
+        end
+        P.kit.dial(v, "Patience in each server", steps, "raid")
+        -- What each answer costs: how long it waits, as bars.
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = s,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = s,
+            })
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham, TextSize = F.tiny, TextColor3 = C.third,
+                TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1,
+                Text = "After a join, the Elite Hunter is asked:", Parent = s,
+            })
+            local lanes = {
+                { "Says \"none up\"", "leaves early", function() return math.min(3, CFG.EliteLook) end },
+                { "No answer", "your patience", function() return CFG.EliteLook end },
+                { "Says \"one is up\"", "looks over its island", function() return 45 end },
+            }
+            local rows = {}
+            for i, ln in ipairs(lanes) do
+                local r = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+                    LayoutOrder = i + 1, Parent = s,
+                })
+                mk("TextLabel", {
+                    Size = UDim2.new(0.42, 0, 1, 0), BackgroundTransparency = 1,
+                    Font = Enum.Font.GothamMedium, TextSize = F.small, TextColor3 = C.text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, Text = ln[1] .. "  ·  " .. ln[2], Parent = r,
+                })
+                local track = mk("Frame", {
+                    Size = UDim2.new(0.38, 0, 0, 6), Position = UDim2.new(0.44, 0, 0.5, -3),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = r,
+                })
+                corner(track, 3)
+                local fill = mk("Frame", {
+                    Size = UDim2.new(0.1, 0, 1, 0), BackgroundColor3 = (i == 2) and C.stop or C.third,
+                    BorderSizePixel = 0, Parent = track,
+                })
+                corner(fill, 3)
+                local val = mk("TextLabel", {
+                    Size = UDim2.new(0.16, 0, 1, 0), Position = UDim2.new(0.84, 0, 0, 0),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.small,
+                    TextColor3 = C.second, TextXAlignment = Enum.TextXAlignment.Right, Text = "", Parent = r,
+                })
+                rows[i] = { fill = fill, val = val, f = ln[3] }
+            end
+            mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham, TextSize = F.tiny, TextColor3 = C.third,
+                TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 9,
+                Text = "then the next server", Parent = s,
+            })
+            addLive(function()
+                for _, r in ipairs(rows) do
+                    local secs = tonumber(r.f()) or 0
+                    r.fill.Size = UDim2.new(math.clamp(secs / 45, 0.03, 1), 0, 1, 0)
+                    r.val.Text = string.format("%g s", secs)
+                end
+            end)
+            gap(v, 8)
+        end
+        P.kit.truthCard(v, function() return "Elites, server after server" end, function()
+            return "The last hit on Diablo, Deandre or Urban, in the Third Sea."
+                .. (CFG.EliteQuest and " Each kill counts toward Yama." or " No quest is taken.")
+                .. " Down with no chalice: the next server."
+                .. "\n\nThe God's Chalice ends the hunt: no hop in that server, you wait 300 up. Stop gives your character back."
+        end, "raid")
+        heading2(v, "also")
+        switchRow(v, "Take the Elite Hunter's quest", function()
+            if not CFG.EliteQuest then return "Off: no quest, no trip to him. The chalice does not need it." end
+            local pr = P.elite and P.elite.progress
+            return (pr and (pr .. " / 30 toward Yama. ") or "") .. "Any other quest you have is dropped for it."
+        end, function() return CFG.EliteQuest end,
             function(x) CFG.EliteQuest = x end)
-        heading2(v, "after a join")
-        sliderRow(v, "Look for an elite", 3, 30, 1,
-            function() return CFG.EliteLook end,
-            function(x) CFG.EliteLook = x end, " s")
+        P.kit.fightsWith(v, "elite")
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
-        fold(v, "How it works", function(v)
-            caption(v, "Diablo, Deandre, Urban - last hit, God's Chalice.")
-            caption(v, "The God's Chalice ends the hunt in the server it came in: "
-                .. "no hop there, ever - leaving or dying with it loses it. You are "
-                .. "held 300 up; Stop gives the character back. Servers & team has "
-                .. "its switch: off = the chalice is ignored, and lost at the next hop.")
-            caption(v, "After a join: this long for an elite to show before leaving. "
-                .. "When the Elite Hunter says none is up, 3 s is enough.")
-            caption(v, "Asked from where you stand. If that gets no answer, once per "
-                .. "server from in front of the Elite Hunter. A different quest "
-                .. "running is dropped for it.")
-        end)
+        P.kit.fineTune(v, function(v)
+            readout(v, function()
+                local el = P.elite
+                local t = el.tally
+                local rate = (t.joins > 0) and string.format("%.0f%%", t.found / t.joins * 100) or "-"
+                return table.concat({
+                    "Elite Hunter  " .. tostring(el.reply or "not asked")
+                        .. (el.replyText and ("  \"" .. string.sub(el.replyText, 1, 70) .. "\"") or ""),
+                    string.format("had one   %d (%s)   ·   down %d   ·   chalices %d", t.found, rate, t.kills, t.chalices),
+                    "progress  " .. (el.progress and (el.progress .. " / 30 toward Yama") or "not read yet"),
+                    "last      " .. tostring(el.lastKill or "-"),
+                }, "\n")
+            end)
+            sliderRow(v, "Look for an elite, exact (3 to 30 s)", 3, 30, 1,
+                function() return CFG.EliteLook end,
+                function(x) CFG.EliteLook = x end, " s")
+        end, 1)
     end
 
     -- =====================================================
@@ -20808,11 +20907,91 @@ local function buildUI()
     end
 
     -- =====================================================
-    -- LEGENDARY SWORDS
+    -- LEGENDARY SWORDS. R2 Task 5: three cards, each BUY or SKIP; the truth
+    -- card says what gets bought.
     -- =====================================================
     do
         local v = makeView("sword")
         gap(v, 6)
+        P.kit.pageTop(v, "raid")
+        P.kit.modeStrip(v, "sword")
+        heading2(v, "legendary swords  ·  $2,000,000 each")
+        local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
+        local _, _, accent, _ = P.r2.acc("raid")
+        local cards = {}
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = s,
+            })
+            mk("UIPadding", {
+                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s,
+            })
+            for i, n in ipairs(P.SWORDS) do
+                local b = mk("TextButton", {
+                    Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C.row, BorderSizePixel = 0,
+                    Text = "", AutoButtonColor = false, LayoutOrder = i, Parent = s,
+                })
+                corner(b, 12)
+                local st = mk("UIStroke", {
+                    Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+                })
+                local name = mk("TextLabel", {
+                    Size = UDim2.new(1, -110, 0, 22), Position = UDim2.fromOffset(14, 8),
+                    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = F.body,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = n, Parent = b,
+                })
+                mk("TextLabel", {
+                    Size = UDim2.new(1, -110, 0, 16), Position = UDim2.fromOffset(14, 31),
+                    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = F.tiny,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                    Text = "was " .. OLD[n], Parent = b,
+                })
+                local pill = mk("TextLabel", {
+                    Size = UDim2.fromOffset(70, 30), Position = UDim2.new(1, -84, 0, 13),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
+                    TextSize = F.small, TextColor3 = C.second, Text = "", Parent = b,
+                })
+                corner(pill, 8)
+                pressable(b)
+                cards[i] = { n = n, b = b, st = st, name = name, pill = pill }
+                b.Activated:Connect(function()
+                    CFG.SwordWant[n] = not (CFG.SwordWant[n] == true)
+                end)
+            end
+        end
+        addLive(function()
+            for _, c in ipairs(cards) do
+                local want = CFG.SwordWant[c.n] == true
+                c.st.Color = want and accent or C.hair
+                c.name.TextColor3 = want and C.text or C.second
+                c.pill.Text = want and "BUY" or "SKIP"
+                c.pill.BackgroundColor3 = want and accent or C.row
+                c.pill.TextColor3 = want and C.base or C.second
+            end
+        end)
+        caption(v, "Tap a sword to buy it or skip it. One you own is switched off by itself.")
+        P.kit.truthCard(v, function()
+            local wanted = {}
+            for _, n in ipairs(P.SWORDS) do
+                if CFG.SwordWant[n] == true then table.insert(wanted, n) end
+            end
+            if #wanted == 0 then return "Nothing to buy" end
+            if #wanted == 1 then return "Buys " .. wanted[1] .. " when he sells it" end
+            if #wanted == 2 then return "Buys " .. wanted[1] .. " or " .. wanted[2] .. ", whichever he sells" end
+            return "Buys whichever of the three he sells"
+        end, function()
+            local any = false
+            for _, n in ipairs(P.SWORDS) do if CFG.SwordWant[n] == true then any = true end end
+            if not any then
+                return "Every sword is skipped or yours, so the hunt stops at once. Tap one to buy it."
+            end
+            return "Second Sea only. The Legendary Sword Dealer sells one per visit and is asked the moment you join: "
+                .. "one you want is bought; not here, or another sword, the next server. Under $2,000,000 the hunt stops."
+        end, "raid")
         readout(v, function()
             local el = P.elite
             return table.concat({
@@ -20821,25 +21000,9 @@ local function buildUI()
                 string.format("bought    %d", el.tally.swords or 0),
             }, "\n")
         end)
-        modeSwitch(v, "sword")
-        heading2(v, "which swords  ·  Second Sea")
-        local OLD = { Shizu = "Shisui", Saishi = "Saddi", Oroshi = "Wando" }
-        local items = {}
-        for _, n in ipairs(P.SWORDS) do
-            table.insert(items, { n, "was " .. OLD[n] .. "  ·  $2M",
-                function() return CFG.SwordWant[n] == true end,
-                function(x) CFG.SwordWant[n] = x and true or false end })
-        end
-        ticks(v, items)
+        caption(v, "For True Triple Katana: all three at 300 mastery, then the Mysterious Man.")
+        P.kit.fightsWith(v, "sword")
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
-        fold(v, "How it works", function(v)
-            caption(v, "Shizu / Saishi / Oroshi for True Triple Katana, $2,000,000 each - asked the moment you join, else the next server.")
-            caption(v, "The Legendary Sword Dealer sells ONE of the three per visit. "
-                .. "He is asked the moment you join - from anywhere, no Cafe Manager, "
-                .. "no 10 minutes - and bought from; not here, or not one you need = "
-                .. "the next server. Swords you own are switched off by themselves. "
-                .. "True Triple Katana: all three at 300 mastery, then the Mysterious Man.")
-        end)
     end
 
     -- =====================================================
