@@ -19,7 +19,7 @@ local function signal()
 end
 
 local SIGNALS = {
-    Activated = true, MouseButton1Down = true, MouseButton1Up = true, MouseLeave = true,
+    Activated = true, MouseButton1Down = true, MouseButton1Up = true, MouseLeave = true, MouseEnter = true,
     InputBegan = true, InputEnded = true, FocusLost = true, InputChanged = true,
     RenderStepped = true, Heartbeat = true, Stepped = true,
 }
@@ -63,7 +63,12 @@ local function newInst(class)
                 o._sig[k] = o._sig[k] or signal()
                 return o._sig[k]
             end
-            if k == "TextBounds" then return { X = 100, Y = 14 } end
+            -- the text's size, about: 0.55 of its size a character (the preview
+            -- measures a long value with it)
+            if k == "TextBounds" then
+                local t, z = tostring(o._props.Text or ""), tonumber(o._props.TextSize) or 14
+                return { X = math.floor((utf8.len(t) or #t) * z * 0.55), Y = z }
+            end
             if k == "AbsolutePosition" then return { X = 0, Y = 0 } end
             if k == "AbsoluteSize" then return { X = 300, Y = 20 } end
             return o._props[k]
@@ -109,10 +114,29 @@ function UDim2.fromOffset(x, y) return UDim2.new(0, x, 0, y) end
 function UDim2.fromScale(x, y) return UDim2.new(x, 0, y, 0) end
 local Vector2 = { new = function(x, y) return { X = x, Y = y } end }
 local Color3 = { fromRGB = function(r, g, b) return { R = r, G = g, B = b } end }
-local TweenInfo = { new = function() return {} end }
+local TweenInfo = { new = function(...) return { args = { ... } } end }
+local ColorSequence = { new = function(k) return { keys = k } end }
+local ColorSequenceKeypoint = { new = function(t, c) return { Time = t, Value = c } end }
+local NumberSequence = { new = function(k) return { keys = k } end }
+local NumberSequenceKeypoint = { new = function(t, v) return { Time = t, Value = v } end }
+-- Font.new: the panel's LOOK takes Montserrat / Michroma through FontFace.
+local Font = { new = function(path, weight) return { Path = path, Weight = tostring(weight) } end }
+local TWEENS = {}           -- every tween made: { target, info, props, playing }
 local TweenService = {}
-function TweenService:Create(o, _, props)
-    return { Play = function() for k, v in pairs(props) do o[k] = v end end }
+function TweenService:Create(o, info, props)
+    local rec = { target = o, info = info, props = props, playing = false }
+    table.insert(TWEENS, rec)
+    return {
+        Play = function()
+            rec.playing = true
+            -- a looping tween (RepeatCount -1) does not end: it sets nothing now
+            if not (info and info.args and info.args[4] == -1) then
+                for k, v in pairs(props) do o[k] = v end
+            end
+        end,
+        Cancel = function() rec.playing = false end,
+        Pause = function() rec.playing = false end,
+    }
 end
 local RunService = newInst("RunService")
 function RunService:BindToRenderStep() end
@@ -146,6 +170,11 @@ local task = {
     defer = function(f, ...) f(...) end,
     wait = function() error("__ONE_PASS__") end,
 }
+-- luau.exe seals _G: the panel's _G is this table instead (the gate's _G.BFF_ENT
+-- / _G.BFF_KIND / _G.BFF_STORE / _G.BFF_KEY are set by the cases), and the
+-- executor's setclipboard is a local the cases assign.
+local _G = {}
+local setclipboard = nil
 local WARNED = {}
 local warn = function(...) table.insert(WARNED, table.concat({ ... }, " ")) end
 
@@ -157,7 +186,8 @@ local function logWrite(path)
     WRITES[path][CTRL] = true
 end
 local NESTED = { AutoKeys = true, SeaEvFight = true, SeaEvKeys = true, SeaEvWeapons = true,
-    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true, FruitMenu = true }
+    VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true, FruitMenu = true,
+    FightWith = true, FightGoal = true }
 local function proxy(real, prefix)
     return setmetatable({}, {
         __index = function(_, k)
@@ -196,9 +226,17 @@ local SAID = {}
 local function say(s) table.insert(SAID, tostring(s)) end
 local function circuit() return {} end
 local function setupKey() return "a setup" end
-local function toolNames() return { { Name = "Godhuman" }, { Name = "Hallow Scythe" } } end
-local function toolType(t) return (t and t.Name == "Hallow Scythe") and "Sword" or "Melee" end
-local function findTool(n) if n == "Godhuman" or n == "Hallow Scythe" then return { Name = n } end return nil end
+-- the backpack: STUB_TOOLS in order, STUB_TYPES = their game labels (Melee by
+-- default); the cases add tools (a non-weapon, a big bag) and take them out again
+local STUB_TOOLS = { "Godhuman", "Hallow Scythe" }
+local STUB_TYPES = { ["Hallow Scythe"] = "Sword" }
+local function toolNames()
+    local out = {}
+    for _, n in ipairs(STUB_TOOLS) do table.insert(out, { Name = n }) end
+    return out
+end
+local function toolType(t) return (t and STUB_TYPES[t.Name]) or "Melee" end
+local function findTool(n) if table.find(STUB_TOOLS, n) then return { Name = n } end return nil end
 local function heldTool() return nil end
 local function wSummary() return "M1 Z" end
 local function syncWeapons() end

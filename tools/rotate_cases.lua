@@ -208,6 +208,30 @@ check("stop: your sword and gun put back", CARRY["Hallow Scythe"] == "Sword" and
     and CARRY.Yama == nil and CARRY.Bazooka == nil and #LOADS == before + 2, #LOADS - before)
 check("stop: only once", (function() local n = #LOADS P.rotRestore() return #LOADS == n end)())
 
+-- ---------------------------------------------------------------- FIGHT WITH (Plan 2 R2)
+-- One weapon per mode: no M1 pick, mastery pick, weapon order or inventory swap can change it.
+function say() end
+P.modeNow = function() return "random" end
+CARRY = { ["Dragon Talon"] = "Melee", ["Hallow Scythe"] = "Sword", ["Kabucha"] = "Gun" }
+CFG.FightWith = {}
+CFG.AutoAttack = true
+CFG.M1Weapon, CFG.MasteryWeapon = "Hallow Scythe", "Kabucha"
+check("wheel MIX: the mastery pick still decides first (today's rule)", P.m1Of(P.autoWeapons()).name == "Kabucha")
+CFG.FightWith.random = "Dragon Talon"
+check("wheel on Dragon Talon: the M1 pick cannot change it", P.m1Of(P.autoWeapons()).name == "Dragon Talon")
+list = usedWeapons()
+check("wheel on Dragon Talon: the attack list is it alone, mastery pick or not",
+    #list == 1 and list[1].name == "Dragon Talon" and list[1].cfg.M1 == true)
+check("wheel on Dragon Talon: nothing is loaded from the inventory", P.rotate(false) == false)
+CFG.FightWith.seaevents = "Kabucha"
+check("another mode's pick does not reach this one", usedWeapons()[1].name == "Dragon Talon")
+CFG.FightWith.random = "Soul Cane"
+check("wheel on a weapon not carried: the mix, today's rule again",
+    P.m1Of(P.autoWeapons()).name == "Kabucha" and #usedWeapons() == 3)
+CFG.FightWith = {}
+check("wheel back to MIX: today's rule again", P.m1Of(P.autoWeapons()).name == "Kabucha")
+CFG.M1Weapon, CFG.MasteryWeapon, CFG.AutoAttack = "", nil, false
+
 -- ---------------------------------------------------------------- LEARNED KEYS, KEPT
 local c = P.learnClean({ ["Kabucha Z"] = { casts = 5, closed = 3 }, ["bad"] = { casts = 1, closed = 4 },
     ["Dragon Talon C"] = { casts = 6, closed = 0 }, ["junk"] = "x", [3] = { casts = 1, closed = 0 } })
