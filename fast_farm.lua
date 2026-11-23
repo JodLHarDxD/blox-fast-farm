@@ -18700,19 +18700,32 @@ local function buildUI()
         return f
     end
 
-    -- A LIST YOU PICK SEVERAL FROM: each row on or off by itself, filled
-    -- ivory = picked - the look of a radio list's chosen row.
+    -- A LIST YOU PICK SEVERAL FROM: each row on or off by itself.
     -- items: { { label, tag, get, set }, ... }
+    -- R3 Task 7: drawn in the kit's pick-list look (the boards' hero list):
+    -- a #1B1917 card (radius 14, 4 px inside) of 46 px rows (radius 10, 2
+    -- px apart); a 16 px square (radius 4, a 2 px #4A453D line) that fills
+    -- ivory with a dark tick when on, the row #2E2B27; the name 14 px
+    -- SemiBold, the tag a muted 11 px word on the right.
     local function ticks(view, items)
-        local box = mk("Frame", {
+        local RING = Color3.fromRGB(74, 69, 61)             -- #4A453D
+        local ON = Color3.fromRGB(46, 43, 39)               -- #2E2B27
+        local s = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = view,
         })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+        local box = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+        })
+        corner(box, 14)
         mk("UIListLayout", {
-            Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, Parent = box,
+            Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = box,
         })
         mk("UIPadding", {
-            PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = box,
+            PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+            PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = box,
         })
         local rows = {}
         local function redraw()
@@ -18720,39 +18733,45 @@ local function buildUI()
                 local ok, v = pcall(it[3])
                 local on = ok and v and true or false
                 local r = rows[i]
-                r.b.BackgroundColor3 = on and C.ivory or C.row
-                setFont(r.name, on and LOOK.bold or LOOK.regular)
-                r.name.TextColor3 = on and C.base or C.text
-                r.name.Text = (on and "  > " or "      ") .. it[1]
-                if r.tag then r.tag.TextColor3 = on and C.base or C.third end
+                r.b.BackgroundColor3 = on and ON or C.row
+                r.sq.BackgroundColor3 = on and C.ivory or C.row
+                r.line.Color = on and C.ivory or RING
+                r.tick.Visible = on
+                r.name.TextColor3 = on and C.text or LOOK.soft
             end
         end
         for i, it in ipairs(items) do
             local b = mk("TextButton", {
-                Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.row,
+                Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = C.row,
                 BorderSizePixel = 0, Text = "", AutoButtonColor = false,
                 LayoutOrder = i, Parent = box,
             })
-            corner(b, 9)
-            -- The name stops short of the tag ("..."), never runs under it.
-            local hasTag = it[2] and it[2] ~= ""
-            local name = mk("TextLabel", {
-                Size = UDim2.new(1, hasTag and -142 or -10, 1, 0), BackgroundTransparency = 1,
-                Font = LOOK.regular, TextSize = F.body, TextColor3 = C.text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
+            corner(b, 10)
+            local sq = mk("Frame", {
+                Size = UDim2.fromOffset(12, 12), Position = UDim2.new(0, 14, 0.5, -6),
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = b,
             })
-            local tag = nil
-            if it[2] and it[2] ~= "" then
-                tag = mk("TextLabel", {
-                    Size = UDim2.fromOffset(128, 38), Position = UDim2.new(1, -138, 0, 0),
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundTransparency = 1, Font = LOOK.semi,
-                    TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Right,
-                    TextColor3 = C.third, Text = it[2], Parent = b,
+            corner(sq, 3)
+            local line = mk("UIStroke", { Color = RING, Thickness = 2,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = sq })
+            local tick = P.kit.icon(sq, 12, P.kit.GLYPH.check, 2, C.base)
+            -- the name stops short of the tag, never runs under it
+            local tagW = (it[2] and it[2] ~= "") and (#tostring(it[2]) * 6 + 8) or 0
+            local name = mk("TextLabel", {
+                Size = UDim2.new(1, -(40 + 12 + tagW), 1, 0), Position = UDim2.fromOffset(40, 0),
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14), TextColor3 = C.text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd, Text = it[1], Parent = b,
+            })
+            if tagW > 0 then
+                mk("TextLabel", {
+                    Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                    AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
+                    TextColor3 = LOOK.mute, Text = it[2], Parent = b,
                 })
             end
-            rows[i] = { b = b, name = name, tag = tag }
+            rows[i] = { b = b, sq = sq, line = line, tick = tick, name = name }
             b.Activated:Connect(function()
                 pcall(function() it[4](not it[3]()) end)
                 redraw()
@@ -18901,7 +18920,7 @@ local function buildUI()
         mk("UIPadding", {
             PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = head,
         })
-        mk("TextLabel", {
+        local name = mk("TextLabel", {
             Size = UDim2.new(1, -110, 0, 20), AutomaticSize = Enum.AutomaticSize.Y,
             TextWrapped = true, BackgroundTransparency = 1, Font = LOOK.semi,
             TextSize = F.label, TextXAlignment = Enum.TextXAlignment.Left,
@@ -18941,6 +18960,12 @@ local function buildUI()
             knob.Position = UDim2.new(a, 0, 0.5, 0)
             val.Text = ((stepV < 1) and string.format("%.2f", v) or tostring(math.floor(v)))
                 .. (unit or "")
+            -- the value never runs over the label: it takes what it needs
+            local w = math.max(110, (tonumber(val.TextBounds.X) or 0) + 8)
+            if val.Size.X.Offset ~= w then
+                val.Size = UDim2.fromOffset(w, 20)
+                name.Size = UDim2.new(1, -w, 0, 20)
+            end
         end
         local function apply(x)
             local a = math.clamp((x - track.AbsolutePosition.X)
@@ -18967,10 +18992,12 @@ local function buildUI()
         return f
     end
 
+    -- R3 Task 7: the boards' by-hand row (Servers.dc.html): 50 high, 14 px
+    -- SemiBold.
     local function actionRow(view, label, tone, cb)
         local b = mk("TextButton", {
-            Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = C.base,
-            BorderSizePixel = 0, Font = LOOK.semi, TextSize = F.label,
+            Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = C.base,
+            BorderSizePixel = 0, Font = LOOK.semi, TextSize = lookPx(14),
             TextXAlignment = Enum.TextXAlignment.Left,
             TextColor3 = (tone == "danger") and C.stop or C.ivory, Text = label,
             AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = view,
@@ -19533,6 +19560,8 @@ local function buildUI()
         -- the head and the buttons (Elite's lanes); a step's head = a bold
         -- 13 px line over its line (Raid's guard); note() = a dim 11 px line
         -- under it; dim() true = the whole dial at the board's opacity .45.
+        -- A step's line may be a function (R3 Task 7, Travel: the minutes at
+        -- sea follow the boat speed).
         -- R3 Task 5 (Sea fight): px = the numbers' board px (12), offPx =
         -- OFF's, radius (10); todayDot = the board's 4 px dot in the today
         -- step's button; legend = { left, right, inset } the two muted
@@ -19545,13 +19574,13 @@ local function buildUI()
             local offFirst = string.upper(tostring(steps[1].name)) == "OFF"
             local head = slot(view, 34)
             local titleL = label(head, {
-                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
+                Size = UDim2.new(1, -8, 1, -6), Position = UDim2.fromOffset(4, 6),
                 Font = LOOK.semi, TextSize = LOOK.size.section,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 Text = string.upper(title),
             })
             local cur = label(head, {
-                Size = UDim2.new(0.5, 0, 1, -6), Position = UDim2.new(0.5, -4, 0, 6),
+                Size = UDim2.new(1, -8, 1, -6), Position = UDim2.fromOffset(4, 6),
                 Font = LOOK.regular, TextSize = LOOK.size.section,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
@@ -19654,7 +19683,12 @@ local function buildUI()
                 end
                 for _, t in pairs(texts) do t.TextTransparency = a end
                 cur.Text = lit and tostring(steps[lit].name) or "your own values"
-                lineL.Text = lit and tostring(steps[lit].line or "") or "your own values"
+                local ln = lit and steps[lit].line
+                if type(ln) == "function" then
+                    local ok, t = pcall(ln)
+                    ln = ok and t or ""
+                end
+                lineL.Text = lit and tostring(ln or "") or "your own values"
                 if headL then
                     headL.Text = lit and tostring(steps[lit].head or "") or ""
                     headL.Visible = headL.Text ~= ""
@@ -20102,7 +20136,8 @@ local function buildUI()
         -- with a 20 px knob, no word. 56 high at least, 20 px side margins.
         -- o: { chip = a small amber tag before the label (the Lab's TEST),
         -- px / subPx = the label and sub sizes, pad, minH, on = the lit
-        -- track's colour (the Lab's amber) }.
+        -- track's colour (the Lab's amber), last = a function: a third line,
+        -- 11 px #6B665F (R3 Task 7, Travel's "Last: ...") }.
         function K.switch(view, text, sub, get, set, o)
             o = o or {}
             local pad = o.pad or 20
@@ -20150,6 +20185,14 @@ local function buildUI()
                     Text = type(sub) == "string" and sub or "",
                 })
             end
+            local lastL
+            if o.last then
+                lastL = label(col, {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 4,
+                    Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.4),
+                    TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, Text = "",
+                })
+            end
             local track = mk("Frame", {
                 Name = "Track", Size = UDim2.fromOffset(44, 26), AnchorPoint = Vector2.new(1, 0.5),
                 Position = UDim2.new(1, -pad, 0.5, 0), BackgroundColor3 = LOOK.ghost, BorderSizePixel = 0, Parent = b,
@@ -20167,6 +20210,11 @@ local function buildUI()
                 if subL and type(sub) == "function" then
                     local ok, t = pcall(sub)
                     subL.Text = ok and tostring(t or "") or ""
+                end
+                if lastL then
+                    local ok, t = pcall(o.last)
+                    lastL.Text = ok and tostring(t or "") or ""
+                    lastL.Visible = lastL.Text ~= ""
                 end
             end
             b.Activated:Connect(function()
@@ -20206,13 +20254,13 @@ local function buildUI()
         function K.sectionRight(view, left, rightFn)
             local head = slot(view, 34)
             label(head, {
-                Size = UDim2.new(0.6, 0, 1, -6), Position = UDim2.fromOffset(4, 6),
+                Size = UDim2.new(1, -8, 1, -6), Position = UDim2.fromOffset(4, 6),
                 Font = LOOK.semi, TextSize = LOOK.size.section,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                 Text = string.upper(left),
             })
             local r = label(head, {
-                Size = UDim2.new(0.4, 0, 1, -6), Position = UDim2.new(0.6, -4, 0, 6),
+                Size = UDim2.new(1, -8, 1, -6), Position = UDim2.fromOffset(4, 6),
                 Font = LOOK.regular, TextSize = LOOK.size.section,
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
@@ -20232,7 +20280,11 @@ local function buildUI()
         -- apart; a ring (16 px, 2 px line) filled when lit, the name 14 px
         -- SemiBold, a muted 11 px tag on the right. Lit = #2E2B27 with the
         -- accent's outline. items = { { value, name, tag }, ... }.
-        function K.heroList(view, items, get, set, accent)
+        -- opts (R3 Task 7, the owner's Fruits): { subTag = the tag drawn as a
+        -- muted line under the name (rows 52 high), for tags too long to sit
+        -- on the right }.
+        function K.heroList(view, items, get, set, accent, opts)
+            opts = opts or {}
             local _, _, acc = accentColors(accent)
             local RING = Color3.fromRGB(74, 69, 61)          -- #4A453D
             local s = slot(view)
@@ -20249,7 +20301,7 @@ local function buildUI()
             local rows = {}
             for i, it in ipairs(items) do
                 local b = mk("TextButton", {
-                    Name = "Pick", Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = C.row,
+                    Name = "Pick", Size = UDim2.new(1, 0, 0, opts.subTag and 52 or 46), BackgroundColor3 = C.row,
                     BorderSizePixel = 0, AutoButtonColor = false, Text = "", LayoutOrder = i, Parent = card,
                 })
                 corner(b, 10)
@@ -20267,17 +20319,31 @@ local function buildUI()
                     BackgroundColor3 = acc, BorderSizePixel = 0, Parent = ring,
                 })
                 corner(dot, 3)
-                local tag = label(b, {
-                    Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
-                    AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0),
-                    Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = LOOK.mute,
-                    Text = tostring(it[3] or ""),
-                })
-                label(b, {
-                    Size = UDim2.new(1, -(40 + 12 + 8 + #tostring(it[3] or "") * 6), 1, 0), Position = UDim2.fromOffset(40, 0),
-                    Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
-                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = tostring(it[2]),
-                })
+                local tag
+                if opts.subTag then
+                    label(b, {
+                        Size = UDim2.new(1, -52, 0, 18), Position = UDim2.fromOffset(40, 8),
+                        Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = tostring(it[2]),
+                    })
+                    tag = label(b, {
+                        Size = UDim2.new(1, -52, 0, 16), Position = UDim2.fromOffset(40, 27),
+                        Font = LOOK.regular, TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.mute, Text = tostring(it[3] or ""),
+                    })
+                else
+                    tag = label(b, {
+                        Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                        AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 0),
+                        Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = LOOK.mute,
+                        Text = tostring(it[3] or ""),
+                    })
+                    label(b, {
+                        Size = UDim2.new(1, -(40 + 12 + 8 + #tostring(it[3] or "") * 6), 1, 0), Position = UDim2.fromOffset(40, 0),
+                        Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = tostring(it[2]),
+                    })
+                end
                 rows[i] = { b = b, line = line, ring = rl, dot = dot, tag = tag }
                 b.Activated:Connect(function()
                     set(it[1])
@@ -20299,6 +20365,10 @@ local function buildUI()
 
         -- STEPPER: label, - value +. fmt turns the value into text; dot is an
         -- optional Color3 in front of the label.
+        -- R3 Task 7 (Safety.dc.html): 54 high, 12 px from the right edge;
+        -- the - and + are 44 px outlined squares (radius 12, #3A3632) with a
+        -- drawn 14 px glyph in #C9C3B9, at the board's opacity .35 at their
+        -- limit; the value 48 wide in Roboto Mono 15. Buttons: Minus / Plus.
         function K.stepper(view, text, get, set, lo, hi, stp, fmt, dot)
             local r = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 54), BackgroundTransparency = 1,
@@ -20314,27 +20384,42 @@ local function buildUI()
                 x0 = 38
             end
             label(r, {
-                Size = UDim2.new(1, -(x0 + 170), 1, 0), Position = UDim2.fromOffset(x0, 0),
-                Font = LOOK.semi, TextSize = F.label,
+                Size = UDim2.new(1, -(x0 + 166), 1, 0), Position = UDim2.fromOffset(x0, 0),
+                Font = LOOK.semi, TextSize = lookPx(15), TextTruncate = Enum.TextTruncate.AtEnd,
                 TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = text,
             })
-            local function btn(x, txt)
+            local function btn(x, name, glyph)
                 local b = mk("TextButton", {
-                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 5),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.body, TextColor3 = C.text,
-                    Text = txt, Parent = r,
+                    Name = name, Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 5),
+                    BackgroundTransparency = 1, BorderSizePixel = 0, AutoButtonColor = false,
+                    Text = "", Parent = r,
                 })
                 corner(b, 12)
-                pressable(b)
-                return b
+                local line = stroke(b, LOOK.ghost)
+                local ic = K.icon(b, 14, glyph, 2, LOOK.soft)
+                ic.Position = UDim2.fromOffset(15, 15)
+                return b, line, ic
             end
-            local minus, plus = btn(-152, "-"), btn(-60, "+")
+            local minus, mLine, mIc = btn(-156, "Minus", K.GLYPH.minus)
+            local plus, pLine, pIc = btn(-56, "Plus", K.GLYPH.plus)
             local val = label(r, {
-                Size = UDim2.fromOffset(48, 54), Position = UDim2.new(1, -104, 0, 0),
-                Font = Enum.Font.Code, TextSize = F.label, TextColor3 = C.text, Text = "",
+                Size = UDim2.fromOffset(48, 54), Position = UDim2.new(1, -108, 0, 0),
+                Font = (P.r2 and P.r2.MONO) or Enum.Font.Code, TextSize = lookPx(15),
+                TextColor3 = C.text, Text = "",
             })
-            local function show() val.Text = fmt(get()) end
+            local function fade(line, ic, off)
+                local a = off and 0.65 or 0
+                line.Transparency = a
+                for _, k in ipairs(ic:GetChildren()) do
+                    if k:IsA("Frame") then k.BackgroundTransparency = a end
+                end
+            end
+            local function show()
+                local x = tonumber(get()) or 0
+                val.Text = fmt(get())
+                fade(mLine, mIc, x <= lo)
+                fade(pLine, pIc, x >= hi)
+            end
             local function nudge(d)
                 local x = (tonumber(get()) or 0) + d * stp
                 set(math.floor(math.clamp(x, lo, hi) * 100 + 0.5) / 100)
@@ -20349,33 +20434,53 @@ local function buildUI()
 
         -- CONFIRM ROW: a by-hand action that wants a second tap ("Tap again:
         -- ..." in amber for 3 s, then it runs and says done).
-        function K.confirmRow(view, text, cb)
-            local AMBER = Color3.fromRGB(240, 166, 60)
+        -- R3 Task 7 (Servers.dc.html, BY HAND): 50 high, the words 14 px
+        -- SemiBold on the left, a muted 12 px line on the right ("next
+        -- server"); done = the words green and the line "done".
+        function K.confirmRow(view, text, cb, line)
             local token = 0
             local armed = false
-            local b
-            b = actionRow(view, text, nil, function()
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = C.base, BorderSizePixel = 0,
+                Text = "", AutoButtonColor = false, LayoutOrder = nextOrder(), Parent = view,
+            })
+            local words = label(b, {
+                Size = UDim2.new(1, -130, 1, 0), Position = UDim2.fromOffset(20, 0),
+                Font = LOOK.semi, TextSize = lookPx(14), TextTruncate = Enum.TextTruncate.AtEnd,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = text,
+            })
+            local right = label(b, {
+                Size = UDim2.fromOffset(100, 50), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -20, 0, 0),
+                Font = LOOK.regular, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right,
+                TextColor3 = LOOK.mute, Text = line or "",
+            })
+            local function paint(t, color, r)
+                words.Text, words.TextColor3, right.Text = t, color, r or line or ""
+            end
+            pressable(b)
+            -- in a task, as actionRow runs its callback
+            local function tapped()
                 token += 1
                 local mine = token
                 if not armed then
                     armed = true
-                    b.Text = "Tap again: " .. text
-                    b.TextColor3 = AMBER
+                    paint("Tap again: " .. text, C.warn)
                     task.delay(3, function()
                         if token == mine and armed then
                             armed = false
-                            b.Text, b.TextColor3 = text, C.ivory
+                            paint(text, C.text)
                         end
                     end)
                     return
                 end
                 armed = false
                 pcall(cb)
-                b.Text, b.TextColor3 = text .. "  -  done", C.live
+                paint(text, C.live, "done")
                 task.delay(1.8, function()
-                    if token == mine then b.Text, b.TextColor3 = text, C.ivory end
+                    if token == mine then paint(text, C.text) end
                 end)
-            end)
+            end
+            b.Activated:Connect(function() task.spawn(tapped) end)
             return b
         end
 
@@ -21765,8 +21870,11 @@ local function buildUI()
         do
             local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v })
+            -- ClipsDescendants: the 28-character placeholder (and a typed
+            -- key) is wider than the box; clipped, it never runs under Redeem
             local tb = mk("TextBox", { Size = UDim2.new(1, -132, 0, 44), Position = UDim2.fromOffset(16, 0),
                 BackgroundColor3 = C.row, BorderSizePixel = 0, ClearTextOnFocus = false, Font = R.MONO,
+                ClipsDescendants = true,
                 TextSize = lookPx(13), TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left,
                 PlaceholderText = "BFV-XXXX-XXXX-XXXX-XXXX-XXXX", PlaceholderColor3 = Color3.fromRGB(111, 106, 98),
                 Text = "", Parent = row })
@@ -22916,7 +23024,7 @@ local function buildUI()
                 #(P.fruitLog or {})))
             return table.concat(lines, "\n")
         end)
-        heading2(v, "which fruits")
+        P.kit.sectionRight(v, "which fruits")
         navRow(v, "Fruit menu", function()
             local take, skip = 0, 0
             for _, c in pairs(CFG.FruitMenu) do
@@ -22925,44 +23033,45 @@ local function buildUI()
             return string.format("%s+ · %d take · %d skip", P.valueWords(CFG.FruitMinPrice), take, skip)
         end, "fruitmenu")
         navRow(v, "Trades", function() return P.trades.short() end, "trades")
-        switchRow(v, "Include fruits players dropped",
+        P.kit.switch(v, "Include fruits players dropped",
             "Off: server spawns only - drops are mostly trades",
             function() return CFG.FruitPlayerDrops end,
             function(x) CFG.FruitPlayerDrops = x end)
-        switchRow(v, "A spawn I cannot name: take it",
+        P.kit.switch(v, "A spawn I cannot name: take it",
             "Off: a spawn is gone for once its fruit is read (its mesh, or a look learned from drops) and its price passes. A spawn still loading is waited for (8 s) either way",
             function() return CFG.FruitUnknownSpawn end,
             function(x) CFG.FruitUnknownSpawn = x end)
-        heading2(v, "the way there")
-        switchRow(v, "Shortest route on a long trip",
+        P.kit.sectionRight(v, "the way there")
+        P.kit.switch(v, "Shortest route on a long trip",
             "The portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship's, the Sky gate) when they beat flying",
             function() return CFG.FruitPortals end,
             function(x) CFG.FruitPortals = x end)
-        switchRow(v, "Use the Home button",
+        P.kit.switch(v, "Use the Home button",
             "When going Home first (your Home Point, in this sea) and flying on is shorter",
             function() return CFG.TravelHome end,
             function(x) CFG.TravelHome = x end)
-        heading2(v, "where it goes")
-        switchRow(v, "Store it at once",
+        P.kit.sectionRight(v, "where it goes")
+        P.kit.switch(v, "Store it at once",
             "Off: kept in your backpack - the raid loop trades a carried fruit for a chip first",
             function() return CFG.FruitStore end,
             function(x) CFG.FruitStore = x end)
-        switchRow(v, "Store the backpack before a hop",
+        P.kit.switch(v, "Store the backpack before a hop",
             "A fruit in the backpack is lost when you leave the server",
             function() return CFG.FruitStoreOnHop end,
             function(x) CFG.FruitStoreOnHop = x end)
-        switchRow(v, "Leave a fruit my storage is full of",
+        P.kit.switch(v, "Leave a fruit my storage is full of",
             "With \"Store it at once\" on: a fruit you already hold as many of as your storage takes cannot be stored - it is left, and said. One too good to lose is still taken",
             function() return CFG.FruitSkipFull ~= false end,
             function(x) CFG.FruitSkipFull = x end)
-        heading2(v, "too good to lose - trade value")
-        radio(v, 205, {
+        P.kit.sectionRight(v, "too good to lose - trade value")
+        P.kit.heroList(v, {
             { 0,         "Off",            "a fruit with no slot is left at a hop" },
             { 10000000,  "10M and up",     "Portal, Buddha, Spirit, Pain..." },
             { 20000000,  "20M and up",     "Lightning, T-Rex, Venom, Dough..." },
             { 60000000,  "60M and up",     "Gas, Yeti, Tiger, Control..." },
             { 100000000, "100M and up",    "Tiger, Control, Magnet, Kitsune, Dragon" },
-        }, function() return CFG.FruitKeepValue end, function(x) CFG.FruitKeepValue = x end)
+        }, function() return CFG.FruitKeepValue end, function(x) CFG.FruitKeepValue = x end, "none", { subTag = true })
+        gap(v, 6)
         link(v, "Fruit history", function() return tostring(#(P.fruitLog or {})) .. " picked" end, "fruitlog")
         link(v, "Servers & team", function() return CFG.HuntHop and "hop on" or "no hop" end, "servers")
         fold(v, "How it works", function(v)
@@ -23013,7 +23122,7 @@ local function buildUI()
         local v = makeView("fruitmenu")
         gap(v, 8)
         P.kit.pageTop(v, "owner")
-        heading2(v, "your limit")
+        P.kit.sectionRight(v, "your limit")
         sliderRow(v, "Only if worth at least", 0, 10000000, 100000,
             function() return CFG.FruitMinPrice end,
             function(x) CFG.FruitMinPrice = x end, " Beli")
@@ -23024,7 +23133,7 @@ local function buildUI()
             return string.format("known     %d of %d fruits, kept for good", total - #miss, total)
                 .. ((#miss > 0) and ("\nnot seen  " .. table.concat(miss, ", ")) or "")
         end)
-        heading2(v, "except these")
+        P.kit.sectionRight(v, "except these")
         local names = {}
         for n in pairs(P.TRADE_VALUES) do table.insert(names, n) end
         table.sort(names, function(a, b)
@@ -23044,10 +23153,12 @@ local function buildUI()
             for n, r in pairs(rows) do
                 local c = CFG.FruitMenu[n]
                 r.sub.Text = P.menuWords(priced[n], CFG.FruitMinPrice, c)
-                r.take.BackgroundColor3 = (c == "take") and C.live or C.raised
-                r.take.TextColor3 = (c == "take") and C.base or C.second
-                r.skip.BackgroundColor3 = (c == "skip") and C.stop or C.raised
-                r.skip.TextColor3 = (c == "skip") and C.text or C.second
+                r.take.BackgroundTransparency = (c == "take") and 0 or 1
+                r.take.TextColor3 = (c == "take") and C.base or LOOK.soft
+                r.takeLine.Color = (c == "take") and C.live or LOOK.ghost
+                r.skip.BackgroundTransparency = (c == "skip") and 0 or 1
+                r.skip.TextColor3 = (c == "skip") and C.text or LOOK.soft
+                r.skipLine.Color = (c == "skip") and C.stop or LOOK.ghost
             end
         end
         for _, n in ipairs(names) do
@@ -23056,25 +23167,31 @@ local function buildUI()
                 LayoutOrder = nextOrder(), Parent = v,
             })
             mk("TextLabel", {
-                Size = UDim2.new(1, -150, 0, 20), Position = UDim2.fromOffset(20, 6),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
+                Size = UDim2.new(1, -150, 0, 18), Position = UDim2.fromOffset(20, 7),
+                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14),
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
                 TextColor3 = C.text, Text = n, Parent = f,
             })
             local sub = mk("TextLabel", {
-                Size = UDim2.new(1, -150, 0, 16), Position = UDim2.fromOffset(20, 26),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
+                Size = UDim2.new(1, -150, 0, 15), Position = UDim2.fromOffset(20, 26),
+                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
                 TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                TextColor3 = C.third, Text = "", Parent = f,
+                TextColor3 = LOOK.mute, Text = "", Parent = f,
             })
+            -- the kit's ghost chip (a #3A3632 outline), filled green / red
+            -- when marked
+            local lines = {}
             local function chip(word, text, x)
                 local b = mk("TextButton", {
-                    Size = UDim2.fromOffset(52, 30), Position = UDim2.new(1, x, 0.5, -15),
-                    BackgroundColor3 = C.raised, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
+                    Size = UDim2.fromOffset(52, 32), Position = UDim2.new(1, x, 0.5, -16),
+                    BackgroundColor3 = (word == "take") and C.live or C.stop, BackgroundTransparency = 1,
+                    BorderSizePixel = 0, AutoButtonColor = false,
+                    Font = LOOK.bold, TextSize = lookPx(12), TextColor3 = LOOK.soft,
                     Text = text, Parent = f,
                 })
-                corner(b, 8)
+                corner(b, 10)
+                lines[word] = mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
                 -- A second tap takes the mark off: the limit decides again.
                 b.Activated:Connect(function()
                     if CFG.FruitMenu[n] == word then CFG.FruitMenu[n] = nil else CFG.FruitMenu[n] = word end
@@ -23083,6 +23200,7 @@ local function buildUI()
                 return b
             end
             rows[n] = { sub = sub, take = chip("take", "Take", -130), skip = chip("skip", "Skip", -72) }
+            rows[n].takeLine, rows[n].skipLine = lines.take, lines.skip
         end
         addLive(paint)
         paint()
@@ -23116,12 +23234,12 @@ local function buildUI()
             table.insert(lines, "server #  the hunt's join count when it came (Servers & team)")
             return table.concat(lines, "\n")
         end)
-        heading2(v, "each fruit - dearest first")
+        P.kit.sectionRight(v, "each fruit - dearest first")
         readout(v, function()
             local s = P.fruitLogSummary()
             return (#s > 0) and table.concat(s, "\n") or "none yet"
         end)
-        heading2(v, "newest first")
+        P.kit.sectionRight(v, "newest first")
         readout(v, function()
             local s = P.fruitLogLines(40)
             return (#s > 0) and table.concat(s, "\n") or "none yet"
@@ -23141,9 +23259,9 @@ local function buildUI()
         gap(v, 6)
         P.kit.pageTop(v, "owner")
         readout(v, function() return P.trades.report() end)
-        heading2(v, "the rule")
+        P.kit.sectionRight(v, "the rule")
         readout(v, function() return P.trades.rules() end)
-        heading2(v, "newest first")
+        P.kit.sectionRight(v, "newest first")
         readout(v, function()
             local s = P.trades.lines(30)
             return (#s > 0) and table.concat(s, "\n") or "none yet"
@@ -23204,7 +23322,7 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
-        heading2(v, "which berries")
+        P.kit.sectionRight(v, "which berries")
         -- What each one makes at the Barista (recipes from the Barista Cousin).
         local BERRY_USE = {
             ["Pink Pig Berry"]     = "Winter Sky: 15  (Legendary)",
@@ -23253,7 +23371,7 @@ local function buildUI()
                 string.format("learned   %d", el.tally.recipes or 0),
             }, "\n")
         end)
-        heading2(v, "which recipes")
+        P.kit.sectionRight(v, "which recipes")
         local items = {}
         for i, n in ipairs(P.RECIPES) do
             table.insert(items, { n, (i <= 3) and "Legendary" or "Rare",
@@ -23499,7 +23617,7 @@ local function buildUI()
                 and ("lying now " .. #list) or "lying now none")
             return table.concat(lines, "\n")
         end)
-        heading2(v, "leaving")
+        P.kit.sectionRight(v, "leaving")
         sliderRow(v, "No flower after the first kill: leave at", 1, 5, 0.5,
             function() return CFG.FlowerGiveUp end,
             function(x) CFG.FlowerGiveUp = x end, " min")
@@ -23538,7 +23656,7 @@ local function buildUI()
             if best then table.insert(lines, string.format("trees     best key %s (%d of %d)", best, m.learn[best].closed, m.learn[best].casts)) end
             return table.concat(lines, "\n")
         end)
-        heading2(v, "the embers")
+        P.kit.sectionRight(v, "the embers")
         sliderRow(v, "Stop when you have", 15, 99, 1,
             function() return CFG.EmberStopAt end,
             function(x) CFG.EmberStopAt = x end, " embers")
@@ -23612,48 +23730,39 @@ local function buildUI()
             end
             return table.concat(lines, "\n")
         end)
-        heading2(v, "what it does")
-        switchRow(v, "Pumpkins", "Smashed with your fighting style; what jumps out is killed",
+        P.kit.sectionRight(v, "what it does")
+        P.kit.switch(v, "Pumpkins", "Smashed with your fighting style; what jumps out is killed",
             function() return CFG.HalloweenPumpkins ~= false end,
             function(x) CFG.HalloweenPumpkins = x end)
-        hairline(v)
-        switchRow(v, "Rare pumpkins first", "The Cursed Pumpkin Seed one - from anywhere in the server",
+        P.kit.switch(v, "Rare pumpkins first", "The Cursed Pumpkin Seed one - from anywhere in the server",
             function() return CFG.HalloweenRareFirst ~= false end,
             function(x) CFG.HalloweenRareFirst = x end)
-        hairline(v)
-        switchRow(v, "ONLY the rare pumpkin", "The ordinary ones are left alone. None here: the next server - with \"Nothing left: the next server\" on",
+        P.kit.switch(v, "ONLY the rare pumpkin", "The ordinary ones are left alone. None here: the next server - with \"Nothing left: the next server\" on",
             function() return CFG.HalloweenRareOnly == true end,
             function(x) CFG.HalloweenRareOnly = x end)
-        hairline(v)
-        switchRow(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
+        P.kit.switch(v, "Doors at the Harvest Moon", "Knock every door, the game's teleport there taken",
             function() return CFG.HalloweenDoors ~= false end,
             function(x) CFG.HalloweenDoors = x end)
-        hairline(v)
-        switchRow(v, "Chase the ghost", "The ghost that steals your treat: followed and hit until it drops the candy",
+        P.kit.switch(v, "Chase the ghost", "The ghost that steals your treat: followed and hit until it drops the candy",
             function() return CFG.HalloweenChase ~= false end,
             function(x) CFG.HalloweenChase = x end)
-        hairline(v)
-        switchRow(v, "Collect candy on the floor", "Walked through, every piece (the game hands it over within 7 studs) - a pumpkin's, a ghost's, the Great Pumpkin's",
+        P.kit.switch(v, "Collect candy on the floor", "Walked through, every piece (the game hands it over within 7 studs) - a pumpkin's, a ghost's, the Great Pumpkin's",
             function() return CFG.HalloweenCandy ~= false end,
             function(x) CFG.HalloweenCandy = x end)
-        hairline(v)
-        switchRow(v, "Finish a door's conversation", "Lines tapped through; of its choices the safe one (the candy, \"Nevermind\") - never rob, roll, play or pay",
+        P.kit.switch(v, "Finish a door's conversation", "Lines tapped through; of its choices the safe one (the candy, \"Nevermind\") - never rob, roll, play or pay",
             function() return CFG.HalloweenTalk ~= false end,
             function(x) CFG.HalloweenTalk = x end)
-        hairline(v)
-        switchRow(v, "Boss doors (Werewolf, Hell Rider)", "A boss door's portal: through it and fight",
+        P.kit.switch(v, "Boss doors (Werewolf, Hell Rider)", "A boss door's portal: through it and fight",
             function() return CFG.HalloweenBoss ~= false end,
             function(x) CFG.HalloweenBoss = x end)
-        hairline(v)
-        switchRow(v, "Teleport back after the moon", "The game's offer, accepted",
+        P.kit.switch(v, "Teleport back after the moon", "The game's offer, accepted",
             function() return CFG.HalloweenReturn ~= false end,
             function(x) CFG.HalloweenReturn = x end)
-        hairline(v)
-        switchRow(v, "Nothing left: the next server", "Off: wait here for them to come back",
+        P.kit.switch(v, "Nothing left: the next server", "Off: wait here for them to come back",
             function() return CFG.HalloweenTour ~= false end,
             function(x) CFG.HalloweenTour = x end)
-        heading2(v, "find out")
-        switchRow(v, "Record what I smash", "Watch only - smash by hand, the farm can be off; bff_halloween_watch.txt",
+        P.kit.sectionRight(v, "find out")
+        P.kit.switch(v, "Record what I smash", "Watch only - smash by hand, the farm can be off; bff_halloween_watch.txt",
             function() return P.halloween.watch.on end,
             function(x)
                 CFG.HalloweenWatch = x
@@ -27633,59 +27742,72 @@ local function buildUI()
     -- MAGNET. R2 Task 9 (board Magnet): a STRENGTH dial OFF + 1-5 over Magnet,
     -- PullAll, MaxPull, GrabMax and PileSpread (step 3 = today); the two
     -- species switches; Fine-tune with every exact value; Details.
+    -- R3 Task 7 (Magnet.dc.html): the dial's 40 px buttons (radius 10, 12
+    -- px) and its line; the truth card says the board's words for a step
+    -- (your own values: what they do); ALSO's two board switches with their
+    -- short sub lines; Fine-tune "8 exact values": the seven numbers and the
+    -- two lists (why no damage, measured limits) with their clears. The
+    -- live pile line and the long words go to Details.
     -- =====================================================
     do
         local v = makeView("magnet")
-        gap(v, 6)
-        local function studs(n) return string.format("%d", n) end
         local MAG = {
-            { "OFF", "OFF", { Magnet = false }, "No pulling. You fight them where they stand." },
+            { "OFF", "OFF", { Magnet = false }, "No pulling.",
+                "Magnet off", "You fight them where they stand." },
             { "1", "1  GENTLE", { Magnet = true, PullAll = false, MaxPull = 150, GrabMax = 8, PileSpread = 1 },
-                "Most 8 in a pile, from 150 studs, width 1." },
+                "Most 8 in a pile, from 150 studs, width 1.",
+                "Small piles of 8", "Pulls from 150 studs, tight pile." },
             { "2", "2  CALM", { Magnet = true, PullAll = false, MaxPull = 200, GrabMax = 15, PileSpread = 2 },
-                "Most 15 in a pile, from 200 studs, width 2." },
+                "Most 15 in a pile, from 200 studs, width 2.",
+                "Piles of 15", "Pulls from 200 studs." },
             { "3", "3  BALANCED", { Magnet = true, PullAll = true, MaxPull = 300, GrabMax = 30, PileSpread = 3 },
-                "Most 30, from 300 studs, width 3 (today's setting)." },
+                "Most 30, from 300 studs, width 3 (today's setting).",
+                "Every one loaded, in one pile", "Pulls up to 300 studs from their spawn, 30 at most." },
             { "4", "4  STRONG", { Magnet = true, PullAll = true, MaxPull = 600, GrabMax = 30, PileSpread = 3 },
-                "Most 30, from 600 studs, width 3." },
+                "Most 30, from 600 studs, width 3.",
+                "Every one loaded, far", "Pulls up to 600 studs from their spawn." },
             { "5", "5  ALL", { Magnet = true, PullAll = true, MaxPull = 1000, GrabMax = 30, PileSpread = 4 },
-                "Most 30, from 1,000 studs, width 4." },
+                "Most 30, from 1,000 studs, width 4.",
+                "Every one loaded, the whole camp", "Pulls up to 1,000 studs: a wide camp is piled one side at a time." },
         }
         local STEPS = {}
         for i, m in ipairs(MAG) do
             table.insert(STEPS, { name = m[2], short = m[1], set = m[3], line = m[4], today = (i == 4) or nil })
         end
-        P.kit.dial(v, "Strength", STEPS, "none")
+        P.kit.dial(v, "Strength", STEPS, "none", { h = 40 })
+        gap(v, 4)
         P.kit.truthCard(v, function()
+            local i = dialStepOf(STEPS, CFG)
+            if i then return MAG[i][5] end
             if not CFG.Magnet then return "Magnet off" end
-            if CFG.PullAll then
-                return CFG.MaxPull >= 1000 and "Every one loaded, the whole camp" or "Every one loaded, in one pile"
-            end
+            if CFG.PullAll then return "Every one loaded, in one pile" end
             return "Piles of " .. tostring(CFG.GrabMax)
         end, function()
+            local i = dialStepOf(STEPS, CFG)
+            if i then return MAG[i][6] end
             if not CFG.Magnet then return "You fight them where they stand." end
             if CFG.PullAll then
-                return "Pulls up to " .. studs(CFG.MaxPull) .. " studs from their spawn, " .. tostring(CFG.GrabMax)
-                    .. " at most. A wide camp is piled one side at a time."
+                return "Pulls up to " .. tostring(CFG.MaxPull) .. " studs from their spawn, " .. tostring(CFG.GrabMax)
+                    .. " at most."
             end
-            return "Pulls from " .. studs(CFG.GrabRadius) .. " studs, " .. tostring(CFG.GrabMax) .. " at most in one pile."
+            return "Pulls from " .. tostring(CFG.GrabRadius) .. " studs, " .. tostring(CFG.GrabMax) .. " at most in one pile."
         end, "none")
         readout(v, function()
             return string.format("held %d · staying put %d · put back %d\n%s",
                 P.pileHeld or 0, P.pileOwned or 0, stats.putBack, tostring(P.simNote))
         end)
-        heading2(v, "also")
-        switchRow(v, "Pull other picked species too",
+        P.kit.sectionRight(v, "also")
+        P.kit.switch(v, "Pull other picked species too",
             "Your circuit's other species in this camp join the pile",
             function() return CFG.PullOthers end,
             function(x) CFG.PullOthers = x end)
-        switchRow(v, "Learn how far each kind can go",
-            "Off by default: it only ever lowers the limit, and split camps",
+        P.kit.switch(v, "Learn how far each kind can go",
+            "Measures each kind's pull limit",
             function() return CFG.LearnLeash end,
             function(x) CFG.LearnLeash = x end)
         P.kit.fineTune(v, function(box)
-            switchRow(box, "Pull every one loaded",
-                "Any distance - a new spawn joins the pile at once",
+            P.kit.switch(box, "Pull every one loaded",
+                "Any distance: a new spawn joins the pile at once",
                 function() return CFG.PullAll end,
                 function(x) CFG.PullAll = x end)
             readout(box, function()
@@ -27693,7 +27815,7 @@ local function buildUI()
                 return P.pileReach and string.format("pile at the camp's middle · farthest pull %.0f studs",
                     P.pileReach) or "pile at the camp's middle (found on the first pile)"
             end)
-            sliderRow(box, "Pull at most, from their spawn", 50, 1000, 10,
+            sliderRow(box, "Pull at most, from spawn", 50, 1000, 10,
                 function() return CFG.MaxPull end,
                 function(x) CFG.MaxPull = x end, " studs")
             sliderRow(box, "When that is off: within", 50, 600, 10,
@@ -27708,11 +27830,36 @@ local function buildUI()
             sliderRow(box, "This camp means within", 20, 300, 10,
                 function() return CFG.OthersRadius end,
                 function(x) CFG.OthersRadius = x end, " studs")
-            sliderRow(box, "Put back after no damage for", 1, 10, 0.5,
+            sliderRow(box, "Put back after no damage", 1, 10, 0.5,
                 function() return CFG.PutBackAfter end,
                 function(x) CFG.PutBackAfter = x end, " s")
-        end, 7)
-        fold(v, "How it works", function(v)
+            heading2(box, "why no damage - the last ones")
+            readout(box, function()
+                if #P.noDamage == 0 then return "every one hit so far took damage" end
+                return table.concat(P.noDamage, "\n")
+            end)
+            actionRow(box, "Clear the list", nil, function() table.clear(P.noDamage) end)
+            heading2(box, "measured limits")
+            readout(box, function()
+                local lines = {}
+                if P.pileSplit then table.insert(lines, P.pileSplit) end
+                local names = {}
+                for n in pairs(P.leash) do table.insert(names, n) end
+                table.sort(names)
+                for _, n in ipairs(names) do
+                    local l = P.leash[n]
+                    table.insert(lines, string.format("%s: hit up to %s from spawn%s  ->  at most %.0f", n,
+                        l.ok and string.format("%.0f", l.ok) or "-",
+                        l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
+                end
+                if #lines == 0 then return "one pile per camp · nothing measured yet" end
+                return table.concat(lines, "\n")
+            end)
+            actionRow(box, "Forget what it measured", nil, function() table.clear(P.leash) end)
+        end, 8)
+        fold(v, "Details", function(v)
+            caption(v, "Learning how far each kind can go is off by default: it only ever "
+                .. "lowers the limit, and it splits camps.")
             caption(v, "A camp wider than the limit is piled one side at a time: "
                 .. "the side nearest you, then the other when it is empty. A pile "
                 .. "holds: it does not move and lets nobody go while one of it is "
@@ -27732,43 +27879,25 @@ local function buildUI()
                 .. "protection. Ours, in reach, no shield = the server refused the hit; "
                 .. "\"pile N of M\" shows whether it is always the last ones (a cap).")
         end)
-        fold(v, "Details", function(v)
-            heading2(v, "why no damage - the last ones")
-            readout(v, function()
-                if #P.noDamage == 0 then return "every one hit so far took damage" end
-                return table.concat(P.noDamage, "\n")
-            end)
-            actionRow(v, "Clear the list", nil, function() table.clear(P.noDamage) end)
-            heading2(v, "measured limits")
-            readout(v, function()
-                local lines = {}
-                if P.pileSplit then table.insert(lines, P.pileSplit) end
-                local names = {}
-                for n in pairs(P.leash) do table.insert(names, n) end
-                table.sort(names)
-                for _, n in ipairs(names) do
-                    local l = P.leash[n]
-                    table.insert(lines, string.format("%s: hit up to %s from spawn%s  ->  at most %.0f", n,
-                        l.ok and string.format("%.0f", l.ok) or "-",
-                        l.bad and string.format(", no damage at %.0f", l.bad) or "", pullLimit(n)))
-                end
-                if #lines == 0 then return "one pile per camp · nothing measured yet" end
-                return table.concat(lines, "\n")
-            end)
-            actionRow(v, "Forget what it measured", nil, function() table.clear(P.leash) end)
-        end)
     end
 
     -- =====================================================
     -- POSITION. R2 Task 9 (board Position): AUTO | FIXED, a truth card, the
     -- "Always stay above them" switch, Fine-tune with the five distances.
+    -- R3 Task 7 (Position.dc.html): WHERE YOU STAND as the board's ring list
+    -- (Auto's "today" tag) with the pick's word on the right; the truth
+    -- card; ALSO's board switch; Fine-tune's five board labels. The live
+    -- line and how it works go to Details.
     -- =====================================================
     do
         local v = makeView("position")
-        gap(v, 6)
-        P.kit.segmented(v, "where you stand", {
-            { "auto", "Auto: high or close" }, { "fixed", "One fixed spot" },
-        }, function() return CFG.HeightMode end, function(x) CFG.HeightMode = x end)
+        P.kit.sectionRight(v, "where you stand", function()
+            return CFG.HeightMode == "fixed" and "Fixed" or "Auto"
+        end)
+        P.kit.heroList(v, {
+            { "auto", "Auto: high or close", "today" }, { "fixed", "One fixed spot", "" },
+        }, function() return CFG.HeightMode end, function(x) CFG.HeightMode = x end, "none")
+        gap(v, 12)
         P.kit.truthCard(v, function()
             if CFG.HeightMode == "fixed" then
                 return "Always " .. tostring(CFG.HeightFixed) .. " up, "
@@ -27793,11 +27922,11 @@ local function buildUI()
                 return string.format("now close: %.1f up, %.1f out", CFG.HeightMelee, CFG.MeleeDistance)
             end
             return string.format("now high: %d over the highest enemy%s", CFG.HeightSafe,
-                CFG.StayHigh and "  (always)" or "")
+                CFG.StayHigh and " (always)" or "")
         end)
-        heading2(v, "also")
-        switchRow(v, "Always stay above them",
-            "Never comes down close - every attack from this height",
+        P.kit.sectionRight(v, "also")
+        P.kit.switch(v, "Always stay above them",
+            "Never below the pile, even when close",
             function() return CFG.StayHigh end,
             function(x)
                 CFG.StayHigh = x
@@ -27805,13 +27934,13 @@ local function buildUI()
                 P.reprobe()             -- the M1 ways were found at the old height
             end)
         P.kit.fineTune(v, function(box)
-            sliderRow(box, "Auto: high, over the pile", 5, 150, 1,
+            sliderRow(box, "High, over the pile", 5, 150, 1,
                 function() return CFG.HeightSafe end,
                 function(x) CFG.HeightSafe = x end, " studs")
-            sliderRow(box, "Auto: close, height", 0, 10, 0.5,
+            sliderRow(box, "Close: height", 0, 10, 0.5,
                 function() return CFG.HeightMelee end,
                 function(x) CFG.HeightMelee = x end, " studs")
-            sliderRow(box, "Auto: close, out to the side", 0, 15, 0.5,
+            sliderRow(box, "Close: out to the side", 0, 15, 0.5,
                 function() return CFG.MeleeDistance end,
                 function(x) CFG.MeleeDistance = x end, " studs")
             sliderRow(box, "Fixed: height", 0, 150, 1,
@@ -27821,7 +27950,8 @@ local function buildUI()
                 function() return CFG.SideFixed end,
                 function(x) CFG.SideFixed = x end, " studs")
         end, 5)
-        fold(v, "How it works", function(v)
+        fold(v, "Details", function(v)
+            caption(v, "Always stay above them: never comes down close - every attack from this height.")
             caption(v, "Auto: high over the pile whenever the hit reaches from "
                 .. "there (remote hit, fruit click, fruit skills) - out of their "
                 .. "reach. Close beside it when it does not (key presses, "
@@ -27837,93 +27967,134 @@ local function buildUI()
     -- SAFETY & HAKI. R2 Task 9 (board Safety): a health bar with the escape
     -- and come-back marks moved by two steppers, a truth card, J and E as two
     -- big tiles, the check-every value in Fine-tune.
+    -- R3 Task 7 (Safety.dc.html): the bar 300 x 92 as the board draws it -
+    -- the 14 px track (#2E2B27, red #4A2420 under OUT, green #1F4A33 from
+    -- BACK), the 2 x 28 marks, the 112 px labels (11 px ExtraBold over a 10
+    -- px line) kept inside the bar's ends; marks and labels glide .25 s.
+    -- The board's steppers with the hairline between; the truth card's
+    -- third line; the haki tiles' colours and type; the haki readout goes
+    -- to Details.
     -- =====================================================
     do
         local v = makeView("safety")
-        local RED = Color3.fromRGB(232, 92, 78)
-        local GREEN = Color3.fromRGB(63, 208, 126)
+        local RED = C.stop
+        local GREEN = C.live
         local function pct(x) return math.floor((tonumber(x) or 0) * 100 + 0.5) end
-        gap(v, 4)
         P.kit.sectionRight(v, "getting out · every mode", function()
             local n = stats.escapes or 0
-            if n == 0 then return "no escape yet" end
-            return n == 1 and "1 escape this run" or (n .. " escapes this run")
+            if n == 0 then return "no escape yet", LOOK.mute end
+            return (n == 1 and "1 escape this run" or (n .. " escapes this run")), LOOK.mute
         end)
         -- the bar: red under the escape mark, green from the come-back mark
         do
+            local W, LW = 300, 112
+            local GLIDE = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
             local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 96), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 100), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.fromOffset(W, 92), Position = UDim2.fromOffset(20, 8),
+                BackgroundTransparency = 1, Parent = s,
+            })
             local function tag(y, color, sub)
                 local h = mk("Frame", {
-                    Size = UDim2.fromOffset(112, 30), Position = UDim2.new(0, 0, 0, y),
-                    BackgroundTransparency = 1, Parent = s,
+                    Size = UDim2.fromOffset(LW, 28), Position = UDim2.fromOffset(0, y),
+                    BackgroundTransparency = 1, Parent = box,
                 })
                 local a = mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 15), BackgroundTransparency = 1, Font = LOOK.bold,
-                    TextSize = F.tiny, TextColor3 = color, Text = "", Parent = h,
+                    Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Font = LOOK.black,
+                    TextSize = lookPx(11), TextColor3 = color, Text = "", Parent = h,
                 })
                 local b = mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 15), BackgroundTransparency = 1,
-                    Font = LOOK.regular, TextSize = 10, TextColor3 = C.third, Text = sub, Parent = h,
+                    Size = UDim2.new(1, 0, 0, 13), Position = UDim2.fromOffset(0, 15), BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = lookPx(10), TextColor3 = LOOK.mute, Text = sub, Parent = h,
                 })
                 return h, a, b
             end
-            local oh, ol, osub = tag(2, RED, "fly 250 up")
-            local bh, bl, bsub = tag(66, GREEN, "back to the fight")
+            local oh, ol, osub = tag(0, RED, "fly 250 up")
+            local bh, bl, bsub = tag(63, GREEN, "back to the fight")
             local bar = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 38),
-                BackgroundColor3 = C.raised, BorderSizePixel = 0, ClipsDescendants = true, Parent = s,
+                Size = UDim2.fromOffset(W, 14), Position = UDim2.fromOffset(0, 38),
+                BackgroundColor3 = P.kit.SEG_ON, BorderSizePixel = 0, ClipsDescendants = true, Parent = box,
             })
             corner(bar, 7)
             local redPart = mk("Frame", {
-                Size = UDim2.fromScale(0.35, 1), BackgroundColor3 = Color3.fromRGB(74, 36, 32),
+                Size = UDim2.fromOffset(105, 14), BackgroundColor3 = Color3.fromRGB(74, 36, 32),
                 BorderSizePixel = 0, Parent = bar,
             })
             local greenPart = mk("Frame", {
-                Size = UDim2.fromScale(0.2, 1), Position = UDim2.fromScale(0.8, 0),
+                Size = UDim2.fromOffset(60, 14), Position = UDim2.fromOffset(240, 0),
                 BackgroundColor3 = Color3.fromRGB(31, 74, 51), BorderSizePixel = 0, Parent = bar,
             })
             local function mark(color)
-                return mk("Frame", {
+                local m = mk("Frame", {
                     Size = UDim2.fromOffset(2, 28), Position = UDim2.fromOffset(0, 31),
-                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = s,
+                    BackgroundColor3 = color, BorderSizePixel = 0, Parent = box,
                 })
+                corner(m, 1)
+                return m
             end
             local om, bm = mark(RED), mark(GREEN)
-            local function place(h, a, b, p, y)
-                h.AnchorPoint = Vector2.new(p, 0)
-                h.Position = UDim2.new(p, 0, 0, y)
-                local al = p < 0.2 and Enum.TextXAlignment.Left
-                    or (p > 0.8 and Enum.TextXAlignment.Right or Enum.TextXAlignment.Center)
-                a.TextXAlignment, b.TextXAlignment = al, al
+            -- the board's place(): a label stays inside the bar's ends
+            local function place(x)
+                if x < LW / 2 then return math.max(0, x - 8), Enum.TextXAlignment.Left end
+                if x > W - LW / 2 then return math.min(W, x + 8) - LW, Enum.TextXAlignment.Right end
+                return x - LW / 2, Enum.TextXAlignment.Center
             end
+            local was
             addLive(function()
-                local po = math.clamp(tonumber(CFG.EscapeBelow) or 0.35, 0, 1)
-                local pb = math.clamp(tonumber(CFG.ReturnAt) or 0.8, 0, 1)
-                redPart.Size = UDim2.fromScale(po, 1)
-                greenPart.Position, greenPart.Size = UDim2.fromScale(pb, 0), UDim2.fromScale(1 - pb, 1)
-                om.Position = UDim2.new(po, -1, 0, 31)
-                bm.Position = UDim2.new(pb, -1, 0, 31)
-                ol.Text, bl.Text = "OUT " .. pct(po) .. "%", "BACK " .. pct(pb) .. "%"
-                place(oh, ol, osub, po, 2)
-                place(bh, bl, bsub, pb, 66)
+                local po = math.clamp(pct(CFG.EscapeBelow), 0, 100)
+                local pb = math.clamp(pct(CFG.ReturnAt), 0, 100)
+                ol.Text, bl.Text = "OUT " .. po .. "%", "BACK " .. pb .. "%"
+                local key = po .. "/" .. pb
+                if key == was then return end
+                local first = was == nil
+                was = key
+                local xo, xb = math.floor(po / 100 * W + 0.5), math.floor(pb / 100 * W + 0.5)
+                local lo, ao = place(xo)
+                local lb, ab = place(xb)
+                ol.TextXAlignment, osub.TextXAlignment = ao, ao
+                bl.TextXAlignment, bsub.TextXAlignment = ab, ab
+                local function go(o, props)
+                    if first then
+                        for k, x in pairs(props) do o[k] = x end
+                    else
+                        tween(o, props, GLIDE)
+                    end
+                end
+                go(redPart, { Size = UDim2.fromOffset(xo, 14) })
+                go(greenPart, { Position = UDim2.fromOffset(xb, 0), Size = UDim2.fromOffset(W - xb, 14) })
+                go(om, { Position = UDim2.fromOffset(xo - 1, 31) })
+                go(bm, { Position = UDim2.fromOffset(xb - 1, 31) })
+                go(oh, { Position = UDim2.fromOffset(lo, 0) })
+                go(bh, { Position = UDim2.fromOffset(lb, 63) })
             end)
         end
+        gap(v, 6)
         -- the two marks never cross: "come back" stays at least 5 above "escape"
         P.kit.stepper(v, "Escape below", function() return pct(CFG.EscapeBelow) end, function(x)
             local o = math.clamp(x, 10, 80)
             CFG.EscapeBelow = o / 100
             if pct(CFG.ReturnAt) < o + 5 then CFG.ReturnAt = math.min(100, o + 5) / 100 end
         end, 10, 80, 5, function(x) return tostring(math.floor(x + 0.5)) .. "%" end, RED)
+        do
+            local h = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 1), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("Frame", {
+                Size = UDim2.new(1, -38, 0, 1), Position = UDim2.fromOffset(38, 0),
+                BackgroundColor3 = C.line, BorderSizePixel = 0, Parent = h,
+            })
+        end
         P.kit.stepper(v, "Come back at", function() return pct(CFG.ReturnAt) end, function(x)
             local b = math.clamp(x, 30, 100)
             CFG.ReturnAt = b / 100
             if pct(CFG.EscapeBelow) > b - 5 then CFG.EscapeBelow = math.max(10, b - 5) / 100 end
         end, 30, 100, 5, function(x) return tostring(math.floor(x + 0.5)) .. "%" end, GREEN)
-        P.kit.truthCard(v, function()
+        gap(v, 10)
+        local card = P.kit.truthCard(v, function()
             return "Out under " .. pct(CFG.EscapeBelow) .. "%, back at " .. pct(CFG.ReturnAt) .. "%"
         end, function()
             local hk
@@ -27933,14 +28104,20 @@ local function buildUI()
             else hk = "No haki key is pressed: both are yours." end
             return "Under " .. pct(CFG.EscapeBelow) .. "% you fly 250 up, out of reach, and wait there for "
                 .. pct(CFG.ReturnAt) .. "%, 40 s at most. Then back to the fight. " .. hk
-                .. "\nNot in PvP, at the boat wheel or on your Mirage moon turn."
         end, "none")
+        mk("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+            Font = LOOK.regular, TextSize = lookPx(11), LineHeight = LOOK.lh(1.45), TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+            Text = "Not in PvP, at the boat wheel or on your Mirage moon turn.", LayoutOrder = 3, Parent = card,
+        })
         caption(v, "There is no real god mode: health lives on the server. "
             .. "Height, a pinned pile and Observation keep you alive. This gets you out.")
-        P.kit.sectionRight(v, "haki · every mode", function() return "keep it on" end)
+        P.kit.sectionRight(v, "haki · every mode", function() return "keep it on", LOOK.mute end)
         do
+            local DEEP = Color3.fromRGB(21, 20, 19)            -- #151413
             local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 124), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 118), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
@@ -27952,24 +28129,25 @@ local function buildUI()
                 corner(b, 14)
                 local st = mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
                 local kb = mk("TextLabel", {
-                    Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(12, 12),
-                    BackgroundColor3 = C.base, BorderSizePixel = 0, Font = Enum.Font.Code,
-                    TextSize = F.label, TextColor3 = C.text, Text = key, Parent = b,
+                    Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(13, 13),
+                    BackgroundColor3 = DEEP, BorderSizePixel = 0, Font = P.r2.MONO,
+                    TextSize = lookPx(14), TextColor3 = C.text, Text = key, Parent = b,
                 })
                 corner(kb, 8)
+                mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = kb })
                 local track = mk("Frame", {
                     Size = UDim2.fromOffset(40, 24), Position = UDim2.new(1, -52, 0, 15),
-                    BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = b,
+                    BackgroundColor3 = LOOK.ghost, BorderSizePixel = 0, Parent = b,
                 })
                 corner(track, 12)
                 local knob = mk("Frame", {
                     Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(3, 3),
-                    BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = track,
+                    BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = track,
                 })
                 corner(knob, 9)
                 local nm = mk("TextLabel", {
-                    Size = UDim2.new(1, -24, 0, 20), Position = UDim2.fromOffset(12, 52),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
+                    Size = UDim2.new(1, -24, 0, 18), Position = UDim2.fromOffset(12, 54),
+                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = lookPx(14),
                     TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
                 })
                 local dot = mk("Frame", {
@@ -27979,25 +28157,33 @@ local function buildUI()
                 corner(dot, 3)
                 local state = mk("TextLabel", {
                     Size = UDim2.new(1, -36, 0, 14), Position = UDim2.fromOffset(24, 76),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "", Parent = b,
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.soft, Text = "", Parent = b,
                 })
                 local sub = mk("TextLabel", {
-                    Size = UDim2.new(1, -24, 0, 14), Position = UDim2.fromOffset(12, 94),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
+                    Size = UDim2.new(1, -24, 0, 14), Position = UDim2.fromOffset(12, 92),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
+                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = b,
                 })
-                pressable(b)
                 b.Activated:Connect(function() setOn(not getOn()) end)
+                local was
                 addLive(function()
                     local on = getOn() and true or false
-                    track.BackgroundColor3 = on and GREEN or C.hair
-                    knob.Position = UDim2.fromOffset(on and 19 or 3, 3)
+                    if was ~= nil and was ~= on then
+                        tween(knob, { Position = UDim2.fromOffset(on and 19 or 3, 3) },
+                            TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut))
+                    else
+                        knob.Position = UDim2.fromOffset(on and 19 or 3, 3)
+                    end
+                    was = on
+                    track.BackgroundColor3 = on and GREEN or LOOK.ghost
+                    b.BackgroundColor3 = on and C.row or DEEP
+                    st.Color = on and C.hair or C.line
                     nm.TextColor3 = on and C.text or C.second
-                    kb.TextColor3 = on and C.text or C.third
-                    st.Color = on and C.raised or C.hair
+                    kb.TextColor3 = on and C.text or LOOK.mute
                     dot.BackgroundColor3 = on and GREEN or C.third
+                    state.TextColor3 = on and LOOK.soft or LOOK.mute
                     state.Text = on and "on now" or "not kept"
                     sub.Text = subFn(on)
                 end)
@@ -28012,6 +28198,7 @@ local function buildUI()
                         or "E is yours to press"
                 end)
         end
+        gap(v, 2)
         readout(v, function()
             local lines = {}
             table.insert(lines, CFG.AutoBuso
@@ -28021,7 +28208,7 @@ local function buildUI()
                 local on = kenOn()
                 table.insert(lines, "Observation now: "
                     .. (on == true and "ON" or on == false and "OFF" or "cannot tell")
-                    .. string.format("   next look in %s", mmss(P.kenNextIn())))
+                    .. string.format(" · next look in %s", mmss(P.kenNextIn())))
                 table.insert(lines, "Last: " .. tostring(P.kenNote))
             else
                 table.insert(lines, "Observation: not managed")
@@ -28044,10 +28231,19 @@ local function buildUI()
     -- TRAVEL & BOAT. R2 Task 9 (board Travel): one SPEED dial for flying and
     -- the boat, the shortest-way switch, the sea search as a picture with
     -- one width dial (or your own steering), Fine-tune with every number.
+    -- R3 Task 7 (Travel.dc.html): SPEED's 44 px buttons (radius 11, 13 px);
+    -- the truth card; Shortest way as the board's switch with its short
+    -- line and "Last: ..."; SEARCHING THE SEA with its two chips; Auto / I
+    -- steer as the board's two-line tabs; the picture on #151413 drawn to
+    -- the board's scale (Tiki at 286, 17,000 m = 246 px; the dashed Danger 6
+    -- line; WEST with its arrow) - the legs, dots and words glide .4 s to a
+    -- new look; HOW FAR TO LOOK's 40 px buttons with the minutes at sea in
+    -- its line; I steer's keycaps card; Fine-tune's board labels and note.
+    -- The raw route and flight lines and the long words go to Details.
     -- =====================================================
     do
         local v = makeView("travel")
-        gap(v, 6)
+        local DEEP = Color3.fromRGB(21, 20, 19)            -- #151413
         local function commas(n)
             local s = tostring(math.floor(n))
             local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
@@ -28066,7 +28262,8 @@ local function buildUI()
                 today = (i == 3) or nil,
             })
         end
-        P.kit.dial(v, "Speed · every mode", SSTEPS, "none")
+        P.kit.dial(v, "Speed · every mode", SSTEPS, "none", { px = 13, radius = 11 })
+        gap(v, 2)
         P.kit.truthCard(v, function()
             return "Flies at " .. tostring(CFG.TravelSpeed) .. ", sails at " .. tostring(CFG.SeaSpeed)
         end, function()
@@ -28079,40 +28276,93 @@ local function buildUI()
             else feel = "Far faster than the public hubs' 330: the server may pull you back often." end
             return feel .. string.format(" This run: %d flights, pulled back %d times.", stats.flights, stats.pulledBack)
         end, "none")
-        heading2(v, "the way there")
-        switchRow(v, "Shortest way",
-            "The Home button, the portals (Castle on the Sea <-> Mansion, Hydra, Tiki) and the doors (the Cursed Ship, the Sky gate) when they beat flying - not on the boat, the sea hunts or raids",
-            function() return CFG.TravelRoutes end,
-            function(x) CFG.TravelRoutes = x end)
+        P.kit.sectionRight(v, "the way there")
+        P.kit.switch(v, "Shortest way", function()
+            return CFG.TravelRoutes and "Home button, portals and doors, when quicker"
+                or "Off: every trip is one straight flight"
+        end, function() return CFG.TravelRoutes end,
+            function(x) CFG.TravelRoutes = x end,
+            { minH = 72, last = function()
+                local R = P.route
+                return (R and R.last) and ("Last: " .. tostring(R.last)) or ""
+            end })
         readout(v, function() return P.route and P.route.words() or "route     -" end)
 
-        -- the sea search
+        -- SEARCHING THE SEA, its two chips on the right
         do
             local head = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 16), Parent = head })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+                PaddingBottom = UDim.new(0, 6), Parent = head })
             mk("TextLabel", {
-                Size = UDim2.new(1, -150, 1, -6), Position = UDim2.fromOffset(0, 6), BackgroundTransparency = 1,
-                Font = LOOK.semi, TextSize = F.tiny, TextXAlignment = Enum.TextXAlignment.Left,
-                TextColor3 = C.third, Text = "SEARCHING THE SEA", Parent = head,
+                Size = UDim2.new(1, -150, 1, 0), BackgroundTransparency = 1,
+                Font = LOOK.semi, TextSize = LOOK.size.section, TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Bottom, TextColor3 = LOOK.mute,
+                Text = "SEARCHING THE SEA", Parent = head,
             })
             local chips = mk("Frame", {
-                Size = UDim2.fromOffset(140, 20), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 8),
+                Size = UDim2.fromOffset(150, 18), AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 0, 1, 1),
                 BackgroundTransparency = 1, Parent = head,
             })
             mk("UIListLayout", {
                 FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Right,
-                Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = chips,
+                Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = chips,
             })
-            P.kit.packChip(chips, "sea")
-            P.kit.packChip(chips, "prehistoric")
+            P.kit.packChip(chips, "sea").LayoutOrder = 1
+            P.kit.packChip(chips, "prehistoric").LayoutOrder = 2
         end
-        P.kit.noteLine(v, "How the boat looks for an island in Prehistoric, Mirage and Sea events. Sea travel always uses your keys.")
-        P.kit.segmented(v, nil, {
-            { "auto", "Auto: west, then new server" }, { "manual", "I steer: A D W S" },
-        }, function() return CFG.SeaSteer end, function(x) CFG.SeaSteer = x end)
+        do
+            local l = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = LOOK.size.help, LineHeight = LOOK.lh(1.5), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, LayoutOrder = nextOrder(),
+                Text = "How the boat looks for an island in Prehistoric, Mirage and Sea events. Sea travel always uses your keys.",
+                Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = l })
+        end
+        gap(v, 8)
+        -- AUTO | I STEER: the board's two-line tabs (#1B1917, 4 px inside,
+        -- radius 12; each 52 high, radius 9; the lit one #2E2B27)
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1,
+                LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local box = mk("Frame", {
+                Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(box, 12)
+            local tabs = {}
+            for i, t in ipairs({ { "auto", "Auto", "west, then a new server" }, { "manual", "I steer", "A / D turn, W go, S stop" } }) do
+                local b = mk("TextButton", {
+                    Size = UDim2.new(0.5, -6, 1, -8), Position = UDim2.new((i - 1) * 0.5, i == 1 and 4 or 2, 0, 4),
+                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false, Text = "", Parent = box,
+                })
+                corner(b, 9)
+                local w = mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 0.5, -16), BackgroundTransparency = 1,
+                    Font = LOOK.bold, TextSize = lookPx(13), TextColor3 = C.second, Text = t[2], Parent = b,
+                })
+                local sl = mk("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0.5, 2), BackgroundTransparency = 1,
+                    Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = C.third, Text = t[3], Parent = b,
+                })
+                tabs[i] = { b = b, w = w, s = sl, id = t[1] }
+                b.Activated:Connect(function() CFG.SeaSteer = t[1] end)
+            end
+            addLive(function()
+                for _, t in ipairs(tabs) do
+                    local on = (CFG.SeaSteer == t.id) or (t.id == "auto" and CFG.SeaSteer ~= "manual")
+                    t.b.BackgroundColor3 = on and P.kit.SEG_ON or C.row
+                    t.w.TextColor3 = on and C.text or C.second
+                    t.s.TextColor3 = on and LOOK.soft or C.third
+                end
+            end)
+        end
 
         local autoBox = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -28125,95 +28375,123 @@ local function buildUI()
         })
         mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = manBox })
         addLive(function()
-            local a = CFG.SeaSteer == "auto"
+            local a = CFG.SeaSteer ~= "manual"
             autoBox.Visible, manBox.Visible = a, not a
         end)
 
-        -- AUTO: the path drawn to scale (Tiki at the right, west is left)
+        -- AUTO: the path drawn to the board's scale (Tiki at 286, west left)
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 160), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = autoBox,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
-            local box = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, -8), BackgroundColor3 = C.row, BorderSizePixel = 0,
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
+                PaddingTop = UDim.new(0, 10), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = DEEP, BorderSizePixel = 0,
                 ClipsDescendants = true, Parent = s,
             })
-            corner(box, 14)
-            local stage = mk("Frame", {
-                Size = UDim2.fromOffset(300, 150), AnchorPoint = Vector2.new(0.5, 0),
-                Position = UDim2.new(0.5, 0, 0, 0), BackgroundTransparency = 1, Parent = box,
-            })
-            local function text(w, str, color, align)
+            corner(card, 14)
+            local GLIDE = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+            local function text(w, str, color, px, align)
                 return mk("TextLabel", {
-                    Size = UDim2.fromOffset(w, 14), BackgroundTransparency = 1, Font = LOOK.regular,
-                    TextSize = 10, TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
-                    Text = str, Parent = stage,
+                    Size = UDim2.fromOffset(w, 13), BackgroundTransparency = 1, Font = LOOK.regular,
+                    TextSize = lookPx(px or 10), TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
+                    Text = str, Parent = card,
                 })
             end
-            local function dot(d, filled)
+            local function ring(d)
                 local f = mk("Frame", {
-                    Size = UDim2.fromOffset(d, d), BackgroundColor3 = filled and C.ivory or C.row,
-                    BorderSizePixel = 0, Parent = stage,
+                    Size = UDim2.fromOffset(d - 4, d - 4), BackgroundColor3 = DEEP,
+                    BorderSizePixel = 0, ZIndex = 2, Parent = card,
                 })
                 corner(f, d / 2)
-                if not filled then
-                    mk("UIStroke", { Color = C.ivory, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = f })
-                end
+                mk("UIStroke", { Color = C.ivory, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = f })
                 return f
             end
-            local TX = 270                      -- Tiki, on the right
-            local west = text(60, "WEST", C.third)
-            west.Position = UDim2.fromOffset(10, 10)
-            mk("Frame", {
-                Size = UDim2.fromOffset(1, 110), Position = UDim2.fromOffset(TX - 38, 16),
-                BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = stage,
-            })
-            local dl = text(60, "Danger 6", C.third)
-            dl.Position = UDim2.fromOffset(TX - 34, 130)
-            local leg1 = mk("Frame", { Size = UDim2.fromOffset(10, 2), BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage })
-            local outL = text(100, "", C.second, Enum.TextXAlignment.Center)
+            -- WEST, its arrow (9 px Bold, #6B665F)
+            do
+                local ic = P.kit.icon(card, 10, { { 19, 12, 5, 12 }, { 11, 6, 5, 12 }, { 5, 12, 11, 18 } }, 1, C.third)
+                ic.Position = UDim2.fromOffset(12, 12)
+                local w = text(40, "WEST", C.third, 9)
+                setFont(w, LOOK.bold)
+                w.Position = UDim2.fromOffset(26, 10)
+            end
+            local dash = P.kit.dash(card, 1, C.hair, 110)
+            dash.Position = UDim2.fromOffset(248, 16)
+            local dl = text(50, "Danger 6", C.third, 9)
+            dl.Position = UDim2.fromOffset(252, 128)
+            local leg1 = mk("Frame", { Size = UDim2.fromOffset(10, 2), BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = card })
+            local outL = text(100, "", LOOK.soft, 10, Enum.TextXAlignment.Center)
             local leg2 = mk("Frame", {
-                Size = UDim2.fromOffset(10, 2), AnchorPoint = Vector2.new(0, 0.5),
-                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage,
+                Size = UDim2.fromOffset(10, 2), AnchorPoint = Vector2.new(0.5, 0.5),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = card,
             })
-            local turnDot = dot(8, false)
-            local turnL = text(64, "", C.third)
-            local endDot = dot(12, false)
-            local endL = text(70, "new server", C.second)
-            local tiki = dot(8, true)
-            tiki.Position = UDim2.fromOffset(TX - 4, 36)
-            local tl = text(30, "Tiki", C.third)
-            tl.Position = UDim2.fromOffset(TX - 14, 50)
+            local turnDot = ring(8)
+            local turnL = text(52, "", C.second, 10)
+            local endDot = ring(12)
+            local endL = text(70, "new server", LOOK.soft, 10)
+            local tiki = mk("Frame", {
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(282, 36),
+                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = card,
+            })
+            corner(tiki, 4)
+            local tl = text(30, "Tiki", C.second, 10)
+            tl.Position = UDim2.fromOffset(270, 50)
+            local was
             addLive(function()
                 local out = math.max(1000, tonumber(CFG.SeaSearchTo) or 17000)
                 local turn = tonumber(CFG.SeaTurnBack) or 120
                 local on = math.max(0, tonumber(CFG.SeaLeg2) or 0)
+                local key = out .. "/" .. turn .. "/" .. on
+                if key == was then return end
+                local first = was == nil
+                was = key
                 local S = 17000 / 246
-                local tx = math.max(8, TX - out / S)
-                local L = math.min(on / S, 170)
+                local tx = math.max(8, 286 - out / S)
+                local L = math.min(on / S, 110)
                 local phi = 180 - turn
                 local rad = math.rad(phi)
-                local ex, ey = tx + L * math.cos(rad), 40 + L * math.sin(rad)
-                leg1.Position = UDim2.fromOffset(math.floor(tx), 39)
-                leg1.Size = UDim2.fromOffset(math.max(1, math.floor(TX - tx)), 2)
-                outL.Position = UDim2.fromOffset(math.floor(tx + (TX - tx) / 2 - 50), 22)
+                local ex, ey = tx + L * math.cos(rad), math.min(40 + L * math.sin(rad), 138)
                 outL.Text = "out to " .. commas(out) .. " m"
-                leg2.Position = UDim2.fromOffset(math.floor(tx), 40)
-                leg2.Size = UDim2.fromOffset(math.floor(L), 2)
-                leg2.Rotation = phi
-                leg2.Visible = L >= 1
-                turnDot.Position = UDim2.fromOffset(math.floor(tx - 4), 36)
                 turnL.Text = math.floor(turn) .. "° left"
-                turnL.TextXAlignment = turn <= 90 and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right
-                turnL.Position = UDim2.fromOffset(math.floor(turn <= 90 and tx + 8 or tx - 68), 47)
-                endDot.Position = UDim2.fromOffset(math.floor(ex - 6), math.floor(math.min(ey, 132) - 6))
-                endL.Position = UDim2.fromOffset(math.floor(math.min(ex + 10, 228)), math.floor(math.min(ey, 132) - 7))
-                endDot.Visible, endL.Visible = L >= 1, L >= 1
+                -- the board's place (right of the turn, or left of it for a
+                -- wide turn), kept inside the card: at 17,000 m out the turn
+                -- sits 40 px in and "120° left" would cut off at the edge
+                local tlx = turn <= 90 and tx + 8 or tx - 60
+                local tAl = turn <= 90 and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right
+                if tlx < 4 then tlx, tAl = 4, Enum.TextXAlignment.Left end
+                turnL.TextXAlignment = tAl
+                leg2.Visible, endDot.Visible, endL.Visible = L >= 1, L >= 1, L >= 1
+                local function go(o, props)
+                    if first then
+                        for k, x in pairs(props) do o[k] = x end
+                    else
+                        tween(o, props, GLIDE)
+                    end
+                end
+                go(leg1, { Position = UDim2.fromOffset(tx, 39), Size = UDim2.fromOffset(math.max(1, 286 - tx), 2) })
+                go(outL, { Position = UDim2.fromOffset(tx + (286 - tx) / 2 - 50, 24) })
+                -- the second leg turns round its own middle in Roblox: its
+                -- middle sits half a leg out from the turn
+                go(leg2, { Position = UDim2.fromOffset(tx + L / 2 * math.cos(rad), 40 + L / 2 * math.sin(rad)),
+                    Size = UDim2.fromOffset(math.max(1, L), 2), Rotation = phi })
+                go(turnDot, { Position = UDim2.fromOffset(tx - 2, 38) })
+                go(turnL, { Position = UDim2.fromOffset(tlx, 48) })
+                go(endDot, { Position = UDim2.fromOffset(ex - 4, ey - 4) })
+                go(endL, { Position = UDim2.fromOffset(ex + 10, ey - 7) })
             end)
         end
-        P.kit.noteLine(autoBox, "Meters count from Tiki Outpost's back boat dealer. Danger 6 starts about 2,600 m out.")
+        do
+            local l = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = LOOK.size.help, LineHeight = LOOK.lh(1.5), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, LayoutOrder = nextOrder(),
+                Text = "Meters count from Tiki Outpost's back boat dealer. Danger 6 starts about 2,600 m out.",
+                Parent = autoBox,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingTop = UDim.new(0, 6), Parent = l })
+        end
         local FAR = {
             { "1  NEAR", 6000, 60, 2000 }, { "2  SHORT", 8000, 75, 2500 }, { "3  MIDDLE", 10500, 75, 3000 },
             { "4  LONG", 14000, 100, 5000 }, { "5  FAR", 17000, 120, 7000 },
@@ -28222,52 +28500,80 @@ local function buildUI()
         for i, f in ipairs(FAR) do
             table.insert(FSTEPS, {
                 name = f[1], set = { SeaSearchTo = f[2], SeaTurnBack = f[3], SeaLeg2 = f[4] },
-                line = "West to " .. commas(f[2]) .. " m, then " .. f[3] .. "° left for " .. commas(f[4])
-                    .. " m more. No island: the next server" .. (i == 5 and " (today's setting)." or "."),
+                line = function()
+                    local boat = math.max(1, tonumber(CFG.SeaSpeed) or 300)
+                    local mins = (f[2] + f[4]) * (tonumber(CFG.SeaStudsPerM) or 10) / boat / 60
+                    return "West to " .. commas(f[2]) .. " m, then " .. f[3] .. "° left for " .. commas(f[4])
+                        .. " m more: about " .. math.floor(mins + 0.5) .. " min at sea at " .. math.floor(boat)
+                        .. " studs/s. No island: the next server" .. (i == 5 and " (today's setting)." or ".")
+                end,
                 today = (i == 5) or nil,
             })
         end
-        P.kit.dial(autoBox, "How far to look", FSTEPS, "sea")
-        P.kit.noteLine(autoBox, function()
-            local m = ((tonumber(CFG.SeaSearchTo) or 0) + (tonumber(CFG.SeaLeg2) or 0)) * (tonumber(CFG.SeaStudsPerM) or 10)
-                / math.max(1, tonumber(CFG.SeaSpeed) or 300) / 60
-            return string.format("About %d min at sea at %s studs/s. Sea events never change server: at the end they turn left again and sail on.",
-                math.floor(m + 0.5), tostring(CFG.SeaSpeed))
-        end)
+        P.kit.dial(autoBox, "How far to look", FSTEPS, "none", { h = 40 })
+        do
+            local l = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = LOOK.size.help, LineHeight = LOOK.lh(1.5), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, LayoutOrder = nextOrder(),
+                Text = "Sea events never change server: at the end they turn left again and sail on.",
+                Parent = autoBox,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = l })
+        end
 
-        -- I STEER
+        -- I STEER: the keycaps card (#151413, 14 px inside, radius 14)
         do
             local s = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = manBox,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16),
+                PaddingTop = UDim.new(0, 10), Parent = s })
             local card = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+                BackgroundColor3 = DEEP, BorderSizePixel = 0, Parent = s,
             })
             corner(card, 14)
-            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = card })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 12), Parent = card })
             mk("UIPadding", {
-                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 14),
                 PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
             })
-            mk("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Font = LOOK.bold,
-                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text,
-                Text = "A D turn · W go · S stop", LayoutOrder = 1, Parent = card,
+            local keys = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = 1, Parent = card,
             })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+                VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = keys })
+            for i, k in ipairs({ "A", "D", "turn", "W", "go", "S", "stop" }) do
+                if #k == 1 then
+                    local cap = mk("TextLabel", {
+                        Size = UDim2.fromOffset(30, 30), BackgroundColor3 = Color3.fromRGB(31, 29, 27),
+                        BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(13), TextColor3 = C.text,
+                        Text = k, LayoutOrder = i, Parent = keys,
+                    })
+                    corner(cap, 8)
+                    mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = cap })
+                else
+                    local w = mk("TextLabel", {
+                        Size = UDim2.fromOffset(0, 32), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1,
+                        Font = LOOK.regular, TextSize = lookPx(12), TextColor3 = C.second,
+                        Text = k, LayoutOrder = i, Parent = keys,
+                    })
+                    if k ~= "stop" then mk("UIPadding", { PaddingRight = UDim.new(0, 10), Parent = w }) end
+                end
+            end
             local r = mk("TextLabel", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
-                Font = LOOK.regular, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
-                TextWrapped = true, TextColor3 = C.second, Text = "", LayoutOrder = 2, Parent = card,
+                Font = LOOK.regular, TextSize = lookPx(12), LineHeight = LOOK.lh(1.5), TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true, TextColor3 = LOOK.soft, Text = "", LayoutOrder = 2, Parent = card,
             })
             addLive(function()
                 r.Text = "The boat goes where you point it at " .. tostring(CFG.SeaSpeed) .. " studs/s and turns "
                     .. tostring(CFG.SeaTurnRate) .. "° a second. It never changes server by distance."
             end)
-            gap(manBox, 8)
         end
+        gap(v, 2)
 
         P.kit.fineTune(v, function(box)
             sliderRow(box, "Fly speed", 100, 1000, 10,
@@ -28279,8 +28585,7 @@ local function buildUI()
             sliderRow(box, "Boat speed", 250, 350, 5,
                 function() return CFG.SeaSpeed end,
                 function(x) CFG.SeaSpeed = x end, " studs/s")
-            switchRow(box, "Ask a far door from where I stand",
-                "A portal's question sent from wherever you are - no flight to it. A server that does not answer from there: flown to the door, and this left 6 hours",
+            P.kit.switch(box, "Doors asked from afar", nil,
                 function() return CFG.TravelFar ~= false end,
                 function(x) CFG.TravelFar = x end)
             sliderRow(box, "Auto: out to", 3000, 30000, 500,
@@ -28288,29 +28593,45 @@ local function buildUI()
                 function(x) CFG.SeaSearchTo = x end, " m")
             sliderRow(box, "Auto: then turn left", 0, 180, 5,
                 function() return CFG.SeaTurnBack end,
-                function(x) CFG.SeaTurnBack = x end, " deg")
+                function(x) CFG.SeaTurnBack = x end, "°")
             sliderRow(box, "Auto: and sail on", 0, 20000, 500,
                 function() return CFG.SeaLeg2 end,
                 function(x) CFG.SeaLeg2 = x end, " m")
-            sliderRow(box, "Auto: a turn every", 20, 180, 5,
+            sliderRow(box, "Auto: zigzag, a turn every", 20, 180, 5,
                 function() return CFG.SeaTurnEvery end,
-                function(x) CFG.SeaTurnEvery = x end, " s (up to 2x)")
-            sliderRow(box, "Auto: a turn up to", 0, 45, 1,
+                function(x) CFG.SeaTurnEvery = x end, " s, up to 2x")
+            sliderRow(box, "Auto: zigzag, a turn up to", 0, 45, 1,
                 function() return CFG.SeaTurnMax end,
-                function(x) CFG.SeaTurnMax = x end, " deg")
+                function(x) CFG.SeaTurnMax = x end, "°")
             sliderRow(box, "I steer: turn speed (A / D)", 20, 120, 5,
                 function() return CFG.SeaTurnRate end,
-                function(x) CFG.SeaTurnRate = x end, " deg/s")
+                function(x) CFG.SeaTurnRate = x end, "°/s")
             sliderRow(box, "One compass meter", 5, 15, 0.5,
                 function() return CFG.SeaStudsPerM end,
                 function(x) CFG.SeaStudsPerM = x end, " studs")
+            local n = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = LOOK.size.help, LineHeight = LOOK.lh(1.5), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, LayoutOrder = nextOrder(),
+                Text = "Doors asked from afar: no flight to a portal when the server answers from where you stand. "
+                    .. "One compass meter: change it if the Prehistoric \"where\" line drifts from your compass.",
+                Parent = box,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+                PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8), Parent = n })
         end, 11)
         readout(v, function()
             return "last flight  " .. tostring(P.lastFlight)
                 .. string.format("\nflights %d · instant hops %d · pulled back %d",
                     stats.flights, stats.hops, stats.pulledBack)
         end)
-        fold(v, "How it works", function(v)
+        fold(v, "Details", function(v)
+            caption(v, "Shortest way: the Home button, the portals (Castle on the Sea <-> Mansion, "
+                .. "Hydra, Tiki) and the doors (the Cursed Ship, the Sky gate) when they beat "
+                .. "flying - not on the boat, the sea hunts or raids.")
+            caption(v, "Doors asked from afar: a portal's question sent from wherever you are - no "
+                .. "flight to it. A server that does not answer from there: flown to the door, "
+                .. "and this left 6 hours.")
             caption(v, "The public hubs fly at 330. Faster and the server may "
                 .. "pull you back - the truth card counts it.")
             caption(v, "Closer than the jump distance is one jump, not a flight.")
@@ -28323,7 +28644,7 @@ local function buildUI()
                 .. "starts about 2,600 m out. Check the Prehistoric page's \"where\" line against your "
                 .. "compass once; if it drifts, move \"One compass meter\".")
             caption(v, "Auto steering: at each turn, at random, left, right or straight "
-                .. "on - never more than 45 deg off west, so it still goes out to sea.")
+                .. "on - never more than 45° off west, so it still goes out to sea.")
         end)
     end
 
@@ -28331,24 +28652,31 @@ local function buildUI()
     -- SERVERS & TEAM. R2 Task 9 (board Servers): when to hop (fewest / most
     -- / any / stay), the team on join, a truth card, Chalice + Light mode,
     -- the news row, by-hand actions with a second tap, Fine-tune.
+    -- R3 Task 7 (Servers.dc.html): NOTHING HERE WORTH IT as the board's
+    -- ring list (Fewest's "today" tag, the pick's word on the right); YOUR
+    -- TEAM ON JOIN as the board's three small tabs; the truth card; ALSO's
+    -- board switches with their short lines; the Breaking news row; BY
+    -- HAND's rows with their muted words (a second tap still confirms);
+    -- Fine-tune. The raw lines and the long words go to Details.
     -- =====================================================
     do
         local v = makeView("servers")
-        gap(v, 6)
-        P.kit.segmented(v, "nothing here worth it", {
-            { "fewest", "Fewest" }, { "most", "Most" }, { "random", "Any" }, { "stay", "Stay" },
-        }, function()
-            if not CFG.HuntHop then return "stay" end
-            return CFG.HopOrder
-        end, function(x)
+        local WORD = { fewest = "Fewest", most = "Most", random = "Any", stay = "Stay" }
+        local function hopNow() return CFG.HuntHop and CFG.HopOrder or "stay" end
+        P.kit.sectionRight(v, "nothing here worth it", function() return WORD[hopNow()] or "" end)
+        P.kit.heroList(v, {
+            { "fewest", "Hop: fewest players", "today" }, { "most", "Hop: most players", "" },
+            { "random", "Hop: any order", "" }, { "stay", "Stay here", "" },
+        }, hopNow, function(x)
             if x == "stay" then
                 CFG.HuntHop = false
             else
                 CFG.HuntHop = true
                 CFG.HopOrder = x
             end
-        end)
-        P.kit.segmented(v, "your team on join", {
+        end, "none")
+        P.kit.sectionRight(v, "your team on join")
+        P.kit.segmented(v, nil, {
             { "Pirates", "Pirates" }, { "Marines", "Marines" }, { "none", "Don't pick" },
         }, function()
             if not CFG.AutoTeam then return "none" end
@@ -28361,7 +28689,7 @@ local function buildUI()
                 CFG.Team = x
             end
             P.teamSave()
-        end)
+        end, { plain = true, h = 44 })
         P.kit.truthCard(v, function()
             if not CFG.HuntHop then return "Stays in this server" end
             if CFG.HopOrder == "most" then return "Next server, most players first" end
@@ -28377,41 +28705,34 @@ local function buildUI()
             if CFG.AutoTeam then team = "Joins as " .. tostring(CFG.Team) .. "." end
             return hop .. " " .. team
         end, "none")
-        heading2(v, "also")
-        switchRow(v, "The God's Chalice stops every hop",
-            "On: with a chalice on you no hunt and no hop (leaving loses it). Off: it is ignored - the hunt hops on and the chalice is lost",
+        P.kit.sectionRight(v, "also")
+        P.kit.switch(v, "The God's Chalice stops every hop",
+            "Got the Chalice: no more hopping",
             function() return CFG.ChaliceGuard ~= false end,
             function(x)
                 CFG.ChaliceGuard = x
                 -- Off: this server's "the chalice came here" is forgotten too.
                 if not x and P.elite then P.elite.chalice = false end
             end)
-        switchRow(v, "Light mode",
-            "Fast Mode on, camera shake and music off, in every server",
+        P.kit.switch(v, "Light mode",
+            "A lighter game: less to draw",
             function() return CFG.LightMode end,
             function(x) CFG.LightMode = x end)
-        navRow(v, "Breaking news", function()
-            local on, total, one = 0, 0, nil
-            for k, x in pairs(CFG.NewsShow) do
-                total += 1
-                if x ~= false then on, one = on + 1, k end
-            end
-            if on == total then return "everything" end
-            if on == 0 then return "nothing" end
-            return (on == 1) and (one .. " only") or (on .. " of " .. total)
-        end, "news")
-        heading2(v, "by hand")
-        P.kit.confirmRow(v, "Hop now", function() P.hopNow() end)
+        gap(v, 14)
+        navRow(v, "Breaking news", function() return "what shows" end, "news", { h = 50, valueSize = 13 })
+        hairline(v)
+        P.kit.sectionRight(v, "by hand")
+        P.kit.confirmRow(v, "Hop now", function() P.hopNow() end, "next server")
         P.kit.confirmRow(v, "Forget the servers looked at", function()
             table.clear(P.elite.visited)
             P.elite.note = "servers looked at: forgotten"
-        end)
+        end, "list")
         P.kit.confirmRow(v, "Reset the hunt counts", function()
             local t = P.elite.tally
             for k in pairs(t) do t[k] = 0 end
             t.since = os.time()
             P.elite.note = "hunt counts reset"
-        end)
+        end, "counts")
         P.kit.fineTune(v, function(box)
             sliderRow(box, "Try a server again after", 5, 60, 1,
                 function() return CFG.HopRevisit end,
@@ -28433,8 +28754,9 @@ local function buildUI()
             readout(v, function() return "team      " .. tostring(P.teamNote) end)
             readout(v, function() return P.reloadWay() end)
             readout(v, function() return "light     " .. tostring(P.light.note) end)
-        end)
-        fold(v, "How it works", function(v)
+            caption(v, "The God's Chalice on: with a chalice on you no hunt and no hop (leaving "
+                .. "loses it). Off: it is ignored - the hunt hops on and the chalice is lost.")
+            caption(v, "Light mode: Fast Mode on, camera shake and music off, in every server.")
             caption(v, "One killed there is back 8 min 45 s later.")
             caption(v, "Your settings, the servers already looked at and these "
                 .. "counts go with you. Without queue_on_teleport, the README's "
@@ -28457,16 +28779,47 @@ local function buildUI()
             local w, t = N.chip()
             return tostring(w) .. ((t and t ~= "") and (" " .. t) or "")
         end)
-        readout(v, function()
-            local N = P.news
-            if not N then return "no news yet" end
-            local out = {}
-            for _, it in ipairs(N.headlines()) do
-                table.insert(out, (it.breaking and "BREAKING " or "") .. tostring(it.title)
-                    .. ((it.body and it.body ~= "") and ("  " .. tostring(it.body)) or ""))
+        -- R3 Task 7: the headlines in the kit's card (#1B1917, radius 14, a
+        -- #35322E line): BREAKING in red, the title Bold, its line muted.
+        do
+            local s = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+            local card = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            })
+            corner(card, 14)
+            mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card })
+            mk("UIPadding", {
+                PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = card,
+            })
+            local t = mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(12), LineHeight = LOOK.lh(1.5), RichText = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, TextColor3 = LOOK.soft,
+                Text = "", Parent = card,
+            })
+            local function esc(x)
+                return (tostring(x):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
             end
-            return #out > 0 and table.concat(out, "\n") or "nothing to show: tick something below"
-        end)
+            addLive(function()
+                local N = P.news
+                if not N then t.Text = "No news yet." return end
+                local out = {}
+                local ok, list = pcall(N.headlines)
+                for _, it in ipairs(ok and list or {}) do
+                    table.insert(out, (it.breaking and '<font color="#E85C4E" weight="heavy">BREAKING</font>  ' or "")
+                        .. '<font color="#F2EFEA" weight="bold">' .. esc(it.title) .. "</font>"
+                        .. ((it.body and it.body ~= "") and ('  <font color="#847E75">' .. esc(it.body) .. "</font>") or ""))
+                end
+                t.Text = #out > 0 and table.concat(out, "\n") or "Nothing to show: tick something below."
+            end)
+        end
+        gap(v, 4)
         P.kit.sectionRight(v, "show in the strip", function()
             local on, total = 0, 0
             for _, x in pairs(CFG.NewsShow) do
@@ -28506,7 +28859,7 @@ local function buildUI()
         P.kit.sectionRight(v, "your settings", function()
             return ((P :: any).lock ~= nil and (P :: any).lock.on == true) and "locked" or "not locked"
         end)
-        switchRow(v, "Lock my settings", "On: everything you changed stays after a reload",
+        P.kit.switch(v, "Lock my settings", "On: everything you changed stays after a reload",
             function() return (P :: any).lock ~= nil and (P :: any).lock.on == true end,
             function(x) if (P :: any).lockSet then (P :: any).lockSet(x) end end)
         readout(v, function()
@@ -28571,7 +28924,7 @@ local function buildUI()
             say("counters reset")
         end)
         hairline(v)
-        switchRow(v, "Print debug to the console", nil,
+        P.kit.switch(v, "Print debug to the console", nil,
             function() return CFG.Debug end,
             function(x) CFG.Debug = x end)
         gap(v, 8)
