@@ -63,7 +63,12 @@ local function newInst(class)
                 o._sig[k] = o._sig[k] or signal()
                 return o._sig[k]
             end
-            if k == "TextBounds" then return { X = 100, Y = 14 } end
+            -- the text's size, about: 0.55 of its size a character (the preview
+            -- measures a long value with it)
+            if k == "TextBounds" then
+                local t, z = tostring(o._props.Text or ""), tonumber(o._props.TextSize) or 14
+                return { X = math.floor((utf8.len(t) or #t) * z * 0.55), Y = z }
+            end
             if k == "AbsolutePosition" then return { X = 0, Y = 0 } end
             if k == "AbsoluteSize" then return { X = 300, Y = 20 } end
             return o._props[k]
