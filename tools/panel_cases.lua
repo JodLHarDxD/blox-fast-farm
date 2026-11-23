@@ -1041,10 +1041,10 @@ do
         P.news = { headlines = function() return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" } } end }
         P.newsStripNow()
     end
-    check(B.has("home", "Mirage is up in this server") and B.has("home", "SEA runs it for you · look inside"),
+    check(B.has("home", "Mirage is up") and B.has("home", "Look inside · SEA"),
         "Home: the live moment card shows for a locked pack")
     check(P.hudExtra == 76, "Home: the panel grows by the card (" .. tostring(P.hudExtra) .. ")")
-    B.tap("home", "Mirage is up in this server")
+    B.tap("home", "Mirage is up")
     check(B.cur() == "cover_sea", "Home: the moment card opens the SEA cover, got " .. B.cur())
     check(P.hudExtra == 0, "Home: the panel is its own size again off Home")
     B.home()
@@ -1055,17 +1055,17 @@ do
     B = build({ farm = NOW + 86400, sea = 0 }, "buyer", nil)
     P.running = false
     B.live()
-    check(B.has("home", "Mirage is up in this server") and B.has("home", "Tap to hunt it · SEA"),
+    check(B.has("home", "Mirage is up") and B.has("home", "Tap to hunt · SEA"),
         "Home: a held pack shows the card, Tap to hunt it")
     check(P.hudExtra == 76, "Home: the panel grows by the card for a held pack too")
     -- the Mirage runs its picked job; "fire every control" leaves the last one picked
     CFG_REAL.MirageJob = "mirage"
     table.clear(CALLS)
-    B.tap("home", "Mirage is up in this server")
+    B.tap("home", "Mirage is up")
     check(B.cur() == "home" and called("setHunt true mirage") and called("start") and P.running,
         "Home: a tap on a held pack sets the Mirage hunt and starts the farm")
     B.live()
-    check(B.has("home", "Hunting it now · SEA"), "Home: the card says Hunting it now")
+    check(B.has("home", "Hunting now · SEA"), "Home: the card says Hunting it now")
     P.running = false
     -- the event ends: the card clears itself
     P.news = { headlines = function() return { { key = "mirage", tone = "dim", title = "NO MIRAGE ISLAND", body = "" } } end }
@@ -1083,12 +1083,40 @@ do
     P.running = false
     P.momentLook()
     OW.live()
-    check(OW.has("home", "Ice fruit is up in this server") and OW.has("home", "Tap to hunt it · FRUITS"),
+    check(OW.has("home", "Ice fruit is up") and OW.has("home", "Tap to hunt · FRUITS"),
         "Home (owner): a fruit on the map leads, named")
     table.clear(CALLS)
-    OW.tap("home", "Ice fruit is up in this server")
+    OW.tap("home", "Ice fruit is up")
     check(called("setHunt true fruit") and called("start"), "Home (owner): a tap hunts the fruit")
     P.running = false
+    -- R4 F3: every live event on one card - arrows, dots, x on the one showing
+    P.news = { headlines = function()
+        return { { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP", body = "" },
+            { key = "boss:Diablo", tone = "up", title = "ELITE UP", body = "Diablo, near you" } } end }
+    local CA = build({ fruits = 0 }, "owner", nil)
+    P.running = false
+    P.momentLook()
+    CA.live()
+    local function vis(text) local b = CA.btn("home", text) return b ~= nil and b.Visible end
+    check(CA.has("home", "Mirage is up") and vis("‹") and vis("›"),
+        "Home: two events - the first shows, with both arrows")
+    check(P.hudExtra == 76, "Home: the carousel is the same 76 px card (" .. tostring(P.hudExtra) .. ")")
+    CA.tap("home", "›")
+    check(CA.has("home", "Diablo is up") and CA.has("home", "Tap to hunt · BOSSES + RAIDS"),
+        "Home: › steps to the next event, short words")
+    CA.tap("home", "‹")
+    check(CA.has("home", "Mirage is up"), "Home: ‹ steps back")
+    CA.tap("home", "›")
+    CA.tap("home", "×")
+    CA.live()
+    check(CA.has("home", "Mirage is up") and not vis("›") and not vis("‹") and P.hudExtra == 76,
+        "Home: x puts away only Diablo; one left = no arrows")
+    P.momentLook()
+    CA.live()
+    check(CA.has("home", "Mirage is up") and not vis("›"), "Home: Diablo stays away at the next look")
+    CA.tap("home", "×")
+    CA.live()
+    check(P.hudExtra == 0, "Home: x on the last one - no card")
     P.fruitSpot = nil
     P.news = nil
 

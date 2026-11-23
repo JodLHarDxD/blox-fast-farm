@@ -890,28 +890,29 @@ LIVE_RAIDBOSS = { ["Dough King"] = true, ["Cake Prince"] = true, ["rip_indra Tru
     ["Soul Reaper"] = true }
 -- fruit = { name, spot } of the dearest fruit lying here (nil = none read).
 -- Returns { key, rank, mode, pack, title } or nil: a headline with no hunt.
+-- R4 F3: short titles - the card itself means "in this server".
 function liveEventOf(it, fruit)
     if type(it) ~= "table" or it.tone ~= "up" or type(it.key) ~= "string" then return nil end
     local boss = string.match(it.key, "^boss:(.+)$")
     if it.key == "fruit" then
         local nm = fruit and fruit.name
         return { key = "fruit:" .. tostring(fruit and fruit.spot or "?"), rank = 1, mode = "fruit", pack = "fruits",
-            title = nm and (tostring(nm) .. " fruit is up in this server") or "A fruit spawned in this server" }
+            title = nm and (tostring(nm) .. " fruit is up") or "A fruit spawned" }
     elseif it.key == "mirage" then
-        return { key = it.key, rank = 2, mode = "mirage", pack = "sea", title = "Mirage is up in this server" }
+        return { key = it.key, rank = 2, mode = "mirage", pack = "sea", title = "Mirage is up" }
     elseif it.key == "prehistoric" then
         return { key = it.key, rank = 3, mode = "prehistoric", pack = "prehistoric",
-            title = "Prehistoric Island is up in this server" }
+            title = "Prehistoric is up" }
     elseif boss then
         return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "raid" or "elite", pack = "raid",
-            title = boss .. " is up in this server" }
+            title = boss .. " is up" }
     elseif it.key == "castle" then
         -- R4 F1: the pirate raid at the Castle on the Sea = Random there,
         -- with the strongest M1 you carry unless Random has its own pick.
         return { key = it.key, rank = 5, mode = "random", pack = "farm", title = "Pirates are in the castle",
             strongest = true }
     elseif it.key == "frozen" then
-        return { key = it.key, rank = 6, mode = "levi", pack = "sea", title = "Frozen Dimension is up in this server" }
+        return { key = it.key, rank = 6, mode = "levi", pack = "sea", title = "Frozen Dimension is up" }
     end
     return nil
 end
@@ -963,16 +964,98 @@ function onceWeaponOf(fightWith, mode, list)
     if type(own) == "string" and own ~= "" and own ~= "MIX" then return nil end
     return strongestM1(list)
 end
--- The one card to show: the best rank not put away (dismissed[key]); the
--- first of a rank wins.
-function liveMoment(items, fruit, dismissed)
+-- R4 F3: EVERY live event, not put away (dismissed[key]), best rank
+-- first; within a rank, the news's own order. One event per key.
+function liveMoments(items, fruit, dismissed)
     dismissed = dismissed or {}
-    local best
-    for _, it in ipairs(items or {}) do
+    local out, seen = {}, {}
+    for i, it in ipairs(items or {}) do
         local m = liveEventOf(it, fruit)
-        if m and not dismissed[m.key] and (not best or m.rank < best.rank) then best = m end
+        if m and not dismissed[m.key] and not seen[m.key] then
+            seen[m.key] = true
+            m.order = i
+            table.insert(out, m)
+        end
     end
-    return best
+    table.sort(out, function(a, b)
+        if a.rank ~= b.rank then return a.rank < b.rank end
+        return a.order < b.order
+    end)
+    return out
+end
+-- The first card: the best rank not put away; the first of a rank wins.
+function liveMoment(items, fruit, dismissed)
+    return liveMoments(items, fruit, dismissed)[1]
+end
+-- THE CAROUSEL (R4 F3, pure): the card rolls through every live event,
+-- LIVE_ROLL s each, and loops; an arrow or a touch holds it LIVE_PAUSE s.
+-- cs = { key, idx, nextAt, pauseUntil }: the event showing is kept by its
+-- key, so a list that changes under it keeps showing the same one; when
+-- that one is gone, the one now at its place (wrapping) takes over.
+LIVE_ROLL, LIVE_PAUSE = 2, 8
+function carouselSync(cs, list)
+    local n = #(list or {})
+    if n < 2 then cs.nextAt = nil end
+    if n == 0 then
+        cs.key, cs.idx = nil, nil
+        return nil
+    end
+    for i, m in ipairs(list) do
+        if m.key == cs.key then
+            cs.idx = i
+            return m
+        end
+    end
+    local i = cs.idx or 1
+    if i > n then i = 1 end
+    cs.idx, cs.key = i, list[i].key
+    return list[i]
+end
+-- One step, dir = 1 (next) or -1 (back), wrapping. manual = an arrow:
+-- the roll holds LIVE_PAUSE s.
+function carouselStep(cs, list, dir, now, manual)
+    carouselSync(cs, list)
+    local n = #(list or {})
+    if n < 2 then return list and list[1] or nil end
+    cs.idx = (cs.idx - 1 + dir) % n + 1
+    cs.key = list[cs.idx].key
+    cs.nextAt = now + LIVE_ROLL
+    if manual then carouselTouch(cs, now) end
+    return list[cs.idx]
+end
+-- A touch on the card: the roll holds LIVE_PAUSE s.
+function carouselTouch(cs, now)
+    cs.pauseUntil = now + LIVE_PAUSE
+    cs.nextAt = math.max(cs.nextAt or 0, cs.pauseUntil)
+end
+-- The driver's tick: the event to show and the step taken (0 or 1). The
+-- first look holds LIVE_ROLL s before the first roll.
+function carouselTick(cs, list, now)
+    local m = carouselSync(cs, list)
+    if #(list or {}) < 2 then return m, 0 end
+    if cs.nextAt == nil then
+        cs.nextAt = now + LIVE_ROLL
+        return m, 0
+    end
+    if now >= cs.nextAt and now >= (cs.pauseUntil or 0) then
+        return carouselStep(cs, list, 1, now), 1
+    end
+    return m, 0
+end
+-- x: only the event showing goes (for the session); the one now at its
+-- place shows next. Returns the new list and the event to show.
+function carouselDismiss(cs, list, dismissed)
+    local out = {}
+    if cs.key then dismissed[cs.key] = true end
+    for _, m in ipairs(list or {}) do
+        if not dismissed[m.key] then table.insert(out, m) end
+    end
+    cs.key = nil
+    return out, carouselSync(cs, out)
+end
+-- The arrows and the position marker: only with more than one event.
+function carouselChrome(n)
+    return (n or 0) > 1
 end
 -- What a tap does: "cover" (pack not held), "none" (already hunting it),
 -- else "hunt". state = packState of the pack's mode.
@@ -982,10 +1065,11 @@ function liveTapOf(m, state, running, nowMode)
     return "hunt"
 end
 -- The card's sub line, by what a tap does.
+-- R4 F3: short, so neither line truncates beside the arrows.
 function liveSubOf(action, packName)
-    if action == "cover" then return packName .. " runs it for you · look inside" end
-    if action == "none" then return "Hunting it now · " .. packName end
-    return "Tap to hunt it · " .. packName
+    if action == "cover" then return "Look inside · " .. packName end
+    if action == "none" then return "Hunting now · " .. packName end
+    return "Tap to hunt · " .. packName
 end
 -- The tap: the hunt = picking the mode (the Library's setMode) and pressing
 -- Start when nothing runs; a running farm just switches mode. act = { cover,
@@ -21357,12 +21441,24 @@ local function buildUI()
         addLive(hopPaintAll)
 
         -- THE LIVE MOMENT (R3): the news says a thing is up in this server
-        -- (a fruit, Mirage, Prehistoric, a boss, the Frozen Dimension). A pack
-        -- you hold: a tap hunts it (the mode, and Start when nothing runs). A
-        -- pack you do not hold: a tap opens its cover. Nothing up: no card at
-        -- all (0 high), and it clears when the event ends. The x puts it away
-        -- for the session. The panel grows by its height while Home shows it
-        -- (applyGrow -> P.panelGrow; a cropped panel just scrolls).
+        -- (a fruit, Mirage, Prehistoric, a boss, the pirates in the castle,
+        -- the Frozen Dimension). A pack you hold: a tap hunts it (the mode,
+        -- and Start when nothing runs). A pack you do not hold: a tap opens
+        -- its cover. Nothing up: no card at all (0 high), and it clears when
+        -- the event ends. The x puts away the event showing, for the session.
+        -- The panel grows by its height while Home shows it (applyGrow ->
+        -- P.panelGrow; a cropped panel just scrolls).
+        -- R4 F3: EVERY live event, in priority order, one at a time: the card
+        -- rolls on every LIVE_ROLL s and loops (the carousel functions); the
+        -- arrows step back and on, an arrow or a touch holds the roll
+        -- LIVE_PAUSE s; dots under the words say where you are. One event:
+        -- no arrows, no dots, no roll. A change slides the words in (0.2 s)
+        -- inside the card's own clipped frame. The driver is the live loop's
+        -- (it runs only while Home shows).
+        -- Layout (card W wide, 64 high): the arrows' 44 px hit areas sit on
+        -- the card's side edges (half in the 20 px margin), the art at 28,
+        -- the words from 78 to W-30, the x a small chip on the top-right
+        -- corner (drawn above the right arrow's top).
         local dismissed, shown, momentOn = {}, nil, false
         local mom = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, ClipsDescendants = true,
@@ -21370,30 +21466,120 @@ local function buildUI()
         })
         local card = mk("TextButton", {
             Size = UDim2.new(1, -40, 0, 64), Position = UDim2.fromOffset(20, 12),
-            BackgroundColor3 = C.row, BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = mom,
+            BackgroundColor3 = C.row, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+            ClipsDescendants = true, ZIndex = 1, Parent = mom,
         })
         corner(card, 14)
         local cardStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card })
-        local artBox = mk("Frame", { Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(10, 10),
-            BackgroundColor3 = C.base, BorderSizePixel = 0, ClipsDescendants = true, Parent = card })
+        -- What slides: the art and the words.
+        local slide = mk("Frame", { Name = "Slide", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+            Parent = card })
+        local artBox = mk("Frame", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(28, 12),
+            BackgroundColor3 = C.base, BorderSizePixel = 0, ClipsDescendants = true, Parent = slide })
         corner(artBox, 10)
-        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 18), Position = UDim2.fromOffset(66, 14),
+        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -108, 0, 18), Position = UDim2.fromOffset(78, 11),
             BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.text, Text = "", Parent = card })
-        local mLine = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 16), Position = UDim2.fromOffset(66, 34),
+            TextColor3 = C.text, Text = "", Parent = slide })
+        local mLine = mk("TextLabel", { Size = UDim2.new(1, -108, 0, 16), Position = UDim2.fromOffset(78, 30),
             BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.second, Text = "", Parent = card })
-        local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -46, 0, 10),
-            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute,
-            Text = "×", AutoButtonColor = false, Parent = card })
+            TextColor3 = C.second, Text = "", Parent = slide })
+        -- Where you are: a dot per event, the one showing lit.
+        local dots = mk("Frame", { Name = "Dots", Size = UDim2.new(1, -108, 0, 4), Position = UDim2.fromOffset(78, 52),
+            BackgroundTransparency = 1, Visible = false, Parent = card })
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4),
+            SortOrder = Enum.SortOrder.LayoutOrder, Parent = dots })
+        local dotList = {}
+        -- The arrows: a thin glyph in a 44 px hit area, centred 10 px inside
+        -- the card's side edges (row x 30 and W-30, the card's y 36).
+        local mPrev = mk("TextButton", {
+            Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(30 - 22, 12 + 36 - 22),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(20), TextColor3 = C.second,
+            Text = "‹", AutoButtonColor = false, Visible = false, ZIndex = 3, Parent = mom,
+        })
+        local mNext = mk("TextButton", {
+            Size = UDim2.fromOffset(44, 44), AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -(30 - 22), 0, 12 + 36 - 22),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(20), TextColor3 = C.second,
+            Text = "›", AutoButtonColor = false, Visible = false, ZIndex = 3, Parent = mom,
+        })
+        -- The x: a 20 px chip on the card's top-right corner, its 44 px hit
+        -- area round it (the row's top clips what is above it).
+        local xChip = mk("Frame", { Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(1, -24, 0, 16), BackgroundColor3 = C.raised, BorderSizePixel = 0,
+            Visible = false, ZIndex = 4, Parent = mom })
+        corner(xChip, 10)
+        mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = xChip })
+        local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(1, -24, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(13), TextColor3 = LOOK.mute, Text = "×", AutoButtonColor = false,
+            Visible = false, ZIndex = 5, Parent = mom })
         local cur, nextLook = nil, 0
+        local list, cs = {}, {}
         P.momentLook = function() nextLook = 0 end    -- look at the news now (a tap; the tests)
         local function momentState(m) return P.packState(R.REP[m.pack]) end
+        local function applyGrow(name)
+            local want = (name == "home") and ((momentOn and 76 or 0) + hopLineH) or 0
+            if want ~= P.hudExtra then P.panelGrow(want) end
+        end
+        P.onView = applyGrow
+        P.homeRegrow = function() applyGrow(currentView) end
+        local SLIDE = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local lastSig
+        -- dir: 1 = rolled on, -1 = stepped back, 0 = no motion.
+        local function setMoment(m, dir)
+            cur = m
+            momentOn = m ~= nil
+            local n = #list
+            local many = carouselChrome(n) and m ~= nil
+            mPrev.Visible, mNext.Visible, dots.Visible = many, many, many
+            mX.Visible, xChip.Visible = m ~= nil, m ~= nil
+            local sig = m and table.concat({ m.key, m.title, tostring(momentState(m)),
+                tostring(P.running and modeNow() == m.mode), tostring(cs.idx), tostring(n) }, "|") or nil
+            if sig ~= lastSig then
+                lastSig = sig
+                if m then
+                    local tint, text, _, soft = R.acc(m.pack)
+                    card.BackgroundColor3, cardStroke.Color = tint, soft
+                    mLine.TextColor3 = text
+                    mPrev.TextColor3, mNext.TextColor3 = text, text
+                    mTitle.Text = m.title
+                    mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
+                    if shown ~= m.pack then
+                        shown = m.pack
+                        for _, k in ipairs(artBox:GetChildren()) do
+                            if k:IsA("Frame") then k:Destroy() end
+                        end
+                        R.art(artBox, m.pack, 40, 40)
+                    end
+                    while #dotList < n do
+                        local d = mk("Frame", { Size = UDim2.fromOffset(4, 4), BorderSizePixel = 0,
+                            LayoutOrder = #dotList + 1, Parent = dots })
+                        corner(d, 2)
+                        table.insert(dotList, d)
+                    end
+                    for i, d in ipairs(dotList) do
+                        d.Visible = i <= n
+                        d.BackgroundColor3 = (i == cs.idx) and C.text or LOOK.mute
+                    end
+                    if dir ~= 0 then
+                        slide.Position = UDim2.fromOffset(16 * dir, 0)
+                        mTitle.TextTransparency, mLine.TextTransparency = 1, 1
+                        tween(slide, { Position = UDim2.fromOffset(0, 0) }, SLIDE)
+                        tween(mTitle, { TextTransparency = 0 }, SLIDE)
+                        tween(mLine, { TextTransparency = 0 }, SLIDE)
+                    end
+                end
+            end
+            mom.Size = UDim2.new(1, 0, 0, m and 76 or 0)
+            applyGrow(currentView)
+        end
+        card.MouseButton1Down:Connect(function() carouselTouch(cs, os.clock()) end)
         card.Activated:Connect(function()
             if not cur then return end
+            carouselTouch(cs, os.clock())
             liveTap(cur, momentState(cur), P.running, modeNow(), {
                 cover = function(pack) show("cover_" .. pack) end,
                 setMode = setMode, start = P.start,
@@ -21404,37 +21590,15 @@ local function buildUI()
                     if w then say(cur.title .. " - fighting with " .. w .. " (your strongest M1)") end
                 end,
             })
-            nextLook = 0    -- the line says "Hunting it now" at the next look
+            nextLook = 0    -- the line says "Hunting now" at the next look
         end)
-        local function applyGrow(name)
-            local want = (name == "home") and ((momentOn and 76 or 0) + hopLineH) or 0
-            if want ~= P.hudExtra then P.panelGrow(want) end
-        end
-        P.onView = applyGrow
-        P.homeRegrow = function() applyGrow(currentView) end
-        local function setMoment(m)
-            cur = m
-            momentOn = m ~= nil
-            if m then
-                local tint, text, _, soft = R.acc(m.pack)
-                card.BackgroundColor3, cardStroke.Color = tint, soft
-                mLine.TextColor3 = text
-                mTitle.Text = m.title
-                mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
-                if shown ~= m.pack then
-                    shown = m.pack
-                    for _, k in ipairs(artBox:GetChildren()) do
-                        if k:IsA("Frame") then k:Destroy() end
-                    end
-                    R.art(artBox, m.pack, 44, 44)
-                end
-            end
-            mom.Size = UDim2.new(1, 0, 0, m and 76 or 0)
-            applyGrow(currentView)
-        end
+        mPrev.Activated:Connect(function() setMoment(carouselStep(cs, list, -1, os.clock(), true), -1) end)
+        mNext.Activated:Connect(function() setMoment(carouselStep(cs, list, 1, os.clock(), true), 1) end)
         mX.Activated:Connect(function()
-            if cur then dismissed[cur.key] = true end
-            setMoment(nil)
+            local m
+            list, m = carouselDismiss(cs, list, dismissed)
+            carouselTouch(cs, os.clock())
+            setMoment(m, m and 1 or 0)
         end)
         -- The pack a headline belongs to, when this key does not hold it.
         function P.newsPack(it)
@@ -21448,11 +21612,11 @@ local function buildUI()
             if pack and P.packState(R.REP[pack]) == "locked" then return pack end
             return nil
         end
-        local function findMoment()
+        local function findMoments()
             local N = P.news
-            if not N then return nil end
+            if not N then return {} end
             local ok, items = pcall(N.headlines)
-            if not ok or type(items) ~= "table" then return nil end
+            if not ok or type(items) ~= "table" then return {} end
             -- The fruit named on the card: the dearest one lying here (N.fruits,
             -- the news's own list, already filtered to the ones you care about).
             local fruit
@@ -21461,19 +21625,18 @@ local function buildUI()
                 fruit = { spot = P.fruitSpot(f),
                     name = f.orig and (P.fruitKey(f.orig) or P.fruitBase(f.orig)) or nil }
             end
-            return liveMoment(items, fruit, dismissed)
+            return liveMoments(items, fruit, dismissed)
         end
-        local lastSig
+        -- The driver: the news every 2 s, the roll every tick (the live loop,
+        -- which runs only while Home shows).
         addLive(function()
-            if os.clock() < nextLook then return end
-            nextLook = os.clock() + 2
-            local m = findMoment()
-            local sig = m and (m.key .. "|" .. m.title .. "|" .. tostring(momentState(m)) .. "|"
-                .. tostring(P.running and modeNow() == m.mode)) or nil
-            if sig ~= lastSig then
-                lastSig = sig
-                setMoment(m)
+            local now = os.clock()
+            if now >= nextLook then
+                nextLook = now + 2
+                list = findMoments()
             end
+            local m, step = carouselTick(cs, list, now)
+            setMoment(m, step)
         end)
         gap(v, 4)       -- the board: MODE's own 4 px margin
 
