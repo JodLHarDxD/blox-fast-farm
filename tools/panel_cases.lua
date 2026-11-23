@@ -1566,8 +1566,11 @@ do
     local function lit()
         local out
         each(VIEWS.prehistoric, function(k)
-            if k.ClassName == "TextLabel" and k.Size and k.Size.X.Offset == 28 and k.BackgroundColor3
-                and k.BackgroundColor3.R == 240 and k.BackgroundColor3.G == 166 then out = tostring(k.Text) end
+            -- R3: the board's ring, filled amber when lit (24 inside its 2 px line)
+            if k.ClassName == "TextLabel" and k.Name == "Step" and k.BackgroundTransparency == 0
+                and k.BackgroundColor3 and k.BackgroundColor3.R == 240 and k.BackgroundColor3.G == 166 then
+                out = tostring(k.Text)
+            end
         end)
         return out
     end
@@ -1605,10 +1608,14 @@ do
     tap("prehistoric", "21")
     check(CFG_REAL.SeaSearchMinutes == P.cfgDefaults.SeaSearchMinutes and P.cfgDefaults.SeaSearchMinutes == 21,
         "prehistoric: 21 min is today's")
-    -- Volcanic Magnet first
+    -- Volcanic Magnet first (R3: the board's switch, the whole row a button)
     local function pillOf(page, label)
         local found
-        each(VIEWS[page], function(k) if not found and isPill(k) and switchLabel(k) == label then found = k end end)
+        each(VIEWS[page], function(k)
+            if not found and k.ClassName == "TextButton" and k.Name == "Switch" and table.find(labelsOf(k), label) then
+                found = k
+            end
+        end)
         check(found ~= nil, "a \"" .. label .. "\" switch on " .. page)
         return found or { Activated = { Fire = function() end } }
     end
@@ -1630,11 +1637,11 @@ do
     modePill("volcano").Activated:Fire()
     check(CFG_REAL.Volcano == false, "volcano: and off")
     -- AFTER THE WIN: VolcanoLoot + VolcanoAfter
-    tap("volcano", "LOOT + AGAIN")
+    tap("volcano", "Loot, then again here")
     check(CFG_REAL.VolcanoLoot == true and CFG_REAL.VolcanoAfter == "again", "volcano: loot + again")
-    tap("volcano", "NO LOOT")
+    tap("volcano", "No loot, next server")
     check(CFG_REAL.VolcanoLoot == false and CFG_REAL.VolcanoAfter == "hop", "volcano: no loot, next server")
-    tap("volcano", "LOOT + HOP")
+    tap("volcano", "Loot, then next server")
     check(CFG_REAL.VolcanoLoot == P.cfgDefaults.VolcanoLoot and CFG_REAL.VolcanoAfter == P.cfgDefaults.VolcanoAfter,
         "volcano: loot + hop is today's")
     -- the two switches
@@ -1677,9 +1684,14 @@ do
         check(b ~= nil, "button #" .. n .. " \"" .. text .. "\" on " .. page)
         return b or { Activated = { Fire = function() end } }
     end
+    -- R3 Task 6: the board's switches, the whole row a button
     local function pillOf(page, label)
         local found
-        each(VIEWS[page], function(k) if not found and isPill(k) and switchLabel(k) == label then found = k end end)
+        each(VIEWS[page], function(k)
+            if not found and k.ClassName == "TextButton" and k.Name == "Switch" and table.find(labelsOf(k), label) then
+                found = k
+            end
+        end)
         check(found ~= nil, "a \"" .. label .. "\" switch on " .. page)
         return found or { Activated = { Fire = function() end } }
     end
@@ -1716,17 +1728,17 @@ do
     check(CFG_REAL.PvpSpeed == false, "pvp: Run tile writes PvpSpeed")
     tap("pvp", "Dash")
     check(CFG_REAL.PvpDash == false, "pvp: Dash tile writes PvpDash")
-    -- aimed moves: Fruit, Fighting, Sword, Gun cards, Z is the third
+    -- aimed moves (R3: the board's order): Melee, Sword, Fruit, Gun cards, the Sword's Z is the second
     check(#buttonsOf("pvp", "Z") == 4, "pvp: four weapon cards each with a Z chip")
     local zWas, m1Was = CFG_REAL.PvpAimKeys.Sword.Z ~= false, CFG_REAL.PvpAimKeys.Gun.M1 ~= false
-    nth("pvp", "Z", 3).Activated:Fire()
+    nth("pvp", "Z", 2).Activated:Fire()
     check((CFG_REAL.PvpAimKeys.Sword.Z ~= false) == (not zWas), "pvp: the Sword's Z chip flips")
     nth("pvp", "M1", 4).Activated:Fire()
     check((CFG_REAL.PvpAimKeys.Gun.M1 ~= false) == (not m1Was), "pvp: the Gun's M1 chip flips")
     -- LEAD: Learns | Off | Fixed over three old controls
-    nth("pvp", "OFF", 2).Activated:Fire()
+    tap("pvp", "Off")
     check(CFG_REAL.PvpLeadAuto == false and CFG_REAL.PvpLead == false, "pvp: lead Off")
-    tap("pvp", "FIXED")
+    tap("pvp", "Fixed")
     check(CFG_REAL.PvpLeadAuto == false and CFG_REAL.PvpLead == true, "pvp: lead Fixed")
     CFG_REAL.PvpLeadScale = 1.0
     nth("pvp", "+", 1).Activated:Fire()
@@ -1734,26 +1746,27 @@ do
     nth("pvp", "-", 1).Activated:Fire()
     nth("pvp", "-", 1).Activated:Fire()
     check(CFG_REAL.PvpLeadScale == 0.9, "pvp: and - lowers it: " .. tostring(CFG_REAL.PvpLeadScale))
-    tap("pvp", "LEARNS")
+    tap("pvp", "Learns")
     check(CFG_REAL.PvpLeadAuto == true, "pvp: lead Learns")
     -- busy servers
     CFG_REAL.PvpHopBusy = true
     pillOf("pvp", "Busy servers").Activated:Fire()
     check(CFG_REAL.PvpHopBusy == false, "pvp: Busy servers switch")
     table.clear(CALLS)
-    tap("pvp", "Hop")
+    tap("pvp", "Hop now")
     livePass()
     check(called("hopNow"), "pvp: the hop row hops")
     -- Lab: a test on turns the header amber
     local function labHint()
-        local b = button("pvp", "Lab · TEST")
-        local kids = b and rawget(b, "_kids") or {}
-        return kids[2]
+        local b = button("pvp", "Lab")
+        local hint
+        if b then each(b, function(k) if k.Name == "Hint" then hint = k end end) end
+        return hint
     end
     goHome() tap("home", "Mode") tap("modes", "PvP")
     CFG_REAL.PvpSoruCut, CFG_REAL.PvpCdTest = 0, false
     pcall(LIVE0)
-    if labHint() and tostring(labHint().Text) == "hide" then tap("pvp", "Lab · TEST") end   -- folds start shut
+    if labHint() and tostring(labHint().Text) == "hide" then tap("pvp", "Lab") end   -- folds start shut
     check(labHint() ~= nil and tostring(labHint().Text) == "2 tests, both off" and labHint().TextColor3.R ~= 240,
         "pvp: Lab header, both off, is not amber")
     nth("pvp", "+", 2).Activated:Fire()
@@ -1761,7 +1774,7 @@ do
     pcall(LIVE0)
     check(labHint() ~= nil and tostring(labHint().Text) == "1 test on" and labHint().TextColor3.R == 240,
         "pvp: Lab header turns amber when a test is on")
-    pillOf("pvp", "Skills off cooldown (test)").Activated:Fire()
+    pillOf("pvp", "Skills off cooldown").Activated:Fire()
     check(CFG_REAL.PvpCdTest == true, "pvp: Lab skills-off-cooldown switch")
     pcall(LIVE0)
     check(labHint() ~= nil and tostring(labHint().Text) == "2 tests on", "pvp: both tests on")
@@ -1773,7 +1786,8 @@ do
         "Legs at a normal pace", "Run speed", "Dash", "Dash animation", "Ping at most, any most-players hop" }) do
         check(string.find(lab, l, 1, true) ~= nil, "pvp: keeps \"" .. l .. "\"")
     end
-    check(button("pvp", "Forget what the moves learned") ~= nil, "pvp: Details keeps Forget what the moves learned")
+    check(button("pvp", "Forget what the moves learned") ~= nil or button("pvp", "Forgotten: learning from zero") ~= nil,
+        "pvp: Details keeps Forget what the moves learned")
     for _, k in ipairs(KEYS) do CFG_REAL[k] = was[k] end
     for kind, t in pairs(wasKeys) do for k2, x in pairs(t) do CFG_REAL.PvpAimKeys[kind][k2] = x end end
     goHome()

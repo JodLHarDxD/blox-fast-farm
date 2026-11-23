@@ -19343,7 +19343,10 @@ local function buildUI()
                 dot.BackgroundColor3 = on and C.live or C.third
                 if id == "volcano" then
                     line.Text = on and "On, alongside your mode" or "Off"
-                    sub.Text = "Runs whenever a Prehistoric Island is up"
+                    -- Volcano.dc.html: "Runs next to Circuit farm or any mode"
+                    local now = modeNow()
+                    sub.Text = now == "none" and "Runs next to any mode"
+                        or ("Runs next to " .. modeName(now) .. " or any mode")
                     paint(on and "Turn off" or "Turn on", on and "ghost" or "ivory")
                 elseif on then
                     line.Text = "Your mode"
@@ -19553,14 +19556,16 @@ local function buildUI()
                 TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.soft, Text = "",
             })
             if opts.under then opts.under(view) end
-            local row = slot(view, 44)
+            -- R3 Task 6: h = the buttons' board height (Prehistoric's 40)
+            local bh = opts.h or 44
+            local row = slot(view, bh)
             local btns = {}
             for i, st in ipairs(steps) do
                 local txt = st.short or ((offFirst and i == 1) and "OFF")
                     or tostring(offFirst and (i - 1) or i)
                 local px = (offFirst and i == 1) and (opts.offPx or opts.px or 12) or (opts.px or 12)
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1 / n, -6 + 6 / n, 0, 44),
+                    Size = UDim2.new(1 / n, -6 + 6 / n, 0, bh),
                     Position = UDim2.new((i - 1) / n, (i - 1) * 6 / n, 0, 0),
                     BackgroundColor3 = C.base, BorderSizePixel = 0, AutoButtonColor = false,
                     Font = LOOK.black, TextSize = lookPx(px), TextColor3 = LOOK.soft,
@@ -20046,23 +20051,27 @@ local function buildUI()
         -- CHIP GRID (R2 Task 5): a few big either/ors in `cols` columns, one
         -- lit. items = { { value, label }, ... }; get() = the lit value (nil =
         -- none lit); set(value). accent = a pack key or a Color3.
-        function K.chipGrid(view, items, cols, get, set, accent)
+        -- opts (R3 Task 6, PvP's LEAD): { gap = px between (8), radius (12),
+        -- after = the gap under it (8) }.
+        function K.chipGrid(view, items, cols, get, set, accent, opts)
             -- R3 Task 4 (Raid.dc.html): 44 high, radius 12, 8 px gaps; resting
             -- = no fill, a #3A3632 outline, #C9C3B9 words; lit = the accent.
+            opts = opts or {}
+            local G = opts.gap or 8
             local _, _, acc = accentColors(accent)
             local rows = math.ceil(#items / cols)
-            local s = slot(view, rows * 52 - 8)
+            local s = slot(view, rows * (44 + G) - G)
             local btns, lines = {}, {}
             for i, it in ipairs(items) do
                 local c, r = (i - 1) % cols, (i - 1) // cols
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1 / cols, -8 + 8 / cols, 0, 44),
-                    Position = UDim2.new(c / cols, c * 8 / cols, 0, r * 52),
+                    Size = UDim2.new(1 / cols, -G + G / cols, 0, 44),
+                    Position = UDim2.new(c / cols, c * G / cols, 0, r * (44 + G)),
                     BackgroundColor3 = C.base, BorderSizePixel = 0, AutoButtonColor = false,
                     Font = LOOK.bold, TextSize = F.small, TextColor3 = LOOK.soft,
                     TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(it[2]), Parent = s,
                 })
-                corner(b, 12)
+                corner(b, opts.radius or 12)
                 lines[i] = stroke(b, LOOK.ghost)
                 btns[i] = b
             end
@@ -20083,8 +20092,90 @@ local function buildUI()
             end
             refresh()
             addLive(refresh)
-            gap(view, 8)
+            gap(view, opts.after or 8)
             return s
+        end
+
+        -- SWITCH (R3 Task 6): the boards' switch row. The whole row is the
+        -- target ("Switch"); the label 15 px SemiBold, a muted 12 px sub line
+        -- (a string or a function), a 44 x 26 track (#3FD07E on, #3A3632 off)
+        -- with a 20 px knob, no word. 56 high at least, 20 px side margins.
+        -- o: { chip = a small amber tag before the label (the Lab's TEST),
+        -- px / subPx = the label and sub sizes, pad, minH, on = the lit
+        -- track's colour (the Lab's amber) }.
+        function K.switch(view, text, sub, get, set, o)
+            o = o or {}
+            local pad = o.pad or 20
+            local b = mk("TextButton", {
+                Name = "Switch", Size = UDim2.new(1, 0, 0, o.minH or 56), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, AutoButtonColor = false, Text = "",
+                LayoutOrder = nextOrder(), Parent = view,
+            })
+            local col = mk("Frame", {
+                Size = UDim2.new(1, -(2 * pad + 54), 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                Position = UDim2.fromOffset(pad, 0), BackgroundTransparency = 1, Parent = b,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3), Parent = col })
+            local v0 = o.vpad or 10
+            mk("UIPadding", { PaddingTop = UDim.new(0, v0), PaddingBottom = UDim.new(0, v0), Parent = col })
+            local head = col
+            if o.chip then
+                head = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1, LayoutOrder = 1, Parent = col,
+                })
+                mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+                    VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = head })
+                local tint = Color3.fromRGB(42, 28, 11)
+                local c = label(head, {
+                    Size = UDim2.fromOffset(0, 17), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = 1,
+                    Font = LOOK.black, TextSize = LOOK.size.chip, TextColor3 = C.warn, Text = o.chip,
+                })
+                c.BackgroundTransparency, c.BackgroundColor3 = 0, tint
+                corner(c, 5)
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = c })
+            end
+            label(head, {
+                Size = UDim2.new(o.chip and 0 or 1, 0, 0, 0), AutomaticSize = o.chip and Enum.AutomaticSize.XY
+                    or Enum.AutomaticSize.Y, LayoutOrder = 2,
+                Font = LOOK.semi, TextSize = lookPx(o.px or 15), TextWrapped = not o.chip,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = text,
+            })
+            local subL
+            if sub then
+                subL = label(col, {
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 3,
+                    Font = LOOK.regular, TextSize = lookPx(o.subPx or 12), LineHeight = LOOK.lh(1.4),
+                    TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+                    Text = type(sub) == "string" and sub or "",
+                })
+            end
+            local track = mk("Frame", {
+                Name = "Track", Size = UDim2.fromOffset(44, 26), AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -pad, 0.5, 0), BackgroundColor3 = LOOK.ghost, BorderSizePixel = 0, Parent = b,
+            })
+            corner(track, 13)
+            local knob = mk("Frame", {
+                Size = UDim2.fromOffset(20, 20), Position = UDim2.fromOffset(3, 3),
+                BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = track,
+            })
+            corner(knob, 10)
+            local function paint()
+                local on = get() and true or false
+                tween(track, { BackgroundColor3 = on and (o.on or C.live) or LOOK.ghost }, QUICK)
+                tween(knob, { Position = UDim2.fromOffset(on and 21 or 3, 3) }, QUICK)
+                if subL and type(sub) == "function" then
+                    local ok, t = pcall(sub)
+                    subL.Text = ok and tostring(t or "") or ""
+                end
+            end
+            b.Activated:Connect(function()
+                set(not get())
+                paint()
+            end)
+            paint()
+            addLive(paint)
+            return b
         end
 
         -- NOTE LINE (R2 Task 9): a small grey line; text is a string or a
@@ -24457,13 +24548,17 @@ local function buildUI()
     -- PREHISTORIC. R2 Task 7 (board Prehistoric): a 4-step loop track that
     -- lights the step the hunt is in, the give-up dial over
     -- CFG.SeaSearchMinutes, Volcanic Magnet first, two nav rows.
+    -- R3 Task 6 (Prehistoric.dc.html): the track is the board's #151413
+    -- card (28 px rings, 2 px #3A3632 line, the lit one amber with dark
+    -- words); the dial's 40 px amber buttons; ALSO with the board's switch;
+    -- the rows 50 high with their dividers. The raw lines live in Details.
     -- =====================================================
     do
         local v = makeView("prehistoric")
         gap(v, 6)
         P.kit.pageTop(v, "prehistoric")
         P.kit.modeStrip(v, "prehistoric")
-        local AMBER = Color3.fromRGB(240, 166, 60)
+        local AMBER = C.warn
         -- Which step of the loop the hunt is in: 1 sailing (no island read
         -- yet), 2 the volcano event runs, 3 the event is over and the loot
         -- is taken, 4 done: the next server. nil = the hunt is not running.
@@ -24476,53 +24571,60 @@ local function buildUI()
             return 2
         end
         do
+            gap(v, 8)
             local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 78), BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 90), BackgroundTransparency = 1,
                 LayoutOrder = nextOrder(), Parent = v,
             })
             mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
             local card = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(21, 20, 19),
+                BorderSizePixel = 0, Parent = s,
             })
             corner(card, 14)
+            -- the line behind the rings: 12% in from each side, 28 px down
+            mk("Frame", {
+                Size = UDim2.new(0.76, 0, 0, 2), Position = UDim2.new(0.12, 0, 0, 28),
+                BackgroundColor3 = C.pressed, BorderSizePixel = 0, ZIndex = 1, Parent = card,
+            })
+            local inner = mk("Frame", {
+                Size = UDim2.new(1, -12, 1, 0), Position = UDim2.fromOffset(6, 0),
+                BackgroundTransparency = 1, ZIndex = 2, Parent = card,
+            })
             local WORDS = { "Sail to it", "Volcano event", "Bones + egg", "Next server" }
-            local dots, words = {}, {}
+            local rings, words = {}, {}
             for i, w in ipairs(WORDS) do
                 local col = mk("Frame", {
                     Size = UDim2.new(0.25, 0, 1, 0), Position = UDim2.new((i - 1) / 4, 0, 0, 0),
-                    BackgroundTransparency = 1, Parent = card,
+                    BackgroundTransparency = 1, ZIndex = 2, Parent = inner,
                 })
-                if i < 4 then
-                    mk("Frame", {
-                        Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0.5, 14, 0, 26),
-                        BackgroundColor3 = C.hair, BorderSizePixel = 0, Parent = col,
-                    })
-                end
+                -- 28 across: 24 inside a 2 px line drawn outside it
                 local d = mk("TextLabel", {
-                    Size = UDim2.fromOffset(28, 28), AnchorPoint = Vector2.new(0.5, 0),
-                    Position = UDim2.new(0.5, 0, 0, 12), BackgroundColor3 = C.row, BorderSizePixel = 0,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second,
-                    Text = tostring(i), ZIndex = 2, Parent = col,
+                    Name = "Step", Size = UDim2.fromOffset(24, 24), AnchorPoint = Vector2.new(0.5, 0),
+                    Position = UDim2.new(0.5, 0, 0, 16), BackgroundColor3 = AMBER, BackgroundTransparency = 1,
+                    BorderSizePixel = 0, Font = LOOK.black, TextSize = lookPx(12), TextColor3 = C.second,
+                    Text = tostring(i), ZIndex = 3, Parent = col,
                 })
-                corner(d, 14)
-                mk("UIStroke", { Color = C.hair, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = d })
-                dots[i] = d
+                corner(d, 12)
+                rings[i] = { d = d, line = mk("UIStroke", { Color = LOOK.ghost, Thickness = 2,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = d }) }
                 words[i] = mk("TextLabel", {
-                    Size = UDim2.new(1, -4, 0, 30), Position = UDim2.fromOffset(2, 44),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                    TextWrapped = true, TextColor3 = C.second, Text = w, Parent = col,
+                    Size = UDim2.new(1, -4, 0, 30), Position = UDim2.fromOffset(2, 48),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
+                    LineHeight = LOOK.lh(1.3), TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+                    TextColor3 = C.second, Text = w, ZIndex = 3, Parent = col,
                 })
             end
             addLive(function()
                 local at = loopStep()
-                for i, d in ipairs(dots) do
+                for i, r in ipairs(rings) do
                     local on = (i == at)
-                    d.BackgroundColor3 = on and AMBER or C.row
-                    d.TextColor3 = on and C.base or C.second
+                    r.d.BackgroundTransparency = on and 0 or 1
+                    r.d.TextColor3 = on and C.base or C.second
+                    r.line.Color = on and AMBER or LOOK.ghost
                     words[i].TextColor3 = on and C.text or C.second
                 end
             end)
-            gap(v, 6)
         end
         -- The give-up dial: no island found this long, the next server.
         local CAPS = {
@@ -24539,7 +24641,9 @@ local function buildUI()
             table.insert(steps, { name = c[3], short = c[2], set = { SeaSearchMinutes = c[1] },
                 line = c[6], today = (c[1] == 21) or nil })
         end
-        P.kit.dial(v, "No island found: give up after", steps, "prehistoric")
+        P.kit.dial(v, "No island found: give up after", steps, "prehistoric", { h = 40, px = 12 })
+        -- the board's line keeps 28 px, then 12 to the card
+        gap(v, 14)
         P.kit.truthCard(v, function()
             local i = dialStepOf(steps, CFG)
             if i then return CAPS[i][4] end
@@ -24549,21 +24653,31 @@ local function buildUI()
             local i = dialStepOf(steps, CFG)
             return i and CAPS[i][5] or "Your own cap, set under Fine-tune."
         end, "prehistoric")
+        gap(v, 2)
+        P.kit.fightsWith(v, "prehistoric", { h = 50, valueSize = 13 })
         hairline(v)
-        P.kit.fightsWith(v, "prehistoric")
-        heading2(v, "also")
-        switchRow(v, "Volcanic Magnet first",
-            "Buys the magnet that pulls the island to you, before the hunt. Not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), farmed first if short",
+        P.kit.sectionRight(v, "Also", nil)
+        P.kit.switch(v, "Volcanic Magnet first",
+            "Buys the magnet that pulls the island to you, before the hunt",
             function() return CFG.SeaMagnet end,
             function(x) CFG.SeaMagnet = x end)
-        link(v, "Volcano event", function() return CFG.Volcano and "On" or "bones + egg, next server" end, "volcano")
-        link(v, "Searching the sea", function()
-            return CFG.SeaSteer == "manual" and "you steer" or ("auto · to " .. math.floor(CFG.SeaSearchTo) .. " m")
-        end, "travel")
+        gap(v, 14)
+        navRow(v, "Volcano event", function()
+            if not CFG.Volcano then return "Off" end
+            if not CFG.VolcanoLoot then return "no loot, next server" end
+            return CFG.VolcanoAfter == "again" and "bones + egg, again here" or "bones + egg, next server"
+        end, "volcano", { h = 50, valueSize = 13 })
+        hairline(v)
+        navRow(v, "Searching the sea", function() return CFG.SeaSteer == "manual" and "I steer" or "Auto" end, "travel",
+            { h = 50, valueSize = 13 })
+        hairline(v)
+        gap(v, 2)
         P.kit.fineTune(v, function(v)
             sliderRow(v, "Safety cap: no island this long, exact (0 = off)", 0, 60, 1,
                 function() return CFG.SeaSearchMinutes end,
                 function(x) CFG.SeaSearchMinutes = x end, " min")
+        end, 1)
+        fold(v, "Details", function(v)
             readout(v, function()
                 local s = P.sea
                 local t = s.tally
@@ -24587,12 +24701,14 @@ local function buildUI()
                         or "not read yet")
             end)
             caption(v, "Sail to the island, run the volcano event, loot, next server - the loop.")
+            caption(v, "Volcanic Magnet not in your inventory: crafted (15 Blaze Ember + 10 Scrap Metal), "
+                .. "farmed first if short.")
             caption(v, "The hunt buys a " .. tostring(CFG.SeaBoat) .. " at Tiki Outpost's BACK "
                 .. "dealer, puts you at the wheel and drives west through the sea "
                 .. "events. Island up: off the boat, onto the island, and it never "
                 .. "leaves (the island goes when nobody is on it). Lost the boat at sea, "
                 .. "or nothing by the far edge: the next server.")
-        end, 1)
+        end)
     end
 
     -- =====================================================
@@ -24699,93 +24815,73 @@ local function buildUI()
     -- explicit choice, busy servers, Details, a Lab fold (amber when a test is
     -- on) and Fine-tune with every exact value. You fight by hand: no
     -- "Fights with" row.
+    -- R3 Task 6 (PvP.dc.html): the picture sits between the dial's head and
+    -- its ivory buttons (the #151413 screen, the violet catch ring that glides
+    -- .3 s, the players, the picked one's ring, arrow and name, your cursor);
+    -- the NOW row inside the truth card; the three tiles with their glyphs;
+    -- the cards in the board's order with type chips, the carried weapon's
+    -- name and its kind's keys; LEAD's ivory tabs and the How far ahead card;
+    -- the board's switches; Details, Lab and Fine-tune as the board's cards
+    -- (learned moves with bars, the live rows, the TEST chips).
     -- =====================================================
     do
         local v = makeView("pvp")
         local S = P.pvp
         local VIOLET = Color3.fromRGB(166, 140, 255)
-        local AMBER = Color3.fromRGB(240, 166, 60)
-        local GREEN = Color3.fromRGB(63, 208, 126)
+        local LILAC = Color3.fromRGB(198, 182, 255)     -- #C6B6FF
+        local DEEP = Color3.fromRGB(21, 20, 19)         -- #151413
+        local DIM = Color3.fromRGB(74, 69, 61)          -- #4A453D
+        local AMBER, GREEN = C.warn, C.live
+        local EASE3 = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
         gap(v, 6)
         P.kit.pageTop(v, "pvp")
         P.kit.modeStrip(v, "pvp")
 
-        local function hasLine(parent, text, order)
-            local l = mk("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third,
-                TextWrapped = true, Text = text, LayoutOrder = order or nextOrder(), Parent = parent,
-            })
-            mk("UIPadding", {
-                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
-                PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = l,
-            })
-            return l
+        local function txt(parent, props)
+            props.BackgroundTransparency = props.BackgroundTransparency or 1
+            props.Parent = parent
+            return mk("TextLabel", props)
         end
-        -- A line under a control whose words follow the CFG.
-        local function liveLine(parent, fn)
-            local l = hasLine(parent, "")
-            addLive(function()
-                local ok, t = pcall(fn)
-                l.Text = ok and tostring(t or "") or ""
-            end)
-            return l
+        -- a row slot with the board's 16 px margins; h nil = grows
+        local function slot16(parent, h)
+            local f = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, h or 0), AutomaticSize = h and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = parent,
+            })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = f })
+            return f
         end
-        -- - value + : a stepper row. fmt turns the value into text.
-        local function stepRow(parent, label, get, set, lo, hi, stp, fmt)
-            local r = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = parent,
+        -- the boards' - / + buttons: 44 x 40, radius 10, a #3A3632 line, the glyph
+        local function stepBtn(parent, x, glyph)
+            local b = mk("TextButton", {
+                Size = UDim2.fromOffset(44, 40), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, x, 0.5, 0),
+                BackgroundColor3 = C.row, BackgroundTransparency = 1, BorderSizePixel = 0, AutoButtonColor = false,
+                -- the glyph is drawn; the word stays for screen readers and the tests
+                Font = LOOK.bold, TextSize = 14, TextTransparency = 1, Text = (glyph == "plus") and "+" or "-",
+                Parent = parent,
             })
-            mk("TextLabel", {
-                Size = UDim2.new(1, -190, 1, 0), Position = UDim2.fromOffset(20, 0),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.label,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = label, Parent = r,
-            })
-            local function btn(x, txt)
-                local b = mk("TextButton", {
-                    Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, x, 0, 4),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.body, TextColor3 = C.text, Text = txt, Parent = r,
-                })
-                corner(b, 10)
-                pressable(b)
-                return b
-            end
-            local minus, plus = btn(-148, "-"), btn(-64, "+")
-            local val = mk("TextLabel", {
-                Size = UDim2.fromOffset(40, 52), Position = UDim2.new(1, -104, 0, 0),
-                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.label,
-                TextColor3 = C.text, Text = "", Parent = r,
-            })
-            local function show() val.Text = fmt(get()) end
-            local function nudge(d)
-                local x = (tonumber(get()) or 0) + d * stp
-                set(math.floor(math.clamp(x, lo, hi) * 100 + 0.5) / 100)
-                show()
-            end
-            minus.Activated:Connect(function() nudge(-1) end)
-            plus.Activated:Connect(function() nudge(1) end)
-            show()
-            addLive(show)
-            return r
+            corner(b, 10)
+            mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+            local ic = P.kit.icon(b, 14, P.kit.GLYPH[glyph], 1.4, LOOK.soft)
+            ic.AnchorPoint, ic.Position = Vector2.new(0.5, 0.5), UDim2.fromScale(0.5, 0.5)
+            return b
         end
+        local function tidy(s) return (string.gsub(tostring(s or ""), "%s%s+", " ")) end
 
         -- ---------- THE AIM DIAL: OFF + 5 steps, each sets 5 old controls ----------
         -- { short, name, catch px, players within, keep aiming, face, face within, line }
         local AIM = {
             { "OFF", "OFF", nil, nil, nil, nil, nil,
                 "Nothing is aimed and your body is never turned. Every attack goes where your mouse points." },
-            { "1", "1  TOUCH", 60, 150, false, false, nil,
+            { "1", "1 TOUCH", 60, 150, false, false, nil,
                 "Only right at your mouse: 60 px, up to 150 studs away. Aimed as you press; your body is not turned." },
-            { "2", "2  LIGHT", 120, 200, true, true, 50,
+            { "2", "2 LIGHT", 120, 200, true, true, 50,
                 "120 px from your mouse, up to 200 studs away. Held on him through the move; turns you to him within 50 studs." },
-            { "3", "3  STEADY", 200, 300, true, true, 100,
+            { "3", "3 STEADY", 200, 300, true, true, 100,
                 "200 px from your mouse, up to 300 studs away. Held on him through the move; turns you to him within 100 studs (today's setting)." },
-            { "4", "4  STRONG", 320, 500, true, true, 125,
+            { "4", "4 STRONG", 320, 500, true, true, 125,
                 "320 px from your mouse, up to 500 studs away. Held on him through the move; turns you to him within 125 studs." },
-            { "5", "5  STICKY", 500, 1000, true, true, 150,
+            { "5", "5 STICKY", 500, 1000, true, true, 150,
                 "500 px, most of your screen, up to 1,000 studs away. Held on him through the move; turns you to him within 150 studs." },
         }
         local STEPS = {}
@@ -24801,72 +24897,93 @@ local function buildUI()
         end
 
         -- The picture: your screen, the catch circle round your mouse, five
-        -- players. It reads CFG, so your own values move it too.
-        do
-            local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 150), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
-            })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
+        -- players. It reads CFG, so your own values move it too. Board px:
+        -- the box's inside, the mouse at 150, 70.
+        local function picture(view)
+            local s = slot16(view, 136)
             local box = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = C.row, BorderSizePixel = 0,
-                ClipsDescendants = true, Parent = s,
+                Size = UDim2.new(1, -2, 1, -2), Position = UDim2.fromOffset(1, 1), BackgroundColor3 = DEEP,
+                BorderSizePixel = 0, ClipsDescendants = true, Parent = s,
             })
             corner(box, 14)
-            mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box })
-            local stage = mk("Frame", {
-                Size = UDim2.fromOffset(300, 140), AnchorPoint = Vector2.new(0.5, 0),
-                Position = UDim2.new(0.5, 0, 0, 5), BackgroundTransparency = 1, Parent = box,
-            })
+            mk("UIStroke", { Color = C.line, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box })
             local CX, CY = 150, 70
-            local function text(x, y, w, str, color, align)
-                return mk("TextLabel", {
-                    Size = UDim2.fromOffset(w, 14), Position = UDim2.fromOffset(x, y),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = 9,
-                    TextColor3 = color, TextXAlignment = align or Enum.TextXAlignment.Left,
-                    Text = str, Parent = stage,
-                })
-            end
-            text(6, 2, 100, "YOUR SCREEN", C.third)
+            txt(box, {
+                Size = UDim2.fromOffset(120, 12), Position = UDim2.fromOffset(11, 9), Font = LOOK.bold,
+                TextSize = lookPx(9), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.third, Text = "YOUR SCREEN",
+            })
             local ring = mk("Frame", {
-                Size = UDim2.fromOffset(0, 0), Position = UDim2.fromOffset(CX, CY),
-                BackgroundTransparency = 1, BorderSizePixel = 0, Parent = stage,
+                Size = UDim2.fromOffset(78, 78), Position = UDim2.fromOffset(CX - 39, CY - 39),
+                BackgroundColor3 = Color3.fromRGB(26, 23, 36), BorderSizePixel = 0, Parent = box,
             })
             corner(ring, 500)
-            mk("UIStroke", { Color = VIOLET, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ring })
-            local ringL = text(CX, CY, 60, "", VIOLET)
+            local ringLine = mk("UIStroke", { Color = Color3.fromRGB(110, 91, 184), Thickness = 1,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = ring })
+            local ringL = txt(box, {
+                Size = UDim2.fromOffset(60, 12), Position = UDim2.fromOffset(CX + 45, 73), Font = P.r2.MONO,
+                TextSize = lookPx(10), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "",
+            })
             local PEOPLE = { { 166, 58 }, { 100, 44 }, { 228, 104 }, { 286, 30 }, { 34, 108 } }
             local folk = {}
             for i, p in ipairs(PEOPLE) do
                 local head = mk("Frame", {
                     Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(p[1] - 4, p[2] - 10),
-                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = stage,
+                    BackgroundColor3 = DIM, BorderSizePixel = 0, ZIndex = 2, Parent = box,
                 })
                 corner(head, 4)
-                local body = mk("Frame", {
-                    Size = UDim2.fromOffset(14, 12), Position = UDim2.fromOffset(p[1] - 7, p[2] - 1),
-                    BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = stage,
+                -- the body: round on top (7), square-ish below (3)
+                local top = mk("Frame", {
+                    Size = UDim2.fromOffset(14, 6), Position = UDim2.fromOffset(p[1] - 7, p[2] - 1),
+                    BackgroundColor3 = DIM, BorderSizePixel = 0, ZIndex = 2, Parent = box,
                 })
-                corner(body, 4)
-                folk[i] = { head, body }
+                corner(top, 6)
+                local low = mk("Frame", {
+                    Size = UDim2.fromOffset(14, 5), Position = UDim2.fromOffset(p[1] - 7, p[2] + 2),
+                    BackgroundColor3 = DIM, BorderSizePixel = 0, ZIndex = 2, Parent = box,
+                })
+                corner(low, 2)
+                folk[i] = { head, top, low }
             end
-            local cursor = mk("Frame", {
-                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(CX - 4, CY - 4),
-                BackgroundColor3 = C.ivory, BorderSizePixel = 0, Parent = stage,
+            -- the picked one: a ring round him, the arrow over him, his name
+            local pick = mk("Frame", {
+                Size = UDim2.fromOffset(25, 25), Position = UDim2.fromOffset(153.5, 43.5),
+                BackgroundTransparency = 1, ZIndex = 3, Parent = box,
             })
-            corner(cursor, 4)
-            local nameL = text(PEOPLE[1][1] + 10, PEOPLE[1][2] - 12, 60, "Player1", VIOLET)
-            local note = text(0, 124, 300, "", C.second, Enum.TextXAlignment.Center)
-            local DIM = Color3.fromRGB(74, 69, 61)
+            corner(pick, 13)
+            local pickLine = mk("UIStroke", { Color = VIOLET, Thickness = 1.5,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = pick })
+            local arrow = P.kit.shape(box, { { 162, 35 }, { 170, 35 }, { 166, 40 } }, VIOLET)
+            arrow.ZIndex = 3
+            local nameL = txt(box, {
+                Size = UDim2.fromOffset(60, 13), Position = UDim2.fromOffset(184, 37), Font = LOOK.bold,
+                TextSize = lookPx(10), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LILAC,
+                Text = "Player1", ZIndex = 3,
+            })
+            -- your mouse: the board's arrow cursor
+            local pts = {}
+            for _, q in ipairs({ { 1, 1 }, { 1, 15 }, { 4.6, 11.6 }, { 7.2, 17.4 }, { 9.6, 16.4 }, { 7, 10.6 }, { 12, 10.6 } }) do
+                table.insert(pts, { 149 + q[1], 69 + q[2] })
+            end
+            P.kit.shape(box, pts, C.text, C.base, 1.2).ZIndex = 4
+            local note = txt(box, {
+                Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -23), Font = LOOK.regular,
+                TextSize = lookPx(11), TextColor3 = LOOK.mute, Text = "", ZIndex = 5,
+            })
+            local lastR = nil
             addLive(function()
                 local on = CFG.PvpAim and true or false
-                local r = (tonumber(CFG.PvpCatchPx) or 200) / 5
-                ring.Visible = on
-                ring.Position = UDim2.fromOffset(math.floor(CX - r), math.floor(CY - r))
-                ring.Size = UDim2.fromOffset(math.floor(2 * r), math.floor(2 * r))
-                ringL.Visible = on
-                ringL.Position = UDim2.fromOffset(math.floor(math.min(262, CX + r + 5)), CY - 7)
-                ringL.Text = math.floor(tonumber(CFG.PvpCatchPx) or 200) .. " px"
+                local px = tonumber(CFG.PvpCatchPx) or 200
+                local r = px / 5
+                if r ~= lastR then
+                    lastR = r
+                    -- 2r across with its 1 px line: the frame 2r - 2, the line outside
+                    tween(ring, { Position = UDim2.fromOffset(CX - r + 1, CY - r + 1),
+                        Size = UDim2.fromOffset(math.max(2 * r - 2, 0), math.max(2 * r - 2, 0)) }, EASE3)
+                    tween(ringL, { Position = UDim2.fromOffset(math.min(262, CX + r + 5), 73) }, EASE3)
+                end
+                ringL.Text = math.floor(px) .. " px"
+                local a = on and 0 or 1
+                ring.BackgroundTransparency, ringLine.Transparency, ringL.TextTransparency = a, a, a
                 local nIn, picked = 0, false
                 for i, p in ipairs(PEOPLE) do
                     local dx, dy = p[1] - CX, p[2] - CY
@@ -24874,36 +24991,62 @@ local function buildUI()
                     if inn then nIn += 1 end
                     if i == 1 and inn then picked = true end
                     local col = (i == 1 and inn) and VIOLET or (inn and C.second or DIM)
-                    folk[i][1].BackgroundColor3, folk[i][2].BackgroundColor3 = col, col
+                    for _, f in ipairs(folk[i]) do f.BackgroundColor3 = col end
                 end
-                nameL.Visible = picked
+                pick.Visible, arrow.Visible, nameL.Visible = picked, picked, picked
+                pickLine.Transparency = picked and 0 or 1
+                note.TextColor3 = picked and LOOK.soft or LOOK.mute
                 if not on then note.Text = "Aim off: your mouse decides"
                 elseif nIn == 0 then note.Text = "Nobody this close: your mouse decides"
                 elseif nIn == 1 then note.Text = "Player1 is inside: he gets it"
                 else note.Text = nIn .. " inside: the one nearest your mouse gets it" end
             end)
-            gap(v, 8)
+            gap(view, 8)
         end
-        P.kit.dial(v, "Aim", STEPS, "pvp")
+        P.kit.dial(v, "Aim", STEPS, "none", { under = picture, px = 13, offPx = 11, radius = 11 })
 
-        -- ---------- THE TRUTH CARD ----------
-        local KINDS = { { "Blox Fruit", "Fruit" }, { "Melee", "Fighting" }, { "Sword", "Sword" }, { "Gun", "Gun" } }
+        -- ---------- THE WEAPONS: the board's order, each kind's own keys ----------
+        -- { kind, chip word, the keys the board shows, the word when none is carried }
+        local KINDS = {
+            { "Melee", "MELEE", { "M1", "Z", "X", "C", "V" }, "Melee" },
+            { "Sword", "SWORD", { "M1", "Z", "X" }, "Sword" },
+            { "Blox Fruit", "FRUIT", { "M1", "Z", "X", "C", "V", "F" }, "Fruit" },
+            { "Gun", "GUN", { "M1", "Z", "X" }, "Gun" },
+        }
         local KEYS = { "M1", "Z", "X", "C", "V", "F" }
         local function aimedKey(kind, k)
             local t = (CFG.PvpAimKeys or {})[kind]
             return not (type(t) == "table" and t[k] == false)
         end
-        local function darkOf(kind)
+        -- A kind's keys: the board's, plus any other key you set to your
+        -- mouse (still shown, so it can be lit again).
+        local function keysOf(kd)
+            local out = {}
+            for _, k in ipairs(KEYS) do
+                if table.find(kd[3], k) or not aimedKey(kd[1], k) then table.insert(out, k) end
+            end
+            return out
+        end
+        local function darkOf(kd)
             local d = {}
-            for _, k in ipairs(KEYS) do if not aimedKey(kind, k) then table.insert(d, k) end end
+            for _, k in ipairs(keysOf(kd)) do if not aimedKey(kd[1], k) then table.insert(d, k) end end
             return d
+        end
+        -- the weapon of that kind you carry, by name; else the kind's word
+        local function nameOf(kd)
+            local ok, list = pcall(toolNames)
+            for _, t in ipairs((ok and list) or {}) do
+                local ok2, ty = pcall(toolType, t)
+                if ok2 and ty == kd[1] then return t.Name end
+            end
+            return kd[4]
         end
         local function mineList()
             local out = {}
             for _, kd in ipairs(KINDS) do
-                local d = darkOf(kd[1])
-                if #d == #KEYS then table.insert(out, kd[2] .. "'s moves")
-                elseif #d > 0 then table.insert(out, kd[2] .. "'s " .. table.concat(d, " ")) end
+                local d = darkOf(kd)
+                if #d == #keysOf(kd) then table.insert(out, nameOf(kd) .. "'s moves")
+                elseif #d > 0 then table.insert(out, nameOf(kd) .. "'s " .. table.concat(d, " ")) end
             end
             return out
         end
@@ -24919,7 +25062,7 @@ local function buildUI()
             if CFG.PvpLeadAuto then return "learn" end
             return CFG.PvpLead and "fixed" or "off"
         end
-        local function scaleText() return string.format("x%.1f", tonumber(CFG.PvpLeadScale) or 1) end
+        local function scaleText() return string.format("×%.1f", tonumber(CFG.PvpLeadScale) or 1) end
         local LEADSETS = {
             learn = function() return "Each move tries 5 amounts and keeps the one that hits him most, from your own hits (today's setting)." end,
             off = function() return "Every move aimed where he is now. Swings and ray guns always are." end,
@@ -24930,7 +25073,10 @@ local function buildUI()
             off = function() return "Aimed where he is, no lead." end,
             fixed = function() return "Skills aimed ahead of him, " .. scaleText() .. " for every move." end,
         }
-        P.kit.truthCard(v, function()
+
+        -- ---------- THE TRUTH CARD, its NOW row inside ----------
+        gap(v, 2)
+        local card = P.kit.truthCard(v, function()
             if not CFG.PvpAim then return "Every attack goes where your mouse points" end
             return (tonumber(CFG.PvpCatchPx) or 200) <= 60 and "Your attacks land on him only when your mouse is on him"
                 or "Your attacks land on the player nearest your mouse"
@@ -24953,83 +25099,120 @@ local function buildUI()
             if #mine == 2 then ms = mine[1] .. " and " .. mine[2] .. " stay yours." end
             if #mine > 2 then ms = "Moves of " .. #mine .. " weapons stay yours." end
             return ms .. " " .. LEADTRUTH[leadNow()]()
-        end, "pvp")
-        -- NOW: the player under your mouse, live, while PvP runs.
+        end, function() return CFG.PvpAim and "pvp" or "none" end)
         do
-            local row = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            local wrap = mk("Frame", {
+                Name = "Now", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1, LayoutOrder = 3, Parent = card,
             })
-            mk("UIPadding", {
-                PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), PaddingBottom = UDim.new(0, 6), Parent = row,
+            mk("UIPadding", { PaddingTop = UDim.new(0, 1), Parent = wrap })
+            local box = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 44), AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = DEEP, BorderSizePixel = 0, Parent = wrap,
             })
+            corner(box, 10)
             local dot = mk("Frame", {
-                Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(0, 6),
-                BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = row,
+                Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 10, 0.5, -4),
+                BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = box,
             })
             corner(dot, 4)
-            local line = mk("TextLabel", {
-                Size = UDim2.new(1, -60, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                Position = UDim2.fromOffset(16, 0), BackgroundTransparency = 1, Font = LOOK.semi,
-                TextSize = F.small, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
-                TextColor3 = C.text, Text = "", Parent = row,
+            local col = mk("Frame", {
+                Size = UDim2.new(1, -64, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                Position = UDim2.fromOffset(28, 0), BackgroundTransparency = 1, Parent = box,
             })
-            mk("TextLabel", {
-                Size = UDim2.fromOffset(40, 16), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0),
-                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = 9,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "NOW", Parent = row,
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = col })
+            mk("UIPadding", { PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 7), Parent = col })
+            local line = txt(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1,
+                Font = LOOK.semi, TextSize = lookPx(12), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
+            })
+            local sub = txt(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2,
+                Font = LOOK.regular, TextSize = lookPx(11), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute, Text = "",
+            })
+            txt(box, {
+                Size = UDim2.new(0, 30, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 0),
+                Font = LOOK.black, TextSize = lookPx(9), TextXAlignment = Enum.TextXAlignment.Right,
+                TextColor3 = C.third, Text = "NOW",
             })
             addLive(function()
-                row.Visible = CFG.Pvp and true or false
-                local ok, t = pcall(S.targetText)
-                line.Text = ok and tostring(t) or "-"
-                dot.BackgroundColor3 = (CFG.PvpAim and S.target) and VIOLET or C.third
+                wrap.Visible = CFG.Pvp and true or false
+                if not wrap.Visible then return end
+                local t = S.target
+                local who = t and t.plr and (t.plr.DisplayName or t.plr.Name) or nil
+                dot.BackgroundColor3, sub.TextColor3 = C.third, LOOK.mute
+                if not CFG.PvpAim then
+                    line.Text = who and (who .. " is nearest your mouse") or "Nobody at your mouse yet"
+                    sub.Text = CFG.PvpMark and "highlighted, not aimed" or "not aimed"
+                elseif not who then
+                    line.Text = "Nobody at your mouse yet"
+                    sub.Text = "your attacks go where it points"
+                else
+                    line.Text = string.format("%s · %.0f studs away", who, tonumber(t.dist) or 0)
+                    dot.BackgroundColor3 = VIOLET
+                    local ken = t.plr:GetAttribute("KenActive") == true
+                    if ken then
+                        sub.Text = "His Ken is on: " .. tostring(t.plr:GetAttribute("KenDodgesLeft") or "?") .. " dodges left"
+                        sub.TextColor3 = AMBER
+                    else
+                        sub.Text = "your mouse is on him"
+                            .. ((P.gameAimHooked and P.gameAimHooked()) and " · aimed" or "")
+                    end
+                end
             end)
         end
 
         -- ---------- ALSO: three one-tap tiles ----------
-        heading2(v, "also · one tap each")
+        P.kit.sectionRight(v, "Also", function() return "one tap each", LOOK.mute end)
         do
             local VIS = { "PvpVision", "PvpFar", "PvpClean", "PvpNoShake", "PvpKenBack" }
-            local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 66), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
-            })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
-            local function tile(i, name, stateFn, valFn, tap)
+            local EYE = { { 2, 12, 5, 8.3 }, { 5, 8.3, 8.5, 5.9 }, { 8.5, 5.9, 12, 5 }, { 12, 5, 15.5, 5.9 },
+                { 15.5, 5.9, 19, 8.3 }, { 19, 8.3, 22, 12 }, { 22, 12, 19, 15.7 }, { 19, 15.7, 15.5, 18.1 },
+                { 15.5, 18.1, 12, 19 }, { 12, 19, 8.5, 18.1 }, { 8.5, 18.1, 5, 15.7 }, { 5, 15.7, 2, 12 },
+                { "ring", 12, 12, 3 } }
+            local RUN = { { 3, 8, 8, 8 }, { 2, 12, 8, 12 }, { 3, 16, 8, 16 }, { 11, 12, 21, 12 },
+                { 16, 7, 21, 12 }, { 21, 12, 16, 17 } }
+            local DASH = { { 5, 6, 11, 12 }, { 11, 12, 5, 18 }, { 13, 6, 19, 12 }, { 19, 12, 13, 18 } }
+            local s = slot16(v, 60)
+            local function tile(i, name, glyph, stateFn, valFn, tap)
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1 / 3, -6, 1, 0), Position = UDim2.new((i - 1) / 3, (i - 1) * 2, 0, 0),
+                    Size = UDim2.new(1 / 3, -16 / 3, 1, 0), Position = UDim2.new((i - 1) / 3, (i - 1) * 8 / 3, 0, 0),
                     BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false, Text = "", Parent = s,
                 })
                 corner(b, 12)
                 local st = mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                local ic, paintIc = P.kit.icon(b, 16, glyph, 2 * 16 / 24, LILAC)
+                ic.Position = UDim2.fromOffset(10, 10)
+                local nm = txt(b, {
+                    Size = UDim2.new(1, -55, 0, 16), Position = UDim2.fromOffset(32, 10), Font = LOOK.bold,
+                    TextSize = lookPx(13), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name,
+                })
                 local dot = mk("Frame", {
-                    Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -16, 0, 14),
+                    Size = UDim2.fromOffset(7, 7), Position = UDim2.new(1, -17, 0, 14),
                     BackgroundColor3 = C.third, BorderSizePixel = 0, Parent = b,
                 })
-                corner(dot, 3)
-                local nm = mk("TextLabel", {
-                    Size = UDim2.new(1, -30, 0, 20), Position = UDim2.fromOffset(12, 8),
-                    BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = name, Parent = b,
+                corner(dot, 4)
+                local val = txt(b, {
+                    Size = UDim2.new(1, -20, 0, 14), Position = UDim2.new(0, 10, 1, -23), Font = LOOK.regular,
+                    TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.second, Text = "",
                 })
-                local val = mk("TextLabel", {
-                    Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(12, 34),
-                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-                    TextColor3 = C.third, Text = "", Parent = b,
-                })
-                pressable(b)
                 b.Activated:Connect(tap)
                 addLive(function()
                     local state = stateFn()
+                    local lit = state ~= "off"
+                    b.BackgroundColor3 = lit and C.row or DEEP
+                    st.Color = lit and C.hair or C.line
+                    nm.TextColor3 = lit and C.text or C.second
+                    paintIc(lit and LILAC or C.third)
                     dot.BackgroundColor3 = (state == "on") and GREEN or (state == "mixed" and AMBER or C.third)
-                    nm.TextColor3 = (state == "off") and C.second or C.text
-                    st.Color = (state == "off") and C.hair or C.raised
+                    val.TextColor3 = lit and C.second or C.third
                     val.Text = valFn()
                 end)
             end
-            tile(1, "Vision", function()
+            tile(1, "Vision", EYE, function()
                 local n = visCount()
                 return n == 5 and "on" or (n > 0 and "mixed" or "off")
             end, function()
@@ -25040,224 +25223,549 @@ local function buildUI()
                 local on = visCount() < 5
                 for _, k in ipairs(VIS) do CFG[k] = on end
             end)
-            tile(2, "Run", function() return CFG.PvpSpeed and "on" or "off" end,
+            tile(2, "Run", RUN, function() return CFG.PvpSpeed and "on" or "off" end,
                 function() return CFG.PvpSpeed and (tostring(CFG.PvpSpeedTo) .. " speed") or "game's own" end,
                 function() CFG.PvpSpeed = not CFG.PvpSpeed end)
-            tile(3, "Dash", function() return CFG.PvpDash and "on" or "off" end,
-                function() return CFG.PvpDash and (string.format("x%g faster", tonumber(CFG.PvpDashX) or 1.5)) or "game's own" end,
+            tile(3, "Dash", DASH, function() return CFG.PvpDash and "on" or "off" end,
+                function() return CFG.PvpDash and (string.format("×%g faster", tonumber(CFG.PvpDashX) or 1.5)) or "game's own" end,
                 function() CFG.PvpDash = not CFG.PvpDash end)
-            gap(v, 8)
         end
 
         -- ---------- AIMED MOVES: which attacks the aim takes, per weapon ----------
-        heading2(v, "aimed moves · lit = at him, dark = your mouse")
-        for _, kd in ipairs(KINDS) do
+        do
+            local h = slot16(v, 36)
+            local inner = mk("Frame", {
+                Size = UDim2.new(1, -8, 0, 18), Position = UDim2.fromOffset(4, 12), BackgroundTransparency = 1, Parent = h,
+            })
+            txt(inner, {
+                Size = UDim2.new(0.5, 0, 1, 0), Font = LOOK.semi, TextSize = LOOK.size.section,
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = LOOK.mute, Text = "AIMED MOVES",
+            })
+            local leg = mk("Frame", {
+                Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X, AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.fromScale(1, 0), BackgroundTransparency = 1, Parent = inner,
+            })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
+                VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = leg })
+            local function key(order, lit, x)
+                local k = txt(leg, {
+                    Size = UDim2.fromOffset(lit and 18 or 16, lit and 18 or 16), LayoutOrder = order,
+                    BackgroundTransparency = lit and 0 or 1, BackgroundColor3 = VIOLET, Font = LOOK.black,
+                    TextSize = lookPx(9), TextColor3 = lit and C.base or LOOK.soft, Text = "Z",
+                })
+                corner(k, 5)
+                if not lit then
+                    mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = k })
+                end
+                txt(leg, {
+                    Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = order + 1,
+                    Font = LOOK.regular, TextSize = lookPx(11), TextColor3 = LOOK.soft, Text = x,
+                })
+            end
+            key(1, true, "at him")
+            key(3, false, "your mouse")
+        end
+        local cardsBox = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+            LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = cardsBox })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = cardsBox })
+        for n, kd in ipairs(KINDS) do
             local kind = kd[1]
-            local s = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 98), BackgroundTransparency = 1,
-                LayoutOrder = nextOrder(), Parent = v,
+            local tint, tfg = P.r2.acc(TYPE_ACCENT[kind])
+            local cardF = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = C.row,
+                BorderSizePixel = 0, LayoutOrder = n, Parent = cardsBox,
             })
-            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = s })
-            local card = mk("Frame", {
-                Size = UDim2.new(1, 0, 1, -6), BackgroundColor3 = C.row, BorderSizePixel = 0, Parent = s,
+            corner(cardF, 14)
+            local rim = mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = cardF })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = cardF })
+            mk("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+                PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10), Parent = cardF })
+            local head = mk("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, LayoutOrder = 1, Parent = cardF })
+            local chip = txt(head, {
+                Size = UDim2.fromOffset(0, 17), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(0, 1),
+                BackgroundTransparency = 0, BackgroundColor3 = tint, Font = LOOK.black, TextSize = LOOK.size.chip,
+                TextColor3 = tfg, Text = kd[2],
             })
-            corner(card, 12)
-            mk("TextLabel", {
-                Size = UDim2.new(0.5, 0, 0, 26), Position = UDim2.fromOffset(12, 6),
-                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = kd[2], Parent = card,
+            corner(chip, 5)
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = chip })
+            local nm = txt(head, {
+                Size = UDim2.new(1, -150, 1, 0), Position = UDim2.fromOffset(#kd[2] * 7 + 20, 0), Font = LOOK.bold,
+                TextSize = lookPx(15), TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = kd[4],
             })
-            local state = mk("TextLabel", {
-                Size = UDim2.new(0.5, -12, 0, 26), Position = UDim2.new(0.5, 0, 0, 6),
-                BackgroundTransparency = 1, Font = LOOK.regular, TextSize = F.tiny,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "", Parent = card,
+            local state = txt(head, {
+                Size = UDim2.new(0, 90, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0),
+                Font = LOOK.regular, TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Right,
+                TextColor3 = LILAC, Text = "",
             })
-            local btns = {}
+            local row = mk("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, LayoutOrder = 2, Parent = cardF })
+            mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+                SortOrder = Enum.SortOrder.LayoutOrder, Parent = row })
+            local chips = {}
             for i, k in ipairs(KEYS) do
                 local b = mk("TextButton", {
-                    Size = UDim2.new(1 / 6, -6, 0, 44), Position = UDim2.new((i - 1) / 6, 3, 0, 36),
-                    BackgroundColor3 = C.row, BorderSizePixel = 0, AutoButtonColor = false,
-                    Font = LOOK.bold, TextSize = F.small, TextColor3 = C.second, Text = k, Parent = card,
+                    Size = UDim2.fromOffset(40, 36), AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = VIOLET,
+                    BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.black, TextSize = lookPx(13),
+                    TextColor3 = C.base, Text = k, LayoutOrder = i, Parent = row,
                 })
                 corner(b, 10)
-                mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9), Parent = b })
+                local line = mk("UIStroke", { Color = VIOLET, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
                 b.Activated:Connect(function()
                     CFG.PvpAimKeys = CFG.PvpAimKeys or {}
                     CFG.PvpAimKeys[kind] = CFG.PvpAimKeys[kind] or {}
                     CFG.PvpAimKeys[kind][k] = not aimedKey(kind, k)
                 end)
-                btns[i] = b
+                chips[i] = { b = b, line = line }
             end
             addLive(function()
+                nm.Text = nameOf(kd)
+                local shown = keysOf(kd)
+                -- the board's opacity .45 with the aim off: each part's own transparency
+                local a = CFG.PvpAim and 0 or 0.55
                 for i, k in ipairs(KEYS) do
+                    local c = chips[i]
                     local lit = aimedKey(kind, k)
-                    btns[i].BackgroundColor3 = lit and VIOLET or C.row
-                    btns[i].TextColor3 = lit and C.base or C.second
+                    c.b.Visible = table.find(shown, k) ~= nil
+                    c.b.BackgroundTransparency = lit and a or 1
+                    c.b.TextColor3 = lit and C.base or LOOK.soft
+                    c.b.TextTransparency = a
+                    c.line.Color = lit and VIOLET or LOOK.ghost
+                    c.line.Transparency = a
                 end
-                local d = darkOf(kind)
-                if not CFG.PvpAim then state.Text = "aim is off"
-                elseif #d == #KEYS then state.Text = "all yours"
-                elseif #d > 0 then state.Text = table.concat(d, " ") .. " yours"
-                else state.Text = "all at him" end
+                local d = darkOf(kd)
+                if not CFG.PvpAim then state.Text, state.TextColor3 = "aim is off", LOOK.mute
+                elseif #d == #shown then state.Text, state.TextColor3 = "all yours", C.second
+                elseif #d > 0 then state.Text, state.TextColor3 = table.concat(d, " ") .. " yours", LOOK.soft
+                else state.Text, state.TextColor3 = "all at him", LILAC end
+                cardF.BackgroundTransparency, rim.Transparency = a, a
+                chip.BackgroundTransparency = a
+                chip.TextTransparency, nm.TextTransparency, state.TextTransparency = a, a, a
             end)
         end
-        hasLine(v, "You hold the weapon and press the keys. A key counts for its whole kind: the sword's Z is every sword's Z, not your fruit's.")
+        gap(v, 2)
+        P.kit.noteLine(v, function()
+            local sw = nameOf(KINDS[2])
+            return "You hold the weapon and press the keys. A key counts for its whole kind: "
+                .. (sw == "Sword" and "a sword's" or (sw .. "'s")) .. " Z is every sword's Z."
+        end)
 
         -- ---------- LEAD: Learns | Off | Fixed ----------
-        P.kit.segmented(v, "lead · aim ahead of him", {
-            { "learn", "Learns" }, { "off", "Off" }, { "fixed", "Fixed" },
-        }, leadNow, function(x)
+        P.kit.sectionRight(v, "Lead · aim ahead of him", function()
+            local l = leadNow()
+            return l == "learn" and "learns per move" or (l == "off" and "off" or ("fixed " .. scaleText()))
+        end)
+        P.kit.chipGrid(v, { { "learn", "Learns" }, { "off", "Off" }, { "fixed", "Fixed" } }, 3, leadNow, function(x)
             if x == "learn" then
                 CFG.PvpLeadAuto = true
             else
                 CFG.PvpLeadAuto = false
                 CFG.PvpLead = (x == "fixed")
             end
-        end)
-        liveLine(v, function() return LEADSETS[leadNow()]() end)
+        end, "none", { gap = 6, radius = 11, after = 0 })
+        P.kit.noteLine(v, function() return LEADSETS[leadNow()]() end)
         do
-            local box = mk("Frame", {
-                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
+            local box = slot16(v, 60)
+            local c = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 52), Position = UDim2.fromOffset(0, 2), BackgroundColor3 = C.row,
+                BorderSizePixel = 0, Parent = box,
             })
-            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = box })
-            stepRow(box, "How far ahead", function() return CFG.PvpLeadScale end,
-                function(x) CFG.PvpLeadScale = x end, 0, 2, 0.1, function(x) return string.format("x%.1f", tonumber(x) or 1) end)
+            corner(c, 12)
+            txt(c, {
+                Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(14, 0), Font = LOOK.semi,
+                TextSize = lookPx(13), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "How far ahead",
+            })
+            local minus = stepBtn(c, -110, "minus")
+            local plus = stepBtn(c, -6, "plus")
+            local val = txt(c, {
+                Size = UDim2.fromOffset(48, 52), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -56, 0, 0),
+                Font = P.r2.MONO, TextSize = lookPx(14), TextColor3 = C.text, Text = "",
+            })
+            local function show() val.Text = scaleText() end
+            local function nudge(d)
+                local x = (tonumber(CFG.PvpLeadScale) or 1) + d * 0.1
+                CFG.PvpLeadScale = math.floor(math.clamp(x, 0, 2) * 100 + 0.5) / 100
+                show()
+            end
+            minus.Activated:Connect(function() nudge(-1) end)
+            plus.Activated:Connect(function() nudge(1) end)
+            show()
             box.Visible = (leadNow() == "fixed")
-            addLive(function() box.Visible = (leadNow() == "fixed") end)
+            addLive(function()
+                show()
+                box.Visible = (leadNow() == "fixed")
+            end)
         end
 
         -- ---------- BUSY SERVERS ----------
-        heading2(v, "busy servers")
-        switchRow(v, "Busy servers",
-            "In PvP every hop goes where the most players are - in a region fast for you. Off: hops keep Servers' order, fewest first",
-            function() return CFG.PvpHopBusy end,
+        P.kit.sectionRight(v, "Busy servers", nil)
+        P.kit.switch(v, "Busy servers", function()
+            return CFG.PvpHopBusy and ("Most players first, ping under " .. math.floor(tonumber(CFG.PvpPingMax) or 150) .. " ms")
+                or "Hops keep Servers' order: fewest first"
+        end, function() return CFG.PvpHopBusy end,
             function(x) CFG.PvpHopBusy = x end)
+        hairline(v)
         do
-            local hop = actionRow(v, "Hop to a busy server", nil, function() P.hopNow() end)
-            addLive(function()
-                hop.Text = (CFG.Pvp and CFG.PvpHopBusy) and "Hop to a busy server" or "Hop now"
+            local hopped = false
+            local b = mk("TextButton", {
+                Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C.base, BorderSizePixel = 0,
+                AutoButtonColor = false, Text = "", LayoutOrder = nextOrder(), Parent = v,
+            })
+            local col = mk("Frame", {
+                Size = UDim2.new(1, -64, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 20, 0.5, 0), BackgroundTransparency = 1, Parent = b,
+            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = col })
+            local lab = txt(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1, Font = LOOK.semi,
+                TextSize = lookPx(15), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "",
+            })
+            local sub = txt(col, {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Font = LOOK.regular,
+                TextSize = lookPx(12), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = LOOK.mute, Text = "",
+            })
+            local ic = P.kit.icon(b, 18, { { 4, 12, 16, 12 }, { 12, 6, 18, 12 }, { 18, 12, 12, 18 }, { 21, 5, 21, 19 } },
+                2 * 18 / 24, C.second)
+            ic.AnchorPoint, ic.Position = Vector2.new(1, 0.5), UDim2.new(1, -16, 0.5, 0)
+            pressable(b)
+            local function paint()
+                local busy = CFG.Pvp and CFG.PvpHopBusy
+                local ms = math.floor(tonumber(CFG.PvpPingMax) or 150)
+                lab.Text = busy and "Hop to a busy server" or "Hop now"
+                if hopped then
+                    sub.Text = busy and ("Hopping: most players, under " .. ms .. " ms") or "Hopping by Servers' order"
+                elseif busy then sub.Text = "Most players, ping under " .. ms .. " ms"
+                elseif not CFG.Pvp then sub.Text = "PvP is off: Servers' order, fewest first"
+                else sub.Text = "Busy is off: Servers' order, fewest first" end
+                sub.TextColor3 = hopped and GREEN or LOOK.mute
+            end
+            b.Activated:Connect(function()
+                hopped = true
+                paint()
+                task.spawn(function() pcall(P.hopNow) end)
             end)
+            paint()
+            addLive(paint)
         end
 
-        -- ---------- DETAILS: what the moves learned, the live readings ----------
-        fold(v, "Details", function(v)
-            heading2(v, "what your moves learned · hit or miss")
-            readout(v, function() return S.tuneText and S.tuneText() or "" end)
-            actionRow(v, "Forget what the moves learned", nil, function()
-                table.clear(S.tune.moves)
-                table.clear(S.tune.tries)
-                S.tune.closed, S.tune.kens = 0, 0
-                pcall(S.tuneSave)
-            end)
-            heading2(v, "live · while PvP is on")
-            readout(v, function()
-                if not CFG.Pvp then return "PvP mode is off" end
-                return "PLAYER  " .. S.targetText()
-            end)
-            readout(v, function()
-                if not CFG.Pvp then return "PvP mode is off" end
-                return "view    " .. tostring(S.view.note)
-                    .. "\nfar     " .. tostring(S.far.note)
-                    .. "\nken     " .. tostring(S.ken.note)
-                    .. "\nscreen  " .. (CFG.PvpClean and (S.clean.count .. " effects switched off") or "off")
-                    .. "\nshake   " .. (CFG.PvpNoShake and tostring(S.shake.note) or "on")
-            end)
-            readout(v, function()
-                if not CFG.Pvp then return "" end
-                return S.targetText() .. string.format("\nattacks turned to him: %d", S.faced)
-                    .. "\n" .. S.leadText()
-            end)
-            readout(v, function() return "dash   " .. S.dashNote() end)
-            readout(v, function() return "speed  " .. tostring(S.speed.note) end)
-            readout(v, function()
-                local el = P.elite
-                return "hop    " .. tostring(el and el.note or "-")
-                    .. "\n" .. (P.pingNote and P.pingNote() or "")
-            end)
-            caption(v, "You fight - Observation view always on, a clean screen, your attacks aimed (stops the farm).")
-            caption(v, "VISION - the game's own Observation view (yours: V2), kept on when a hit "
-                .. "ends your Ken; your screen kept clear of other players' effects.")
-            caption(v, "AIM - you aim with your mouse: the player nearest it (within the catch area) "
-                .. "gets what you fire, and is highlighted red.")
-            caption(v, "LEAD - skills, fruit M1 and slow guns go where he will be when they land (the server "
-                .. "runs them: your ping + their travel ahead of what you see). Ray guns and sword / melee "
-                .. "swings hit what you see - aimed at him as he is. Hits land behind him: Lead strength up; "
-                .. "ahead of him: down. His Ken dodges whatever the aim - the PLAYER line says when it is on.")
-        end)
-
-        -- ---------- LAB: tests, amber while one is on ----------
-        do
+        -- ---------- the board's folds: Details, Lab ----------
+        -- A 48 px card (radius 14, a #35322E line): the title 14 px SemiBold,
+        -- a chip, the hint on the right (Name "Hint"), a chevron that turns.
+        -- top = its margin. Returns the box, its holder and a hint repaint.
+        local function foldCard(title, chipWord, hintFn, top)
             local holder = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, LayoutOrder = nextOrder(), Parent = v,
             })
-            mk("UIListLayout", {
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = holder,
-            })
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = holder })
+            local s = mk("Frame", { Size = UDim2.new(1, 0, 0, 48 + top), BackgroundTransparency = 1, LayoutOrder = 1, Parent = holder })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, top), Parent = s })
             local b = mk("TextButton", {
-                Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = C.base, BorderSizePixel = 0,
-                Text = "", AutoButtonColor = false, LayoutOrder = 1, Parent = holder,
+                Size = UDim2.new(1, 0, 0, 48), BackgroundColor3 = C.row, BorderSizePixel = 0,
+                Text = "", AutoButtonColor = false, Parent = s,
             })
-            mk("TextLabel", {
-                Size = UDim2.new(1, -170, 1, 0), Position = UDim2.fromOffset(20, 0),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.body,
-                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.second, Text = "Lab · TEST", Parent = b,
+            corner(b, 14)
+            mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+            local t = txt(b, {
+                Size = UDim2.fromOffset(0, 48), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(14, 0),
+                Font = LOOK.semi, TextSize = lookPx(14), TextXAlignment = Enum.TextXAlignment.Left,
+                TextColor3 = C.text, Text = title,
             })
-            local word = mk("TextLabel", {
-                Size = UDim2.fromOffset(140, 44), Position = UDim2.new(1, -160, 0, 0),
-                BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
-                TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.third, Text = "", Parent = b,
+            if chipWord then
+                local c = txt(b, {
+                    Size = UDim2.fromOffset(0, 17), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(14 + #title * 9 + 8, 15),
+                    BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(42, 28, 11), Font = LOOK.black,
+                    TextSize = LOOK.size.chip, TextColor3 = AMBER, Text = chipWord,
+                })
+                corner(c, 5)
+                mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = c })
+                t.Size = UDim2.fromOffset(#title * 9, 48)
+                t.AutomaticSize = Enum.AutomaticSize.None
+            end
+            local hint = txt(b, {
+                Name = "Hint", Size = UDim2.fromOffset(150, 48), Position = UDim2.new(1, -186, 0, 0), Font = LOOK.regular,
+                TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = LOOK.mute, Text = "",
+            })
+            local chev = txt(b, {
+                Size = UDim2.fromOffset(16, 48), Position = UDim2.new(1, -28, 0, 0), Font = LOOK.regular,
+                TextSize = 22, TextColor3 = LOOK.mute, Text = "›",
             })
             pressable(b)
             local box = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1, Visible = false, LayoutOrder = 2, Parent = holder,
             })
-            mk("UIListLayout", {
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = box,
-            })
-            local function testsOn()
-                return ((tonumber(CFG.PvpSoruCut) or 0) > 0 and 1 or 0) + (CFG.PvpCdTest and 1 or 0)
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = box })
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 6), Parent = box })
+            local function paintHint()
+                if box.Visible then hint.Text, hint.TextColor3 = "hide", LOOK.mute return end
+                local ok, w, col = pcall(hintFn)
+                hint.Text = ok and tostring(w or "") or ""
+                hint.TextColor3 = (ok and col) or LOOK.mute
             end
-            local function headline()
-                local n = testsOn()
-                if box.Visible then word.Text, word.TextColor3 = "hide", C.third return end
-                word.Text = (n == 0) and "2 tests, both off" or (n .. (n == 1 and " test on" or " tests on"))
-                word.TextColor3 = (n > 0) and AMBER or C.third
-            end
-            local outer = buildingFold
-            buildingFold = box
-            caption(box, "Tests, both off unless you turn them on. They bend the game's cooldowns, so they may not hold.")
-            stepRow(box, "Flash Step cooldown cut", function() return CFG.PvpSoruCut end,
-                function(x) CFG.PvpSoruCut = x end, 0, 95, 5, function(x) return math.floor(tonumber(x) or 0) .. "%" end)
-            liveLine(box, function()
-                local c = tonumber(CFG.PvpSoruCut) or 0
-                local r = (c == 0) and "the game's 15 s" or string.format("15 s  ->  %.1f s", 15 * (1 - c / 100))
-                return "Your own game checks this one, so it may hold. " .. r
-            end)
-            switchRow(box, "Skills off cooldown (test)",
-                "The server most likely refuses. Turn on, spam one key, read the count",
-                function() return CFG.PvpCdTest end,
-                function(x) CFG.PvpCdTest = x end)
-            readout(box, function()
-                if not CFG.Pvp then return "" end
-                return S.soruNote() .. "\n" .. S.cdNote()
-            end)
-            buildingFold = outer
             b.Activated:Connect(function()
                 box.Visible = not box.Visible
-                headline()
+                chev.Rotation = box.Visible and 90 or 0
+                paintHint()
                 if box.Visible then
                     for _, e in ipairs(live) do
                         if e.w == box then pcall(e.f) end
                     end
                 end
             end)
-            headline()
-            addLive(headline)
+            paintHint()
+            addLive(paintHint)
+            return box, holder
+        end
+        -- the inside of a fold: the board's #1B1917 card
+        local function foldInside(box, padTop, padBottom)
+            local inner = mk("Frame", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = C.row,
+                BorderSizePixel = 0, LayoutOrder = 1, Parent = box,
+            })
+            corner(inner, 14)
+            mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = inner })
+            mk("UIPadding", { PaddingTop = UDim.new(0, padTop), PaddingBottom = UDim.new(0, padBottom), Parent = inner })
+            local n = 0
+            return inner, function(o)
+                n += 1
+                o.LayoutOrder, o.Parent = n, inner
+                return o
+            end
+        end
+        local function foldHead(add, word, h)
+            local t = add(mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, h), BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(10),
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                TextColor3 = C.third, Text = word,
+            }))
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingBottom = UDim.new(0, 4), Parent = t })
+            return t
+        end
+        local function para(add, word, px, color, top)
+            local t = add(mk("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+                Font = LOOK.regular, TextSize = lookPx(px), LineHeight = LOOK.lh(1.45), TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = color, Text = word,
+            }))
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), PaddingTop = UDim.new(0, top or 0), Parent = t })
+            return t
+        end
+
+        -- ---------- DETAILS: what the moves learned, the live readings ----------
+        local function learnedRows()
+            local list = {}
+            local TU = S.tune
+            for id, m in pairs((TU and TU.moves) or {}) do
+                if type(m) == "table" and (m.n or 0) > 0 then table.insert(list, { id = id, m = m }) end
+            end
+            table.sort(list, function(a, b) return a.m.n > b.m.n end)
+            return list
+        end
+        local forgot = false
+        do
+            local box, holder = foldCard("Details", nil, function()
+                local n = #learnedRows()
+                if n == 0 then return "nothing learned yet" end
+                return n .. (n == 1 and " move learned" or " moves learned")
+            end, 14)
+            P.detailsBox[v] = { holder = holder, box = box }
+            local _, add = foldInside(box, 4, 10)
+            foldHead(add, "WHAT YOUR MOVES LEARNED · MOST TRIED FIRST", 28)
+            local rows = {}
+            for i = 1, 8 do
+                local r = add(mk("Frame", { Size = UDim2.new(1, 0, 0, 31), BackgroundTransparency = 1 }))
+                local mv = txt(r, {
+                    Size = UDim2.new(0.5, -14, 0, 16), Position = UDim2.fromOffset(14, 7), Font = LOOK.semi,
+                    TextSize = lookPx(13), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = C.text, Text = "",
+                })
+                local note = txt(r, {
+                    Size = UDim2.new(0.5, -60, 0, 16), Position = UDim2.new(0.5, 0, 0, 7), Font = LOOK.regular,
+                    TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Right,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.mute, Text = "",
+                })
+                local pct = txt(r, {
+                    Size = UDim2.fromOffset(38, 16), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 7),
+                    Font = P.r2.MONO, TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right,
+                    TextColor3 = C.text, Text = "",
+                })
+                local bar = mk("Frame", {
+                    Size = UDim2.new(1, -28, 0, 4), Position = UDim2.fromOffset(14, 27), BackgroundColor3 = C.line,
+                    BorderSizePixel = 0, ClipsDescendants = true, Parent = r,
+                })
+                corner(bar, 2)
+                local fill = mk("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = VIOLET, BorderSizePixel = 0, Parent = bar })
+                corner(fill, 2)
+                rows[i] = { r = r, mv = mv, note = note, pct = pct, fill = fill }
+            end
+            local kenP = para(add, "", 11, LOOK.mute, 8)
+            local noneP = para(add, "Nothing tried yet. Every move you aim at a player is counted, hit or miss.", 12, C.second, 6)
+            local fw = add(mk("Frame", { Size = UDim2.new(1, 0, 0, 54), BackgroundTransparency = 1 }))
+            local forget = mk("TextButton", {
+                Size = UDim2.new(1, -28, 0, 44), Position = UDim2.fromOffset(14, 10), BackgroundColor3 = C.row,
+                BackgroundTransparency = 1, BorderSizePixel = 0, AutoButtonColor = false, Font = LOOK.bold,
+                TextSize = lookPx(13), TextColor3 = C.stop, Text = "Forget what the moves learned", Parent = fw,
+            })
+            corner(forget, 11)
+            mk("UIStroke", { Color = LOOK.ghost, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = forget })
+            forget.Activated:Connect(function()
+                pcall(function()
+                    table.clear(S.tune.moves)
+                    table.clear(S.tune.tries)
+                    S.tune.closed, S.tune.kens = 0, 0
+                end)
+                pcall(S.tuneSave)
+                forgot = true
+            end)
+            foldHead(add, "LIVE · WHILE PVP IS ON", 32)
+            local liveRows = {}
+            for i = 1, 6 do
+                local r = add(mk("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1 }))
+                local l = txt(r, {
+                    Size = UDim2.new(0.45, -14, 1, 0), Position = UDim2.fromOffset(14, 0), Font = LOOK.regular,
+                    TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.soft, Text = "",
+                })
+                local val = txt(r, {
+                    Size = UDim2.new(0.55, -14, 1, 0), Position = UDim2.new(0.45, 0, 0, 0), Font = LOOK.regular,
+                    TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right,
+                    TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.mute, Text = "",
+                })
+                liveRows[i] = { r = r, l = l, v = val }
+            end
+            addLive(function()
+                local list = learnedRows()
+                local L = S.L
+                for i, x in ipairs(rows) do
+                    local e = list[i]
+                    x.r.Visible = e ~= nil
+                    if e then
+                        local weapon, key = string.match(e.id, "^(.*)|(.-)$")
+                        local lead = "learning off"
+                        if CFG.PvpLeadAuto and L and L.ARMS and L.armPick then
+                            local ok, a = pcall(function() return L.ARMS[L.armPick(e.m.arms or {})] end)
+                            a = ok and tonumber(a) or 0
+                            lead = (a == 0) and "no lead" or string.format("lead %.2f", a)
+                        end
+                        local h, n = math.floor(e.m.h + 0.5), math.floor(e.m.n + 0.5)
+                        local p = math.floor(100 * e.m.h / math.max(e.m.n, 1) + 0.5)
+                        x.mv.Text = tostring(weapon or e.id) .. " " .. tostring(key or "")
+                        x.note.Text = lead .. " · " .. h .. " of " .. n
+                        x.pct.Text = p .. "%"
+                        x.fill.Size = UDim2.fromScale(math.clamp(p / 100, 0, 1), 1)
+                    end
+                end
+                local has = #list > 0
+                if has then forgot = false end
+                kenP.Visible, noneP.Visible = has, not has
+                kenP.Text = "His Ken took " .. tostring((S.tune and S.tune.kens) or 0)
+                    .. " of these. They count as reaching him: the aim was right."
+                forget.Text = (forgot and not has) and "Forgotten: learning from zero" or "Forget what the moves learned"
+                forget.TextColor3 = (forgot and not has) and C.third or C.stop
+                local lines
+                if not CFG.Pvp then
+                    lines = { { "PvP is off", "nothing runs" } }
+                else
+                    local lead = leadNow()
+                    local ms = math.floor((S.rtt or 0) * 1000 + 0.5)
+                    lines = {
+                        { "Ken view", tidy(S.view and S.view.note) },
+                        { "Your Ken", tidy(S.ken and S.ken.note) },
+                        { "Screen", CFG.PvpClean and (tostring(S.clean and S.clean.count or 0) .. " effects switched off")
+                            or "as the game shows it" },
+                        { "Attacks turned to him", tostring(S.faced or 0) },
+                        { "Lead now", lead == "learn" and string.format("×%.2f · ping %d ms", S.aimScale or 0, ms)
+                            or (lead == "fixed" and (scaleText() .. " · ping " .. ms .. " ms") or "off") },
+                        { "Run", tidy(S.speed and S.speed.note) },
+                    }
+                end
+                for i, x in ipairs(liveRows) do
+                    local ln = lines[i]
+                    x.r.Visible = ln ~= nil
+                    if ln then x.l.Text, x.v.Text = ln[1], ln[2] end
+                end
+            end)
+        end
+
+        -- ---------- LAB: tests, amber while one is on ----------
+        do
+            local function testsOn()
+                return ((tonumber(CFG.PvpSoruCut) or 0) > 0 and 1 or 0) + (CFG.PvpCdTest and 1 or 0)
+            end
+            local box = foldCard("Lab", "TEST", function()
+                local n = testsOn()
+                if n == 0 then return "2 tests, both off" end
+                return n .. (n == 1 and " test on" or " tests on"), AMBER
+            end, 8)
+            local inner, add = foldInside(box, 4, 8)
+            para(add, "Tests, both off unless you turn them on. They bend the game's cooldowns, so they may not hold.", 11,
+                LOOK.mute, 8)
+            -- Flash Step: TEST + title, its line, - value + and what it makes
+            local fs = add(mk("Frame", { Size = UDim2.new(1, 0, 0, 104), BackgroundTransparency = 1 }))
+            local chip = txt(fs, {
+                Size = UDim2.fromOffset(0, 17), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(14, 10),
+                BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(42, 28, 11), Font = LOOK.black,
+                TextSize = LOOK.size.chip, TextColor3 = AMBER, Text = "TEST",
+            })
+            corner(chip, 5)
+            mk("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = chip })
+            txt(fs, {
+                Size = UDim2.new(1, -70, 0, 17), Position = UDim2.fromOffset(60, 10), Font = LOOK.semi, TextSize = lookPx(14),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "Flash Step cooldown cut",
+            })
+            txt(fs, {
+                Size = UDim2.new(1, -28, 0, 14), Position = UDim2.fromOffset(14, 31), Font = LOOK.regular, TextSize = lookPx(11),
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = LOOK.mute,
+                Text = "Your own game checks this one, so it may hold.",
+            })
+            local ctl = mk("Frame", { Size = UDim2.new(1, -20, 0, 40), Position = UDim2.fromOffset(14, 56),
+                BackgroundTransparency = 1, Parent = fs })
+            local function sbtn(x, glyph)
+                local b = stepBtn(ctl, 0, glyph)
+                b.AnchorPoint, b.Position = Vector2.new(0, 0), UDim2.fromOffset(x, 0)
+                return b
+            end
+            local minus, plus = sbtn(0, "minus"), sbtn(108, "plus")
+            local val = txt(ctl, {
+                Size = UDim2.fromOffset(52, 40), Position = UDim2.fromOffset(50, 0), Font = P.r2.MONO,
+                TextSize = lookPx(14), TextColor3 = C.text, Text = "",
+            })
+            local res = txt(ctl, {
+                Size = UDim2.new(1, -168, 1, 0), Position = UDim2.fromOffset(160, 0), Font = LOOK.regular,
+                TextSize = lookPx(12), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.second, Text = "",
+            })
+            local function showCut()
+                local c = math.floor(tonumber(CFG.PvpSoruCut) or 0)
+                val.Text = c .. "%"
+                val.TextColor3 = c > 0 and AMBER or C.text
+                res.Text = (c == 0) and "the game's 15 s" or string.format("15 s → %.1f s", 15 * (1 - c / 100))
+            end
+            local function nudge(d)
+                CFG.PvpSoruCut = math.clamp((tonumber(CFG.PvpSoruCut) or 0) + d * 5, 0, 95)
+                showCut()
+            end
+            minus.Activated:Connect(function() nudge(-1) end)
+            plus.Activated:Connect(function() nudge(1) end)
+            showCut()
+            addLive(showCut)
+            add(mk("Frame", { Size = UDim2.new(1, -14, 0, 1), BackgroundColor3 = C.line, BorderSizePixel = 0 }))
+            local cd = P.kit.switch(inner, "Skills off cooldown", function()
+                if not CFG.PvpCdTest then return "The server most likely refuses. Turn on, spam one key, read the count." end
+                if not CFG.Pvp then return "Counts presses and moves while PvP is on." end
+                local c = S.cd or {}
+                local pr, mv = c.presses or 0, c.moves or 0
+                local verdict = "."
+                if pr >= 6 then verdict = (mv * 2 < pr) and ": it refuses." or ": it takes them." end
+                return pr .. " presses, " .. mv .. " moves the game started" .. verdict
+            end, function() return CFG.PvpCdTest end,
+                function(x) CFG.PvpCdTest = x end, { chip = "TEST", px = 14, subPx = 11, pad = 14, minH = 64, vpad = 9, on = AMBER })
+            add(cd)
         end
 
         -- ---------- FINE-TUNE: every exact value ----------
@@ -25326,13 +25834,17 @@ local function buildUI()
             sliderRow(v, "Ping at most, any most-players hop", 60, 400, 10,
                 function() return CFG.PvpPingMax end,
                 function(x) CFG.PvpPingMax = x end, " ms")
-        end, 20)
+        end, "20 settings")
     end
 
     -- =====================================================
     -- VOLCANO EVENT: alongside any mode. R2 Task 7 (board Volcano): the
     -- "alongside" strip, AFTER THE WIN (VolcanoLoot + VolcanoAfter), the two
     -- switches, everything else in Fine-tune and Details.
+    -- R3 Task 6 (Volcano.dc.html): AFTER THE WIN names the pick on its right
+    -- and is the board's ring list (today's tag on Loot + hop); the board's
+    -- switches with their short sub lines (the rest moved to Details); the
+    -- Fights with row 50 high, the help line 10 px under the switches.
     -- =====================================================
     do
         local v = makeView("volcano")
@@ -25342,17 +25854,20 @@ local function buildUI()
         -- Three outcomes over two keys: loot + hop (today), loot + again, no loot.
         local WIN = {
             hop = { "Wins, takes bones + egg, then the next server",
-                "Stays 20 s after the loot, home by respawn, then hops: the hunt goes on there." },
+                "Stays 20 s after the loot, home by respawn, then hops: the hunt goes on there.", "Loot + hop" },
             again = { "Wins, takes bones + egg, then again on this island",
-                "Starts the event again here instead of hopping." },
-            none = { "Wins, then the next server", "Skips the bones and the egg." },
+                "Starts the event again here instead of hopping.", "Loot + again" },
+            none = { "Wins, then the next server", "Skips the bones and the egg.", "No loot" },
         }
         local function winNow()
             if not CFG.VolcanoLoot then return "none" end
             return CFG.VolcanoAfter == "again" and "again" or "hop"
         end
-        P.kit.segmented(v, "after the win", {
-            { "hop", "Loot + hop" }, { "again", "Loot + again" }, { "none", "No loot" },
+        P.kit.sectionRight(v, "After the win", function() return WIN[winNow()][3] end)
+        P.kit.heroList(v, {
+            { "hop", "Loot, then next server", "today" },
+            { "again", "Loot, then again here", "" },
+            { "none", "No loot, next server", "" },
         }, winNow, function(x)
             if x == "none" then
                 CFG.VolcanoLoot = false
@@ -25361,7 +25876,8 @@ local function buildUI()
                 CFG.VolcanoLoot = true
                 CFG.VolcanoAfter = x
             end
-        end)
+        end, "prehistoric")
+        gap(v, 12)
         P.kit.truthCard(v, function() return WIN[winNow()][1] end, function()
             local r = WIN[winNow()][2]
             if winNow() == "hop" then
@@ -25370,17 +25886,18 @@ local function buildUI()
             end
             return r
         end, "prehistoric")
+        gap(v, 2)
+        P.kit.fightsWith(v, "prehistoric", { h = 50, valueSize = 13 })
         hairline(v)
-        P.kit.fightsWith(v, "prehistoric")
-        heading2(v, "also")
-        switchRow(v, "Skull Guitar M1 on the vents",
+        P.kit.sectionRight(v, "Also", nil)
+        P.kit.switch(v, "Skull Guitar M1 on the vents",
             "Its M1 breaks vents. No guitar: every weapon you carry fires",
             function() return CFG.VentGuitar end,
             function(x) CFG.VentGuitar = x end)
-        switchRow(v, "Home by respawn after the loot",
-            "A respawn takes you home fast. The stay over: reset, back at your spawn (Tiki), then the next server. Never with the chalice",
+        P.kit.switch(v, "Home by respawn after the loot", "A respawn takes you home fast",
             function() return CFG.RespawnHome end,
             function(x) CFG.RespawnHome = x end)
+        gap(v, 10)
         caption(v, "The egg needs the Dragon Tether and a hit on a golem or vent. Lava golems are held off the relic by the magnet.")
         P.kit.fineTune(v, function(v)
             sliderRow(v, "Stay after the loot, then the next server", 0, 300, 5,
@@ -25461,7 +25978,7 @@ local function buildUI()
             sliderRow(v, "Pressure that comes first", 20, 100, 5,
                 function() return CFG.PressureMax end,
                 function(x) CFG.PressureMax = x end, " %")
-        end, 15)
+        end, 12)
         fold(v, "Details", function(v)
             readout(v, function()
                 local ev = P.sea.ev
@@ -25532,6 +26049,8 @@ local function buildUI()
                 return table.concat(out, "\n")
             end)
             caption(v, "Prehistoric Island up: start it, vents + Lava Golems, bones + egg.")
+            caption(v, "Home by respawn: the stay over, reset, back at your spawn (Tiki), then the next server. "
+                .. "Never with the chalice.")
             caption(v, "After the loot: the next server = the hunt goes on there - the loop. "
                 .. "Again, on this island = the wiki: the event has no cooldown.")
             caption(v, "The egg needs the Dragon Tether, a hit on a golem or vent, and "
