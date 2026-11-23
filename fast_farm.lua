@@ -7796,8 +7796,17 @@ do
             local buster = string.find(url, "?", 1, true) and "&cb=" or "?cb="
             local code = "repeat task.wait() until game:IsLoaded()\n"
                 .. (carry and string.format("_G.BFF_CARRY = %q\n", carry) or "")
-                .. string.format("_G.BFF_SOURCE = %q\n", url)
-                .. string.format("pcall(function() loadstring(game:HttpGet(%q .. %q .. tostring(tick())))() end)\n", url, buster)
+            -- Owner test build loaded from the workspace (_G.BFF_LOCAL =
+            -- "ff_r3.lua"): the hop reloads that same file, not the live
+            -- URL, so an unpushed build survives a hop (2026-11-23).
+            local localFile = _G.BFF_LOCAL
+            if type(localFile) == "string" and localFile ~= "" then
+                code = code .. string.format("_G.BFF_LOCAL = %q\n", localFile)
+                    .. string.format("pcall(function() loadstring(readfile(%q))() end)\n", localFile)
+            else
+                code = code .. string.format("_G.BFF_SOURCE = %q\n", url)
+                    .. string.format("pcall(function() loadstring(game:HttpGet(%q .. %q .. tostring(tick())))() end)\n", url, buster)
+            end
             if pcall(q, code) then E.queued = true end
         end
 
