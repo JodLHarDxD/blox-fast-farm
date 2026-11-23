@@ -104,4 +104,11 @@ for name, code in runs:
     print("== " + name)
     print(r.stdout + r.stderr)
     ok = ok and "ALL PASS" in r.stdout
+# R4 F2: every Stop cancels a pending hop - the farm's Stop and Home's pill.
+stop = cut("function P.stop(why)", "function P.stats()")
+home = cut("hero.Activated:Connect(function()", "hero.MouseButton1Down")
+for name, cond in (("P.stop calls P.hopCancel", "pcall(P.hopCancel" in stop),
+                   ("Home's Stop (PvP, a hop by hand) cancels the hop", home.count("hopCancel") >= 2)):
+    print(("PASS " if cond else "FAIL ") + name)
+    ok = ok and cond
 sys.exit(0 if ok else 1)

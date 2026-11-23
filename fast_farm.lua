@@ -735,7 +735,7 @@ local CFG = {
     -- WHICH NEWS THE STRIP SHOWS (user, 2026-11-07): one tick each, on the
     -- Breaking news page. Only what is shown: the news is read all the same.
     NewsShow           = { fruit = true, moon = true, mirage = true, prehistoric = true, kitsune = true,
-        frozen = true, elite = true, raid = true, server = true, trades = true },
+        frozen = true, elite = true, raid = true, castle = true, server = true, trades = true },
 
     Debug              = false,
 }
@@ -883,42 +883,179 @@ function panelKeepOnScreen(rx, ty, w, h, vw, vh)
 end
 -- LIVE CARD (R3 Task 1c, pure: tools/livecard_test.py). Home's "X is up in
 -- this server" card: a headline (tone "up") -> the hunt it is. Priority, one
--- card at a time: a fruit, Mirage, Prehistoric, a boss, any other news item
--- that maps to a hunt (the Frozen Dimension = the Leviathan hunt).
+-- card at a time: a fruit, Mirage, Prehistoric, a boss, the pirates in the
+-- castle (Random), any other news item that maps to a hunt (the Frozen
+-- Dimension = the Leviathan hunt).
 LIVE_RAIDBOSS = { ["Dough King"] = true, ["Cake Prince"] = true, ["rip_indra True Form"] = true,
     ["Soul Reaper"] = true }
 -- fruit = { name, spot } of the dearest fruit lying here (nil = none read).
 -- Returns { key, rank, mode, pack, title } or nil: a headline with no hunt.
+-- R4 F3: short titles - the card itself means "in this server".
 function liveEventOf(it, fruit)
     if type(it) ~= "table" or it.tone ~= "up" or type(it.key) ~= "string" then return nil end
     local boss = string.match(it.key, "^boss:(.+)$")
     if it.key == "fruit" then
         local nm = fruit and fruit.name
         return { key = "fruit:" .. tostring(fruit and fruit.spot or "?"), rank = 1, mode = "fruit", pack = "fruits",
-            title = nm and (tostring(nm) .. " fruit is up in this server") or "A fruit spawned in this server" }
+            title = nm and (tostring(nm) .. " fruit is up") or "A fruit spawned" }
     elseif it.key == "mirage" then
-        return { key = it.key, rank = 2, mode = "mirage", pack = "sea", title = "Mirage is up in this server" }
+        return { key = it.key, rank = 2, mode = "mirage", pack = "sea", title = "Mirage is up" }
     elseif it.key == "prehistoric" then
         return { key = it.key, rank = 3, mode = "prehistoric", pack = "prehistoric",
-            title = "Prehistoric Island is up in this server" }
+            title = "Prehistoric is up" }
     elseif boss then
         return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "raid" or "elite", pack = "raid",
-            title = boss .. " is up in this server" }
+            title = boss .. " is up" }
+    elseif it.key == "castle" then
+        -- R4 F1: the pirate raid at the Castle on the Sea = Random there,
+        -- with the strongest M1 you carry unless Random has its own pick.
+        return { key = it.key, rank = 5, mode = "random", pack = "farm", title = "Pirates are in the castle",
+            strongest = true }
     elseif it.key == "frozen" then
-        return { key = it.key, rank = 5, mode = "levi", pack = "sea", title = "Frozen Dimension is up in this server" }
+        return { key = it.key, rank = 6, mode = "levi", pack = "sea", title = "Frozen Dimension is up" }
     end
     return nil
 end
--- The one card to show: the best rank not put away (dismissed[key]); the
--- first of a rank wins.
-function liveMoment(items, fruit, dismissed)
-    dismissed = dismissed or {}
-    local best
-    for _, it in ipairs(items or {}) do
-        local m = liveEventOf(it, fruit)
-        if m and not dismissed[m.key] and (not best or m.rank < best.rank) then best = m end
+-- THE CASTLE RAID (R4 F1). The game's signal is the one Random mode uses:
+-- a raid pirate is a living enemy within CASTLE_RAID_R studs of the raid
+-- centre (randomStep's CASTLE_RAID; the redz hub's own definition). The
+-- news counts them (loaded or parked far off) once a second; n = that
+-- count, rip_indra left out. Up at the first pirate; over only after
+-- CASTLE_GRACE s with none (the gap between two waves is still the raid).
+-- st = { up, since, lastSeen }. Returns "up", "gone" or nil.
+CASTLE_RAID_R, CASTLE_GRACE = 750, 60
+function castleRaidFeed(st, n, now)
+    if type(n) == "number" and n > 0 then
+        st.lastSeen = now
+        if not st.up then
+            st.up, st.since = true, now
+            return "up"
+        end
+    elseif st.up and now - (st.lastSeen or now) >= CASTLE_GRACE then
+        st.up = false
+        return "gone"
+    end
+    return nil
+end
+-- THE STRONGEST M1 (R4 F1, owner: "fight them with the strongest M1 you
+-- have right then"). The script's own M1 ranking (WEAPON ROTATION's
+-- M1_RANK: the sword swings hardest - Hallow Scythe 3755 a swing - then a
+-- fighting style, the fruit, a gun); the higher mastery breaks a tie, then
+-- the name. list = { { name, type, mastery } } of the weapons you carry.
+M1_STRENGTH = { Sword = 1, Melee = 2, ["Blox Fruit"] = 3, Gun = 4 }
+function strongestM1(list)
+    local best, br, bm, bn
+    for _, w in ipairs(list or {}) do
+        local r = type(w) == "table" and M1_STRENGTH[w.type]
+        if r then
+            local m = tonumber(w.mastery) or 0
+            if not best or r < br or (r == br and (m > bm or (m == bm and tostring(w.name) < bn))) then
+                best, br, bm, bn = w.name, r, m, tostring(w.name)
+            end
+        end
     end
     return best
+end
+-- The weapon a card start fights with for this start only: nil when the
+-- mode has its own pick (CFG.FightWith[mode], never overwritten), else the
+-- strongest you carry.
+function onceWeaponOf(fightWith, mode, list)
+    local own = type(fightWith) == "table" and fightWith[mode] or nil
+    if type(own) == "string" and own ~= "" and own ~= "MIX" then return nil end
+    return strongestM1(list)
+end
+-- R4 F3: EVERY live event, not put away (dismissed[key]), best rank
+-- first; within a rank, the news's own order. One event per key.
+function liveMoments(items, fruit, dismissed)
+    dismissed = dismissed or {}
+    local out, seen = {}, {}
+    for i, it in ipairs(items or {}) do
+        local m = liveEventOf(it, fruit)
+        if m and not dismissed[m.key] and not seen[m.key] then
+            seen[m.key] = true
+            m.order = i
+            table.insert(out, m)
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.rank ~= b.rank then return a.rank < b.rank end
+        return a.order < b.order
+    end)
+    return out
+end
+-- The first card: the best rank not put away; the first of a rank wins.
+function liveMoment(items, fruit, dismissed)
+    return liveMoments(items, fruit, dismissed)[1]
+end
+-- THE CAROUSEL (R4 F3, pure): the card rolls through every live event,
+-- LIVE_ROLL s each, and loops; an arrow or a touch holds it LIVE_PAUSE s.
+-- cs = { key, idx, nextAt, pauseUntil }: the event showing is kept by its
+-- key, so a list that changes under it keeps showing the same one; when
+-- that one is gone, the one now at its place (wrapping) takes over.
+LIVE_ROLL, LIVE_PAUSE = 2, 8
+function carouselSync(cs, list)
+    local n = #(list or {})
+    if n < 2 then cs.nextAt = nil end
+    if n == 0 then
+        cs.key, cs.idx = nil, nil
+        return nil
+    end
+    for i, m in ipairs(list) do
+        if m.key == cs.key then
+            cs.idx = i
+            return m
+        end
+    end
+    local i = cs.idx or 1
+    if i > n then i = 1 end
+    cs.idx, cs.key = i, list[i].key
+    return list[i]
+end
+-- One step, dir = 1 (next) or -1 (back), wrapping. manual = an arrow:
+-- the roll holds LIVE_PAUSE s.
+function carouselStep(cs, list, dir, now, manual)
+    carouselSync(cs, list)
+    local n = #(list or {})
+    if n < 2 then return list and list[1] or nil end
+    cs.idx = (cs.idx - 1 + dir) % n + 1
+    cs.key = list[cs.idx].key
+    cs.nextAt = now + LIVE_ROLL
+    if manual then carouselTouch(cs, now) end
+    return list[cs.idx]
+end
+-- A touch on the card: the roll holds LIVE_PAUSE s.
+function carouselTouch(cs, now)
+    cs.pauseUntil = now + LIVE_PAUSE
+    cs.nextAt = math.max(cs.nextAt or 0, cs.pauseUntil)
+end
+-- The driver's tick: the event to show and the step taken (0 or 1). The
+-- first look holds LIVE_ROLL s before the first roll.
+function carouselTick(cs, list, now)
+    local m = carouselSync(cs, list)
+    if #(list or {}) < 2 then return m, 0 end
+    if cs.nextAt == nil then
+        cs.nextAt = now + LIVE_ROLL
+        return m, 0
+    end
+    if now >= cs.nextAt and now >= (cs.pauseUntil or 0) then
+        return carouselStep(cs, list, 1, now), 1
+    end
+    return m, 0
+end
+-- x: only the event showing goes (for the session); the one now at its
+-- place shows next. Returns the new list and the event to show.
+function carouselDismiss(cs, list, dismissed)
+    local out = {}
+    if cs.key then dismissed[cs.key] = true end
+    for _, m in ipairs(list or {}) do
+        if not dismissed[m.key] then table.insert(out, m) end
+    end
+    cs.key = nil
+    return out, carouselSync(cs, out)
+end
+-- The arrows and the position marker: only with more than one event.
+function carouselChrome(n)
+    return (n or 0) > 1
 end
 -- What a tap does: "cover" (pack not held), "none" (already hunting it),
 -- else "hunt". state = packState of the pack's mode.
@@ -928,10 +1065,11 @@ function liveTapOf(m, state, running, nowMode)
     return "hunt"
 end
 -- The card's sub line, by what a tap does.
+-- R4 F3: short, so neither line truncates beside the arrows.
 function liveSubOf(action, packName)
-    if action == "cover" then return packName .. " runs it for you · look inside" end
-    if action == "none" then return "Hunting it now · " .. packName end
-    return "Tap to hunt it · " .. packName
+    if action == "cover" then return "Look inside · " .. packName end
+    if action == "none" then return "Hunting now · " .. packName end
+    return "Tap to hunt · " .. packName
 end
 -- The tap: the hunt = picking the mode (the Library's setMode) and pressing
 -- Start when nothing runs; a running farm just switches mode. act = { cover,
@@ -941,6 +1079,7 @@ function liveTap(m, state, running, nowMode, act)
     if a == "cover" then act.cover(m.pack)
     elseif a == "hunt" then
         act.setMode(m.mode, true)
+        if m.strongest and act.weapon then act.weapon(m.mode) end
         if not running then act.start() end
     end
     return a
@@ -4526,12 +4665,18 @@ do
     -- The one weapon in force, or nil = MIX. quiet: no status line.
     function P.fightWeapon(mode, quiet)
         local tbl = CFG.FightWith
-        if type(tbl) ~= "table" or next(tbl) == nil then return nil end
+        -- A live card's start (R4 F1, the castle raid): its weapon for this
+        -- start only (P.fightOnce, cleared by Stop); the mode's own pick wins.
+        local once = (P :: any).fightOnce
+        if (type(tbl) ~= "table" or next(tbl) == nil) and not once then return nil end
         if mode == nil then
             local mn = (P :: any).modeNow
             mode = mn and mn() or nil
         end
-        local want = mode and tbl[mode]
+        local want = mode and type(tbl) == "table" and tbl[mode] or nil
+        if (type(want) ~= "string" or want == "" or want == "MIX") and once and once.mode == mode then
+            want = once.name
+        end
         if type(want) ~= "string" or want == "" or want == "MIX" then return nil end
         local _, missing = fightPick(want, carried(), nil)
         if missing then
@@ -4571,6 +4716,18 @@ do
         local lv = t and t:FindFirstChild("Level")
         local v = lv and tonumber(lv.Value)
         return v or P.fightMasteryCache[name]
+    end
+    -- The weapons you carry right now as { name, type, mastery } (R4 F1:
+    -- the castle card's strongest M1, onceWeaponOf).
+    function P.carriedWeapons()
+        local out = {}
+        for _, t in ipairs(toolNames()) do
+            local ty = toolType(t)
+            if M1_STRENGTH[ty] then
+                table.insert(out, { name = t.Name, type = ty, mastery = P.fightMastery(t.Name) })
+            end
+        end
+        return out
     end
     -- Once a second (the side loop): a mode whose goal is on and whose weapon
     -- reached MasteryStop goes back to MIX, goal off.
@@ -7313,6 +7470,7 @@ do
     -- area is that circle, however far the pirates spread over the yard. Anywhere
     -- else: RandomRadius round you.
     local CASTLE_RAID = Vector3.new(-5556, 314, -2988)
+    P.castleRaidAt = CASTLE_RAID     -- the news's castle raid (R4 F1) reads the same circle
     function randomStep()
         local _, r = parts()
         if not r then return end
@@ -7983,7 +8141,11 @@ do
         -- this script mid-wait). The game's server join whatever list the JobId
         -- came from; one started here only without it, and never again in this
         -- server once refused for want of a teleport token.
-        local function joinServer(id, myEpoch)
+        -- gone (R4 F2): the hop's cancel test (Stop, a cancel) - asked right
+        -- before the teleport call, so a hop cancelled while the list was
+        -- read never asks for one.
+        local function joinServer(id, myEpoch, gone)
+            local function off() return stale(myEpoch) or (gone ~= nil and gone()) end
             local sb = RS:FindFirstChild("__ServerBrowser")
             local via = sb and "game" or "here"
             if not sb and E.clientRefused then
@@ -8008,6 +8170,10 @@ do
             -- Its own thread: the game's server may take its time answering, and
             -- the wait below must still end.
             task.spawn(function()
+                if off() then
+                    failed, why = true, "stopped"
+                    return
+                end
                 local ok, r = pcall(function()
                     if via == "game" then return sb:InvokeServer("teleport", id) end
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, id, player)
@@ -8018,13 +8184,13 @@ do
                 end
             end)
             local t0 = os.clock()
-            while not failed and os.clock() - t0 < 15 and not stale(myEpoch) do
+            while not failed and os.clock() - t0 < 15 and not off() do
                 task.wait(0.25)
             end
             if c1 then pcall(function() c1:Disconnect() end) end
             if c2 then pcall(function() c2:Disconnect() end) end
             if not failed then
-                why = stale(myEpoch) and "stopped"
+                why = off() and "stopped"
                     or ("no teleport within 15 s" .. ((ret ~= nil) and ("  (the game said " .. tostring(ret) .. ")") or ""))
             end
             why = tostring(why or "refused")
@@ -8059,11 +8225,27 @@ do
             end
             if E.hopping then return false end
             E.hopping = true
-            local myEpoch = epoch
+            -- STOP CANCELS IT (R4 F2, owner: Stop still hopped). Two tokens:
+            -- the farm's epoch (P.stop) and the hop's own (P.hopCancel - a
+            -- hop by hand runs with the farm stopped, so the epoch alone
+            -- cannot end it). gone() is asked before every step that leads
+            -- to a teleport: the list, each join, right before the call.
+            local myEpoch, myToken = epoch, E.hopToken
+            local function gone() return stale(myEpoch) or E.hopToken ~= myToken end
+            local function cancelled()
+                -- P.hopCancel already said so and freed E.hopping (a new
+                -- hop may be running by now: its flag is not ours to clear).
+                if E.hopToken == myToken then
+                    E.hopping = false
+                    E.note = "hop stopped"
+                end
+                return false
+            end
             releasePile()
             setState("HOP")
             -- A fruit in the backpack is lost on a hop: stored first (P.storeBeforeHop).
             if P.storeBeforeHop then pcall(P.storeBeforeHop) end
+            if gone() then return cancelled() end
             local now = os.time()
             E.visited[game.JobId] = now + (tonumber(keepAway) or 0)
             pruneVisited(E.visited, now, 3600)
@@ -8083,7 +8265,7 @@ do
                         or ("the Roblox server list - " .. tostring(E.listWhy or "the game's was empty")))
                 print("[BFF] hop: " .. E.lastList)
                 for i, s in ipairs(cands) do
-                    if i > 5 or stale(myEpoch) then break end
+                    if i > 5 or gone() then break end
                     if holdingChalice() then
                         E.hopping = false
                         markChalice()
@@ -8092,23 +8274,56 @@ do
                     E.visited[s.id] = os.time()
                     local carry = carryState(CFG.Hunt and P.running, s)
                     fileWrite(carry)
+                    E.carryOut = true          -- a cancel writes resume = false over it
                     queueReload(carry)
                     E.note = string.format("hop: joining a server with %d players%s  (%s)", s.count,
                         s.region and ("  ·  " .. tostring(s.region) .. (s.ms and string.format(" ~%d ms", math.floor(s.ms + 0.5))
                             or " (your ping there not known yet)")) or "", tostring(why))
                     say(E.note)
-                    joinServer(s.id, myEpoch)
+                    joinServer(s.id, myEpoch, gone)
+                    if gone() then break end
                     -- Still here: that one refused (full, gone, or teleports throttled).
                     E.tally.fails += 1
                     task.wait(1)
                 end
-                if stale(myEpoch) then break end
+                if gone() then return cancelled() end
                 task.wait(3 * round)
+                if gone() then return cancelled() end
             end
             E.hopping = false
             E.note = "hop failed three times - trying again shortly  (" .. tostring(E.lastJoin or E.lastList) .. ")"
             say(E.note)
             return false
+        end
+
+        -- CANCEL (R4 F2): every hop in flight gives up before its next
+        -- teleport call - the list being read, the join being waited on, the
+        -- retry rounds. A carry already written for the next server is
+        -- written again with resume = false: a teleport the game's server
+        -- had already started lands with the hunt stopped.
+        -- keepCarry: a new copy of the script is replacing this one (P.stop
+        -- "reload") - what was carried stays carried.
+        function P.hopCancel(keepCarry)
+            E.hopToken = (E.hopToken or 0) + 1
+            local was = E.hopping
+            E.hopping = false
+            if E.carryOut and not keepCarry then
+                E.carryOut = false
+                pcall(function() fileWrite(carryState(false)) end)
+            end
+            if was then
+                E.note = "hop stopped"
+                say(E.note)
+            end
+            return was
+        end
+        function P.hopPending() return E.hopping == true end
+        -- Why no hop can happen now (the Home button dims and says it), or
+        -- nil. The chalice only: the fruit-too-good-to-lose check stores and
+        -- unequips, so it runs on the tap (hop says why it refused).
+        function P.hopBlocked()
+            if E.chalice or holdingChalice() then return "the God's Chalice is with you" end
+            return nil
         end
 
         function P.hopNow()
@@ -17180,7 +17395,8 @@ end
 do
     local function build()
         -- Typed open: its fields come as the news is read.
-        local N: { [string]: any } = { isles = {}, bosses = {}, fruits = {}, events = {} }
+        local N: { [string]: any } = { isles = {}, bosses = {}, fruits = {}, events = {},
+            castle = { up = false, n = 0 } }
         P.news = N
         local Lighting    = game:GetService("Lighting")
         local HttpService = game:GetService("HttpService")
@@ -17500,6 +17716,32 @@ do
                     end
                 end
                 N.bosses = found
+                -- THE CASTLE RAID (R4 F1): Random's own signal - living
+                -- enemies within CASTLE_RAID_R of its raid centre, loaded
+                -- or parked far off (the game parks far ones in
+                -- ReplicatedStorage), rip_indra left out (castleRaidFeed).
+                local at = (P :: any).castleRaidAt
+                if at then
+                    local n = 0
+                    local enemies = workspace:FindFirstChild("Enemies")
+                    for _, folder in ipairs(enemies and { enemies, RS } or { RS }) do
+                        for _, m in ipairs(folder:GetChildren()) do
+                            if m:IsA("Model") then
+                                local hrp = m:FindFirstChild("HumanoidRootPart")
+                                local hum = m:FindFirstChildOfClass("Humanoid")
+                                if hrp and hrp:IsA("BasePart") and (not hum or hum.Health > 0)
+                                    and not IS_RAID[cleanName(m)]
+                                    and (hrp.Position - at).Magnitude <= CASTLE_RAID_R then
+                                    n += 1
+                                end
+                            end
+                        end
+                    end
+                    N.castle.n = n
+                    if castleRaidFeed(N.castle, n, now) == "up" then
+                        breaking("castle", "PIRATES ARE IN THE CASTLE", now)
+                    end
+                end
                 local g = N.shown
                 if g and g.Parent and now - cakeAt > 60 then
                     cakeAt = now
@@ -17641,6 +17883,13 @@ do
                 if not anyElite then add("elite", "dim", "NO ELITE", "Diablo, Deandre, Urban: none up") end
                 for _, n in ipairs(RAID) do
                     if N.bosses[n] then add("boss:" .. n, "up", string.upper(n) .. " UP", N.bosses[n]) end
+                end
+                -- The pirate raid at the Castle on the Sea (R4 F1): after the bosses.
+                local cs = N.castle
+                if cs and cs.up then
+                    add("castle", "up", "PIRATES IN THE CASTLE", (cs.n > 0)
+                        and string.format("the raid at the Castle on the Sea · %d pirates", cs.n)
+                        or "the raid at the Castle on the Sea · the next wave is coming")
                 end
                 local ck = N.cake
                 if ck and not N.bosses["Cake Prince"] and not N.bosses["Dough King"] then
@@ -21064,39 +21313,152 @@ local function buildUI()
             if race and race.allNow() then detail.Text = "V4 - every weapon · " .. detail.Text end
         end)
         gap(v, 12)
-        local hero = mk("TextButton", {
-            Size = UDim2.new(1, -40, 0, 52), BackgroundColor3 = C.ivory,
-            BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(16),
-            TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
+        -- THE ROW (R4 F2): the Start/Stop pill and, beside it, a square hop
+        -- button at the same height (ghost: no fill, a hairline, the board's
+        -- swap arrows). The pill shrinks to fit: 20 px margins, an 8 px gap.
+        local HOP_W = 52
+        local heroRow = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
             LayoutOrder = nextOrder(), Parent = v,
         })
+        local heroW = -(40 + HOP_W + 8)
+        local hero = mk("TextButton", {
+            Size = UDim2.new(1, heroW, 0, 52), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, -(HOP_W + 8) / 2, 0.5, 0), BackgroundColor3 = C.ivory,
+            BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(16),
+            TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
+            TextTruncate = Enum.TextTruncate.AtEnd, Parent = heroRow,
+        })
         corner(hero, 14)
-        -- PvP on: this is its Stop (the farm is stopped already).
+        -- PvP on: this is its Stop (the farm is stopped already). A hop by
+        -- hand on its way with the farm stopped: this is its Stop too.
+        -- Every Stop here cancels a pending hop (R4 F2).
         hero.Activated:Connect(function()
-            if CFG.Pvp then P.pvpSet(false)
-            elseif P.running then P.stop() else P.start() end
+            if CFG.Pvp then
+                P.pvpSet(false)
+                pcall(P.hopCancel)
+            elseif P.running then P.stop()
+            elseif P.hopPending and P.hopPending() then P.hopCancel()
+            else P.start() end
         end)
         hero.MouseButton1Down:Connect(function()
-            tween(hero, { Size = UDim2.new(1, -46, 0, 50) }, QUICK)
+            tween(hero, { Size = UDim2.new(1, heroW - 6, 0, 50) }, QUICK)
         end)
-        local function heroUp() tween(hero, { Size = UDim2.new(1, -40, 0, 52) }, QUICK) end
+        local function heroUp() tween(hero, { Size = UDim2.new(1, heroW, 0, 52) }, QUICK) end
         hero.MouseButton1Up:Connect(heroUp)
         hero.MouseLeave:Connect(heroUp)
         -- It says what it starts: "Start · Haki berries".
         addLive(function()
-            local busy = P.running or CFG.Pvp
-            hero.Text = (busy and "Stop" or "Start") .. " · " .. modeName()
+            local hopping = P.hopPending and P.hopPending()
+            local busy = P.running or CFG.Pvp or hopping
+            hero.Text = (busy and "Stop" or "Start") .. " · "
+                .. ((hopping and not P.running and not CFG.Pvp) and "hop" or modeName())
             hero.BackgroundColor3 = busy and C.stop or C.ivory
             hero.TextColor3 = busy and C.text or C.base
         end)
 
+        -- THE HOP BUTTON: a hop by hand through Servers' own "Hop now"
+        -- (P.hopNow: the carry goes too, so a running hunt resumes over
+        -- there). Second tap: the first reads "Tap again" in amber for 2 s.
+        -- No hop possible (the chalice): dimmed, the line under the row says
+        -- why. A hop refused on the tap (a fruit too good to lose): its
+        -- words on that line.
+        local hopB = mk("TextButton", {
+            Size = UDim2.fromOffset(HOP_W, 52), AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -20, 0, 0), BackgroundColor3 = C.base, BackgroundTransparency = 1,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = heroRow,
+        })
+        corner(hopB, 14)
+        local hopStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = hopB })
+        local hopIc, hopPaint = P.kit.icon(hopB, 18, {
+            { 4, 8, 20, 8 }, { 16, 4, 20, 8 }, { 16, 12, 20, 8 },
+            { 20, 16, 4, 16 }, { 8, 12, 4, 16 }, { 8, 20, 4, 16 },
+        }, 1.5, C.text)
+        hopIc.AnchorPoint, hopIc.Position = Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 9)
+        local hopWord = mk("TextLabel", {
+            Size = UDim2.new(1, -4, 0, 14), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -7),
+            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(9),
+            TextColor3 = C.second, Text = "Hop", Parent = hopB,
+        })
+        -- The line under the row: 0 high while it has nothing to say; the
+        -- panel grows by its height on Home (applyGrow, as the live card).
+        local hopLineH = 0
+        local hopLine = mk("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.mute, Text = "",
+            LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = hopLine })
+        local hopArmed, hopTok, hopTapped = false, 0, 0
+        local function hopPaintAll()
+            local why = P.hopBlocked and P.hopBlocked() or nil
+            local hopping = P.hopPending and P.hopPending()
+            local col = why and C.third or (hopArmed and C.warn) or (hopping and C.live) or C.text
+            hopPaint(col)
+            hopWord.Text = hopArmed and "Tap again" or (hopping and "Hopping" or "Hop")
+            hopWord.TextColor3 = why and C.third or (hopArmed and C.warn) or (hopping and C.live) or C.second
+            hopStroke.Color = hopArmed and C.warn or C.hair
+            local line = ""
+            if why then line = "No hop: " .. why
+            elseif os.clock() - hopTapped < 6 and not hopping then
+                -- What the tap came to: the hop's own words when it refused.
+                local e = P.elite
+                local note = e and tostring(e.note or "") or ""
+                if string.find(note, "refused", 1, true) then line = note end
+            end
+            hopLine.Text = line
+            local h = (line ~= "") and 20 or 0
+            if h ~= hopLineH then
+                hopLineH = h
+                hopLine.Size = UDim2.new(1, 0, 0, h)
+                if P.homeRegrow then pcall(P.homeRegrow) end
+            end
+        end
+        hopB.Activated:Connect(function()
+            if P.hopBlocked and P.hopBlocked() then hopPaintAll() return end
+            if P.hopPending and P.hopPending() then return end
+            hopTok += 1
+            local mine = hopTok
+            if not hopArmed then
+                hopArmed = true
+                hopPaintAll()
+                task.delay(2, function()
+                    if hopTok == mine and hopArmed then
+                        hopArmed = false
+                        hopPaintAll()
+                    end
+                end)
+                return
+            end
+            hopArmed = false
+            hopTapped = os.clock()
+            pcall(P.hopNow)
+            hopPaintAll()
+        end)
+        hopPaintAll()
+        addLive(hopPaintAll)
+
         -- THE LIVE MOMENT (R3): the news says a thing is up in this server
-        -- (a fruit, Mirage, Prehistoric, a boss, the Frozen Dimension). A pack
-        -- you hold: a tap hunts it (the mode, and Start when nothing runs). A
-        -- pack you do not hold: a tap opens its cover. Nothing up: no card at
-        -- all (0 high), and it clears when the event ends. The x puts it away
-        -- for the session. The panel grows by its height while Home shows it
-        -- (applyGrow -> P.panelGrow; a cropped panel just scrolls).
+        -- (a fruit, Mirage, Prehistoric, a boss, the pirates in the castle,
+        -- the Frozen Dimension). A pack you hold: a tap hunts it (the mode,
+        -- and Start when nothing runs). A pack you do not hold: a tap opens
+        -- its cover. Nothing up: no card at all (0 high), and it clears when
+        -- the event ends. The x puts away the event showing, for the session.
+        -- The panel grows by its height while Home shows it (applyGrow ->
+        -- P.panelGrow; a cropped panel just scrolls).
+        -- R4 F3: EVERY live event, in priority order, one at a time: the card
+        -- rolls on every LIVE_ROLL s and loops (the carousel functions); the
+        -- arrows step back and on, an arrow or a touch holds the roll
+        -- LIVE_PAUSE s; dots under the words say where you are. One event:
+        -- no arrows, no dots, no roll. A change slides the words in (0.2 s)
+        -- inside the card's own clipped frame. The driver is the live loop's
+        -- (it runs only while Home shows).
+        -- Layout (card W wide, 64 high): the arrows' 44 px hit areas sit on
+        -- the card's side edges (half in the 20 px margin), the art at 28,
+        -- the words from 78 to W-30, the x a small chip on the top-right
+        -- corner (drawn above the right arrow's top).
         local dismissed, shown, momentOn = {}, nil, false
         local mom = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, ClipsDescendants = true,
@@ -21104,64 +21466,139 @@ local function buildUI()
         })
         local card = mk("TextButton", {
             Size = UDim2.new(1, -40, 0, 64), Position = UDim2.fromOffset(20, 12),
-            BackgroundColor3 = C.row, BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = mom,
+            BackgroundColor3 = C.row, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+            ClipsDescendants = true, ZIndex = 1, Parent = mom,
         })
         corner(card, 14)
         local cardStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card })
-        local artBox = mk("Frame", { Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(10, 10),
-            BackgroundColor3 = C.base, BorderSizePixel = 0, ClipsDescendants = true, Parent = card })
+        -- What slides: the art and the words.
+        local slide = mk("Frame", { Name = "Slide", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+            Parent = card })
+        local artBox = mk("Frame", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(28, 12),
+            BackgroundColor3 = C.base, BorderSizePixel = 0, ClipsDescendants = true, Parent = slide })
         corner(artBox, 10)
-        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 18), Position = UDim2.fromOffset(66, 14),
+        local mTitle = mk("TextLabel", { Size = UDim2.new(1, -108, 0, 18), Position = UDim2.fromOffset(78, 11),
             BackgroundTransparency = 1, Font = LOOK.semi, TextSize = F.small,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.text, Text = "", Parent = card })
-        local mLine = mk("TextLabel", { Size = UDim2.new(1, -124, 0, 16), Position = UDim2.fromOffset(66, 34),
+            TextColor3 = C.text, Text = "", Parent = slide })
+        local mLine = mk("TextLabel", { Size = UDim2.new(1, -108, 0, 16), Position = UDim2.fromOffset(78, 30),
             BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(12),
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.second, Text = "", Parent = card })
-        local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), Position = UDim2.new(1, -46, 0, 10),
-            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = 22, TextColor3 = LOOK.mute,
-            Text = "×", AutoButtonColor = false, Parent = card })
+            TextColor3 = C.second, Text = "", Parent = slide })
+        -- Where you are: a dot per event, the one showing lit.
+        local dots = mk("Frame", { Name = "Dots", Size = UDim2.new(1, -108, 0, 4), Position = UDim2.fromOffset(78, 52),
+            BackgroundTransparency = 1, Visible = false, Parent = card })
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4),
+            SortOrder = Enum.SortOrder.LayoutOrder, Parent = dots })
+        local dotList = {}
+        -- The arrows: a thin glyph in a 44 px hit area, centred 10 px inside
+        -- the card's side edges (row x 30 and W-30, the card's y 36).
+        local mPrev = mk("TextButton", {
+            Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(30 - 22, 12 + 36 - 22),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(20), TextColor3 = C.second,
+            Text = "‹", AutoButtonColor = false, Visible = false, ZIndex = 3, Parent = mom,
+        })
+        local mNext = mk("TextButton", {
+            Size = UDim2.fromOffset(44, 44), AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -(30 - 22), 0, 12 + 36 - 22),
+            BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(20), TextColor3 = C.second,
+            Text = "›", AutoButtonColor = false, Visible = false, ZIndex = 3, Parent = mom,
+        })
+        -- The x: a 20 px chip on the card's top-right corner, its 44 px hit
+        -- area round it (the row's top clips what is above it).
+        local xChip = mk("Frame", { Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(1, -24, 0, 16), BackgroundColor3 = C.raised, BorderSizePixel = 0,
+            Visible = false, ZIndex = 4, Parent = mom })
+        corner(xChip, 10)
+        mk("UIStroke", { Color = C.hair, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = xChip })
+        local mX = mk("TextButton", { Size = UDim2.fromOffset(44, 44), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(1, -24, 0, 16), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(13), TextColor3 = LOOK.mute, Text = "×", AutoButtonColor = false,
+            Visible = false, ZIndex = 5, Parent = mom })
         local cur, nextLook = nil, 0
+        local list, cs = {}, {}
         P.momentLook = function() nextLook = 0 end    -- look at the news now (a tap; the tests)
         local function momentState(m) return P.packState(R.REP[m.pack]) end
-        card.Activated:Connect(function()
-            if not cur then return end
-            liveTap(cur, momentState(cur), P.running, modeNow(), {
-                cover = function(pack) show("cover_" .. pack) end,
-                setMode = setMode, start = P.start,
-            })
-            nextLook = 0    -- the line says "Hunting it now" at the next look
-        end)
         local function applyGrow(name)
-            local want = (name == "home" and momentOn) and 76 or 0
+            local want = (name == "home") and ((momentOn and 76 or 0) + hopLineH) or 0
             if want ~= P.hudExtra then P.panelGrow(want) end
         end
         P.onView = applyGrow
-        local function setMoment(m)
+        P.homeRegrow = function() applyGrow(currentView) end
+        local SLIDE = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local lastSig
+        -- dir: 1 = rolled on, -1 = stepped back, 0 = no motion.
+        local function setMoment(m, dir)
             cur = m
             momentOn = m ~= nil
-            if m then
-                local tint, text, _, soft = R.acc(m.pack)
-                card.BackgroundColor3, cardStroke.Color = tint, soft
-                mLine.TextColor3 = text
-                mTitle.Text = m.title
-                mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
-                if shown ~= m.pack then
-                    shown = m.pack
-                    for _, k in ipairs(artBox:GetChildren()) do
-                        if k:IsA("Frame") then k:Destroy() end
+            local n = #list
+            local many = carouselChrome(n) and m ~= nil
+            mPrev.Visible, mNext.Visible, dots.Visible = many, many, many
+            mX.Visible, xChip.Visible = m ~= nil, m ~= nil
+            local sig = m and table.concat({ m.key, m.title, tostring(momentState(m)),
+                tostring(P.running and modeNow() == m.mode), tostring(cs.idx), tostring(n) }, "|") or nil
+            if sig ~= lastSig then
+                lastSig = sig
+                if m then
+                    local tint, text, _, soft = R.acc(m.pack)
+                    card.BackgroundColor3, cardStroke.Color = tint, soft
+                    mLine.TextColor3 = text
+                    mPrev.TextColor3, mNext.TextColor3 = text, text
+                    mTitle.Text = m.title
+                    mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
+                    if shown ~= m.pack then
+                        shown = m.pack
+                        for _, k in ipairs(artBox:GetChildren()) do
+                            if k:IsA("Frame") then k:Destroy() end
+                        end
+                        R.art(artBox, m.pack, 40, 40)
                     end
-                    R.art(artBox, m.pack, 44, 44)
+                    while #dotList < n do
+                        local d = mk("Frame", { Size = UDim2.fromOffset(4, 4), BorderSizePixel = 0,
+                            LayoutOrder = #dotList + 1, Parent = dots })
+                        corner(d, 2)
+                        table.insert(dotList, d)
+                    end
+                    for i, d in ipairs(dotList) do
+                        d.Visible = i <= n
+                        d.BackgroundColor3 = (i == cs.idx) and C.text or LOOK.mute
+                    end
+                    if dir ~= 0 then
+                        slide.Position = UDim2.fromOffset(16 * dir, 0)
+                        mTitle.TextTransparency, mLine.TextTransparency = 1, 1
+                        tween(slide, { Position = UDim2.fromOffset(0, 0) }, SLIDE)
+                        tween(mTitle, { TextTransparency = 0 }, SLIDE)
+                        tween(mLine, { TextTransparency = 0 }, SLIDE)
+                    end
                 end
             end
             mom.Size = UDim2.new(1, 0, 0, m and 76 or 0)
             applyGrow(currentView)
         end
+        card.MouseButton1Down:Connect(function() carouselTouch(cs, os.clock()) end)
+        card.Activated:Connect(function()
+            if not cur then return end
+            carouselTouch(cs, os.clock())
+            liveTap(cur, momentState(cur), P.running, modeNow(), {
+                cover = function(pack) show("cover_" .. pack) end,
+                setMode = setMode, start = P.start,
+                -- The castle raid: the strongest M1 you carry, this start only.
+                weapon = function(mode)
+                    local w = onceWeaponOf(CFG.FightWith, mode, P.carriedWeapons())
+                    P.fightOnce = w and { mode = mode, name = w } or nil
+                    if w then say(cur.title .. " - fighting with " .. w .. " (your strongest M1)") end
+                end,
+            })
+            nextLook = 0    -- the line says "Hunting now" at the next look
+        end)
+        mPrev.Activated:Connect(function() setMoment(carouselStep(cs, list, -1, os.clock(), true), -1) end)
+        mNext.Activated:Connect(function() setMoment(carouselStep(cs, list, 1, os.clock(), true), 1) end)
         mX.Activated:Connect(function()
-            if cur then dismissed[cur.key] = true end
-            setMoment(nil)
+            local m
+            list, m = carouselDismiss(cs, list, dismissed)
+            carouselTouch(cs, os.clock())
+            setMoment(m, m and 1 or 0)
         end)
         -- The pack a headline belongs to, when this key does not hold it.
         function P.newsPack(it)
@@ -21170,15 +21607,16 @@ local function buildUI()
             local boss = string.match(it.key, "^boss:(.+)$")
             if it.key == "mirage" then pack = "sea"
             elseif it.key == "prehistoric" then pack = "prehistoric"
+            elseif it.key == "castle" then pack = "farm"
             elseif boss then pack = "raid" end
             if pack and P.packState(R.REP[pack]) == "locked" then return pack end
             return nil
         end
-        local function findMoment()
+        local function findMoments()
             local N = P.news
-            if not N then return nil end
+            if not N then return {} end
             local ok, items = pcall(N.headlines)
-            if not ok or type(items) ~= "table" then return nil end
+            if not ok or type(items) ~= "table" then return {} end
             -- The fruit named on the card: the dearest one lying here (N.fruits,
             -- the news's own list, already filtered to the ones you care about).
             local fruit
@@ -21187,19 +21625,18 @@ local function buildUI()
                 fruit = { spot = P.fruitSpot(f),
                     name = f.orig and (P.fruitKey(f.orig) or P.fruitBase(f.orig)) or nil }
             end
-            return liveMoment(items, fruit, dismissed)
+            return liveMoments(items, fruit, dismissed)
         end
-        local lastSig
+        -- The driver: the news every 2 s, the roll every tick (the live loop,
+        -- which runs only while Home shows).
         addLive(function()
-            if os.clock() < nextLook then return end
-            nextLook = os.clock() + 2
-            local m = findMoment()
-            local sig = m and (m.key .. "|" .. m.title .. "|" .. tostring(momentState(m)) .. "|"
-                .. tostring(P.running and modeNow() == m.mode)) or nil
-            if sig ~= lastSig then
-                lastSig = sig
-                setMoment(m)
+            local now = os.clock()
+            if now >= nextLook then
+                nextLook = now + 2
+                list = findMoments()
             end
+            local m, step = carouselTick(cs, list, now)
+            setMoment(m, step)
         end)
         gap(v, 4)       -- the board: MODE's own 4 px margin
 
@@ -28842,7 +29279,8 @@ local function buildUI()
             { "fruit", "Fruits" }, { "moon", "Moon, day and night" }, { "mirage", "Mirage Island" },
             { "prehistoric", "Prehistoric Island" }, { "kitsune", "Kitsune Island" },
             { "frozen", "Frozen Dimension" }, { "elite", "Elite pirates" },
-            { "raid", "Raid bosses, Cake Prince" }, { "server", "Server: players, time here" },
+            { "raid", "Raid bosses, Cake Prince" }, { "castle", "Pirate raid at the castle" },
+            { "server", "Server: players, time here" },
             { "trades", "Your trades: left, back at" },
         }) do
             table.insert(items, { t[2], "",
@@ -29063,6 +29501,10 @@ end
 -- the file) -- not you stopping, so a hunt carried over a hop stays carried.
 function P.stop(why)
     if why ~= "reload" then pcall(P.carryOff) end
+    P.fightOnce = nil          -- a live card's weapon was for that start only (R4 F1)
+    -- Every hop in flight gives up before its next teleport call (R4 F2):
+    -- the list, the join being waited on, the retry rounds.
+    pcall(P.hopCancel, why == "reload")
     -- A new copy replacing this one: PvP's view switch, screen and
     -- attributes are given back first (the new copy starts with PvP off).
     if why == "reload" then pcall(P.pvpSet, false) end

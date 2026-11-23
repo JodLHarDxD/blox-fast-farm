@@ -97,4 +97,21 @@ PAGES[2] = { ["job-a"] = { Count = 2 } }
 out = browserList(0)
 check("list: two servers, stops on a page with nothing new", #out == 2 and E.listWhy == nil, #out)
 
+-- R4 F2: a hop cancelled (Stop) before the join's call: no teleport asked
+reset()
+GAME_JOIN = function() end
+joinServer("job-1", 0, function() return true end)
+check("cancelled: no teleport call at all", #CALLS == 0 and string.find(E.lastJoin, "stopped", 1, true) ~= nil,
+    tostring(E.lastJoin))
+reset()
+SB = nil
+joinServer("job-1", 0, function() return true end)
+check("cancelled, join from here: no TeleportToPlaceInstance", #CALLS == 0, table.concat(CALLS, ","))
+reset()
+local n = 0
+GAME_JOIN = function() end
+joinServer("job-1", 0, function() n += 1 return n > 3 end)
+check("cancelled mid-wait: the wait ends early, says stopped", #CALLS == 1
+    and string.find(E.lastJoin, "stopped", 1, true) ~= nil and CLOCK < 15, tostring(E.lastJoin) .. " " .. CLOCK)
+
 print(all and "ALL PASS" or "SOME FAILED")
