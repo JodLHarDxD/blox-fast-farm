@@ -118,4 +118,76 @@ r = hop("test")
 check("traded / stored since: the hop goes on", #log.joins > 0, #log.joins)
 P.keepersLeft, P.keepWords = nil, nil
 
+-- R4 F2: STOP CANCELS EVERY PENDING HOP (owner: Stop still hopped).
+-- P.hopCancel is what P.stop and Home's Stop call; a hop by hand runs with
+-- the farm stopped, so the epoch alone cannot end it.
+-- a. Stop while the backpack is stored before the hop: not one join
+reset()
+ROWS = servers()
+P.storeBeforeHop = function() P.hopCancel() end
+r = hop("by hand")
+check("stop during the store: no join, no list, not hopping", r == false and #log.joins == 0
+    and not E.hopping and E.note == "hop stopped", #log.joins)
+-- b. Stop while the server list is read: not one join
+reset()
+ROWS = servers()
+LIST_HOOK = function() P.hopCancel() end
+r = hop("by hand")
+check("stop during the list: no join", r == false and #log.joins == 0 and not E.hopping, #log.joins)
+-- c. Stop while a join is waited on: no second join, no retry round
+reset()
+ROWS = servers()
+AFTER_JOIN = function() P.hopCancel() end
+r = hop("auto")
+check("stop during a join: that one only, no retry", r == false and #log.joins == 1 and not E.hopping,
+    table.concat(log.joins, ","))
+check("...the join was handed the cancel test", log.goneGiven == true)
+check("...the carry written again with resume off (a teleport already started lands stopped)",
+    log.lastResume == false and E.carryOut == false, tostring(log.lastResume))
+-- d. the farm's own Stop (epoch) while the join waits: the same
+reset()
+ROWS = servers()
+AFTER_JOIN = function() epoch += 1 end
+r = hop("auto")
+check("epoch stop during a join: no retry", #log.joins == 1 and not E.hopping)
+-- e. a cancel with nothing pending: says nothing, no file written
+reset()
+check("cancel with no hop: false, nothing written", P.hopCancel() == false and log.files == 0)
+-- f. a hop after a cancel runs (the token is per hop, not a latch)
+reset()
+P.hopCancel()
+ROWS = servers()
+r = hop("by hand")
+check("a new hop after the cancel joins", #log.joins == 6, #log.joins)
+-- g. the cancelled hop never clears the NEXT hop's flag
+reset()
+ROWS = servers()
+AFTER_JOIN = function()
+    P.hopCancel()
+    E.hopping = true          -- a new hop has begun meanwhile
+end
+hop("old")
+check("old hop leaves the new hop's flag alone", E.hopping == true)
+-- h. a new copy replacing this one (P.stop "reload"): the carry stays carried
+reset()
+ROWS = servers()
+AFTER_JOIN = function() P.hopCancel(true) end
+hop("auto")
+check("reload: no carry rewrite", log.lastResume ~= false and E.carryOut == true, tostring(log.lastResume))
+-- i. pending: P.hopPending is what Home's pill reads
+reset()
+ROWS = servers()
+local seen
+AFTER_JOIN = function() seen = P.hopPending() P.hopCancel() end
+hop("by hand")
+check("pending while it joins, not after the cancel", seen == true and P.hopPending() == false)
+-- j. why no hop: the chalice dims Home's button
+reset()
+check("no chalice: hop allowed", P.hopBlocked() == nil)
+HOLD = true
+check("chalice held: blocked, says why", P.hopBlocked() == "the God's Chalice is with you")
+HOLD = false
+E.chalice = true
+check("chalice seen here: blocked", P.hopBlocked() ~= nil)
+
 print(all and "ALL PASS" or "SOME FAILED")

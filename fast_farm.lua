@@ -8057,7 +8057,11 @@ do
         -- this script mid-wait). The game's server join whatever list the JobId
         -- came from; one started here only without it, and never again in this
         -- server once refused for want of a teleport token.
-        local function joinServer(id, myEpoch)
+        -- gone (R4 F2): the hop's cancel test (Stop, a cancel) - asked right
+        -- before the teleport call, so a hop cancelled while the list was
+        -- read never asks for one.
+        local function joinServer(id, myEpoch, gone)
+            local function off() return stale(myEpoch) or (gone ~= nil and gone()) end
             local sb = RS:FindFirstChild("__ServerBrowser")
             local via = sb and "game" or "here"
             if not sb and E.clientRefused then
@@ -8082,6 +8086,10 @@ do
             -- Its own thread: the game's server may take its time answering, and
             -- the wait below must still end.
             task.spawn(function()
+                if off() then
+                    failed, why = true, "stopped"
+                    return
+                end
                 local ok, r = pcall(function()
                     if via == "game" then return sb:InvokeServer("teleport", id) end
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, id, player)
@@ -8092,13 +8100,13 @@ do
                 end
             end)
             local t0 = os.clock()
-            while not failed and os.clock() - t0 < 15 and not stale(myEpoch) do
+            while not failed and os.clock() - t0 < 15 and not off() do
                 task.wait(0.25)
             end
             if c1 then pcall(function() c1:Disconnect() end) end
             if c2 then pcall(function() c2:Disconnect() end) end
             if not failed then
-                why = stale(myEpoch) and "stopped"
+                why = off() and "stopped"
                     or ("no teleport within 15 s" .. ((ret ~= nil) and ("  (the game said " .. tostring(ret) .. ")") or ""))
             end
             why = tostring(why or "refused")
@@ -8133,11 +8141,27 @@ do
             end
             if E.hopping then return false end
             E.hopping = true
-            local myEpoch = epoch
+            -- STOP CANCELS IT (R4 F2, owner: Stop still hopped). Two tokens:
+            -- the farm's epoch (P.stop) and the hop's own (P.hopCancel - a
+            -- hop by hand runs with the farm stopped, so the epoch alone
+            -- cannot end it). gone() is asked before every step that leads
+            -- to a teleport: the list, each join, right before the call.
+            local myEpoch, myToken = epoch, E.hopToken
+            local function gone() return stale(myEpoch) or E.hopToken ~= myToken end
+            local function cancelled()
+                -- P.hopCancel already said so and freed E.hopping (a new
+                -- hop may be running by now: its flag is not ours to clear).
+                if E.hopToken == myToken then
+                    E.hopping = false
+                    E.note = "hop stopped"
+                end
+                return false
+            end
             releasePile()
             setState("HOP")
             -- A fruit in the backpack is lost on a hop: stored first (P.storeBeforeHop).
             if P.storeBeforeHop then pcall(P.storeBeforeHop) end
+            if gone() then return cancelled() end
             local now = os.time()
             E.visited[game.JobId] = now + (tonumber(keepAway) or 0)
             pruneVisited(E.visited, now, 3600)
@@ -8157,7 +8181,7 @@ do
                         or ("the Roblox server list - " .. tostring(E.listWhy or "the game's was empty")))
                 print("[BFF] hop: " .. E.lastList)
                 for i, s in ipairs(cands) do
-                    if i > 5 or stale(myEpoch) then break end
+                    if i > 5 or gone() then break end
                     if holdingChalice() then
                         E.hopping = false
                         markChalice()
@@ -8166,23 +8190,56 @@ do
                     E.visited[s.id] = os.time()
                     local carry = carryState(CFG.Hunt and P.running, s)
                     fileWrite(carry)
+                    E.carryOut = true          -- a cancel writes resume = false over it
                     queueReload(carry)
                     E.note = string.format("hop: joining a server with %d players%s  (%s)", s.count,
                         s.region and ("  ·  " .. tostring(s.region) .. (s.ms and string.format(" ~%d ms", math.floor(s.ms + 0.5))
                             or " (your ping there not known yet)")) or "", tostring(why))
                     say(E.note)
-                    joinServer(s.id, myEpoch)
+                    joinServer(s.id, myEpoch, gone)
+                    if gone() then break end
                     -- Still here: that one refused (full, gone, or teleports throttled).
                     E.tally.fails += 1
                     task.wait(1)
                 end
-                if stale(myEpoch) then break end
+                if gone() then return cancelled() end
                 task.wait(3 * round)
+                if gone() then return cancelled() end
             end
             E.hopping = false
             E.note = "hop failed three times - trying again shortly  (" .. tostring(E.lastJoin or E.lastList) .. ")"
             say(E.note)
             return false
+        end
+
+        -- CANCEL (R4 F2): every hop in flight gives up before its next
+        -- teleport call - the list being read, the join being waited on, the
+        -- retry rounds. A carry already written for the next server is
+        -- written again with resume = false: a teleport the game's server
+        -- had already started lands with the hunt stopped.
+        -- keepCarry: a new copy of the script is replacing this one (P.stop
+        -- "reload") - what was carried stays carried.
+        function P.hopCancel(keepCarry)
+            E.hopToken = (E.hopToken or 0) + 1
+            local was = E.hopping
+            E.hopping = false
+            if E.carryOut and not keepCarry then
+                E.carryOut = false
+                pcall(function() fileWrite(carryState(false)) end)
+            end
+            if was then
+                E.note = "hop stopped"
+                say(E.note)
+            end
+            return was
+        end
+        function P.hopPending() return E.hopping == true end
+        -- Why no hop can happen now (the Home button dims and says it), or
+        -- nil. The chalice only: the fruit-too-good-to-lose check stores and
+        -- unequips, so it runs on the tap (hop says why it refused).
+        function P.hopBlocked()
+            if E.chalice or holdingChalice() then return "the God's Chalice is with you" end
+            return nil
         end
 
         function P.hopNow()
@@ -21172,31 +21229,132 @@ local function buildUI()
             if race and race.allNow() then detail.Text = "V4 - every weapon · " .. detail.Text end
         end)
         gap(v, 12)
-        local hero = mk("TextButton", {
-            Size = UDim2.new(1, -40, 0, 52), BackgroundColor3 = C.ivory,
-            BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(16),
-            TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
+        -- THE ROW (R4 F2): the Start/Stop pill and, beside it, a square hop
+        -- button at the same height (ghost: no fill, a hairline, the board's
+        -- swap arrows). The pill shrinks to fit: 20 px margins, an 8 px gap.
+        local HOP_W = 52
+        local heroRow = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1,
             LayoutOrder = nextOrder(), Parent = v,
         })
+        local heroW = -(40 + HOP_W + 8)
+        local hero = mk("TextButton", {
+            Size = UDim2.new(1, heroW, 0, 52), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, -(HOP_W + 8) / 2, 0.5, 0), BackgroundColor3 = C.ivory,
+            BorderSizePixel = 0, Font = LOOK.bold, TextSize = lookPx(16),
+            TextColor3 = C.base, Text = "Start", AutoButtonColor = false,
+            TextTruncate = Enum.TextTruncate.AtEnd, Parent = heroRow,
+        })
         corner(hero, 14)
-        -- PvP on: this is its Stop (the farm is stopped already).
+        -- PvP on: this is its Stop (the farm is stopped already). A hop by
+        -- hand on its way with the farm stopped: this is its Stop too.
+        -- Every Stop here cancels a pending hop (R4 F2).
         hero.Activated:Connect(function()
-            if CFG.Pvp then P.pvpSet(false)
-            elseif P.running then P.stop() else P.start() end
+            if CFG.Pvp then
+                P.pvpSet(false)
+                pcall(P.hopCancel)
+            elseif P.running then P.stop()
+            elseif P.hopPending and P.hopPending() then P.hopCancel()
+            else P.start() end
         end)
         hero.MouseButton1Down:Connect(function()
-            tween(hero, { Size = UDim2.new(1, -46, 0, 50) }, QUICK)
+            tween(hero, { Size = UDim2.new(1, heroW - 6, 0, 50) }, QUICK)
         end)
-        local function heroUp() tween(hero, { Size = UDim2.new(1, -40, 0, 52) }, QUICK) end
+        local function heroUp() tween(hero, { Size = UDim2.new(1, heroW, 0, 52) }, QUICK) end
         hero.MouseButton1Up:Connect(heroUp)
         hero.MouseLeave:Connect(heroUp)
         -- It says what it starts: "Start · Haki berries".
         addLive(function()
-            local busy = P.running or CFG.Pvp
-            hero.Text = (busy and "Stop" or "Start") .. " · " .. modeName()
+            local hopping = P.hopPending and P.hopPending()
+            local busy = P.running or CFG.Pvp or hopping
+            hero.Text = (busy and "Stop" or "Start") .. " · "
+                .. ((hopping and not P.running and not CFG.Pvp) and "hop" or modeName())
             hero.BackgroundColor3 = busy and C.stop or C.ivory
             hero.TextColor3 = busy and C.text or C.base
         end)
+
+        -- THE HOP BUTTON: a hop by hand through Servers' own "Hop now"
+        -- (P.hopNow: the carry goes too, so a running hunt resumes over
+        -- there). Second tap: the first reads "Tap again" in amber for 2 s.
+        -- No hop possible (the chalice): dimmed, the line under the row says
+        -- why. A hop refused on the tap (a fruit too good to lose): its
+        -- words on that line.
+        local hopB = mk("TextButton", {
+            Size = UDim2.fromOffset(HOP_W, 52), AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -20, 0, 0), BackgroundColor3 = C.base, BackgroundTransparency = 1,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = heroRow,
+        })
+        corner(hopB, 14)
+        local hopStroke = mk("UIStroke", { Color = C.hair, Thickness = 1,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = hopB })
+        local hopIc, hopPaint = P.kit.icon(hopB, 18, {
+            { 4, 8, 20, 8 }, { 16, 4, 20, 8 }, { 16, 12, 20, 8 },
+            { 20, 16, 4, 16 }, { 8, 12, 4, 16 }, { 8, 20, 4, 16 },
+        }, 1.5, C.text)
+        hopIc.AnchorPoint, hopIc.Position = Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 9)
+        local hopWord = mk("TextLabel", {
+            Size = UDim2.new(1, -4, 0, 14), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -7),
+            BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(9),
+            TextColor3 = C.second, Text = "Hop", Parent = hopB,
+        })
+        -- The line under the row: 0 high while it has nothing to say; the
+        -- panel grows by its height on Home (applyGrow, as the live card).
+        local hopLineH = 0
+        local hopLine = mk("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, Font = LOOK.regular,
+            TextSize = lookPx(11), TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = LOOK.mute, Text = "",
+            LayoutOrder = nextOrder(), Parent = v,
+        })
+        mk("UIPadding", { PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20), Parent = hopLine })
+        local hopArmed, hopTok, hopTapped = false, 0, 0
+        local function hopPaintAll()
+            local why = P.hopBlocked and P.hopBlocked() or nil
+            local hopping = P.hopPending and P.hopPending()
+            local col = why and C.third or (hopArmed and C.warn) or (hopping and C.live) or C.text
+            hopPaint(col)
+            hopWord.Text = hopArmed and "Tap again" or (hopping and "Hopping" or "Hop")
+            hopWord.TextColor3 = why and C.third or (hopArmed and C.warn) or (hopping and C.live) or C.second
+            hopStroke.Color = hopArmed and C.warn or C.hair
+            local line = ""
+            if why then line = "No hop: " .. why
+            elseif os.clock() - hopTapped < 6 and not hopping then
+                -- What the tap came to: the hop's own words when it refused.
+                local e = P.elite
+                local note = e and tostring(e.note or "") or ""
+                if string.find(note, "refused", 1, true) then line = note end
+            end
+            hopLine.Text = line
+            local h = (line ~= "") and 20 or 0
+            if h ~= hopLineH then
+                hopLineH = h
+                hopLine.Size = UDim2.new(1, 0, 0, h)
+                if P.homeRegrow then pcall(P.homeRegrow) end
+            end
+        end
+        hopB.Activated:Connect(function()
+            if P.hopBlocked and P.hopBlocked() then hopPaintAll() return end
+            if P.hopPending and P.hopPending() then return end
+            hopTok += 1
+            local mine = hopTok
+            if not hopArmed then
+                hopArmed = true
+                hopPaintAll()
+                task.delay(2, function()
+                    if hopTok == mine and hopArmed then
+                        hopArmed = false
+                        hopPaintAll()
+                    end
+                end)
+                return
+            end
+            hopArmed = false
+            hopTapped = os.clock()
+            pcall(P.hopNow)
+            hopPaintAll()
+        end)
+        hopPaintAll()
+        addLive(hopPaintAll)
 
         -- THE LIVE MOMENT (R3): the news says a thing is up in this server
         -- (a fruit, Mirage, Prehistoric, a boss, the Frozen Dimension). A pack
@@ -21249,10 +21407,11 @@ local function buildUI()
             nextLook = 0    -- the line says "Hunting it now" at the next look
         end)
         local function applyGrow(name)
-            local want = (name == "home" and momentOn) and 76 or 0
+            local want = (name == "home") and ((momentOn and 76 or 0) + hopLineH) or 0
             if want ~= P.hudExtra then P.panelGrow(want) end
         end
         P.onView = applyGrow
+        P.homeRegrow = function() applyGrow(currentView) end
         local function setMoment(m)
             cur = m
             momentOn = m ~= nil
@@ -29180,6 +29339,9 @@ end
 function P.stop(why)
     if why ~= "reload" then pcall(P.carryOff) end
     P.fightOnce = nil          -- a live card's weapon was for that start only (R4 F1)
+    -- Every hop in flight gives up before its next teleport call (R4 F2):
+    -- the list, the join being waited on, the retry rounds.
+    pcall(P.hopCancel, why == "reload")
     -- A new copy replacing this one: PvP's view switch, screen and
     -- attributes are given back first (the new copy starts with PvP off).
     if why == "reload" then pcall(P.pvpSet, false) end
