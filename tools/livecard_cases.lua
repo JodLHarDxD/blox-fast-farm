@@ -101,4 +101,57 @@ check("type colours: melee red, sword blue, fruit orange, gun violet",
     TYPE_ACCENT.Melee == "raid" and TYPE_ACCENT.Sword == "sea" and TYPE_ACCENT["Blox Fruit"] == "prehistoric"
     and TYPE_ACCENT.Gun == "pvp")
 
+-- R4 F1: the pirates in the castle
+e = liveEventOf(up("castle"))
+check("castle -> random / farm (GRIND)", e and e.mode == "random" and e.pack == "farm"
+    and e.title == "Pirates are in the castle" and e.strongest == true, e)
+m = liveMoment({ up("frozen"), up("castle"), up("boss:Diablo") })
+check("castle after the boss", m and m.key == "boss:Diablo", m and m.key)
+m = liveMoment({ up("frozen"), up("castle") })
+check("castle before the Frozen Dimension", m and m.key == "castle", m and m.key)
+local function stubW()
+    local a, lg = stub()
+    a.weapon = function(md) table.insert(lg, "weapon:" .. md) end
+    return a, lg
+end
+local cas = liveEventOf(up("castle"))
+a, log = stubW()
+check("castle, idle: mode, strongest weapon, then start", liveTap(cas, "open", false, "none", a) == "hunt"
+    and table.concat(log, ",") == "mode:random:true,weapon:random,start", table.concat(log, ","))
+a, log = stubW()
+liveTap(mir, "open", false, "none", a)
+check("mirage: no weapon pick", table.concat(log, ",") == "mode:mirage:true,start", table.concat(log, ","))
+a, log = stubW()
+check("castle, locked GRIND: cover, no weapon", liveTap(cas, "locked", false, "none", a) == "cover"
+    and table.concat(log, ",") == "cover:farm", table.concat(log, ","))
+
+-- the strongest M1: sword, then melee, fruit, gun; mastery breaks a tie
+local bag = { { name = "Kabucha", type = "Gun", mastery = 600 }, { name = "Dragon Talon", type = "Melee", mastery = 500 },
+    { name = "Kitsune-Kitsune", type = "Blox Fruit", mastery = 600 } }
+check("no sword: melee first", strongestM1(bag) == "Dragon Talon", strongestM1(bag))
+table.insert(bag, { name = "Yama", type = "Sword", mastery = 100 })
+table.insert(bag, { name = "Cursed Dual Katana", type = "Sword", mastery = 350 })
+check("swords: the higher mastery", strongestM1(bag) == "Cursed Dual Katana", strongestM1(bag))
+check("not weapons are skipped", strongestM1({ { name = "Awakening", type = "?" },
+    { name = "Shark Rod", type = "Tool" } }) == nil)
+check("nothing carried: nil", strongestM1({}) == nil and strongestM1(nil) == nil)
+check("only a gun: the gun", strongestM1({ { name = "Kabucha", type = "Gun" } }) == "Kabucha")
+check("Random has no pick: strongest", onceWeaponOf({}, "random", bag) == "Cursed Dual Katana")
+check("Random on MIX: strongest", onceWeaponOf({ random = "MIX" }, "random", bag) == "Cursed Dual Katana")
+check("FightWith unset table: strongest", onceWeaponOf(nil, "random", bag) == "Cursed Dual Katana")
+check("Random's own pick stays: nothing chosen", onceWeaponOf({ random = "Yama" }, "random", bag) == nil)
+check("another mode's pick does not count", onceWeaponOf({ circuit = "Yama" }, "random", bag) == "Cursed Dual Katana")
+
+-- the castle raid signal: up at the first pirate, over after CASTLE_GRACE s with none
+local st = { up = false }
+check("no pirate: nothing", castleRaidFeed(st, 0, 0) == nil and not st.up)
+check("first pirate: up", castleRaidFeed(st, 4, 10) == "up" and st.up and st.since == 10)
+check("more pirates: no second up", castleRaidFeed(st, 9, 11) == nil)
+check("between waves (59 s none): still up", castleRaidFeed(st, 0, 11 + CASTLE_GRACE - 1) == nil and st.up)
+check("a new wave keeps it", castleRaidFeed(st, 2, 80) == nil and st.lastSeen == 80)
+check("none for the grace: gone", castleRaidFeed(st, 0, 80 + CASTLE_GRACE) == "gone" and not st.up)
+check("gone: no second gone", castleRaidFeed(st, 0, 500) == nil)
+local st2 = newsStripOf({ { key = "castle", tone = "up", title = "PIRATES IN THE CASTLE", body = "x" } })
+check("strip: the castle raid", st2 and st2.text == "PIRATES IN THE CASTLE", st2 and st2.text)
+
 print(all and "ALL PASS" or "SOME FAILED")

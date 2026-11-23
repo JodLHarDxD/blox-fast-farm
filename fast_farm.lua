@@ -735,7 +735,7 @@ local CFG = {
     -- WHICH NEWS THE STRIP SHOWS (user, 2026-11-07): one tick each, on the
     -- Breaking news page. Only what is shown: the news is read all the same.
     NewsShow           = { fruit = true, moon = true, mirage = true, prehistoric = true, kitsune = true,
-        frozen = true, elite = true, raid = true, server = true, trades = true },
+        frozen = true, elite = true, raid = true, castle = true, server = true, trades = true },
 
     Debug              = false,
 }
@@ -883,8 +883,9 @@ function panelKeepOnScreen(rx, ty, w, h, vw, vh)
 end
 -- LIVE CARD (R3 Task 1c, pure: tools/livecard_test.py). Home's "X is up in
 -- this server" card: a headline (tone "up") -> the hunt it is. Priority, one
--- card at a time: a fruit, Mirage, Prehistoric, a boss, any other news item
--- that maps to a hunt (the Frozen Dimension = the Leviathan hunt).
+-- card at a time: a fruit, Mirage, Prehistoric, a boss, the pirates in the
+-- castle (Random), any other news item that maps to a hunt (the Frozen
+-- Dimension = the Leviathan hunt).
 LIVE_RAIDBOSS = { ["Dough King"] = true, ["Cake Prince"] = true, ["rip_indra True Form"] = true,
     ["Soul Reaper"] = true }
 -- fruit = { name, spot } of the dearest fruit lying here (nil = none read).
@@ -904,10 +905,63 @@ function liveEventOf(it, fruit)
     elseif boss then
         return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "raid" or "elite", pack = "raid",
             title = boss .. " is up in this server" }
+    elseif it.key == "castle" then
+        -- R4 F1: the pirate raid at the Castle on the Sea = Random there,
+        -- with the strongest M1 you carry unless Random has its own pick.
+        return { key = it.key, rank = 5, mode = "random", pack = "farm", title = "Pirates are in the castle",
+            strongest = true }
     elseif it.key == "frozen" then
-        return { key = it.key, rank = 5, mode = "levi", pack = "sea", title = "Frozen Dimension is up in this server" }
+        return { key = it.key, rank = 6, mode = "levi", pack = "sea", title = "Frozen Dimension is up in this server" }
     end
     return nil
+end
+-- THE CASTLE RAID (R4 F1). The game's signal is the one Random mode uses:
+-- a raid pirate is a living enemy within CASTLE_RAID_R studs of the raid
+-- centre (randomStep's CASTLE_RAID; the redz hub's own definition). The
+-- news counts them (loaded or parked far off) once a second; n = that
+-- count, rip_indra left out. Up at the first pirate; over only after
+-- CASTLE_GRACE s with none (the gap between two waves is still the raid).
+-- st = { up, since, lastSeen }. Returns "up", "gone" or nil.
+CASTLE_RAID_R, CASTLE_GRACE = 750, 60
+function castleRaidFeed(st, n, now)
+    if type(n) == "number" and n > 0 then
+        st.lastSeen = now
+        if not st.up then
+            st.up, st.since = true, now
+            return "up"
+        end
+    elseif st.up and now - (st.lastSeen or now) >= CASTLE_GRACE then
+        st.up = false
+        return "gone"
+    end
+    return nil
+end
+-- THE STRONGEST M1 (R4 F1, owner: "fight them with the strongest M1 you
+-- have right then"). The script's own M1 ranking (WEAPON ROTATION's
+-- M1_RANK: the sword swings hardest - Hallow Scythe 3755 a swing - then a
+-- fighting style, the fruit, a gun); the higher mastery breaks a tie, then
+-- the name. list = { { name, type, mastery } } of the weapons you carry.
+M1_STRENGTH = { Sword = 1, Melee = 2, ["Blox Fruit"] = 3, Gun = 4 }
+function strongestM1(list)
+    local best, br, bm, bn
+    for _, w in ipairs(list or {}) do
+        local r = type(w) == "table" and M1_STRENGTH[w.type]
+        if r then
+            local m = tonumber(w.mastery) or 0
+            if not best or r < br or (r == br and (m > bm or (m == bm and tostring(w.name) < bn))) then
+                best, br, bm, bn = w.name, r, m, tostring(w.name)
+            end
+        end
+    end
+    return best
+end
+-- The weapon a card start fights with for this start only: nil when the
+-- mode has its own pick (CFG.FightWith[mode], never overwritten), else the
+-- strongest you carry.
+function onceWeaponOf(fightWith, mode, list)
+    local own = type(fightWith) == "table" and fightWith[mode] or nil
+    if type(own) == "string" and own ~= "" and own ~= "MIX" then return nil end
+    return strongestM1(list)
 end
 -- The one card to show: the best rank not put away (dismissed[key]); the
 -- first of a rank wins.
@@ -941,6 +995,7 @@ function liveTap(m, state, running, nowMode, act)
     if a == "cover" then act.cover(m.pack)
     elseif a == "hunt" then
         act.setMode(m.mode, true)
+        if m.strongest and act.weapon then act.weapon(m.mode) end
         if not running then act.start() end
     end
     return a
@@ -4526,12 +4581,18 @@ do
     -- The one weapon in force, or nil = MIX. quiet: no status line.
     function P.fightWeapon(mode, quiet)
         local tbl = CFG.FightWith
-        if type(tbl) ~= "table" or next(tbl) == nil then return nil end
+        -- A live card's start (R4 F1, the castle raid): its weapon for this
+        -- start only (P.fightOnce, cleared by Stop); the mode's own pick wins.
+        local once = (P :: any).fightOnce
+        if (type(tbl) ~= "table" or next(tbl) == nil) and not once then return nil end
         if mode == nil then
             local mn = (P :: any).modeNow
             mode = mn and mn() or nil
         end
-        local want = mode and tbl[mode]
+        local want = mode and type(tbl) == "table" and tbl[mode] or nil
+        if (type(want) ~= "string" or want == "" or want == "MIX") and once and once.mode == mode then
+            want = once.name
+        end
         if type(want) ~= "string" or want == "" or want == "MIX" then return nil end
         local _, missing = fightPick(want, carried(), nil)
         if missing then
@@ -4571,6 +4632,18 @@ do
         local lv = t and t:FindFirstChild("Level")
         local v = lv and tonumber(lv.Value)
         return v or P.fightMasteryCache[name]
+    end
+    -- The weapons you carry right now as { name, type, mastery } (R4 F1:
+    -- the castle card's strongest M1, onceWeaponOf).
+    function P.carriedWeapons()
+        local out = {}
+        for _, t in ipairs(toolNames()) do
+            local ty = toolType(t)
+            if M1_STRENGTH[ty] then
+                table.insert(out, { name = t.Name, type = ty, mastery = P.fightMastery(t.Name) })
+            end
+        end
+        return out
     end
     -- Once a second (the side loop): a mode whose goal is on and whose weapon
     -- reached MasteryStop goes back to MIX, goal off.
@@ -7313,6 +7386,7 @@ do
     -- area is that circle, however far the pirates spread over the yard. Anywhere
     -- else: RandomRadius round you.
     local CASTLE_RAID = Vector3.new(-5556, 314, -2988)
+    P.castleRaidAt = CASTLE_RAID     -- the news's castle raid (R4 F1) reads the same circle
     function randomStep()
         local _, r = parts()
         if not r then return end
@@ -17180,7 +17254,8 @@ end
 do
     local function build()
         -- Typed open: its fields come as the news is read.
-        local N: { [string]: any } = { isles = {}, bosses = {}, fruits = {}, events = {} }
+        local N: { [string]: any } = { isles = {}, bosses = {}, fruits = {}, events = {},
+            castle = { up = false, n = 0 } }
         P.news = N
         local Lighting    = game:GetService("Lighting")
         local HttpService = game:GetService("HttpService")
@@ -17500,6 +17575,32 @@ do
                     end
                 end
                 N.bosses = found
+                -- THE CASTLE RAID (R4 F1): Random's own signal - living
+                -- enemies within CASTLE_RAID_R of its raid centre, loaded
+                -- or parked far off (the game parks far ones in
+                -- ReplicatedStorage), rip_indra left out (castleRaidFeed).
+                local at = (P :: any).castleRaidAt
+                if at then
+                    local n = 0
+                    local enemies = workspace:FindFirstChild("Enemies")
+                    for _, folder in ipairs(enemies and { enemies, RS } or { RS }) do
+                        for _, m in ipairs(folder:GetChildren()) do
+                            if m:IsA("Model") then
+                                local hrp = m:FindFirstChild("HumanoidRootPart")
+                                local hum = m:FindFirstChildOfClass("Humanoid")
+                                if hrp and hrp:IsA("BasePart") and (not hum or hum.Health > 0)
+                                    and not IS_RAID[cleanName(m)]
+                                    and (hrp.Position - at).Magnitude <= CASTLE_RAID_R then
+                                    n += 1
+                                end
+                            end
+                        end
+                    end
+                    N.castle.n = n
+                    if castleRaidFeed(N.castle, n, now) == "up" then
+                        breaking("castle", "PIRATES ARE IN THE CASTLE", now)
+                    end
+                end
                 local g = N.shown
                 if g and g.Parent and now - cakeAt > 60 then
                     cakeAt = now
@@ -17641,6 +17742,13 @@ do
                 if not anyElite then add("elite", "dim", "NO ELITE", "Diablo, Deandre, Urban: none up") end
                 for _, n in ipairs(RAID) do
                     if N.bosses[n] then add("boss:" .. n, "up", string.upper(n) .. " UP", N.bosses[n]) end
+                end
+                -- The pirate raid at the Castle on the Sea (R4 F1): after the bosses.
+                local cs = N.castle
+                if cs and cs.up then
+                    add("castle", "up", "PIRATES IN THE CASTLE", (cs.n > 0)
+                        and string.format("the raid at the Castle on the Sea · %d pirates", cs.n)
+                        or "the raid at the Castle on the Sea · the next wave is coming")
                 end
                 local ck = N.cake
                 if ck and not N.bosses["Cake Prince"] and not N.bosses["Dough King"] then
@@ -21131,6 +21239,12 @@ local function buildUI()
             liveTap(cur, momentState(cur), P.running, modeNow(), {
                 cover = function(pack) show("cover_" .. pack) end,
                 setMode = setMode, start = P.start,
+                -- The castle raid: the strongest M1 you carry, this start only.
+                weapon = function(mode)
+                    local w = onceWeaponOf(CFG.FightWith, mode, P.carriedWeapons())
+                    P.fightOnce = w and { mode = mode, name = w } or nil
+                    if w then say(cur.title .. " - fighting with " .. w .. " (your strongest M1)") end
+                end,
             })
             nextLook = 0    -- the line says "Hunting it now" at the next look
         end)
@@ -21170,6 +21284,7 @@ local function buildUI()
             local boss = string.match(it.key, "^boss:(.+)$")
             if it.key == "mirage" then pack = "sea"
             elseif it.key == "prehistoric" then pack = "prehistoric"
+            elseif it.key == "castle" then pack = "farm"
             elseif boss then pack = "raid" end
             if pack and P.packState(R.REP[pack]) == "locked" then return pack end
             return nil
@@ -28842,7 +28957,8 @@ local function buildUI()
             { "fruit", "Fruits" }, { "moon", "Moon, day and night" }, { "mirage", "Mirage Island" },
             { "prehistoric", "Prehistoric Island" }, { "kitsune", "Kitsune Island" },
             { "frozen", "Frozen Dimension" }, { "elite", "Elite pirates" },
-            { "raid", "Raid bosses, Cake Prince" }, { "server", "Server: players, time here" },
+            { "raid", "Raid bosses, Cake Prince" }, { "castle", "Pirate raid at the castle" },
+            { "server", "Server: players, time here" },
             { "trades", "Your trades: left, back at" },
         }) do
             table.insert(items, { t[2], "",
@@ -29063,6 +29179,7 @@ end
 -- the file) -- not you stopping, so a hunt carried over a hop stays carried.
 function P.stop(why)
     if why ~= "reload" then pcall(P.carryOff) end
+    P.fightOnce = nil          -- a live card's weapon was for that start only (R4 F1)
     -- A new copy replacing this one: PvP's view switch, screen and
     -- attributes are given back first (the new copy starts with PvP off).
     if why == "reload" then pcall(P.pvpSet, false) end

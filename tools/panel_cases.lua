@@ -674,7 +674,8 @@ local NEW_OK = { MirageJob = true,
     ["NewsShow.fruit"] = true, ["NewsShow.moon"] = true, ["NewsShow.mirage"] = true,
     ["NewsShow.prehistoric"] = true, ["NewsShow.kitsune"] = true, ["NewsShow.frozen"] = true,
     ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true,
-    ["NewsShow.trades"] = true }                -- 2026-11-08: your trades, left and back at
+    ["NewsShow.trades"] = true,                 -- 2026-11-08: your trades, left and back at
+    ["NewsShow.castle"] = true }                -- 2026-11-23 (R4 F1): the pirate raid at the castle
 for _, k in ipairs(keys) do
     -- 2026-11-07: the fruit menu, a mark per fruit.
     -- 2026-11-22: FIGHT WITH, one wheel per mode, and its mastery goal (Attack).
