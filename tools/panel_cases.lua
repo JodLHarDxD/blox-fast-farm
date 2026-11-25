@@ -510,6 +510,16 @@ if RUN == "full" then
     tap("fruitmenu", "Skip")
     check(CFG_REAL.FruitMenu.Dragon == nil, "a second tap takes the mark off")
 
+    -- ---------- the news's fruits: Tell, Mute, a second tap takes it off ----------
+    table.clear(CFG_REAL.NewsFruitMenu)
+    tap("news", "Tell")
+    check(CFG_REAL.NewsFruitMenu.Dragon == "show", "Tell marks the fruit told: " .. tostring(CFG_REAL.NewsFruitMenu.Dragon))
+    tap("news", "Mute")
+    check(CFG_REAL.NewsFruitMenu.Dragon == "hide", "Mute over Tell: one mark, the last")
+    tap("news", "Mute")
+    check(CFG_REAL.NewsFruitMenu.Dragon == nil, "news: a second tap takes the mark off")
+    check(next(CFG_REAL.FruitMenu) == nil, "news marks never touch the fruit menu")
+
     -- ---------- the Mirage: one row, its page picks the job ----------
     table.clear(CALLS)
     button("mirage", "Advanced Fruit Dealer").Activated:Fire()
@@ -675,12 +685,19 @@ local NEW_OK = { MirageJob = true,
     ["NewsShow.prehistoric"] = true, ["NewsShow.kitsune"] = true, ["NewsShow.frozen"] = true,
     ["NewsShow.elite"] = true, ["NewsShow.raid"] = true, ["NewsShow.server"] = true,
     ["NewsShow.trades"] = true,                 -- 2026-11-08: your trades, left and back at
-    ["NewsShow.castle"] = true }                -- 2026-11-23 (R4 F1): the pirate raid at the castle
+    ["NewsShow.castle"] = true,                 -- 2026-11-23 (R4 F1): the pirate raid at the castle
+    NewsFruitMin = true }                       -- 2026-11-25: which fruits are news, its own range
 for _, k in ipairs(keys) do
     -- 2026-11-07: the fruit menu, a mark per fruit.
     -- 2026-11-22: FIGHT WITH, one wheel per mode, and its mastery goal (Attack).
+    -- 2026-11-25: the news's own marks, Tell / Mute per fruit (Breaking news).
     check(old[k] or NEW_OK[k] or string.match(k, "^FruitMenu%.") or string.match(k, "^FightWith%.")
-        or string.match(k, "^FightGoal%."), "a key the old panel never changed: CFG." .. k)
+        or string.match(k, "^FightGoal%.") or string.match(k, "^NewsFruitMenu%."),
+        "a key the old panel never changed: CFG." .. k)
+end
+-- The news's fruit marks: every fruit on the list can be told or muted.
+for n in pairs(P.TRADE_VALUES) do
+    check(have["NewsFruitMenu." .. n], "the Breaking news page has a Tell / Mute row for " .. n)
 end
 
 -- The fruit menu: every fruit on it can be marked.

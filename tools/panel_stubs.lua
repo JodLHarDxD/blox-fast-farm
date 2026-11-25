@@ -187,7 +187,7 @@ local function logWrite(path)
 end
 local NESTED = { AutoKeys = true, SeaEvFight = true, SeaEvKeys = true, SeaEvWeapons = true,
     VentKeys = true, BerryWant = true, RecipeWant = true, SwordWant = true, NewsShow = true, FruitMenu = true,
-    FightWith = true, FightGoal = true }
+    FightWith = true, FightGoal = true, NewsFruitMenu = true }
 local function proxy(real, prefix)
     return setmetatable({}, {
         __index = function(_, k)
@@ -301,6 +301,10 @@ P.fruitCatalog = { ["Buddha-Buddha"] = 1200000 }
 function P.fruitKey(orig) return string.match(tostring(orig), "^(.-)%-") end
 function P.looksMissing() return { "Dragon" } end
 function P.menuWords(price, limit, choice) return tostring(price) .. " " .. tostring(limit) .. " " .. tostring(choice) end
+function P.newsWords(price, limit, said, mark)
+    return tostring(price) .. " " .. tostring(limit) .. " " .. tostring(said) .. " " .. tostring(mark)
+end
+P.MYTHICAL_PRICE = 2.5e6
 function P.fruitLogSummary() return {} end
 function P.fruitLogLines() return {} end
 function P.fruitLogClear() end

@@ -744,6 +744,12 @@ local CFG = {
     -- Breaking news page. Only what is shown: the news is read all the same.
     NewsShow           = { fruit = true, moon = true, mirage = true, prehistoric = true, kitsune = true,
         frozen = true, elite = true, raid = true, castle = true, server = true, trades = true },
+    -- WHICH FRUITS ARE NEWS (user, 2026-11-25): the news's own range, like
+    -- the fruit menu's - at least this game price (Beli; 0 = every fruit;
+    -- 2.5M = the Mythicals, as before) - and its own marks:
+    -- [fruit] = "show" (told under the range too) / "hide" (never told).
+    NewsFruitMin       = 2500000,
+    NewsFruitMenu      = {},
 
     Debug              = false,
 }
@@ -2007,29 +2013,57 @@ end
 -- when above 0); Skip never. No price read yet: the market's list decides
 -- (10M and up, or a fruit newer than the list). A server spawn not named
 -- yet might be anything: said too.
+--
+-- ITS OWN RANGE (user, 2026-11-25: "for a new player maybe a rare fruit is
+-- also good ... a range which fruit notification we will get, and other
+-- fruits also, select specifically"). The news has its own limit and its own
+-- marks, on the Breaking news page, like the fruit menu's:
+--   1. your news mark: Show = always said, Hide = never;
+--   2. your fruit menu: Take = said (what you take you hear of), Skip = not;
+--   3. the news limit (CFG.NewsFruitMin, the game's Beli price): at least
+--      it = said. 0 = every fruit. Its default, 2.5M, is the Mythical floor
+--      the news had before, so nothing changes until you move it.
+-- The fruit menu's own limit no longer decides the news.
 P.MYTHICAL_PRICE = 2.5e6
-function P.fruitMatters(f, limit, choice)
-    if f.orig == nil then return not f.dropper end
+function P.newsChoice(orig)
+    local k = P.fruitKey(orig)
+    return k and (CFG.NewsFruitMenu or {})[k] or nil
+end
+function P.fruitMatters(f, limit, choice, newsChoice)
+    limit = tonumber(limit) or P.MYTHICAL_PRICE
+    if f.orig == nil then return (not f.dropper) or limit <= 0 end
+    local said = newsChoice and newsChoice(f.orig) or nil
+    if said == "show" then return true end
+    if said == "hide" then return false end
     local mark = choice and choice(f.orig) or nil
     if mark == "skip" then return false end
     if mark == "take" then return true end
+    if limit <= 0 then return true end
     local p = tonumber(f.price)
     if not p then
         local v = P.tradeValue(f.orig)
         return v == nil or v >= 10e6
     end
-    if p >= P.MYTHICAL_PRICE then return true end
-    limit = tonumber(limit) or 0
-    return limit > 0 and p >= limit
+    return p >= limit
+end
+-- A news row's line: its Beli price, and whether it is said.
+function P.newsWords(price, limit, said, mark)
+    limit = tonumber(limit) or P.MYTHICAL_PRICE
+    local what = (said == "show" and "always told") or (said == "hide" and "never told")
+        or (mark == "take" and "told - you take it") or (mark == "skip" and "not told - you skip it")
+        or ((limit <= 0) and "told")
+        or (not price and "no price yet")
+        or ((price >= limit) and "told") or "under your news limit"
+    return price and ("$" .. P.valueWords(price) .. "  ·  " .. what) or what
 end
 -- -> the ones you care about, DEAREST FIRST (the market's trade value; the
 -- game's price for a fruit the list does not know; one not named yet
 -- last), a server spawn before a player's drop of the same worth; and how
 -- many others lie here, not said.
-function P.fruitNews(list, limit, choice)
+function P.fruitNews(list, limit, choice, newsChoice)
     local keep, hidden = {}, 0
     for _, f in ipairs(list) do
-        if P.fruitMatters(f, limit, choice) then
+        if P.fruitMatters(f, limit, choice, newsChoice) then
             local v = f.orig and (P.tradeValue(f.orig) or tonumber(f.price) or 0) or -1
             table.insert(keep, { f = f, v = v })
         else
@@ -18016,7 +18050,7 @@ do
             end
             -- The game's prices, to tell a Mythical (asked at most every 5 min).
             if #fr > 0 and P.fruitPrice then task.spawn(P.fruitPrice) end
-            local shown, hidden = P.fruitNews(fr, CFG.FruitMinPrice, P.fruitChoice)
+            local shown, hidden = P.fruitNews(fr, CFG.NewsFruitMin, P.fruitChoice, P.newsChoice)
             for _, f in ipairs(shown) do
                 local spot = P.fruitSpot(f)
                 if not fruitSeen[spot] then
@@ -29533,7 +29567,94 @@ local function buildUI()
                 function(x) CFG.NewsShow[t[1]] = x and true or false end })
         end
         ticks(v, items)
+
+        -- WHICH FRUITS ARE NEWS (user, 2026-11-25): the fruit menu's shape -
+        -- a range, then every fruit with Show / Hide - for the news alone.
+        gap(v, 4)
+        P.kit.sectionRight(v, "fruits told", function()
+            if CFG.NewsShow.fruit == false then return "Fruits unticked" end
+            local m = tonumber(CFG.NewsFruitMin) or P.MYTHICAL_PRICE
+            return (m <= 0) and "every fruit" or ("$" .. P.valueWords(m) .. " and up")
+        end)
+        sliderRow(v, "Told if worth at least", 0, 10000000, 100000,
+            function() return CFG.NewsFruitMin end,
+            function(x) CFG.NewsFruitMin = x end, " Beli")
+        P.kit.sectionRight(v, "except these")
+        do
+            local names = {}
+            for n in pairs(P.TRADE_VALUES) do table.insert(names, n) end
+            table.sort(names, function(a, b)
+                local x, y = P.TRADE_VALUES[a], P.TRADE_VALUES[b]
+                if x ~= y then return x > y end
+                return a < b
+            end)
+            local rows = {}
+            local function paint()
+                local priced = {}
+                for o, p in pairs(P.fruitCatalog or {}) do
+                    local k = P.fruitKey(o)
+                    if k and p > (priced[k] or 0) then priced[k] = p end
+                end
+                for n, r in pairs(rows) do
+                    local s = CFG.NewsFruitMenu[n]
+                    r.sub.Text = P.newsWords(priced[n], CFG.NewsFruitMin, s, CFG.FruitMenu[n])
+                    for word, b in pairs(r.chips) do
+                        local on = (s == word)
+                        b.BackgroundTransparency = on and 0 or 1
+                        b.TextColor3 = on and ((word == "show") and C.base or C.text) or LOOK.soft
+                        r.lines[word].Color = on and ((word == "show") and C.live or C.stop) or LOOK.ghost
+                    end
+                end
+            end
+            for _, n in ipairs(names) do
+                local f = mk("Frame", {
+                    Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1,
+                    LayoutOrder = nextOrder(), Parent = v,
+                })
+                mk("TextLabel", {
+                    Size = UDim2.new(1, -150, 0, 18), Position = UDim2.fromOffset(20, 7),
+                    BackgroundTransparency = 1, Font = LOOK.semi, TextSize = lookPx(14),
+                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = C.text, Text = n, Parent = f,
+                })
+                local r = { chips = {}, lines = {} }
+                r.sub = mk("TextLabel", {
+                    Size = UDim2.new(1, -150, 0, 15), Position = UDim2.fromOffset(20, 26),
+                    BackgroundTransparency = 1, Font = LOOK.regular, TextSize = lookPx(11),
+                    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextColor3 = LOOK.mute, Text = "", Parent = f,
+                })
+                -- Tell / Mute (not Show / Hide: those are the panel's own fold button)
+                for _, c in ipairs({ { "show", "Tell", -130 }, { "hide", "Mute", -72 } }) do
+                    local word = c[1]
+                    local b = mk("TextButton", {
+                        Size = UDim2.fromOffset(52, 32), Position = UDim2.new(1, c[3], 0.5, -16),
+                        BackgroundColor3 = (word == "show") and C.live or C.stop, BackgroundTransparency = 1,
+                        BorderSizePixel = 0, AutoButtonColor = false,
+                        Font = LOOK.bold, TextSize = lookPx(12), TextColor3 = LOOK.soft,
+                        Text = c[2], Parent = f,
+                    })
+                    corner(b, 10)
+                    r.lines[word] = mk("UIStroke", { Color = LOOK.ghost, Thickness = 1,
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+                    -- A second tap takes the mark off: the range decides again.
+                    b.Activated:Connect(function()
+                        if CFG.NewsFruitMenu[n] == word then CFG.NewsFruitMenu[n] = nil else CFG.NewsFruitMenu[n] = word end
+                        paint()
+                    end)
+                    r.chips[word] = b
+                end
+                rows[n] = r
+            end
+            addLive(paint)
+            paint()
+        end
+
         fold(v, "How it works", function(v)
+            caption(v, "Fruits: told if the game's price is at least your news range (0 = every "
+                .. "fruit; 2.5M = the Mythicals). Tell: told even under it. Mute: never told. "
+                .. "No mark: Take on your fruit menu tells it, Skip does not; else the range "
+                .. "decides. This is the news only - what is picked up stays on the fruit menu.")
             caption(v, "Only what is ticked is shown or says BREAKING. The hunts do not change: "
                 .. "the news is read all the same, so a tick shows its news at once. Moon "
                 .. "unticked takes the day, night and clock off the chip too. With Lock my "

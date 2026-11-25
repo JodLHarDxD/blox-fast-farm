@@ -417,9 +417,42 @@ check("limit 2.8M: T-Rex (2.7M, a Mythical) and Spider (Take) said; Buddha, Love
 CFG.FruitMinPrice = 1.25e6
 pass(1)
 N.tick()
-check("limit 1.25M: Portal (1.9M) and Love (1.3M) join, by value", said()
+check("the fruit menu's limit (1.25M) no longer decides the news: nothing joins",
+    said() == "T-Rex 20M (server spawn) | Spider 1.5M (server spawn)", said())
+CFG.FruitMinPrice, CFG.NewsFruitMin = 2.8e6, 1.25e6
+pass(1)
+N.tick()
+check("news range 1.25M: Portal (1.9M) and Love (1.3M) join, by value", said()
     == "T-Rex 20M (server spawn) | Portal 10M (server spawn) | Love 1.5M (server spawn) | Spider 1.5M (server spawn)", said())
-CFG.FruitMinPrice, CFG.FruitMenu = nil, {}
+CFG.NewsFruitMin = 0
+pass(1)
+N.tick()
+check("news range 0: every fruit - Buddha too; Dough still Skip on the menu",
+    said() == "T-Rex 20M (server spawn) | Buddha 10M (server spawn) | Portal 10M (server spawn)"
+    .. " | Love 1.5M (server spawn) | Spider 1.5M (server spawn)", said())
+CFG.NewsFruitMin = nil
+CFG.NewsFruitMenu = { Buddha = "show", ["T-Rex"] = "hide", Spider = "hide", Dough = "show" }
+pass(1)
+N.tick()
+check("news marks: Show tells under the range (Buddha), and over a menu Skip (Dough); "
+    .. "Hide silences over the range (T-Rex) and over a menu Take (Spider)",
+    said() == "Dough 30M (server spawn) | Buddha 10M (server spawn)", said())
+CFG.FruitMinPrice, CFG.FruitMenu, CFG.NewsFruitMenu = nil, {}, {}
+-- A drop not named yet: only when every fruit is news.
+check("a drop not named yet: not news at the default range, news at 0",
+    not P.fruitMatters({ dropper = "x" }, nil) and P.fruitMatters({ dropper = "x" }, 0)
+    and P.fruitMatters({}, nil))
+check("range 0 tells a cheap fruit whose price is not read yet; the default does not",
+    P.fruitMatters({ orig = "Rocket-Rocket" }, 0) and not P.fruitMatters({ orig = "Rocket-Rocket" }, nil))
+check("news row words",
+    P.newsWords(3e6, nil, nil, nil) == "$3M  ·  told"
+    and P.newsWords(1e6, nil, nil, nil) == "$1M  ·  under your news limit"
+    and P.newsWords(1e6, 0, nil, nil) == "$1M  ·  told"
+    and P.newsWords(1e6, nil, "show", nil) == "$1M  ·  always told"
+    and P.newsWords(9e6, nil, "hide", "take") == "$9M  ·  never told"
+    and P.newsWords(1e6, nil, nil, "take") == "$1M  ·  told - you take it"
+    and P.newsWords(nil, nil, nil, nil) == "no price yet",
+    P.newsWords(1e6, nil, nil, "take"))
 -- A server spawn before a player's drop of the same worth; one not named yet is said, last.
 fresh()
 lying("Gravity Fruit", "Gravity-Gravity", { by = "trader" })
