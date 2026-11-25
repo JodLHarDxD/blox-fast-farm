@@ -164,4 +164,195 @@ reset()
 ME = nil
 check("no character yet: still a pick, no error", Q.want() ~= nil)
 
+-- ---------------------------------------------------------------- 2026-11-25
+-- The log: a quest taken every ~185 s whatever the kills - the tracker was
+-- never read, every quest ran blind for the full hold and was asked again.
+
+reset()
+LEVEL = 25
+ME = vec(1000, 0, 0)
+w = Q.want()
+check("near its giver: asked from where you stand, no flight",
+    Q.take(w) == true and calls() == "start JungleQuest 2", calls())
+
+reset()
+LEVEL = 25
+CAMPS.Gorilla = vec(1800, 0, 0)
+w = Q.want()
+Q.take(w)
+check("far: flown to the species' camp (the fight is there), asked from there",
+    calls() == "fly 1800,start JungleQuest 2", calls())
+
+reset()
+LEVEL = 25
+CAMPS.Gorilla = vec(9000, 0, 0)
+w = Q.want()
+Q.take(w)
+check("far, and the camp is not near the giver: to the giver", calls() == "fly 2000,start JungleQuest 2", calls())
+
+reset()
+LEVEL = 25
+ME = vec(1000, 0, 0)
+REPLY = function() return (ME - vec(2000, 0, 0)).Magnitude < 100 and 0 or 1 end
+w = Q.want()
+check("refused from afar: to the giver, asked again - a success",
+    Q.take(w) == true and calls() == "start JungleQuest 2,fly 2000,start JungleQuest 2", calls())
+tracker(nil)
+CLOCK += 1
+Q.finished()
+CLOCK += 1
+Q.finished()
+ME = vec(1000, 0, 0)
+CALLS = {}
+w = Q.want()
+Q.take(w)
+check("...and the next ask for that giver comes from closer (flown first)",
+    CALLS[1] ~= "start JungleQuest 2" and string.find(CALLS[1] or "", "fly", 1, true) ~= nil, calls())
+
+reset()
+LEVEL = 25
+REPLY = 1
+ME = vec(2000, 0, 0)
+w = Q.want()
+check("refused at the giver: no flight, a refusal", Q.take(w) == false and calls() == "start JungleQuest 2", calls())
+
+-- THE TRACKER MOVED off Main.Quest: found on screen, not the panel, not a tag.
+reset()
+MOVED = true
+PG.Main = nil
+LEVEL = 25
+w = Q.want()
+check("tracker moved: taken, and read where it is now", Q.take(w) == true and not string.find(Q.note, "counted here", 1, true), Q.note)
+local held2 = Q.want()
+check("...held as running (no second ask)", held2 and held2.running and held2.enemy == "Gorilla", held2 and held2.enemy)
+tracker("Defeat 8 Gorillas (5/8)")
+CLOCK += 5
+Q.want()
+check("...its count shown", string.find(Q.note, "5/8", 1, true) ~= nil, Q.note)
+tracker(nil)
+CLOCK += 1
+Q.finished()
+CLOCK += 1
+check("...gone twice: finished", Q.finished() == true)
+
+reset()
+MOVED = true
+PG.Main = nil
+LEVEL = 25
+check("the panel's own words and a name tag are no quest", Q.want() and not Q.want().running)
+
+-- BLIND: no tracker anywhere - its own count, Beli, or no kill for long.
+reset()
+LEVEL = 25
+TRACKS = false
+w = Q.want()
+Q.take(w)
+for _ = 1, 7 do Q.onKill("Gorilla") end
+Q.onKill("Monkey")
+CLOCK += 10
+check("blind: 7 of 8 is not done", Q.finished() == false)
+check("...the count is shown", string.find(Q.note, "7/8", 1, true) ~= nil, Q.note)
+Q.onKill("Gorilla")
+CLOCK += 1
+check("...8 of 8: not yet (the game's word may still come)", Q.finished() == false)
+CLOCK += 5
+check("...8 of 8 and a moment: done", Q.finished() == true)
+check("...a new quest picked at once", Q.want() and not Q.want().running)
+
+reset()
+LEVEL = 25
+TRACKS = false
+Q.take(Q.want())
+Q.onKill("Gorilla")
+BELI.Value += 2500
+CLOCK += 1
+check("blind: Beli paid (only a quest pays) = done, whatever the count", Q.finished() == true)
+
+reset()
+LEVEL = 25
+TRACKS = false
+Q.take(Q.want())
+for _ = 1, 3 do
+    CLOCK += 150
+    Q.onKill("Gorilla")
+end
+CLOCK += 1
+check("blind: kills keep coming - no hold ends it", Q.finished() == false)
+CLOCK += 181
+check("...no kill for 180 s: ended", Q.finished() == true)
+
+-- MY LIST: the species fought takes its quest; a list quest running is kept.
+reset()
+CFG.Quests = false
+LEVEL = 25
+local lw, lrun = Q.forList({ Monkey = true, Gorilla = true }, "Monkey")
+check("my list: Monkey's own quest", lw and lw.enemy == "Monkey" and lw.tier == 1 and lrun == nil, lw and lw.enemy)
+tracker("Defeat 8 Gorillas (2/8)")
+CLOCK += 5
+lw, lrun = Q.forList({ Monkey = true, Gorilla = true }, "Monkey")
+check("...a running Gorilla quest (on the list) is kept", lw == nil and lrun == "Gorilla", tostring(lrun))
+lw, lrun = Q.forList({ Monkey = true }, "Monkey")
+check("...one of a species not on the list is replaced", lw and lw.enemy == "Monkey", lw and lw.enemy)
+tracker(nil)
+lw = Q.forList({ ["The Gorilla King"] = true }, "The Gorilla King")
+check("...a boss on the list takes its boss quest", lw and lw.tier == 3, lw and lw.tier)
+LEVEL = 5
+lw = Q.forList({ Gorilla = true }, "Gorilla")
+check("...not until your level allows it", lw == nil)
+CFG.Quests = true
+
+-- THE OLD ENGINE'S READING (2026-09-28): counter + Defeat in one block.
+reset()
+MOVED = true
+PG.Main = nil
+LEVEL = 25
+local split = inst("Frame", "Split", { Visible = true }, {
+    inst("TextLabel", "Head", { Text = "Defeat 8 Gorillas", Visible = true }),
+    inst("TextLabel", "Count", { Text = "(2/8)", Visible = true }) })
+HUD_FRAME.Visible = true
+split.Parent = HUD_FRAME
+table.insert(HUD_FRAME.kids, split)
+local sw = Q.want()
+check("title and counter in two labels of one block: running",
+    sw and sw.running and sw.enemy == "Gorilla", sw and sw.enemy)
+check("...its count read from the counter", string.find(Q.note, "2/8", 1, true) ~= nil, Q.note)
+
+reset()
+MOVED = true
+PG.Main = nil
+LEVEL = 25
+HUD_FRAME.Visible = true
+HUD_LABEL.Text = "Gorillas 3/8 left on the board"
+check("a counter with no Defeat in its block (a board) is no quest", not Q.want().running)
+
+reset()
+LEVEL = 25
+TITLE.Text = "Defeat 8 Gorillas (8/8)"
+QUEST_GUI.Visible = false
+check("old words left in a hidden tracker are no quest", not Q.want().running)
+
+reset()
+LEVEL = 25
+ME = vec(1000, 0, 0)
+w = Q.want()
+tracker("Defeat 8 Gorillas (3/8)")
+check("taking a quest already running (a look missed it): kept, never asked again",
+    Q.take(w) == true and calls() == "", calls())
+check("...its count kept", string.find(Q.note, "3/8", 1, true) ~= nil, Q.note)
+
+reset()
+LEVEL = 25
+ME = vec(1000, 0, 0)
+REPLY = 1
+w = Q.want()
+local plain = cf.InvokeServer
+cf.InvokeServer = function(self, name, id, tier)
+    local r = plain(self, name, id, tier)
+    if name == "StartQuest" then tracker("Defeat 8 Gorillas (0/8)") end
+    return r
+end
+check("the server's word odd but its tracker up: taken, no flight, no second ask",
+    Q.take(w) == true and calls() == "start JungleQuest 2", calls())
+cf.InvokeServer = plain
+
 io_print(all and "ALL PASS" or "SOME FAILED")

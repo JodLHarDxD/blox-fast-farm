@@ -264,9 +264,17 @@ local CFG = {
     -- Off by default: no mode = Start does nothing, nothing runs.
     Circuit            = false,
     -- QUESTS BY YOUR LEVEL (Circuit page): the best quest your level allows in
-    -- this sea, taken at its giver, its species killed, the next one. Your
-    -- Targets wait meanwhile. For leveling a new account.
+    -- this sea, asked for from where you stand, its species killed, the next
+    -- one. Your Targets wait meanwhile. For leveling a new account.
     Quests             = false,
+    -- A quest is asked for from where you stand when its giver is this close
+    -- (user, 2026-11-25: "it can take the quest from anywhere on that
+    -- island"). Farther: the flight goes to the species' camp, and asks from
+    -- there. Refused from afar: to the giver, and asked again there.
+    QuestAskFrom       = 1500,
+    -- MY LIST takes quests too: the species being fought, its best quest
+    -- your level allows, taken and retaken (user, 2026-11-25).
+    ListQuests         = true,
     RaidMode           = false,
     RaidRadius         = 450,    -- the public raid scripts' "on this island"
     -- STALE ISLANDS (user, 2026-10-10: the raid over and back at the Castle
@@ -6611,21 +6619,39 @@ end
 -- leave a table behind (the old table's Hydra rows had already moved):
 --   RS.Quests                     quest id -> tiers { LevelReq, Task = { enemy = n } }
 --   RS.GuideModule Data.NPCList   THIS sea's givers: their quest id, where they stand
--- The server refuses StartQuest away from the giver, so you fly there first.
--- It answers 0 yes, 1 error, 2 done already, or the level it needs. Asking
--- again while a quest runs resets its count, so a running one is never asked.
+-- StartQuest answers 0 yes, 1 error, 2 done already, or the level it needs.
+-- Asking again while a quest runs resets its count, so a running one is never
+-- asked.
+--
+-- 2026-11-25 (user: "it is not counting how much kill have to do ... not
+-- taking the quest reliably every time"). The log showed it: a quest taken
+-- every ~185 s whatever the kills (Bandit x5 for 197 s, Gorilla x8 three times
+-- at one level, 177 kills to 3 quests) - the tracker at Main.Quest was never
+-- read, so every quest ran "blind" for the full 180 s hold and was then asked
+-- again, its count reset. Now:
+--   * THE TRACKER: read as the 2026-09-28 engine read it - the shown label
+--     with a have/need counter in a block that says Defeat - found once, kept.
+--   * NO TRACKER: the quest's own count. Its species' kills are counted here
+--     against the number it asks for; full, or Beli paid (an enemy pays no
+--     Beli, a quest does) = done. The 180 s hold is only for no kill at all.
+--   * ASKED FROM WHERE YOU STAND (user: "it can take the quest from anywhere
+--     on that island"): near its giver, asked from here; far, flown to the
+--     species' camp and asked from there; refused from afar, to the giver.
 P.quest = { note = "off", done = 0 }
 do
     local Q = P.quest
-    local RETRY, HOLD = 60, 180
+    local RETRY, HOLD, GRACE, SCAN = 60, 180, 4, 3
     local refused = {}                 -- "id/tier" -> when to try it again
+    local reach = {}                   -- quest id -> how far an ask may come from
     local gone, lookAt = 0, 0          -- looks in a row with no tracker
-    local blind, blindUntil = nil, 0   -- taken, but the tracker cannot be read
+    local active = nil                 -- the quest taken by this run
+    local label, scanAt = nil, -100    -- the tracker's label, once found
 
     -- A fresh Start: everything refused is tried again.
     function Q.reset()
         table.clear(refused)
-        gone, lookAt, blind, blindUntil = 0, 0, nil, 0
+        table.clear(reach)
+        gone, lookAt, active, label, scanAt = 0, 0, nil, nil, -100
         Q.note, Q.done = "", 0
     end
 
@@ -6641,22 +6667,22 @@ do
         return quests, type(npcs) == "table" and npcs or nil
     end
 
-    local function tracker()
-        local ok, txt = pcall(function()
-            local q = player.PlayerGui.Main.Quest
-            return q.Visible and q.Container.QuestTitle.Title.Text
-        end)
-        return (ok and type(txt) == "string" and txt ~= "") and txt or nil
+    local function beliNow()
+        local ok, v = pcall(function() return player.Data.Beli.Value end)
+        return ok and tonumber(v) or nil
     end
 
-    -- The enemy the tracker names: the longest match, so Desert Bandit is not Bandit.
+    -- The enemy a text names: the longest match, so Desert Bandit is not Bandit.
     local function enemyIn(quests, txt)
         local best
         for _, tiers in pairs(quests) do
-            for _, t in ipairs(tiers) do
-                for enemy in pairs(t.Task or {}) do
-                    if string.find(txt, enemy, 1, true) and (not best or #enemy > #best) then
-                        best = enemy
+            if type(tiers) == "table" then
+                for _, t in ipairs(tiers) do
+                    for enemy in pairs(type(t) == "table" and t.Task or {}) do
+                        if type(enemy) == "string" and string.find(txt, enemy, 1, true)
+                            and (not best or #enemy > #best) then
+                            best = enemy
+                        end
                     end
                 end
             end
@@ -6664,9 +6690,89 @@ do
         return best
     end
 
-    -- The highest quest your level allows among this sea's givers, the nearest
-    -- giver on a tie. Boss tiers are left out: one kill on a long respawn.
-    local function pick(quests, npcs, level, from)
+    -- THE TRACKER, read the way the engine of 2026-09-28 read it (the one that
+    -- looped quest after quest): not by a path - the label with a live
+    -- have/need counter whose block also says Defeat (or Eliminate / Kill).
+    -- The quest BOARD has words but no counter; a name tag has no Defeat. The
+    -- counter and the title may be two labels of one block, so the block's
+    -- words are read together. Main.Quest is not trusted: the 2026-11-25 log
+    -- shows every quest of build 2026-11-23.2 run blind on it.
+    local function noTags(t) return (string.gsub(t, "<[^>]->", "")) end
+    local function blockText(frame)
+        local acc = {}
+        for _, d in ipairs(frame:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and type(d.Text) == "string" then
+                table.insert(acc, noTags(d.Text))
+            end
+        end
+        return table.concat(acc, " ")
+    end
+    -- On screen: every frame up to its ScreenGui shown, and not this panel.
+    local function onScreen(l, pg)
+        local x = l
+        while x and x ~= pg do
+            if x:IsA("LayerCollector") then
+                return x:IsA("ScreenGui") and x.Enabled ~= false and x.Name ~= "BFFHUD"
+            end
+            if x:IsA("GuiObject") and not x.Visible then return false end
+            x = x.Parent
+        end
+        return false
+    end
+    -- One label: -> "<its counter text> | <its block's words>", or nil.
+    local function readLabel(l, pg)
+        if not l or not l.Parent then return nil end
+        local t = l.Text
+        if type(t) ~= "string" or t == "" then return nil end
+        t = noTags(t)
+        if not string.find(t, "%d+%s*/%s*%d+") then return nil end
+        if not onScreen(l, pg) then return nil end
+        local blob = blockText(l.Parent)
+        local low = string.lower(blob)
+        if not (string.find(low, "defeat", 1, true) or string.find(low, "eliminate", 1, true)
+            or string.find(low, "kill", 1, true)) then return nil end
+        return t .. " | " .. blob
+    end
+
+    -- The running quest's words, or nil. The label found once is re-read (a
+    -- text compare); the screen is walked again only when it has gone, at
+    -- most every SCAN seconds unless `force`.
+    local function tracker(_, force)
+        local found
+        pcall(function()
+            local pg = player:FindFirstChildOfClass("PlayerGui")
+            if not pg then return end
+            if label and label:IsDescendantOf(pg) then
+                found = readLabel(label, pg)
+                if found then return end
+            end
+            if not force and os.clock() - scanAt < SCAN then return end
+            scanAt = os.clock()
+            for _, d in ipairs(pg:GetDescendants()) do
+                if d:IsA("TextLabel") then
+                    local w = readLabel(d, pg)
+                    if w then
+                        if label ~= d then
+                            print("[BFF] quest: the tracker is read at " .. d:GetFullName())
+                        end
+                        label, found = d, w
+                        return
+                    end
+                end
+            end
+        end)
+        return found
+    end
+
+    local function count(txt)
+        local have, need = string.match(txt, "(%d+)%s*/%s*(%d+)")
+        return tonumber(have), tonumber(need)
+    end
+
+    -- The best quest your level allows among this sea's givers, the nearest
+    -- giver on a tie. `species`: that enemy's quests alone (My list), bosses too;
+    -- otherwise boss tiers are left out (one kill on a long respawn).
+    local function pick(quests, npcs, level, from, species)
         local best
         for _, npc in pairs(npcs) do
             local tiers = npc.InternalQuestName and quests[npc.InternalQuestName]
@@ -6675,7 +6781,8 @@ do
                     local enemy, n = next(t.Task or {})
                     local lv = t.LevelReq or 0
                     local key = npc.InternalQuestName .. "/" .. tier
-                    if enemy and n > 1 and lv <= level and os.clock() >= (refused[key] or 0) then
+                    if enemy and lv <= level and os.clock() >= (refused[key] or 0)
+                        and ((species and enemy == species) or (not species and n > 1)) then
                         local dist = from and (npc.Position - from).Magnitude or 0
                         if not best or lv > best.lv or (lv == best.lv and dist < best.dist) then
                             best = { id = npc.InternalQuestName, tier = tier, lv = lv, enemy = enemy,
@@ -6688,18 +6795,36 @@ do
         return best
     end
 
+    local function noteRunning(enemy, have, need)
+        Q.note = string.format("%s %s/%s  ·  %d done", enemy, tostring(have or "?"), tostring(need or "?"), Q.done)
+    end
+
+    -- The quest running now: its enemy, or nil.
+    local function runningNow(quests)
+        local txt = tracker(quests)
+        -- Its enemy: the game's name in its words; else the one taken here (a
+        -- quest of ours is never dropped for a name not matched).
+        local enemy = txt and (enemyIn(quests, txt) or (active and active.enemy))
+        if enemy then
+            local have, need = count(txt)
+            if active and active.enemy == enemy then active.blind = false end
+            noteRunning(enemy, have, need or (active and active.need))
+            return enemy
+        end
+        if active and active.blind and not Q.finished() then
+            noteRunning(active.enemy, active.kills, active.need)
+            return active.enemy
+        end
+        return nil
+    end
+
     -- What to fight: the running quest, or the one to take. -> nil: nothing to
     -- go on (the circuit then falls back on the species for your level).
     function Q.want()
-        if blind and os.clock() < blindUntil then return { enemy = blind, running = true } end
         local quests, npcs = gameData()
         if not quests then Q.note = "the game's quest data cannot be read" return nil end
-        local txt = tracker()
-        local enemy = txt and enemyIn(quests, txt)
-        if enemy then
-            Q.note = string.format("%s  ·  %d done", txt, Q.done)
-            return { enemy = enemy, running = true }
-        end
+        local enemy = runningNow(quests)
+        if enemy then return { enemy = enemy, running = true } end
         if not npcs or next(npcs) == nil then Q.note = "no quest giver known in this sea" return nil end
         local level = playerLevel()
         if not level then Q.note = "your level cannot be read" return nil end
@@ -6709,36 +6834,118 @@ do
         return w
     end
 
+    -- MY LIST: -> (quest to take for `name`, or nil), (the running quest's
+    -- enemy, or nil). A running quest of any species on the list is kept.
+    function Q.forList(names, name)
+        local quests, npcs = gameData()
+        if not quests then return nil, nil end
+        local enemy = runningNow(quests)
+        if enemy and names[enemy] then return nil, enemy end
+        if not npcs or next(npcs) == nil then return nil, enemy end
+        local level = playerLevel()
+        if not level then return nil, enemy end
+        local _, r = parts()
+        return pick(quests, npcs, level, r and r.Position, name), enemy
+    end
+
+    -- An answer that is the server's word on the quest itself (not on where
+    -- it was asked from): yes, done already, or a level.
+    local function final(ok, r)
+        return ok and (r == 0 or r == 2 or (type(r) == "number" and r > 2))
+    end
+
     function Q.take(w)
         local cf = commF()
         if not cf then Q.note = "no CommF_ remote" return false end
         local myEpoch = epoch
-        releasePile()
-        -- A tracker here is no quest of this list (an elite's, a story's).
-        if tracker() then
+        local quests = gameData()
+        -- A tracker here: this very quest already running (a look that came
+        -- too soon missed it) is kept - asking would reset its count. Any
+        -- other (an elite's, a story's) is dropped.
+        local shown = tracker(quests, true)
+        if shown and quests and enemyIn(quests, shown) == w.enemy then
+            local have, need = count(shown)
+            active = active or { enemy = w.enemy, need = need or w.need, beli0 = beliNow(), kills = have or 0,
+                at = os.clock(), last = os.clock(), blind = false }
+            gone = 0
+            noteRunning(w.enemy, have, need or w.need)
+            return true
+        end
+        if shown then
             pcall(function() cf:InvokeServer("AbandonQuest") end)
             task.wait(0.4)
         end
         setState("QUEST")
-        say(string.format("to %s for the %s quest", tostring(w.giver), w.enemy))
-        flyTo(w.pos + Vector3.new(0, 3, 0))
-        if stale(myEpoch) then return false end
-        local ok, r = pcall(function() return cf:InvokeServer("StartQuest", w.id, w.tier) end)
+        -- One ask. Taken = the server's yes, or its tracker up for this enemy
+        -- (the old engine's test - an odd answer is not a refusal then).
+        local function ask()
+            local ok, r = pcall(function() return cf:InvokeServer("StartQuest", w.id, w.tier) end)
+            if not final(ok, r) then
+                task.wait(0.45)
+                local up = tracker(quests, true)
+                if up and enemyIn(quests, up) == w.enemy then return true, 0 end
+            end
+            return ok, r
+        end
+        local function away()
+            local _, r = parts()
+            return r and (r.Position - w.pos).Magnitude or math.huge
+        end
+        local giver = tostring(w.giver)
+        local limit = math.min(CFG.QuestAskFrom or 1500, reach[w.id] or math.huge)
+        local ok, r, from
+        -- 1. Not near: to the species' camp (the fight is there), if it is near
+        -- the giver; else to the giver.
+        if away() > limit then
+            local row = rowOf(w.enemy)
+            local camp = campOf(w.enemy, row and row[4] or nil)
+            releasePile()
+            if camp and (camp - w.pos).Magnitude <= limit then
+                say(string.format("to the %s camp for the %s quest", w.enemy, giver))
+                flyTo(camp + Vector3.new(0, CFG.HeightSafe or 20, 0))
+            else
+                say(string.format("to %s for the %s quest", giver, w.enemy))
+                flyTo(w.pos + Vector3.new(0, 3, 0))
+            end
+            if stale(myEpoch) then return false end
+        end
+        -- 2. Asked from here.
+        local far = away()
+        say(string.format("asking %s for the %s quest from %d studs", giver, w.enemy, math.floor(far)))
+        ok, r = ask()
+        from = string.format("asked from %d studs", math.floor(far))
+        -- 3. Refused from afar: to the giver, asked again; asks for this giver
+        -- come from closer from now on.
+        if not final(ok, r) and far > 40 then
+            reach[w.id] = math.max(40, far * 0.75)
+            releasePile()
+            say(string.format("%s did not answer from %d studs - to him", giver, math.floor(far)))
+            flyTo(w.pos + Vector3.new(0, 3, 0))
+            if stale(myEpoch) then return false end
+            ok, r = ask()
+            from = "asked at the giver"
+        end
         if ok and r == 0 then
-            gone, blind = 0, nil
-            for _ = 1, 15 do
-                if tracker() then break end
+            gone = 0
+            active = { enemy = w.enemy, need = w.need, beli0 = beliNow(), kills = 0,
+                at = os.clock(), last = os.clock(), blind = false }
+            local seen
+            for i = 1, 15 do
+                seen = tracker(quests, i % 5 == 0)
+                if seen then break end
                 task.wait(0.2)
             end
-            if not tracker() then
-                -- Asking again would reset the count: fight it for a while.
-                blind, blindUntil = w.enemy, os.clock() + HOLD
-                Q.note = "taken, but its tracker cannot be read: " .. w.enemy
+            if not seen then
+                -- Asking again would reset the count: counted here instead.
+                active.blind = true
+                noteRunning(w.enemy, 0, w.need)
+                Q.note ..= "  (counted here)"
             else
-                Q.note = string.format("%s x%d  ·  %d done", w.enemy, w.need, Q.done)
+                local have, need = count(seen)
+                noteRunning(w.enemy, have or 0, need or w.need)
             end
-            print(string.format("[BFF] quest: %s x%d from %s (%s %d, level %d)", w.enemy, w.need,
-                tostring(w.giver), w.id, w.tier, w.lv))
+            print(string.format("[BFF] quest: %s x%d from %s (%s %d, level %d, %s)%s", w.enemy, w.need,
+                giver, w.id, w.tier, w.lv, from, seen and "" or " - no tracker, counted here"))
             return true
         end
         refused[w.key] = (r == 2) and math.huge or (os.clock() + RETRY)
@@ -6750,24 +6957,48 @@ do
         return false
     end
 
-    -- Its tracker gone, on two looks in a row: a UI that blinks must not end a
-    -- quest, because the next one asked would replace a running count.
-    function Q.finished()
-        if blind then
-            if os.clock() < blindUntil then return false end
-            blind = nil
-            Q.done += 1
-            return true
+    -- A kill of the quest's species (the fight's own count).
+    function Q.onKill(name)
+        if not active or name ~= active.enemy then return end
+        active.kills += 1
+        active.last = os.clock()
+        if active.kills >= (active.need or math.huge) and not active.fullAt then
+            active.fullAt = os.clock()
         end
+        if active.blind then
+            noteRunning(active.enemy, active.kills, active.need)
+            Q.note ..= "  (counted here)"
+        end
+    end
+
+    local function ended(why)
+        if active then
+            print(string.format("[BFF] quest done: %s (%s, %d kills)", active.enemy, why, active.kills))
+        end
+        active, gone = nil, 0
+        Q.done += 1
+        return true
+    end
+
+    -- Its tracker gone, on two looks in a row: a UI that blinks must not end a
+    -- quest, because the next one asked would replace a running count. No
+    -- tracker at all: Beli paid, its count full, or no kill for HOLD seconds.
+    function Q.finished()
         local now = os.clock()
         if now - lookAt < 0.5 then return false end
         lookAt = now
-        if tracker() then gone = 0 return false end
+        if active and active.blind then
+            if tracker(gameData()) then active.blind = false gone = 0 return false end
+            local b = beliNow()
+            if b and active.beli0 and b > active.beli0 then return ended("Beli paid") end
+            if active.fullAt and now - active.fullAt >= GRACE then return ended("count full") end
+            if now - active.last >= HOLD then return ended("no kill for " .. HOLD .. " s") end
+            return false
+        end
+        if tracker(gameData(), gone >= 1) then gone = 0 return false end
         gone += 1
         if gone < 2 then return false end
-        gone = 0
-        Q.done += 1
-        return true
+        return ended("tracker gone")
     end
 end
 -- (end of quests)
@@ -6838,6 +7069,7 @@ end
 local function onKill(name)
     stats.kills += 1
     if meas then meas.kills += 1 end
+    P.quest.onKill(name)
 end
 
 -- ---------------------------------------------------------
@@ -13460,6 +13692,16 @@ local function step()
     if cur.quest and not cur.quest.running then
         P.quest.take(cur.quest)
         return
+    end
+    -- My list: the species being fought takes its own quest when your level
+    -- allows one; a running quest of any species on the list is kept.
+    if not cur.quest and not CFG.Quests and CFG.ListQuests then
+        local w, running = P.quest.forList(names, cur.name)
+        if w then
+            P.quest.take(w)
+            return
+        end
+        if running == cur.name then cur.quest = { enemy = running, running = true } end
     end
 
     -- A BOSS is one enemy on a long respawn. While it is not up: the rest of
@@ -22665,11 +22907,14 @@ local function buildUI()
                     if not first then return "No quest for your level here: " .. tostring(P.quest.note) .. "." end
                     local lv = playerLevel()
                     return "Now: " .. first .. ", the best quest" .. (lv and (" for Lv " .. lv) or " for your level")
-                        .. ". As you level up it moves on by itself."
+                        .. " (" .. tostring(P.quest.note) .. "). As you level up it moves on by itself."
                 end
                 if #CFG.Targets == 0 then
                     return "Until you add one: " .. (list[1] and tostring(list[1].name) or "the species for your level")
                         .. ", the species for your level, without a quest."
+                end
+                if CFG.ListQuests and P.running then
+                    return "Each with its quest when your level allows: " .. tostring(P.quest.note) .. "."
                 end
                 return ""
             end, "farm")
