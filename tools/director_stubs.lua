@@ -39,4 +39,6 @@ local function setState() end
 -- The sea hunts' own step (SEA HUNT): logged with its kind; true = busy.
 local P = { sea = { huntStep = function(_, kind) log("sea " .. tostring(kind)) return true end },
     fruitWait = function() if LOADING then log("wait: loading") end return LOADING end }
+-- The boss hunt's own step (a boss's live card): always busy.
+local function bossStep() log("boss " .. tostring(CFG.HuntBoss)) return true end
 local huntStep

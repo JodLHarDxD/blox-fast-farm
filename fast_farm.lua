@@ -315,6 +315,11 @@ local CFG = {
     HuntKind           = "elite",    -- "elite" | "fruit" | "berry" | "recipe" | "sword" | "flower" | "ember" | "halloween" | "prehistoric"
                                      -- | "mirage" | "dealer" | "mchest" | "gear" (the four Mirage hunts)
                                      -- | "seaevents" | "sail" (Sea travel: the boat only)
+                                     -- | "boss" (one boss, CFG.HuntBoss: a boss's live card)
+    -- THE BOSS HUNT (user, 2026-11-25): the one boss a Home card was tapped
+    -- for - fought where the game has it, then back to the mode you had.
+    -- Never hops; never the raid.
+    HuntBoss           = "",
     -- FRUIT HUNT: fruits on the ground, grabbed and STORED, never eaten.
     -- Worth it = the game's own price at least this (0 = any). Player drops
     -- are mostly trades (dropped and picked up within a second): off =
@@ -764,7 +769,7 @@ _G.BFF = P
 -- at Luau's 200-local limit.
 PACK_OF = {
     circuit = "farm", random = "farm",
-    raid = "raid", elite = "raid", sword = "raid",
+    raid = "raid", elite = "raid", sword = "raid", boss = "raid",
     sail = "sea", seaevents = "sea", levi = "sea", mirage = "sea",
     dealer = "sea", mchest = "sea", gear = "sea",          -- the Mirage jobs (CFG.HuntKind)
     prehistoric = "prehistoric", volcano = "prehistoric",
@@ -900,8 +905,16 @@ end
 -- card at a time: a fruit, Mirage, Prehistoric, a boss, the pirates in the
 -- castle (Random), any other news item that maps to a hunt (the Frozen
 -- Dimension = the Leviathan hunt).
+-- A BOSS'S CARD FIGHTS THAT BOSS (user, 2026-11-25: "raid bosses are not
+-- raids ... raid mode only when I hand-click it"). Each of these is fought
+-- by the boss hunt (CFG.HuntKind "boss", CFG.HuntBoss = its name): flown to
+-- where the game has it - Cake Prince / Dough King in their dimension, the
+-- Soul Reaper at the Haunted Castle, the Tyrant at Tiki Outpost, Darkbeard
+-- at the Dark Arena - fought, then back to the mode you had. Raid mode (the
+-- fruit raid) is never turned on by a card. An elite pirate's card is still
+-- the elite hunt.
 LIVE_RAIDBOSS = { ["Dough King"] = true, ["Cake Prince"] = true, ["rip_indra True Form"] = true,
-    ["Soul Reaper"] = true }
+    ["Soul Reaper"] = true, ["Tyrant of the Skies"] = true, Darkbeard = true }
 -- fruit = { name, spot } of the dearest fruit lying here (nil = none read).
 -- Returns { key, rank, mode, pack, title } or nil: a headline with no hunt.
 -- R4 F3: short titles - the card itself means "in this server".
@@ -918,8 +931,8 @@ function liveEventOf(it, fruit)
         return { key = it.key, rank = 3, mode = "prehistoric", pack = "prehistoric",
             title = "Prehistoric is up" }
     elseif boss then
-        return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "raid" or "elite", pack = "raid",
-            title = boss .. " is up" }
+        return { key = it.key, rank = 4, mode = LIVE_RAIDBOSS[boss] and "boss" or "elite", pack = "raid",
+            boss = LIVE_RAIDBOSS[boss] and boss or nil, title = boss .. " is up" }
     elseif it.key == "castle" then
         -- R4 F1: the pirate raid at the Castle on the Sea = Random there,
         -- with the strongest M1 you carry unless Random has its own pick.
@@ -1072,10 +1085,11 @@ function carouselChrome(n)
     return (n or 0) > 1
 end
 -- What a tap does: "cover" (pack not held), "none" (already hunting it),
--- else "hunt". state = packState of the pack's mode.
-function liveTapOf(m, state, running, nowMode)
+-- else "hunt". state = packState of the pack's mode. nowBoss: the boss the
+-- boss hunt is on (a boss card is "hunting now" only for that one).
+function liveTapOf(m, state, running, nowMode, nowBoss)
     if state ~= "open" then return "cover" end
-    if running and nowMode == m.mode then return "none" end
+    if running and nowMode == m.mode and (m.boss == nil or m.boss == nowBoss) then return "none" end
     return "hunt"
 end
 -- The card's sub line, by what a tap does.
@@ -1089,10 +1103,11 @@ end
 -- Start when nothing runs; a running farm just switches mode. act = { cover,
 -- setMode, start } (the panel's own functions).
 function liveTap(m, state, running, nowMode, act)
-    local a = liveTapOf(m, state, running, nowMode)
+    local a = liveTapOf(m, state, running, nowMode, act.nowBoss)
     if a == "cover" then act.cover(m.pack)
     elseif a == "hunt" then
-        act.setMode(m.mode, true)
+        -- A boss: that boss (act.boss), never the raid.
+        if m.boss and act.boss then act.boss(m.boss) else act.setMode(m.mode, true) end
         if m.strongest and act.weapon then act.weapon(m.mode) end
         if not running then act.start() end
     end
@@ -9965,13 +9980,13 @@ do
             return true
         end
 
-        local function eliteFight(name, at, where, myEpoch)
+        -- One named boss: flown to (loaded, or where the game parked it),
+        -- piled and fought. -> true once it is dead.
+        local function fightNamed(name, at, where, myEpoch)
             activeName = name
-            if CFG.EliteQuest then takeEliteQuest(myEpoch) end
-            if stale(myEpoch) then return end
             local e = nearestLoaded(name)
             local _, r = parts()
-            if not r then return end
+            if not r then return false end
             local target = e and e.root.Position or at
             local over = target + Vector3.new(0, CFG.HeightSafe or 20, 0)
             if (r.Position - over).Magnitude > 150 and not (pileCentre and pileFor == name) then
@@ -9979,7 +9994,7 @@ do
                 setState("FLY")
                 say(string.format("flying to %s  (%s)", name, where == "parked" and "parked by the game" or "loaded"))
                 flyTo(over, { stream = name })
-                if stale(myEpoch) then return end
+                if stale(myEpoch) then return false end
                 e = nearestLoaded(name)
             end
             if not e then
@@ -9992,13 +10007,20 @@ do
                 end
                 say(name .. " is listed as up but is not here yet")
                 task.wait(0.3)
-                return
+                return false
             end
             E.missSince = nil
             local model, hum = e.model, e.hum
             local why = fight({ name = name, elite = true }, { [name] = true })
-            if why ~= "empty" then return end                 -- hurt / 30 s sweep / a fruit: the next step
-            if not (hum.Health <= 0 or model.Parent == nil) then return end   -- walked off / parked: look again
+            if why ~= "empty" then return false end           -- hurt / 30 s sweep / a fruit: the next step
+            return hum.Health <= 0 or model.Parent == nil      -- walked off / parked: look again
+        end
+
+        local function eliteFight(name, at, where, myEpoch)
+            activeName = name
+            if CFG.EliteQuest then takeEliteQuest(myEpoch) end
+            if stale(myEpoch) then return end
+            if not fightNamed(name, at, where, myEpoch) then return end
             E.tally.kills += 1
             releasePile()
             say(name .. " is down - looking for the chalice")
@@ -10071,6 +10093,53 @@ do
             end
             E.why = (E.reply == "none") and "no elite up here" or "no elite seen here"
             return false
+        end
+
+        -- THE BOSS HUNT (CFG.HuntBoss, from a boss's live card). The boss
+        -- fought where the game has it; down, or not up here any more = the
+        -- hunt ends and the mode you had before the card comes back
+        -- (P.bossBack, set by the card), else the farm stops. Never a hop:
+        -- the next server is very unlikely to have the same boss up.
+        local function bossDone(why)
+            E.note = why
+            say(why)
+            print("[BFF] boss: " .. why)
+            local back = (P :: any).bossBack
+            ;(P :: any).bossBack = nil
+            P.setHunt(false)
+            if back and (P :: any).setModeById then
+                pcall((P :: any).setModeById, back, true)
+                say(why .. " - back to " .. tostring(back))
+            end
+        end
+        local function bossStep(myEpoch)
+            local name = CFG.HuntBoss
+            if type(name) ~= "string" or name == "" then
+                bossDone("no boss picked")
+                return true
+            end
+            local at, where = bossUp(name)
+            if at then
+                E.bossSeenAt = os.clock()
+                E.note = string.format("%s is up (%s)", name, where == "parked" and "far off" or "near you")
+                if fightNamed(name, at, where, myEpoch) then
+                    releasePile()
+                    bossDone(name .. " is down")
+                end
+                return true
+            end
+            -- Not seen: a few seconds for the world to arrive (a join, a
+            -- flight), then it is gone (killed by others, or it left).
+            local since = math.max(E.bossSeenAt or 0, E.lookStart or 0)
+            if os.clock() - since < 8 then
+                E.note = string.format("looking for %s  %.0fs", name, os.clock() - since)
+                say(E.note)
+                setState("LOOK")
+                task.wait(0.25)
+                return true
+            end
+            bossDone(name .. " is not up here any more")
+            return true
         end
 
         -- THE DIRECTOR. Every step: the chalice stops everything; then ONLY
@@ -10146,6 +10215,9 @@ do
             elseif kind == "seaevents" then
                 -- SEA EVENTS: always busy (never hops).
                 if (P :: any).seaev.step(myEpoch) then return end
+            elseif kind == "boss" then
+                -- ONE BOSS (its live card): always busy, never hops.
+                if bossStep(myEpoch) then return end
             elseif eliteLook(myEpoch) then
                 return
             end
@@ -17698,7 +17770,9 @@ do
             { key = "frozen", title = "FROZEN DIMENSION", map = "FrozenDimension", loc = "Frozen Dimension",
                 why = "Leviathan" },
         }
-        local RAID = { "Dough King", "Cake Prince", "rip_indra True Form", "Soul Reaper" }
+        -- Darkbeard (Second Sea, the Dark Arena) since 2026-11-25: a boss
+        -- the user fights, so it is news and has its card.
+        local RAID = { "Dough King", "Cake Prince", "rip_indra True Form", "Soul Reaper", "Darkbeard" }
         for _, d in ipairs(ISLES) do N.isles[d.key] = { up = false } end
 
         -- YOUR TICKS (user, 2026-11-07: "If I select one only about fruit, it
@@ -18742,7 +18816,7 @@ local function buildUI()
     -- list, the Start button, the Mode row).
     local TITLES = {
         home = "Fast Farm · " .. tostring(P.build), modes = "Modes",
-        circuit = "Circuit farm", none = "No mode", random = "Random", raid = "Raid",
+        circuit = "Circuit farm", none = "No mode", random = "Random", raid = "Raid", boss = "Boss fight",
         elite = "Elite pirates", fruit = "Fruits", fruitlog = "Fruit history", berry = "Haki berries",
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
         ember = "Blaze Ember", halloween = "Halloween", sail = "Sea travel", seaevents = "Sea events",
@@ -19743,6 +19817,12 @@ local function buildUI()
             if CFG.RandomMode then randomSet(false) end
         elseif id == "mirage" then P.setHunt(true, CFG.MirageJob or "mirage")
         else P.setHunt(true, id) end
+    end
+    -- The boss hunt, when its boss is down, gives you back the mode you had.
+    ;(P :: any).setModeById = setMode
+    -- The boss the boss hunt is on (nil when another mode runs).
+    local function huntBossNow()
+        return (CFG.Hunt and CFG.HuntKind == "boss") and CFG.HuntBoss or nil
     end
 
     -- =====================================================
@@ -21813,7 +21893,7 @@ local function buildUI()
             mPrev.Visible, mNext.Visible, dots.Visible = many, many, many
             mX.Visible, xChip.Visible = m ~= nil, m ~= nil
             local sig = m and table.concat({ m.key, m.title, tostring(momentState(m)),
-                tostring(P.running and modeNow() == m.mode), tostring(cs.idx), tostring(n) }, "|") or nil
+                tostring(P.running and modeNow() == m.mode), tostring(huntBossNow()), tostring(cs.idx), tostring(n) }, "|") or nil
             if sig ~= lastSig then
                 lastSig = sig
                 if m then
@@ -21822,7 +21902,7 @@ local function buildUI()
                     mLine.TextColor3 = text
                     mPrev.TextColor3, mNext.TextColor3 = text, text
                     mTitle.Text = m.title
-                    mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow()), PACKS[m.pack].name)
+                    mLine.Text = liveSubOf(liveTapOf(m, momentState(m), P.running, modeNow(), huntBossNow()), PACKS[m.pack].name)
                     if shown ~= m.pack then
                         shown = m.pack
                         for _, k in ipairs(artBox:GetChildren()) do
@@ -21859,6 +21939,15 @@ local function buildUI()
             liveTap(cur, momentState(cur), P.running, modeNow(), {
                 cover = function(pack) show("cover_" .. pack) end,
                 setMode = setMode, start = P.start,
+                -- A boss's card: that boss alone, then the mode you have now.
+                nowBoss = huntBossNow(),
+                boss = function(name)
+                    local prev = modeNow()
+                    if prev ~= "boss" then (P :: any).bossBack = (prev ~= "none") and prev or nil end
+                    CFG.HuntBoss = name
+                    setMode("boss", true)
+                    say(name .. " is up - fighting it, then back to " .. tostring((P :: any).bossBack or "no mode"))
+                end,
                 -- The castle raid: the strongest M1 you carry, this start only.
                 weapon = function(mode)
                     local w = onceWeaponOf(CFG.FightWith, mode, P.carriedWeapons())

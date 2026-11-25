@@ -93,6 +93,10 @@ runs = [
     ("fruitwant", read("elite_stubs.lua") + pure + read("fruitwant_stubs.lua") + fruitrules + fruitwant
         + read("fruitwant_cases.lua")),
     ("chalice", chalice_world + chalice + chalice_cases),
+    # 2026-11-25: a boss's live card fights that boss, then the mode you had.
+    ("boss", "local io_print = print\n" + read("boss_stubs.lua")
+        + cut("        -- THE BOSS HUNT (CFG.HuntBoss, from a boss's live card).", "        -- THE DIRECTOR.")
+        + read("boss_cases.lua")),
 ]
 ok = True
 for name, code in runs:

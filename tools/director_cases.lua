@@ -93,4 +93,10 @@ reset() CFG.HuntKind = "sail" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
 got = run()
 check("sea travel: the sea step (kind \"sail\") only - no fruit, berry, elite, hop", got == "sea sail", got)
 
+-- THE BOSS HUNT (2026-11-25): a boss's card - that boss's step only, never a hop
+reset() CFG.HuntKind = "boss" CFG.HuntBoss = "Cake Prince" FRUIT = KITSUNE BERRY = PIG ELITE_BUSY = true
+E.lookStart = NOW - 600
+got = run()
+check("boss hunt: the boss step only - no fruit, berry, elite, and no hop however long", got == "boss Cake Prince", got)
+
 print(all and "ALL PASS" or "SOME FAILED")

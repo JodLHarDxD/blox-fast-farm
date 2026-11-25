@@ -16,6 +16,9 @@ check("expired GRIND: locked", packState("random", { farm = gone }, "buyer", NOW
 check("forever (0): open", packState("pvp", { pvp = 0 }, "friend", NOW) == "open")
 check("BOSSES = raid: elite and sword open", packState("elite", { raid = live }, "buyer", NOW) == "open"
     and packState("sword", { raid = live }, "buyer", NOW) == "open")
+check("a boss's own fight (2026-11-25) is BOSSES too: open with raid, locked without",
+    packState("boss", { raid = live }, "buyer", NOW) == "open"
+    and packState("boss", { farm = live }, "buyer", NOW) == "locked")
 check("mirage jobs are SEA", packState("gear", { sea = live }, "buyer", NOW) == "open"
     and packState("dealer", { farm = live }, "buyer", NOW) == "locked")
 check("fruits: a locked cover for a buyer, open with the fruits flag", packState("fruit", { farm = live }, "buyer", NOW) == "locked"

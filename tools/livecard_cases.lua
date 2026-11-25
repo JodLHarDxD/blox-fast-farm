@@ -12,10 +12,19 @@ e = liveEventOf(up("prehistoric"))
 check("prehistoric -> prehistoric", e and e.mode == "prehistoric" and e.pack == "prehistoric", e)
 e = liveEventOf(up("boss:Diablo"))
 check("elite boss -> elite / raid pack", e and e.mode == "elite" and e.pack == "raid" and e.title == "Diablo is up", e)
-e = liveEventOf(up("boss:Dough King"))
-check("raid boss -> raid", e and e.mode == "raid", e)
-e = liveEventOf(up("boss:rip_indra True Form"))
-check("rip_indra -> raid", e and e.mode == "raid", e)
+-- 2026-11-25 (user: "raid bosses are not raids"): a raid boss's card is
+-- that boss's own fight - never the raid.
+for _, b in ipairs({ "Dough King", "Cake Prince", "rip_indra True Form", "Soul Reaper",
+        "Tyrant of the Skies", "Darkbeard" }) do
+    e = liveEventOf(up("boss:" .. b))
+    check(b .. " -> its own boss fight, not the raid", e and e.mode == "boss" and e.boss == b
+        and e.pack == "raid" and e.title == b .. " is up", e and e.mode)
+end
+check("an elite pirate's card names no boss (the elite hunt)", liveEventOf(up("boss:Diablo")).boss == nil)
+for _, k in ipairs({ "boss:Dough King", "boss:Soul Reaper", "boss:Darkbeard", "boss:Diablo", "castle", "cake" }) do
+    local x = liveEventOf(up(k))
+    check("no card turns the raid on: " .. k, x == nil or x.mode ~= "raid", x and x.mode)
+end
 e = liveEventOf(up("frozen"))
 check("frozen -> levi / sea", e and e.mode == "levi" and e.pack == "sea", e)
 e = liveEventOf(up("fruit"), { name = "Ice", spot = "Ice-Ice@3,4" })
@@ -73,6 +82,32 @@ local fr = liveEventOf(up("fruit"), { name = "Ice", spot = "a" })
 check("locked fruits: coming-soon cover", liveTap(fr, "locked", false, "none", a) == "cover"
     and table.concat(log, ",") == "cover:fruits", table.concat(log, ","))
 check("running, not this mode, stopped farm of same id: idle start", liveTapOf(mir, "open", false, "mirage") == "hunt")
+
+-- a boss's card: act.boss(name), never setMode (the raid), then start
+local cake = liveEventOf(up("boss:Cake Prince"))
+a, log = stub()
+a.boss = function(n) table.insert(log, "boss:" .. n) end
+check("boss card, idle: that boss, then start - no mode set", liveTap(cake, "open", false, "circuit", a) == "hunt"
+    and table.concat(log, ",") == "boss:Cake Prince,start", table.concat(log, ","))
+a, log = stub()
+a.boss = function(n) table.insert(log, "boss:" .. n) end
+check("boss card, a farm running: that boss, no restart", liveTap(cake, "open", true, "circuit", a) == "hunt"
+    and table.concat(log, ",") == "boss:Cake Prince", table.concat(log, ","))
+a, log = stub()
+a.boss, a.nowBoss = function(n) table.insert(log, "boss:" .. n) end, "Cake Prince"
+check("boss card, already fighting that boss: nothing", liveTap(cake, "open", true, "boss", a) == "none" and #log == 0)
+a, log = stub()
+a.boss, a.nowBoss = function(n) table.insert(log, "boss:" .. n) end, "Cake Prince"
+local reaper = liveEventOf(up("boss:Soul Reaper"))
+check("boss card, fighting ANOTHER boss: switches to this one", liveTap(reaper, "open", true, "boss", a) == "hunt"
+    and table.concat(log, ",") == "boss:Soul Reaper", table.concat(log, ","))
+check("sub line: hunting now only for the boss being fought",
+    liveTapOf(cake, "open", true, "boss", "Cake Prince") == "none"
+    and liveTapOf(reaper, "open", true, "boss", "Cake Prince") == "hunt")
+a, log = stub()
+a.boss = function(n) table.insert(log, "boss:" .. n) end
+check("boss card, locked raid pack: cover only", liveTap(cake, "locked", false, "none", a) == "cover"
+    and table.concat(log, ",") == "cover:raid", table.concat(log, ","))
 
 -- sub line
 check("sub held", liveSubOf("hunt", "SEA") == "Tap to hunt · SEA", liveSubOf("hunt", "SEA"))
