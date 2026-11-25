@@ -902,4 +902,66 @@ do
     check("a fruit you carry teaches its look with no hunt on (the news looks every second)", bag == 1, bag)
 end
 
+-- ---------------------------------------------------------------- THE CASTLE RAID: ONLY ITS PIRATES
+-- 2026-11-26 (user: "a false alarm - every time it says pirates are in the
+-- castle, there is no raid"): the alarm came at the first look in every
+-- server - anything alive in the circle counted.
+do
+    local n = 0
+    local function mob(name, pos, opts)
+        opts = opts or {}
+        n += 1
+        local m = inst(name, "Model")
+        m.kids.HumanoidRootPart = inst("HumanoidRootPart", "Part", { pos = pos })
+        m.kids.Humanoid = inst("Humanoid", "Humanoid")
+        m.kids.Humanoid.Health = opts.hp or 100
+        if opts.noHum then m.kids.Humanoid = nil end
+        local folder = opts.parked and RS or WS_KIDS.Enemies
+        folder.kids[name .. "#" .. n] = m
+        return m
+    end
+    local NEAR = Vector3.new(-5400, 314, -2900)
+    local function castleNews()
+        for _, l in ipairs(PRINTED) do if string.find(l, "PIRATES ARE IN THE CASTLE", 1, true) then return true end end
+        return false
+    end
+    local function freshCastle()
+        fresh()
+        WS_KIDS.Enemies = inst("Enemies", "Folder")
+        LEVEL_OF = { ["Horned Warrior"] = 1125, ["Magma Ninja"] = 1175, ["Pirate Millionaire"] = 1500,
+            ["Tide Keeper"] = 1475, ["Reborn Skeleton"] = 1975 }
+    end
+
+    freshCastle()
+    mob("Elite Hunter", Vector3.new(-5419, 314, -2826), { parked = true })
+    mob("Pirate Millionaire", NEAR)
+    mob("Reborn Skeleton [Lv. 1975]", NEAR, { parked = true })
+    mob("Sea Beast", NEAR, { noHum = true })
+    N.tick()
+    check("the castle's NPCs, a Third Sea enemy, a thing with no Humanoid in the circle: no raid",
+        not castleNews() and not N.castle.up and N.castle.n == 0, N.castle.n)
+
+    freshCastle()
+    mob("Horned Warrior [Lv. 2300]", NEAR)
+    mob("Horned Warrior", NEAR)
+    mob("Magma Ninja", NEAR, { parked = true })
+    mob("Elite Hunter", Vector3.new(-5419, 314, -2826), { parked = true })
+    N.tick()
+    check("raid pirates (Second Sea species), loaded or parked: the raid - 3, the NPC not counted",
+        castleNews() and N.castle.up and N.castle.n == 3, N.castle.n)
+    check("...who made it news is said once", printed("[BFF] castle raid: 3 pirates - Horned Warrior x2, Magma Ninja x1"))
+
+    freshCastle()
+    mob("Tide Keeper", NEAR)
+    N.tick()
+    check("a Second Sea boss in the circle (the raid's last enemy): the raid", castleNews() and N.castle.n == 1)
+
+    freshCastle()
+    mob("Horned Warrior", Vector3.new(-3000, 50, 0))
+    mob("Magma Ninja", NEAR, { hp = 0 })
+    N.tick()
+    check("a raid species outside the circle, a dead one inside: no raid", not castleNews() and N.castle.n == 0,
+        N.castle.n)
+end
+
 realPrint(all and "ALL PASS" or "SOME FAILED")

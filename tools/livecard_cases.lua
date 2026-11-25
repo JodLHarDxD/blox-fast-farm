@@ -186,6 +186,19 @@ check("between waves (59 s none): still up", castleRaidFeed(st, 0, 11 + CASTLE_G
 check("a new wave keeps it", castleRaidFeed(st, 2, 80) == nil and st.lastSeen == 80)
 check("none for the grace: gone", castleRaidFeed(st, 0, 80 + CASTLE_GRACE) == "gone" and not st.up)
 check("gone: no second gone", castleRaidFeed(st, 0, 500) == nil)
+-- WHO IS A RAID PIRATE (2026-11-26: the alarm in every server joined)
+for _, n in ipairs({ "Horned Warrior", "Magma Ninja", "Lava Pirate", "Ship Deckhand", "Ship Engineer",
+        "Ship Steward", "Ship Officer", "Arctic Warrior", "Snow Lurker", "Sea Soldier" }) do
+    check("raid pirate (Fandom's list): " .. n, isCastleRaider(n, nil))
+end
+check("a Second Sea species not on the list (lv 1250): a raid pirate", isCastleRaider("Some New Pirate", 1250))
+check("a Second Sea boss (the raid's last, lv 1475): a raid pirate", isCastleRaider("Tide Keeper", 1475))
+check("the castle's Elite Hunter (an NPC, no level): not a pirate", not isCastleRaider("Elite Hunter", nil))
+check("an elite pirate (Diablo, no level row): not a raid pirate", not isCastleRaider("Diablo", nil))
+check("a Third Sea species (lv 1500+): not", not isCastleRaider("Pirate Millionaire", 1500)
+    and not isCastleRaider("Reborn Skeleton", 1975))
+check("a First Sea species (lv < 700): not", not isCastleRaider("Bandit", 1))
+check("junk: not", not isCastleRaider(nil, 1000) and not isCastleRaider(5, 1000))
 local st2 = newsStripOf({ { key = "castle", tone = "up", title = "PIRATES IN THE CASTLE", body = "x" } })
 check("strip: the castle raid", st2 and st2.text == "PIRATES IN THE CASTLE", st2 and st2.text)
 

@@ -37,6 +37,7 @@ local function inst(name, class, opts)
         return false
     end
     function o:FindFirstChild(n) return self.kids[n] end
+    function o:FindFirstChildOfClass(c) for _, k in pairs(self.kids) do if k.ClassName == c then return k end end return nil end
     function o:FindFirstChildWhichIsA(c) for _, k in pairs(self.kids) do if k:IsA(c) then return k end end return nil end
     function o:GetChildren()
         local out = {}
@@ -63,6 +64,11 @@ local function inst(name, class, opts)
 end
 
 local LIGHT, SKY, MAP, LOCS, WS_KIDS, BOSSES, CAKE_ANSWER, CAKE_CALLS, SEA, ROOT, FILES
+-- RS = ReplicatedStorage (where the game parks far enemies); LEVEL_OF = the
+-- level table's level of a species (levelOf); a model's name, brackets off.
+local RS, LEVEL_OF
+local function cleanName(m) return (string.gsub(m.Name, "%s*%b[]", "")) end
+local function levelOf(n) return LEVEL_OF[n] end
 local PLAYERS_N
 
 local Lighting = {}
@@ -170,6 +176,9 @@ local function reset(o)
     PRINTED = {}
     CFG.NewsShow, CFG.FruitMenu = {}, {}
     P = { ELITES = { "Diablo", "Deandre", "Urban", "Tyrant of the Skies" } }
+    RS = inst("ReplicatedStorage", "Folder")
+    LEVEL_OF = {}
+    P.castleRaidAt = Vector3.new(-5556, 314, -2988)
     if INSTALL_FRUITS then INSTALL_FRUITS() end
 end
 reset()

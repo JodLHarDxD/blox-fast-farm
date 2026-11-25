@@ -951,6 +951,23 @@ end
 -- CASTLE_GRACE s with none (the gap between two waves is still the raid).
 -- st = { up, since, lastSeen }. Returns "up", "gone" or nil.
 CASTLE_RAID_R, CASTLE_GRACE = 750, 60
+-- WHO IS A RAID PIRATE (user, 2026-11-26: "a false alarm - every time it
+-- says pirates are in the castle, there is no raid"). The logs: the alarm
+-- at the first look in EVERY server joined (14 of 14, 2026-11-25) - anything
+-- alive within 750 studs counted, loaded or parked in ReplicatedStorage
+-- (the castle's own NPCs stand inside the circle: the Elite Hunter at
+-- -5419, 314, -2826). The raid's horde is SECOND SEA species, which the
+-- Third Sea has nowhere else (Fandom, Pirate Raid): these names, or any
+-- species the level table files in the Second Sea (lv 700-1499; its bosses
+-- too - the raid's last, tankiest enemy). lv = levelOf(name), nil = unknown.
+CASTLE_RAIDERS = { ["Horned Warrior"] = true, ["Magma Ninja"] = true, ["Lava Pirate"] = true,
+    ["Ship Deckhand"] = true, ["Ship Engineer"] = true, ["Ship Steward"] = true, ["Ship Officer"] = true,
+    ["Arctic Warrior"] = true, ["Snow Lurker"] = true, ["Sea Soldier"] = true }
+function isCastleRaider(name, lv)
+    if type(name) ~= "string" then return false end
+    if CASTLE_RAIDERS[name] then return true end
+    return type(lv) == "number" and lv >= 700 and lv < 1500
+end
 function castleRaidFeed(st, n, now)
     if type(n) == "number" and n > 0 then
         st.lastSeen = now
@@ -18147,19 +18164,24 @@ do
                 -- enemies within CASTLE_RAID_R of its raid centre, loaded
                 -- or parked far off (the game parks far ones in
                 -- ReplicatedStorage), rip_indra left out (castleRaidFeed).
+                -- 2026-11-26: only the raid's own pirates (isCastleRaider) -
+                -- the castle's NPCs and anything else in the circle were a
+                -- false alarm in every server.
                 local at = (P :: any).castleRaidAt
                 if at then
-                    local n = 0
+                    local n, seen = 0, {}
                     local enemies = workspace:FindFirstChild("Enemies")
                     for _, folder in ipairs(enemies and { enemies, RS } or { RS }) do
                         for _, m in ipairs(folder:GetChildren()) do
                             if m:IsA("Model") then
                                 local hrp = m:FindFirstChild("HumanoidRootPart")
                                 local hum = m:FindFirstChildOfClass("Humanoid")
-                                if hrp and hrp:IsA("BasePart") and (not hum or hum.Health > 0)
-                                    and not IS_RAID[cleanName(m)]
+                                local nm = cleanName(m)
+                                if hrp and hrp:IsA("BasePart") and hum and hum.Health > 0
+                                    and isCastleRaider(nm, levelOf(nm))
                                     and (hrp.Position - at).Magnitude <= CASTLE_RAID_R then
                                     n += 1
+                                    seen[nm] = (seen[nm] or 0) + 1
                                 end
                             end
                         end
@@ -18167,6 +18189,11 @@ do
                     N.castle.n = n
                     if castleRaidFeed(N.castle, n, now) == "up" then
                         breaking("castle", "PIRATES ARE IN THE CASTLE", now)
+                        -- Who made it news, once per raid (a wrong one shows here).
+                        local words = {}
+                        for k, cnt in pairs(seen) do table.insert(words, k .. " x" .. cnt) end
+                        table.sort(words)
+                        print("[BFF] castle raid: " .. n .. " pirates - " .. table.concat(words, ", "))
                     end
                 end
                 local g = N.shown
