@@ -10100,8 +10100,68 @@ do
         -- hunt ends and the mode you had before the card comes back
         -- (P.bossBack, set by the card), else the farm stops. Never a hop:
         -- the next server is very unlikely to have the same boss up.
+        -- THE CAKE LOAF MIRROR (user, 2026-11-26: "it should not go directly
+        -- to where Dough King or Cake Prince spawns - it is far away high in
+        -- the sky. It should use the mirror wall behind the building where
+        -- Drip Mama stands - like the Cursed Captain: you go in the ship's
+        -- door, not to his spot"). Their arena is a dimension; the way in is
+        -- the mirror workspace.Map.CakeLoaf.BigMirror.Main, a TOUCH part (two
+        -- public hubs, 2026: DevAurora's UseCakeMirror / its Dough King farm -
+        -- firetouchinterest on it; in = the body moved 50+ studs within 2 s).
+        -- The spot by the Cake Loaf where they wait for it to stream in:
+        local CAKE_MIRROR_BOSS = { ["Cake Prince"] = true, ["Dough King"] = true }
+        local CAKE_MIRROR_NEAR = Vector3.new(-2124, 69, -12401)
+        local function cakeMirror()
+            local ok, m = pcall(function() return workspace.Map.CakeLoaf.BigMirror.Main end)
+            if ok and m and m:IsA("BasePart") then return m end
+            return nil
+        end
+        -- -> true when the mirror moved you; else false and why.
+        local function throughMirror(name, myEpoch)
+            local m = cakeMirror()
+            if not m then
+                local _, r = parts()
+                if r and (r.Position - CAKE_MIRROR_NEAR).Magnitude > 200 then
+                    releasePile()
+                    setState("FLY")
+                    say("to the Cake Loaf mirror for " .. name)
+                    flyTo(CAKE_MIRROR_NEAR + Vector3.new(0, CFG.HeightSafe or 20, 0))
+                    if stale(myEpoch) then return false, "stopped" end
+                end
+                pcall(function() player:RequestStreamAroundAsync(CAKE_MIRROR_NEAR, 3) end)
+                local t0 = os.clock()
+                while not m and os.clock() - t0 < 10 and not stale(myEpoch) do
+                    task.wait(0.25)
+                    m = cakeMirror()
+                end
+                if not m then return false, "the Cake Loaf mirror did not load" end
+            end
+            releasePile()
+            setState("FLY")
+            say("into the Cake Loaf mirror for " .. name)
+            -- Into the part itself (a touch), never a planned route.
+            flyTo(m.Position, { portal = false })
+            if stale(myEpoch) then return false, "stopped" end
+            local _, r = parts()
+            if not r then return false, "no character" end
+            local from = r.Position
+            if firetouchinterest then
+                pcall(firetouchinterest, r, m, 0)
+                task.wait()
+                pcall(firetouchinterest, r, m, 1)
+            end
+            local t0 = os.clock()
+            while os.clock() - t0 < 3 and not stale(myEpoch) do
+                local _, r2 = parts()
+                if r2 and (r2.Position - from).Magnitude > 50 then return true end
+                task.wait(0.1)
+            end
+            return false, "the Cake Loaf mirror did not take you (not open?)"
+        end
+
         local function bossDone(why)
             E.note = why
+            E.mirrorFails = 0
             say(why)
             print("[BFF] boss: " .. why)
             local back = (P :: any).bossBack
@@ -10122,6 +10182,23 @@ do
             if at then
                 E.bossSeenAt = os.clock()
                 E.note = string.format("%s is up (%s)", name, where == "parked" and "far off" or "near you")
+                -- Cake Prince / Dough King far off = not in their dimension
+                -- yet: through the mirror, never a flight to their spot.
+                local _, me = parts()
+                if CAKE_MIRROR_BOSS[name] and me and (me.Position - at).Magnitude > 1500 then
+                    local ok, why = throughMirror(name, myEpoch)
+                    if ok then
+                        E.mirrorFails = 0
+                        print("[BFF] boss: through the Cake Loaf mirror to " .. name)
+                    elseif not stale(myEpoch) then
+                        E.mirrorFails = (E.mirrorFails or 0) + 1
+                        E.note = tostring(why) .. " (" .. E.mirrorFails .. "/3)"
+                        say(E.note)
+                        print("[BFF] boss: " .. E.note)
+                        if E.mirrorFails >= 3 then bossDone(name .. ": " .. tostring(why)) end
+                    end
+                    return true
+                end
                 if fightNamed(name, at, where, myEpoch) then
                     releasePile()
                     bossDone(name .. " is down")
