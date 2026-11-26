@@ -41,6 +41,13 @@ local function barReady(w, k) if held ~= w then return nil end return clock >= (
 local function skillReady(w, k) return clock >= (CD[w .. k] or 0) end
 local function equip(name) if held ~= name then ev("swap " .. name) held = name end return true end
 local TOOLS = { Kitsune = { kind = "Blox Fruit" }, ["Sanguine Art"] = { kind = "Melee" }, Sword = { kind = "Sword" } }
+-- What you carry (toolNames): every TOOLS entry, by name.
+local function toolNames()
+    local out = {}
+    for n, t in pairs(TOOLS) do t.Name = n table.insert(out, t) end
+    table.sort(out, function(a, b) return a.Name < b.Name end)
+    return out
+end
 local function usedWeapons()
     local out = {}
     for _, n in ipairs(CFG.WeaponOrder) do

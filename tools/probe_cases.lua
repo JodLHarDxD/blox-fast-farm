@@ -145,45 +145,63 @@ probeM1("Bisento", {})
 CLOCK += 12
 check("a find starts the wait over at 12 s", m1Due("Bisento") == true)
 
--- HOW M1 LANDS IS A PREFERENCE, NOT A LOCK (user, 2026-11-26: the second
--- account - "combat, Ice, the sword: nothing works". It had "Fruit M1" picked:
--- forced on every weapon, a fighting style or sword was given a fruit tap
--- and nothing else, and Ice - no Holding flag - a tap only.)
-reset() P.reprobe() TYPE, GAME, LANDS = "Melee", true, { game = true }
-CFG.M1Method = "tap"
-way = probeM1("Combat", {})
-check("'Fruit M1' picked, Combat: its own ways still tried - the game's sender lands",
-    way and way.variant == "game", table.concat(TRIED, ","))
-check("...no fruit tap made up for a fighting style", not table.find(TRIED, "tap"), table.concat(TRIED, ","))
-
-reset() P.reprobe() TYPE, LANDS = "Sword", { new = true }
-CFG.M1Method = "tap"
-way = probeM1("Katana", {})
-check("'Fruit M1' picked, a sword: the raw remote still found", way and way.variant == "new", table.concat(TRIED, ","))
-
-reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { click = true }
-CFG.M1Method = "tap"
-way = probeM1("Ice-Ice", fruitTool({ LeftClickRemote = true }))
-check("'Fruit M1' picked, a fruit with no Holding (no tap bound): its click still lands",
-    way and way.path == "click", table.concat(TRIED, ","))
-
-reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { tap = true, new = true }
-CFG.M1Method = "tap"
-way = probeM1("Lightning-Lightning", fruitTool({ Holding = true }))
-check("'Fruit M1' picked, a fruit that has it: tried FIRST", way and way.path == "tap" and TRIED[1] == "tap",
-    table.concat(TRIED, ","))
-
-reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { new = true }
-CFG.M1Method = "tap"
-way = probeM1("Lightning-Lightning", fruitTool({ Holding = true }))
-check("...the picked way lands nothing: the next ways after it", way and way.variant == "new"
-    and TRIED[1] == "tap", table.concat(TRIED, ","))
-
-reset() P.reprobe() TYPE, GAME, LANDS = "Melee", true, { keys = true, game = true }
+-- HOW M1 LANDS IS NO SETTING (user, 2026-11-26: "it should be locked how it
+-- lands a hit"). A left-over M1Method in a saved file changes nothing: each
+-- weapon's own ways, in their own order.
+reset() P.reprobe() TYPE, GAME, LANDS = "Melee", true, { game = true, keys = true }
 CFG.M1Method = "keys"
 way = probeM1("Combat", {})
-check("'Key press' picked, Combat: key press first", way and way.path == "keys" and TRIED[1] == "keys",
+check("a saved 'Key press' pick is ignored: Combat's game sender first, kept",
+    way and way.variant == "game" and TRIED[1] == "game", table.concat(TRIED, ","))
+reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { new = true }
+CFG.M1Method = "tap"
+way = probeM1("Spin-Spin", fruitTool({}))
+check("...a saved 'Fruit M1' pick: no tap made up for a fruit without one",
+    way and way.variant == "new" and not table.find(TRIED, "tap"), table.concat(TRIED, ","))
+CFG.M1Method = nil
+
+-- A FRUIT WITH NO M1 IN THE GAME (user, 2026-11-26, the second account: "fruit
+-- M1 not landing"). Its own table (GetFruitData) lists Z X C V and no TAP -
+-- Ice. Nothing is tried, no 2 s probes every 12 / 24 / 48 s: false for good.
+reset() P.reprobe()
+CLOCK = 1000                               -- past the unreadable table's 30 s wait
+FRUIT_TABLE = {
+    ["Ice-Ice"] = { Cooldown = { Z = 6, X = 9, C = 10, V = 16 }, Cost = { Z = 15 }, Lvl = { Z = 1 } },
+    ["Lightning-Lightning"] = { Cooldown = { TAP = 0.5, Z = 4 }, Cost = { TAP = 0 }, Lvl = { TAP = 0 } },
+}
+TYPE, LANDS = "Blox Fruit", { tap = true, new = true, keys = true }
+local asked0 = FRUIT_ASKED
+way = probeM1("Ice-Ice", fruitTool({ Holding = true }))
+check("Ice (no TAP): false at once, not one way fired", way == false and #TRIED == 0, table.concat(TRIED, ","))
+check("...the game's table asked once", FRUIT_ASKED == asked0 + 1, FRUIT_ASKED - asked0)
+check("...never due again (no probing in the fight)", m1Due("Ice-Ice") == false)
+CLOCK += 100000
+check("...not even much later", m1Due("Ice-Ice") == false)
+check("...the note says why", string.find(P.m1Notes["Ice-Ice"] or "", "no M1 in the game", 1, true) ~= nil,
+    P.m1Notes["Ice-Ice"])
+check("P.fruitM1: Ice false, Lightning true, an unknown name nil",
+    P.fruitM1("Ice-Ice", fruitTool({})) == false and P.fruitM1("Lightning-Lightning", fruitTool({})) == true
+    and P.fruitM1("Spin-Spin", fruitTool({})) == nil)
+check("P.fruitM1: a LeftClickRemote fruit has one, whatever its table says",
+    P.fruitM1("Ice-Ice", fruitTool({ LeftClickRemote = true })) == true)
+check("...the table read once per server, not per question", FRUIT_ASKED == asked0 + 1, FRUIT_ASKED - asked0)
+
+reset() P.reprobe()
+TYPE, LANDS = "Blox Fruit", { tap = true }
+way = probeM1("Lightning-Lightning", fruitTool({ Holding = true }))
+check("a fruit WITH a TAP: its own M1 tried and kept as before", way and way.path == "tap" and TRIED[1] == "tap",
     table.concat(TRIED, ","))
-CFG.M1Method = "auto"
+
+reset() P.reprobe()
+TYPE, LANDS = "Blox Fruit", { new = true }
+way = probeM1("Spin-Spin", fruitTool({}))
+check("a fruit the table does not name: tried as before", way and way.variant == "new", table.concat(TRIED, ","))
+
+reset()
+TYPE = "Blox Fruit"
+P.reprobe()
+check("reprobe: Ice due again (looked at again)", m1Due("Ice-Ice") == true)
+way = probeM1("Ice-Ice", fruitTool({ Holding = true }))
+check("...and found to have none again, nothing fired", way == false and #TRIED == 0, table.concat(TRIED, ","))
 
 print(all and "ALL PASS" or "SOME FAILED")

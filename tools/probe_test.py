@@ -3,7 +3,7 @@ that "nothing landed" is NOT final for the server (it used to be: one bad
 probe on arrival = no M1 against that server's elite, ever).
 
 The REAL code is cut out of fast_farm.lua every run -- the plan tables and
-m1Due, and probeM1 with P.reprobe -- and run in luau.exe between
+m1Due and P.fruitM1 (the game's fruit table), and probeM1 with P.reprobe -- and run in luau.exe between
 probe_stubs.lua and probe_cases.lua.
 
 usage: python tools/probe_test.py [path-to-luau.exe]
@@ -25,7 +25,7 @@ def read(name):
 
 src = read(os.path.join("..", "fast_farm.lua"))
 a = src.index("local m1Plan  = {}")
-b = src.index("local lastProbeMethod", a)
+b = src.index("local fireM1", a)
 c = src.index("local probeM1")
 d = src.index("-- THE RHYTHM", c)
 d = src.rindex("-- ====", c, d)

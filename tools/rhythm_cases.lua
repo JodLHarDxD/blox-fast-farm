@@ -69,6 +69,40 @@ local kept = P.keepSword == "Sword"
 print((kept and "PASS " or "FAIL ") .. "...and that sword is kept from the rotation (any attack mode)")
 all = kept and all
 P.m1Of, P.keepSword = nil, nil
+-- M1 IS M1 (user, 2026-11-26: "If we select M1, it's gonna do M1"). The second
+-- account: M1 picked on Ice - no M1 in the game - its keys off: nothing at all.
+-- The M1 goes to another weapon of the fight with M1 on, else the fighting style.
+P.m1Of = function(used)
+    for _, u in ipairs(used) do if u.name == "Kitsune" then return u end end
+    return nil
+end
+m1Plan.Kitsune = false                     -- no M1 in the game (never due again)
+all = run("M1 picked on a fruit with no M1: the next weapon with M1 on swings it",
+    cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{}, Sword = W{ M1 = true } }), 2,
+    "swap Sword | M1 Sword | M1 Sword") and all
+all = run("...none other with M1 on: your fighting style swings it",
+    cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 2,
+    "swap Sanguine Art | M1 Sanguine Art | M1 Sanguine Art") and all
+all = run("...the fruit's skills still cast between, from the fruit",
+    cfg({ M1Between = 2 }, { Kitsune = W{ M1 = true, Z = true, X = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 4,
+    "swap Kitsune | cast Kitsune Z | swap Sanguine Art | M1 Sanguine Art | M1 Sanguine Art | swap Kitsune | cast Kitsune X") and all
+m1Plan["Sanguine Art"] = false
+all = run("...the fighting style lands nothing either: no M1, the skills carry it (as before)",
+    cfg({}, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 2,
+    "swap Kitsune | cast Kitsune Z") and all
+m1Plan["Sanguine Art"] = nil
+all = run("THE MASTERY FARM keeps its weapon: no other weapon's swing shares its kills",
+    (function()
+        local c = cfg({}, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} })
+        c.MasteryWeapon = "Kitsune"
+        return c
+    end)(), 2,
+    "swap Kitsune | cast Kitsune Z") and all
+m1Plan.Kitsune = nil
+all = run("a fruit whose M1 lands: swung by itself, nothing handed on",
+    cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{}, Sword = W{ M1 = true } }), 2,
+    "swap Kitsune | M1 Kitsune | M1 Kitsune") and all
+P.m1Of = nil
 -- A GUN THAT FIRES WHILE HELD (THE GUN, user 2026-10-07: Dragonstorm). Its
 -- heat drains while a skill plays, so the skills go whenever ready - "M1
 -- between" does not hold them back - and the held button is let go first.

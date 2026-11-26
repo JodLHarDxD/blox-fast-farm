@@ -934,7 +934,7 @@ Hovering is still, so a held relic shields you while you hover.
 
 ## First in-game test (each answer decides the next fix)
 
-1. **Attack** page, "how M1 lands": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
+1. **Attack** page, Details, "M1: what landed": which way does each weapon say — remote hit / fruit click / key press / nothing landed?
 2. **Magnet** page: "held N · staying put N" and "farthest pull N studs". When new ones spawn mid-fight, do they fly into the pile at once? Does "put back" climb (= some were dragged out of their area)?
 2b. **Attack** page: switch on Z/X/C for a weapon. Under "last skill" each skill shows "hit N of M". Look around and move your cursor freely while it casts — do the counts say hit? A skill that keeps saying MISSED reads the aim at a moment the hidden swap does not cover: switch "Keep my camera free" off and compare.
 3. **Travel** page: does a long flight arrive? Any "pulled back"? (lower the speed if so)

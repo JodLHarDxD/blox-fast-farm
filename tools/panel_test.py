@@ -95,7 +95,6 @@ HeightFixed
 HeightMelee
 HeightMode
 HeightSafe
-HitRange
 HopOrder
 HopRevisit
 Hunt
@@ -111,7 +110,6 @@ LeviShare
 LootStay
 M1Between
 M1Every
-M1Method
 M1Weapon
 Magnet
 MasteryStop
@@ -216,6 +214,8 @@ Weapons.*.use
 """.splitlines() if k.strip()]
 # Gone on purpose since: SeaEvDanger (2026-10-12 - the sea events boat always
 # travels, no patrol circle; user: "it doesn't matter 6 or 7").
+# M1Method and HitRange (2026-11-26 - "how M1 lands" is no setting; user: "it
+# should be locked how it lands a hit ... only customization which weapon").
 
 
 def read(name):

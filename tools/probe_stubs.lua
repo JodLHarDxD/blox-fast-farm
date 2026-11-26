@@ -5,7 +5,17 @@
 local CLOCK, DOT, ON_WAIT = 0, 0, nil
 local os = { clock = function() return CLOCK end, time = function() return 0 end }
 local task = { wait = function(s) s = s or 0.03 CLOCK += s if ON_WAIT then ON_WAIT(s) end end }
-local CFG = { StayHigh = false, M1Method = "auto", M1Every = 0.12 }
+local CFG = { StayHigh = false, M1Every = 0.12 }
+-- Remotes.GetFruitData's answer (P.fruitM1): FRUIT_TABLE = { [tool] = { Cooldown = {..}, ..} },
+-- nil = the call fails (unreadable); FRUIT_ASKED = how many times the server was asked.
+local FRUIT_TABLE, FRUIT_ASKED = nil, 0
+local RS = { WaitForChild = function(_, _) return { WaitForChild = function(_, _)
+    return { InvokeServer = function()
+        FRUIT_ASKED += 1
+        if FRUIT_TABLE == nil then error("no answer") end
+        return FRUIT_TABLE
+    end }
+end } end }
 local P = { running = true }
 local stats = { probes = 0 }
 local probing = false

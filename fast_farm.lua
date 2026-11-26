@@ -148,9 +148,10 @@ local CFG = {
     SideFixed          = 0,
 
     -- ---------- M1 ----------
-    -- "auto" tries each way of landing an M1 against the pile and keeps the
-    -- first one that takes HP off. The others force one way.
-    M1Method           = "auto", -- "auto" | "remote" | "click" | "tap" | "keys"
+    -- HOW an M1 lands is never a setting (user, 2026-11-26: "it should be
+    -- locked how it lands a hit"): each weapon's own ways are tried against
+    -- the pile and the first that takes HP off is kept (M1: THREE WAYS TO
+    -- LAND IT); a weapon with none hands its M1 to one that has (THE RHYTHM).
     M1Every            = 0.06,   -- seconds between M1s (user, 2026-10-05: 0.06)
     HitRange           = 60,     -- the remote hit names enemies this close
 
@@ -5261,14 +5262,40 @@ local function m1Due(name)
     local way = m1Plan[name]
     return way == nil or (way == false and os.clock() >= (m1Retry[name] or 0))
 end
-local lastProbeMethod = CFG.M1Method
+
+-- A FRUIT WITH NO M1 (user, 2026-11-26, the second account: "fruit M1 not
+-- landing"). The game's own table (Remotes.GetFruitData, what its
+-- FruitSkillUtil reads) lists each fruit's moves, and TAP is its M1. Ice's
+-- reads "Cooldown Z 6, X 9, C 10, V 16" - no TAP: a click with Ice in hand
+-- does nothing, by hand too, so every way "landed nothing" because there was
+-- nothing to land. Read once per server (again after 30 s while unreadable).
+-- true = it has one (a LeftClickRemote fruit too), false = none, nil = not
+-- known (its ways are tried as before).
+local fruitTable, fruitTableAt = nil, -1e9
+function P.fruitM1(name, tool)
+    if tool and tool:FindFirstChild("LeftClickRemote") then return true end
+    if not fruitTable and os.clock() - fruitTableAt >= 30 then
+        fruitTableAt = os.clock()
+        local ok, all = pcall(function()
+            return RS:WaitForChild("Remotes", 5):WaitForChild("GetFruitData", 5):InvokeServer()
+        end)
+        if ok and type(all) == "table" then fruitTable = all end
+    end
+    local d = fruitTable and fruitTable[name]
+    if type(d) ~= "table" or type(d.Cooldown) ~= "table" then return nil end
+    for _, part in ipairs({ "Cooldown", "Cost", "Lvl" }) do
+        local t = d[part]
+        if type(t) == "table" and t.TAP ~= nil then return true end
+    end
+    return false
+end
 
 local fireM1
 do
     local HIT_TAG = "078da341"
     -- Your reach, or far enough to reach the pile from the height you set
     -- (60 up with a 60 reach named nobody at all). Whether the server takes a
-    -- hit from that far is its call: "how M1 lands" shows it. On P so the
+    -- hit from that far is its call: "M1: what landed" shows it. On P so the
     -- no-damage note (checkPutBack) reads the same number the hit uses.
     function P.hitReach()
         local _, r = parts()
@@ -5517,26 +5544,25 @@ do
             end
             all = out
         end
-        -- HOW M1 LANDS IS A PREFERENCE, NOT A LOCK (user, 2026-11-26: the
-        -- second account - "combat, Ice, the sword: nothing works"). It had
-        -- "Fruit M1" picked, and the pick was the ONLY way for every weapon:
-        -- a fighting style or sword was handed a made-up fruit tap and
-        -- nothing else, Ice (no Holding flag) a tap only - nothing could
-        -- land. Now the picked way goes first where this weapon has it; every
-        -- other way of this weapon still follows.
-        local force = CFG.M1Method
-        if force and force ~= "auto" then
-            local first, rest = {}, {}
-            for _, w in ipairs(all) do
-                if w.path == force then table.insert(first, w) else table.insert(rest, w) end
-            end
-            for _, w in ipairs(rest) do table.insert(first, w) end
-            return first
-        end
+        -- NO PICK (user, 2026-11-26: "why I need to select remote hit, not
+        -- remote hit? ... locked how it lands a hit"). "How M1 lands" is gone:
+        -- a picked way was handed to weapons that do not have it (a fruit tap
+        -- for a fighting style) and made M1 land "sometimes". Each weapon's
+        -- own ways, in this order, always.
         return all
     end
 
     function probeM1(name, tool)
+        -- A fruit whose game table has no M1 (Ice): nothing to try, ever -
+        -- its M1 is swung by a weapon that has one (attackTick).
+        if toolType(tool) == "Blox Fruit" and P.fruitM1(name, tool) == false then
+            m1Plan[name] = false
+            m1Retry[name] = math.huge
+            P.m1Fails[name] = nil
+            P.m1Notes[name] = "no M1 in the game (its moves list no TAP) - another weapon swings the M1"
+            print("[BFF] M1 " .. name .. ": " .. P.m1Notes[name])
+            return false
+        end
         stats.probes += 1
         probing = true
         -- A SKILL'S DAMAGE IS NOT AN M1's (user, 2026-10-24: Lightning's M1
@@ -5779,6 +5805,42 @@ local function attackTick()
     -- A fight that swings no M1 at all (SEA EVENTS out of Kitsune form, user
     -- 2026-10-09) - whatever the Attack page, your M1 pick or the mastery say.
     if pileCur and pileCur.noM1 and pileCur.noM1() then m1u = nil end
+    -- M1 IS M1 (user, 2026-11-26: "If we select M1, it's gonna do M1"). A
+    -- weapon that has no M1 in the game (Ice) or whose M1 lands nothing right
+    -- now hands it on: to another weapon of this fight with M1 on, else to
+    -- your fighting style - the M1 every character has. It used to be "no M1
+    -- lands with Ice - let the skills carry it": Ice picked, its keys off =
+    -- nothing at all. Kept as it was: V4's turn, a fight's own M1 weapon, and
+    -- a mastery farm (another weapon's swing would share its kills).
+    local function m1Lands(u)
+        return not (m1Plan[u.name] == false and not m1Due(u.name))
+    end
+    local mastery = (CFG.MasteryWeapon or "") ~= "" and not (P :: any).fightWeapon()
+    if not mastery and type(CFG.FightGoal) == "table" and (P :: any).fightWeapon() then
+        local mn = (P :: any).modeNow
+        local mode = mn and mn() or nil
+        mastery = mode ~= nil and CFG.FightGoal[mode] == true
+    end
+    if m1u and not race and not mastery and not m1Lands(m1u)
+        and not (pileCur and pileCur.m1Weapon and pileCur.m1Weapon()) then
+        local stand = nil
+        for _, u in ipairs(used) do
+            if u ~= m1u and u.cfg.M1 and m1Lands(u) then
+                stand = u
+                break
+            end
+        end
+        if not stand then
+            for _, t in ipairs(toolNames()) do
+                if toolType(t) == "Melee" and t.Name ~= m1u.name then
+                    local u = { name = t.Name, cfg = { use = true, M1 = true }, tool = t }
+                    if m1Lands(u) then stand = u end
+                    break
+                end
+            end
+        end
+        if stand then m1u = stand end
+    end
     P.m1Now = m1u and m1u.name or nil
     if m1u and m1u.tool and toolType(m1u.tool) == "Sword" then P.keepSword = m1u.name end
 
@@ -14035,10 +14097,6 @@ local function sideLoop()
         if now - lastSlow > 1 then
             lastSlow = now
             if meas and setupKey() ~= meas.key then rollMeas() end
-            if CFG.M1Method ~= lastProbeMethod then
-                lastProbeMethod = CFG.M1Method
-                P.reprobe()
-            end
             pcall(syncWeapons)
             pcall((P :: any).masteryTick)
             pcall((P :: any).fightGoalTick)
@@ -28451,6 +28509,9 @@ local function buildUI()
             sliderRow(v, "M1 swings between skills", 0, 10, 1,
                 function() return CFG.M1Between end,
                 function(x) CFG.M1Between = x end)
+            sliderRow(v, "M1 every", 0.03, 1, 0.01,
+                function() return CFG.M1Every end,
+                function(x) CFG.M1Every = x end, " s")
             sliderRow(v, "Wait after a skill", 0.1, 1.5, 0.05,
                 function() return CFG.CastWait end,
                 function(x) CFG.CastWait = x end, " s")
@@ -28511,22 +28572,9 @@ local function buildUI()
                 function() return CFG.MasteryStop end,
                 function(x) CFG.MasteryStop = x end, " mastery")
             readout(v, function() return tostring(P.masteryNote) end)
-            heading2(v, "how M1 lands")
-            -- A pick is tried FIRST, never the only way (2026-11-26).
-            radio(v, 205, {
-                { "auto", "Auto - keep what hurts" },
-                { "remote", "Remote hit first - whole pile" },
-                { "click", "Fruit click first" },
-                { "tap", "Fruit M1 first - the game's own click" },
-                { "keys", "Key press first" },
-            }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
-            actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)
-            sliderRow(v, "M1 every", 0.03, 1, 0.01,
-                function() return CFG.M1Every end,
-                function(x) CFG.M1Every = x end, " s")
-            sliderRow(v, "Remote hit reaches", 20, 100, 5,
-                function() return CFG.HitRange end,
-                function(x) CFG.HitRange = x end, " studs")
+            -- HOW M1 LANDS is no setting any more (user, 2026-11-26: "it should
+            -- be locked how it lands a hit") - no pick, no reach, no retry
+            -- button: each weapon's own ways, the first that hurts kept.
         end, 23)
         fold(v, "How it works", function(v)
             caption(v, "FIGHT WITH: each mode has its own pick. A weapon on the wheel is the ONLY "
@@ -28565,9 +28613,11 @@ local function buildUI()
                 .. "better\": kills per minute of each.")
             caption(v, "The old mastery farm (MIX only): the picked weapon alone hurts anything, "
                 .. "its M1 and the keys under \"Every weapon you carry\". Stop at 0 = never.")
-            caption(v, "Auto fires each way at the pile for a moment and keeps the "
-                .. "first that takes HP off, per weapon. The remote hit names every "
-                .. "enemy in the pile, so one swing hits all of them.")
+            caption(v, "How an M1 lands is not a setting: each weapon's own ways are fired at "
+                .. "the pile for a moment and the first that takes HP off is kept. The remote "
+                .. "hit names every enemy in the pile, so one swing hits all of them. A fruit "
+                .. "with no M1 in the game (Ice) - or an M1 that lands nothing right now - "
+                .. "hands it to another weapon with M1 on, else your fighting style.")
         end)
         fold(v, "Details", function(v)
             heading2(v, "skills: hit counts")
