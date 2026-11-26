@@ -145,4 +145,45 @@ probeM1("Bisento", {})
 CLOCK += 12
 check("a find starts the wait over at 12 s", m1Due("Bisento") == true)
 
+-- HOW M1 LANDS IS A PREFERENCE, NOT A LOCK (user, 2026-11-26: the second
+-- account - "combat, Ice, the sword: nothing works". It had "Fruit M1" picked:
+-- forced on every weapon, a fighting style or sword was given a fruit tap
+-- and nothing else, and Ice - no Holding flag - a tap only.)
+reset() P.reprobe() TYPE, GAME, LANDS = "Melee", true, { game = true }
+CFG.M1Method = "tap"
+way = probeM1("Combat", {})
+check("'Fruit M1' picked, Combat: its own ways still tried - the game's sender lands",
+    way and way.variant == "game", table.concat(TRIED, ","))
+check("...no fruit tap made up for a fighting style", not table.find(TRIED, "tap"), table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, LANDS = "Sword", { new = true }
+CFG.M1Method = "tap"
+way = probeM1("Katana", {})
+check("'Fruit M1' picked, a sword: the raw remote still found", way and way.variant == "new", table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { click = true }
+CFG.M1Method = "tap"
+way = probeM1("Ice-Ice", fruitTool({ LeftClickRemote = true }))
+check("'Fruit M1' picked, a fruit with no Holding (no tap bound): its click still lands",
+    way and way.path == "click", table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { tap = true, new = true }
+CFG.M1Method = "tap"
+way = probeM1("Lightning-Lightning", fruitTool({ Holding = true }))
+check("'Fruit M1' picked, a fruit that has it: tried FIRST", way and way.path == "tap" and TRIED[1] == "tap",
+    table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, LANDS = "Blox Fruit", { new = true }
+CFG.M1Method = "tap"
+way = probeM1("Lightning-Lightning", fruitTool({ Holding = true }))
+check("...the picked way lands nothing: the next ways after it", way and way.variant == "new"
+    and TRIED[1] == "tap", table.concat(TRIED, ","))
+
+reset() P.reprobe() TYPE, GAME, LANDS = "Melee", true, { keys = true, game = true }
+CFG.M1Method = "keys"
+way = probeM1("Combat", {})
+check("'Key press' picked, Combat: key press first", way and way.path == "keys" and TRIED[1] == "keys",
+    table.concat(TRIED, ","))
+CFG.M1Method = "auto"
+
 print(all and "ALL PASS" or "SOME FAILED")

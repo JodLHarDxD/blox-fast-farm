@@ -5517,15 +5517,21 @@ do
             end
             all = out
         end
+        -- HOW M1 LANDS IS A PREFERENCE, NOT A LOCK (user, 2026-11-26: the
+        -- second account - "combat, Ice, the sword: nothing works"). It had
+        -- "Fruit M1" picked, and the pick was the ONLY way for every weapon:
+        -- a fighting style or sword was handed a made-up fruit tap and
+        -- nothing else, Ice (no Holding flag) a tap only - nothing could
+        -- land. Now the picked way goes first where this weapon has it; every
+        -- other way of this weapon still follows.
         local force = CFG.M1Method
         if force and force ~= "auto" then
-            local out = {}
-            for _, w in ipairs(all) do if w.path == force then table.insert(out, w) end end
-            if #out == 0 then
-                table.insert(out, { path = force, variant = "new",
-                    pose = (force == "keys") and "melee" or "safe" })
+            local first, rest = {}, {}
+            for _, w in ipairs(all) do
+                if w.path == force then table.insert(first, w) else table.insert(rest, w) end
             end
-            return out
+            for _, w in ipairs(rest) do table.insert(first, w) end
+            return first
         end
         return all
     end
@@ -28506,12 +28512,13 @@ local function buildUI()
                 function(x) CFG.MasteryStop = x end, " mastery")
             readout(v, function() return tostring(P.masteryNote) end)
             heading2(v, "how M1 lands")
+            -- A pick is tried FIRST, never the only way (2026-11-26).
             radio(v, 205, {
                 { "auto", "Auto - keep what hurts" },
-                { "remote", "Remote hit - whole pile" },
-                { "click", "Fruit click" },
-                { "tap", "Fruit M1 - the game's own click" },
-                { "keys", "Key press" },
+                { "remote", "Remote hit first - whole pile" },
+                { "click", "Fruit click first" },
+                { "tap", "Fruit M1 first - the game's own click" },
+                { "keys", "Key press first" },
             }, function() return CFG.M1Method end, function(x) CFG.M1Method = x end)
             actionRow(v, "Try the M1 ways again", nil, function() P.reprobe() end)
             sliderRow(v, "M1 every", 0.03, 1, 0.01,
