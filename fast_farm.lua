@@ -6988,6 +6988,15 @@ do
         return ok and (r == 0 or r == 2 or (type(r) == "number" and r > 2))
     end
 
+    local function ended(why)
+        if active then
+            print(string.format("[BFF] quest done: %s (%s, %d kills)", active.enemy, why, active.kills))
+        end
+        active, gone = nil, 0
+        Q.done += 1
+        return true
+    end
+
     function Q.take(w)
         local cf = commF()
         if not cf then Q.note = "no CommF_ remote" return false end
@@ -7005,6 +7014,10 @@ do
             noteRunning(w.enemy, have, need or w.need)
             return true
         end
+        -- The last quest's tracker gone before finished() had its two looks
+        -- (the circuit looked first): it paid out - counted done here, not
+        -- lost under the next one.
+        if active and not shown then ended("tracker gone") end
         if shown then
             pcall(function() cf:InvokeServer("AbandonQuest") end)
             task.wait(0.4)
@@ -7103,15 +7116,6 @@ do
             noteRunning(active.enemy, active.kills, active.need)
             Q.note ..= "  (counted here)"
         end
-    end
-
-    local function ended(why)
-        if active then
-            print(string.format("[BFF] quest done: %s (%s, %d kills)", active.enemy, why, active.kills))
-        end
-        active, gone = nil, 0
-        Q.done += 1
-        return true
     end
 
     -- Its tracker gone, on two looks in a row: a UI that blinks must not end a

@@ -355,4 +355,26 @@ check("the server's word odd but its tracker up: taken, no flight, no second ask
     Q.take(w) == true and calls() == "start JungleQuest 2", calls())
 cf.InvokeServer = plain
 
+reset()
+LEVEL = 25
+w = Q.want()
+Q.take(w)
+tracker(nil)            -- the quest paid out; its tracker is gone
+CLOCK += 1
+w = Q.want()            -- the circuit looks before finished() has had its two looks
+local done0 = Q.done
+Q.take(w)
+check("a quest whose tracker went before the next take is counted done", Q.done == done0 + 1,
+    tostring(done0) .. " -> " .. tostring(Q.done))
+
+reset()
+LEVEL = 25
+w = Q.want()
+Q.take(w)
+tracker("Defeat Diablo (0/1)")  -- another quest up: dropped, never counted done
+CLOCK += 1
+done0 = Q.done
+Q.take(w)
+check("a quest dropped for another is not counted done", Q.done == done0, tostring(done0) .. " -> " .. tostring(Q.done))
+
 io_print(all and "ALL PASS" or "SOME FAILED")
