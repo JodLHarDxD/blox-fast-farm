@@ -691,6 +691,14 @@ local CFG = {
     Factory            = false,
     FactoryReach       = 30,
     FactoryEvery       = 0.06,
+    -- AUTO-TAP (user, 2026-11-27: "the click on the event has to be
+    -- automated, for the events I picked before"). While your mode runs, an
+    -- event ticked here is tapped for you - Home's card, the same hunt - and
+    -- when that hunt has nothing left on this server, back to your mode (no
+    -- hop). fruit / elite / boss (a raid boss) / mirage / prehistoric /
+    -- castle (the pirate raid) / frozen (the Leviathan's dimension).
+    AutoTap            = { fruit = false, elite = false, boss = false, mirage = false, prehistoric = false,
+        castle = false, frozen = false },
     PvpVision          = true,   -- the game's Ken view is never turned off
     PvpClean           = true,   -- other players' screen effects off (Ghoul / Angel V4, Dark)
     -- (user, 2026-10-23: the Pale Scarf gives "10x vision"; in PvP see that
@@ -1146,6 +1154,27 @@ function liveTap(m, state, running, nowMode, act)
         if not running then act.start() end
     end
     return a
+end
+-- AUTO-TAP (user, 2026-11-27: "it shows the fruit, I click it and fruit mode
+-- starts - that click has to be automated, for the events I picked before").
+-- An event's kind for its tick: fruit, elite, boss (a raid boss), else its
+-- key (mirage, prehistoric, castle, frozen).
+function autoTapKind(m)
+    if type(m) ~= "table" then return nil end
+    if m.mode == "fruit" then return "fruit" end
+    if m.boss then return "boss" end
+    if m.mode == "elite" then return "elite" end
+    return m.key
+end
+-- The card to tap for you: the first (the card's own order) whose kind you
+-- ticked (auto = CFG.AutoTap) and not tapped already (tapped[key]).
+function autoTapPick(list, auto, tapped)
+    if type(auto) ~= "table" then return nil end
+    for _, m in ipairs(list or {}) do
+        local k = autoTapKind(m)
+        if k and auto[k] and not (tapped and tapped[m.key]) then return m end
+    end
+    return nil
 end
 -- NEWS STRIP (R3 Task S, pure: tools/livecard_test.py). The board shows the
 -- strip on Home only, and only while something is up: the first headline
@@ -10550,6 +10579,11 @@ do
                 say(E.note)
                 setState("LOOK")
                 task.wait(0.25)
+                return
+            end
+            -- AUTO-TAP: a hunt tapped for you goes back to your mode, never hops.
+            if (P :: any).autoBack and P.autoBackNow then
+                P.autoBackNow(E.why or "nothing left here")
                 return
             end
             if CFG.HuntHop then
@@ -22291,10 +22325,9 @@ local function buildUI()
             applyGrow(currentView)
         end
         card.MouseButton1Down:Connect(function() carouselTouch(cs, os.clock()) end)
-        card.Activated:Connect(function()
-            if not cur then return end
-            carouselTouch(cs, os.clock())
-            liveTap(cur, momentState(cur), P.running, modeNow(), {
+        -- The tap (the card, or AUTO-TAP for you): the event's hunt.
+        local function tapMoment(m)
+            return liveTap(m, momentState(m), P.running, modeNow(), {
                 cover = function(pack) show("cover_" .. pack) end,
                 setMode = setMode, start = P.start,
                 -- A boss's card: that boss alone, then the mode you have now.
@@ -22310,9 +22343,14 @@ local function buildUI()
                 weapon = function(mode)
                     local w = onceWeaponOf(CFG.FightWith, mode, P.carriedWeapons())
                     P.fightOnce = w and { mode = mode, name = w } or nil
-                    if w then say(cur.title .. " - fighting with " .. w .. " (your strongest M1)") end
+                    if w then say(m.title .. " - fighting with " .. w .. " (your strongest M1)") end
                 end,
             })
+        end
+        card.Activated:Connect(function()
+            if not cur then return end
+            carouselTouch(cs, os.clock())
+            tapMoment(cur)
             nextLook = 0    -- the line says "Hunting now" at the next look
         end)
         mPrev.Activated:Connect(function() setMoment(carouselStep(cs, list, -1, os.clock(), true), -1) end)
@@ -22350,6 +22388,61 @@ local function buildUI()
             end
             return liveMoments(items, fruit, dismissed)
         end
+        -- AUTO-TAP (user, 2026-11-27). Every 2 s whatever page shows, while
+        -- your mode runs (not PvP, not Factory): an event you ticked is
+        -- tapped for you - once per event - and the mode you had is kept in
+        -- P.autoBack. Back to it when the hunt finds nothing left here
+        -- (P.autoBackNow, from the hunt instead of its hop), or when the
+        -- event is gone from the news while its mode still runs (the castle
+        -- raid, the frozen dimension: modes that never end by themselves).
+        local autoTapped = {}
+        function P.autoBackNow(why)
+            local b = (P :: any).autoBack
+            if not b then return false end
+            ;(P :: any).autoBack = nil
+            print("[BFF] auto-tap: " .. tostring(why) .. " - back to " .. tostring(b.mode))
+            if b.mode ~= "none" then
+                setMode(b.mode, true)
+            elseif modeNow() ~= "none" then
+                setMode(modeNow(), false)
+            end
+            say(tostring(why) .. " - back to " .. modeName(b.mode))
+            return true
+        end
+        task.spawn(function()
+            local myGui = gui
+            while myGui and myGui.Parent do
+                pcall(function()
+                    local b = (P :: any).autoBack
+                    if b then
+                        if modeNow() ~= b.now then
+                            (P :: any).autoBack = nil                  -- you changed mode yourself
+                            return
+                        end
+                        local still = false
+                        for _, m in ipairs(findMoments()) do
+                            if m.key == b.key then still = true break end
+                        end
+                        if not still and os.clock() - b.at > 10 then P.autoBackNow(b.title .. " is over") end
+                        return
+                    end
+                    if not P.running or CFG.Pvp or CFG.Factory or (P :: any).bossBack then return end
+                    local m = autoTapPick(findMoments(), CFG.AutoTap, autoTapped)
+                    if not m then return end
+                    autoTapped[m.key] = true
+                    local prev = modeNow()
+                    if liveTapOf(m, momentState(m), P.running, prev, huntBossNow()) ~= "hunt" then return end
+                    print("[BFF] auto-tap: " .. m.title .. " - tapped for you, then back to " .. prev)
+                    tapMoment(m)
+                    if not m.boss then
+                        (P :: any).autoBack = { mode = prev, now = modeNow(), key = m.key, title = m.title,
+                            at = os.clock() }
+                    end
+                    nextLook = 0
+                end)
+                task.wait(2)
+            end
+        end)
         -- The driver: the news every 2 s, the roll every tick (the live loop,
         -- which runs only while Home shows).
         addLive(function()
@@ -22564,6 +22657,23 @@ local function buildUI()
                 return "Off"
             end } })
         end
+        -- AUTO-TAP (user, 2026-11-27): Home's "X is up - tap to hunt", tapped
+        -- for you while your mode runs; then back to your mode, no hop. A
+        -- pack this key does not hold: no row.
+        heading2(v, "auto-tap · when it is up here, then back")
+        local function autoRow(kind, mode, label, sub)
+            if P.packState(mode) ~= "open" then return end
+            switchRow(v, label, sub,
+                function() return CFG.AutoTap[kind] == true end,
+                function(x) CFG.AutoTap[kind] = x and true or false end)
+        end
+        autoRow("fruit", "fruit", "Fruit spawned", "stored, then back to your mode")
+        autoRow("prehistoric", "prehistoric", "Prehistoric island", "onto it - the Volcano switch does the event")
+        autoRow("mirage", "mirage", "Mirage island", "your Mirage job, then back")
+        autoRow("castle", "random", "Castle pirate raid", "fought till the raid is over")
+        autoRow("frozen", "levi", "Frozen Dimension", "the Leviathan, then back")
+        autoRow("boss", "boss", "Raid boss", "Dough King, Soul Reaper, ... - fought, then back")
+        autoRow("elite", "elite", "Elite pirate", "often up - mostly keep off")
         if P.packState("berry") == "open" then
             heading2(v, "owner tools · hunt, next server when not here")
             rows({

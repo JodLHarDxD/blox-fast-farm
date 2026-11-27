@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-11-27, user):** "too complicated - we already have every mode and the news card; only the click has to be automated." Built instead as AUTO-TAP: `CFG.AutoTap` ticks, Home's card tapped for you, back to your mode when the hunt has nothing left (build 2026-11-27.5). Kept for the record only.
+
 # Secondary modes — design (2026-11-27)
 
 User, 2026-11-27: "Primary is whatever mode I pick. Secondary modes I can turn

@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-11-27, user):** "too complicated - we already have every mode and the news card; only the click has to be automated." Built instead as AUTO-TAP: `CFG.AutoTap` ticks, Home's card tapped for you, back to your mode when the hunt has nothing left (build 2026-11-27.5). Kept for the record only.
+
 # Secondary Modes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

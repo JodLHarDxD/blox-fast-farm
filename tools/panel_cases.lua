@@ -663,6 +663,8 @@ local NEW_OK = { MirageJob = true,
     PvpDashAnim = true, PvpLegs = true,       -- 2026-10-23: the dash animation sped, legs at a normal pace
     PvpJump = true, PvpJumpX = true, PvpJumpAnim = true, PvpJumpExtra = true,  -- 2026-11-27: the air jump boosted
     Factory = true, FactoryReach = true, FactoryEvery = true,  -- 2026-11-27: the factory raid, stay and swing
+    ["AutoTap.fruit"] = true, ["AutoTap.elite"] = true, ["AutoTap.boss"] = true, ["AutoTap.mirage"] = true,
+    ["AutoTap.prehistoric"] = true, ["AutoTap.castle"] = true, ["AutoTap.frozen"] = true,  -- 2026-11-27: auto-tap
     PvpHopBusy = true,                        -- 2026-10-23: PvP hops go to the busiest servers
     PvpPingMax = true,                        -- 2026-10-24: ...in regions fast for you
     PvpLeadAuto = true,                       -- 2026-10-24: the lead learned per move

@@ -136,6 +136,22 @@ check("strip: the crawl carries every thing up, in order", st and st.key == "mir
 st = newsStripOf({ { key = "castle", tone = "up", title = "PIRATES IN THE CASTLE" } })
 check("strip: one thing up = its line alone", st and st.line == "PIRATES IN THE CASTLE", st and st.line)
 
+-- AUTO-TAP (user, 2026-11-27): the events you ticked are tapped for you
+local fruitM = { key = "fruit:Jungle", mode = "fruit", pack = "fruits" }
+local miraM = { key = "mirage", mode = "mirage", pack = "sea" }
+local eliteM = { key = "boss:Diablo", mode = "elite", pack = "raid" }
+local bossM = { key = "boss:Dough King", mode = "boss", boss = "Dough King", pack = "raid" }
+local castM = { key = "castle", mode = "random", pack = "farm" }
+check("auto kind: fruit / elite / raid boss / by key",
+    autoTapKind(fruitM) == "fruit" and autoTapKind(eliteM) == "elite" and autoTapKind(bossM) == "boss"
+    and autoTapKind(miraM) == "mirage" and autoTapKind(castM) == "castle")
+check("auto: nothing ticked = nothing tapped", autoTapPick({ fruitM, miraM }, {}, {}) == nil)
+check("auto: the ticked one", autoTapPick({ miraM, fruitM }, { fruit = true }, {}) == fruitM)
+check("auto: the first ticked in the card's order", autoTapPick({ fruitM, miraM }, { fruit = true, mirage = true }, {}) == fruitM)
+check("auto: one already tapped is not tapped again", autoTapPick({ fruitM, miraM }, { fruit = true, mirage = true },
+    { ["fruit:Jungle"] = true }) == miraM)
+check("auto: no settings = nothing", autoTapPick({ fruitM }, nil, {}) == nil)
+
 -- board px -> TextSize (Montserrat's em is TextSize / 1.21 in Roblox)
 check("px: 15 -> 18", lookPx(15) == 18, tostring(lookPx(15)))
 check("px: 11 -> 13", lookPx(11) == 13, tostring(lookPx(11)))
