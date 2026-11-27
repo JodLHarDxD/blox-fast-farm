@@ -738,6 +738,14 @@ local CFG = {
     -- the game's own speed, and the run animation kept at a normal pace
     -- however fast you run
     PvpDashAnim        = 2.0,
+    -- (user, 2026-11-27: "2x air jump - height and animation speed, the way
+    -- the dash has them; extend my air jumps") The game's own air jump (Space
+    -- in the air) rises PvpJumpX as high, its animation PvpJumpAnim x the
+    -- game's speed; its jumps spent, PvpJumpExtra more of yours.
+    PvpJump            = true,
+    PvpJumpX           = 2.0,
+    PvpJumpAnim        = 2.0,
+    PvpJumpExtra       = 0,
     PvpLegs            = true,
     -- (user, 2026-10-15: chased down over 300-400 m - "they make their
     -- cooldowns shorter; I want mine 0 or half") Both TESTS, off by default:
@@ -26925,11 +26933,23 @@ local function buildUI()
             sliderRow(v, "Dash animation", 1, 3, 0.1,
                 function() return CFG.PvpDashAnim end,
                 function(x) CFG.PvpDashAnim = x end, "x")
+            switchRow(v, "Air jump boost", "Space in the air: the game's air jump higher, its animation faster",
+                function() return CFG.PvpJump end,
+                function(x) CFG.PvpJump = x end)
+            sliderRow(v, "Air jump height", 1, 4, 0.1,
+                function() return CFG.PvpJumpX end,
+                function(x) CFG.PvpJumpX = x end, "x")
+            sliderRow(v, "Air jump animation", 1, 3, 0.1,
+                function() return CFG.PvpJumpAnim end,
+                function(x) CFG.PvpJumpAnim = x end, "x")
+            sliderRow(v, "Extra air jumps", 0, 10, 1,
+                function() return CFG.PvpJumpExtra end,
+                function(x) CFG.PvpJumpExtra = x end)
             heading2(v, "servers")
             sliderRow(v, "Ping at most, any most-players hop", 60, 400, 10,
                 function() return CFG.PvpPingMax end,
                 function(x) CFG.PvpPingMax = x end, " ms")
-        end, "20 settings")
+        end, "24 settings")
     end
 
     -- =====================================================
@@ -30975,11 +30995,15 @@ do
 
         -- ANIMATIONS. Which of yours a track is: "dash" (the game's Dash*
         -- tracks, played at 1.65 - 1.45 sideways), "legs" (Animate's run /
-        -- walk family: run, runKitsune, walkHover, ...) or nil. a = the
+        -- walk family: run, runKitsune, walkHover, ...), "air" (an air jump by
+        -- its name: Geppo, AirJump, SkyJump, DoubleJump) or nil. a = the
         -- Animation's name, t = the track's.
         function L.animKind(a, t)
             a, t = tostring(a or ""), tostring(t or "")
             if a:lower():find("dash", 1, true) or t:lower():find("dash", 1, true) then return "dash" end
+            local n = (a .. " " .. t):lower()
+            if n:find("geppo", 1, true) or n:find("airjump", 1, true) or n:find("skyjump", 1, true)
+                or n:find("doublejump", 1, true) then return "air" end
             if a:find("^run") or a:find("^walk") then return "legs" end
             return nil
         end
@@ -30992,6 +31016,30 @@ do
             if mine ~= nil and math.abs(cur - mine) < 1e-3 then return nil end   -- ours still stands
             if p <= pace or cur <= 0 then return nil end
             return cur * pace / p
+        end
+
+        -- AIR JUMP (user, 2026-11-27: "2x air jump - its height and animation
+        -- speed, the way the dash has them"). The game's air jump is SEEN:
+        -- Space pressed in the air (press = seconds since), then this frame's
+        -- upward speed vy1 at least 15 over the last frame's vy0. air = no
+        -- floor under you for airFor seconds (the ground jump starts on the
+        -- floor), ours = seconds since a kick of this script's own. A hit's
+        -- knock-up comes with no Space: never taken for a jump.
+        function L.jumpKick(air, airFor, vy0, vy1, press, ours)
+            return air and airFor >= 0.08 and press <= 0.25 and ours > 0.1
+                and vy1 - vy0 >= 15 and vy1 > 10
+        end
+        -- A kick's upward speed -> the one that rises x times as high (the
+        -- height goes with the speed squared).
+        function L.jumpBoost(vy, x)
+            if x <= 1 or vy <= 0 then return vy end
+            return vy * math.sqrt(x)
+        end
+        -- A rise held by a mover (BodyVelocity / LinearVelocity at vy for its
+        -- time) -> its speed for x times the height: the time is the game's.
+        function L.jumpHeld(vy, x)
+            if x <= 1 or vy <= 0 then return vy end
+            return vy * x
         end
 
         -- FLASH STEP'S CUT (2026-10-15). The game's cooldown = 15 s (10 for an
@@ -31051,6 +31099,13 @@ do
             dash  = { note = "-", st = {} },
             anim  = { animator = nil, mine = setmetatable({}, { __mode = "k" }), dashes = 0, probes = 0,
                 note = "-", qAt = nil },
+            -- the air jump: the press, the floor, the last kicks, the game's
+            -- tracks learned (names, one Animation to play for ours)
+            jump  = { pressAt = -1e9, kickAt = -1e9, oursAt = -1e9, airAt = nil, air = false, vy = nil,
+                root = nil, used = 0, base = nil, games = 0, extras = 0, probes = 0, quiet = 0,
+                names = {}, anim = nil, track = nil, trackFor = nil,
+                recent = setmetatable({}, { __mode = "k" }), sped = setmetatable({}, { __mode = "k" }),
+                movers = setmetatable({}, { __mode = "k" }), pruneAt = 0 },
             soru  = { base = nil, mine = nil },
             cd    = { set = setmetatable({}, { __mode = "k" }), presses = 0, moves = 0, busy = false },
             faceUntil = 0, faced = 0, held = {}, lastAttack = -1e9,
@@ -31380,6 +31435,7 @@ do
         -- ---------- DASH ----------
         local D = S.dash
         local AN = S.anim
+        local J = S.jump
         local function dashRestore()
             local char, st = player.Character, D.st
             if char and st.mine ~= nil and char:GetAttribute("DashLength") == st.mine then
@@ -31437,6 +31493,7 @@ do
                 if not S.on then return end
                 local a = track.Animation
                 local kind = L.animKind(a and a.Name, track.Name)
+                if J.played then pcall(J.played, track, kind) end
                 -- what starts right after Q, in the console (the first 3 dashes)
                 if os.clock() - (AN.qAt or -1e9) < 0.3 and AN.probes < 3 then
                     AN.probes += 1
@@ -31474,6 +31531,161 @@ do
             end
             AN.note = (n > 0) and string.format("held at a %d run  ·  you %d", LEGS_PACE, math.floor(p))
                 or string.format("the game's own (under %d)", LEGS_PACE)
+        end
+
+        -- ---------- AIR JUMP (user, 2026-11-27: "2x air jump - height and
+        -- animation speed, the way the dash has them; extend my air jumps") ----------
+        -- The game's own air jump is seen, never guessed: Space in the air,
+        -- then an upward kick (L.jumpKick). The kick is raised so the jump
+        -- rises PvpJumpX as high; a rise the game holds with a mover (a
+        -- BodyVelocity / LinearVelocity put on you right after the press)
+        -- gets that mover's upward speed x PvpJumpX instead. The tracks that
+        -- started with it are sped PvpJumpAnim x and learned by name (every
+        -- later play of them sped too; one kept to play for yours). Its jumps
+        -- spent - Space in the air and no kick within 0.15 s - up to
+        -- PvpJumpExtra of yours before you land: the same kick, its own
+        -- animation. None of the game's values is written. The first 3 of
+        -- each are told in the console.
+        function J.speed(track)
+            local x = tonumber(CFG.PvpJumpAnim) or 1
+            if x <= 1 then return end
+            local now = os.clock()
+            if now - (J.sped[track] or -1e9) < 0.3 then return end   -- this play is sped already
+            J.sped[track] = now
+            task.defer(function()
+                pcall(function() track:AdjustSpeed(track.Speed * x) end)
+            end)
+        end
+        -- A track that started with the game's air jump: learned, sped. Not
+        -- the legs, a dash, or Animate's fall / idle / swim / climb.
+        function J.learn(track)
+            local a = track.Animation
+            if not a then return nil end
+            local kind = L.animKind(a.Name, track.Name)
+            local low = string.lower(a.Name)
+            if kind == "legs" or kind == "dash" or low:find("fall", 1, true) or low:find("idle", 1, true)
+                or low:find("swim", 1, true) or low:find("climb", 1, true) then return nil end
+            J.names[a.Name] = true
+            if not J.anim or kind == "air" then J.anim = a end
+            J.speed(track)
+            return a.Name
+        end
+        -- every track you play (the animation hook): an air jump's is sped
+        function J.played(track, kind)
+            if not CFG.PvpJump then return end
+            local now = os.clock()
+            J.recent[track] = now
+            local a = track.Animation
+            if J.air and (kind == "air" or (a and J.names[a.Name])) then J.speed(track) return end
+            if now - J.kickAt <= 0.25 then J.learn(track) end
+        end
+        -- a mover put on you right after Space in the air, rising: x as high
+        function J.mover(m)
+            if not (S.on and CFG.PvpJump) or J.movers[m] then return end
+            if os.clock() - J.pressAt > 0.25 or not J.air then return end
+            task.defer(function()
+                pcall(function()
+                    local field = (m:IsA("BodyVelocity") and "Velocity") or (m:IsA("LinearVelocity") and "VectorVelocity")
+                    if not field then return end
+                    local v = m[field]
+                    if v.Y <= 0 or v.Y < math.sqrt(v.X * v.X + v.Z * v.Z) then return end
+                    J.movers[m] = true
+                    local up = L.jumpHeld(v.Y, tonumber(CFG.PvpJumpX) or 1)
+                    m[field] = Vector3.new(v.X, up, v.Z)
+                    J.kickAt = os.clock()
+                    if J.probes < 3 then
+                        J.probes += 1
+                        print(string.format("[BFF] air jump: the game's %s %.0f up -> %.0f (x%.1f high)",
+                            m.ClassName, v.Y, up, CFG.PvpJumpX))
+                    end
+                end)
+            end)
+        end
+        -- every frame: the floor, the kick
+        function J.tick(now)
+            local char, root, hum = parts()
+            if not root or not hum then return end
+            if J.root ~= root then
+                J.root, J.used, J.vy, J.airAt, J.track, J.trackFor = root, 0, nil, nil, nil, nil
+                hold(char.DescendantAdded:Connect(function(d)
+                    if d:IsA("BodyVelocity") or d:IsA("LinearVelocity") then J.mover(d) end
+                end))
+            end
+            local air = hum.FloorMaterial == Enum.Material.Air
+            if air then J.airAt = J.airAt or now else J.airAt, J.used = nil, 0 end
+            J.air = air
+            local vy = root.AssemblyLinearVelocity.Y
+            local vy0 = J.vy or vy
+            J.vy = vy
+            if now >= J.pruneAt then
+                J.pruneAt = now + 1
+                for tr, t in pairs(J.recent) do
+                    if now - t > 1 then J.recent[tr] = nil end
+                end
+            end
+            if not CFG.PvpJump then return end
+            if not L.jumpKick(air, J.airAt and (now - J.airAt) or 0, vy0, vy, now - J.pressAt, now - J.oursAt) then return end
+            if now - J.kickAt < 0.2 then return end      -- the same jump (a held rise, seen over frames)
+            J.kickAt, J.games, J.base = now, J.games + 1, vy
+            local want = L.jumpBoost(vy, tonumber(CFG.PvpJumpX) or 1)
+            if want ~= vy then
+                local v = root.AssemblyLinearVelocity
+                root.AssemblyLinearVelocity = Vector3.new(v.X, want, v.Z)
+                J.vy = want
+            end
+            local names = {}
+            for tr, t in pairs(J.recent) do
+                if now - t <= 0.25 then
+                    local n = J.learn(tr)
+                    if n then table.insert(names, n) end
+                end
+            end
+            if J.probes < 3 then
+                J.probes += 1
+                print(string.format("[BFF] air jump: the game's kick %.0f -> %.0f up (x%.1f high)  ·  tracks: %s",
+                    vy, want, CFG.PvpJumpX, #names > 0 and table.concat(names, ", ") or "none yet"))
+            end
+        end
+        -- Space (JumpRequest): in the air and unanswered -> one of yours
+        function J.pressed()
+            local now = os.clock()
+            if now - J.pressAt < 0.15 then return end    -- one press, not its repeats
+            J.pressAt = now
+            if not (CFG.PvpJump and J.air and J.airAt and now - J.airAt >= 0.08) then return end
+            task.delay(0.15, function()
+                if not S.on or J.pressAt ~= now or J.kickAt >= now then return end   -- the game answered
+                local _, root, hum = parts()
+                if not root or not hum or hum.FloorMaterial ~= Enum.Material.Air then return end
+                local extra = math.floor(tonumber(CFG.PvpJumpExtra) or 0)
+                if J.used >= extra then
+                    if J.quiet < 3 then
+                        J.quiet += 1
+                        print("[BFF] air jump: Space in the air, no rise from the game (its jumps spent?)"
+                            .. (extra > 0 and string.format(" - your %d extra used too", extra) or " - Extra air jumps is 0"))
+                    end
+                    return
+                end
+                J.used += 1
+                J.extras += 1
+                J.oursAt = os.clock()
+                local up = L.jumpBoost(J.base or math.max(hum.JumpPower, 50), tonumber(CFG.PvpJumpX) or 1)
+                local v = root.AssemblyLinearVelocity
+                root.AssemblyLinearVelocity = Vector3.new(v.X, up, v.Z)
+                J.vy = up
+                -- its animation: the game's own, learned from its jumps
+                local animator = hum:FindFirstChildOfClass("Animator")
+                if J.anim and animator then
+                    if J.trackFor ~= animator then
+                        J.track, J.trackFor = animator:LoadAnimation(J.anim), animator
+                    end
+                    J.sped[J.track] = os.clock()
+                    J.track:Play(0.05, 1, math.max(tonumber(CFG.PvpJumpAnim) or 1, 1))
+                end
+                if J.extras <= 3 then
+                    print(string.format("[BFF] air jump: one of yours (%d of %d) - %.0f up%s", J.used, extra, up,
+                        J.anim and "" or " - no game animation learned yet"))
+                end
+            end)
         end
 
         -- ---------- COOLDOWNS (user, 2026-10-15: chased down over 300-400 m -
@@ -32222,6 +32434,7 @@ do
                     pcall(markTick)
                     pcall(farTick)
                     pcall(animTick)
+                    pcall(J.tick, now)
                     -- The game sets the view's radius to 0 when Ken ends; it
                     -- is put back before its next refresh can empty the view.
                     local om = V.om
@@ -32270,6 +32483,9 @@ do
                         AN.qAt = os.clock()
                     end
                 end))
+                hold(UIS.JumpRequest:Connect(function()
+                    if S.on then pcall(J.pressed) end
+                end))
                 hold(UIS.InputEnded:Connect(function(i)
                     if i.UserInputType == Enum.UserInputType.MouseButton1 then S.held.M1 = nil
                     elseif ATTACK_KEYS[i.KeyCode] then S.held[ATTACK_KEYS[i.KeyCode]] = nil end
@@ -32292,6 +32508,7 @@ do
                 pcall(farRestore)
                 pcall(dashRestore)
                 AN.animator = nil                 -- its hook went with S.conns
+                J.root, J.track, J.trackFor = nil, nil, nil   -- its mover hook too
                 table.clear(S.tune.tries)
                 pcall(S.tuneSave)
                 pcall(soruRestore)

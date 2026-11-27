@@ -418,6 +418,22 @@ do
     check("x5: five times", near(s0 + L.dashWant({}, 10, 5, s0), 5 * (s0 + 10)))
 end
 
+-- ===== air jump (2026-11-27) =====
+check("air jump: Space in the air, then a kick = the game's air jump",
+    L.jumpKick(true, 0.3, -20, 40, 0.05, 9) == true)
+check("air jump: the ground jump (no time in the air yet) is not one",
+    L.jumpKick(true, 0, 0, 50, 0.02, 9) == false and L.jumpKick(false, 0, 0, 50, 0.02, 9) == false)
+check("air jump: a knock-up with no Space is not one", L.jumpKick(true, 0.5, -20, 40, 3, 9) == false)
+check("air jump: a kick of our own is not taken for the game's", L.jumpKick(true, 0.5, -20, 40, 0.05, 0.02) == false)
+check("air jump: a small change of speed is not one", L.jumpKick(true, 0.5, -20, -8, 0.05, 9) == false)
+check("air jump: x2 kick rises twice as high (speed x sqrt 2)", near(L.jumpBoost(50, 2) ^ 2, 2 * 50 ^ 2))
+check("air jump: x1 / a falling speed -> left", L.jumpBoost(50, 1) == 50 and L.jumpBoost(-5, 2) == -5)
+check("air jump: a held rise x2 -> its speed x2 (same time)", L.jumpHeld(40, 2) == 80 and L.jumpHeld(40, 1) == 40)
+check("anim: Geppo / AirJump / SkyJump = air",
+    L.animKind("Geppo", "") == "air" and L.animKind("AirJump", "") == "air" and L.animKind(nil, "SkyJump2") == "air"
+    and L.animKind("DoubleJump", "") == "air")
+check("anim: Animate's jump / fall are not counted as air", L.animKind("jump", "") == nil and L.animKind("fall", "") == nil)
+
 -- ===== animations (2026-10-23) =====
 check("anim: DashForward = dash", L.animKind("DashForward", "DashForward") == "dash")
 check("anim: the track's name alone = dash", L.animKind(nil, "dashLeft") == "dash")
