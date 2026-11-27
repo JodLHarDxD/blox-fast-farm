@@ -11,8 +11,13 @@ then back. The way volcano starts by itself when I get the prehistoric."
   Unchanged — including its own hop rules: Circuit never hops; a hunt picked
   as primary (Fruits, Elite, …) still hops when its target is not here.
 - **Secondaries**: Fruits, Factory raid, Elite pirates, Prehistoric + Volcano.
-  Each on / off, in the user's own order. A secondary **never hops**: it acts
-  only when its event is up on this server, then hands back.
+  Each on / off. A secondary **never hops**: it acts only when its event is
+  up on this server, then hands back.
+- **Order: fixed, not a setting** (user, 2026-11-27: "very low chance two
+  appear at once - I don't care about the order"): fruit, factory,
+  prehistoric, elite. Elite last: an elite is alive most of the time, so with
+  it on it would hold the character over the primary - the user keeps it off
+  mostly; when on, every other secondary still goes first.
 - A mode is never both: the primary's own kind is skipped in the secondary
   list (Fruits primary + Fruits secondary = Fruits primary).
 
@@ -21,7 +26,7 @@ then back. The way volcano starts by itself when I get the prehistoric."
 In `step()` (MAIN LOOP), after the Leviathan and before the primary:
 
 ```
-for id in CFG.SideOrder:
+for id in SIDE_ORDER:            -- fruit, factory, prehistoric, elite
     if CFG.Side[id] and id ~= primaryKind() and SIDE[id].ready():
         P.sideNow = id
         SIDE[id].step(myEpoch)      -- one step, no hop
@@ -42,13 +47,8 @@ P.sideNow = nil
 The pure choice is one function, tested offline:
 `sideNext(order, on, ready, primary) -> id | nil`.
 
-## Cutting in
-
-Each step re-checks, so a higher secondary takes the next turn on its own.
-Long blocking actions — `fight()`, a flight, a grab — get a `breakIf` that is
-true when a secondary **higher in the order** than the one running is ready.
-Example: order Fruit, Factory — a fruit mid-raid is grabbed, then back to the
-Core.
+No cutting in: a running secondary finishes its step; the next step picks
+again. (Two events at once is rare - user.)
 
 ## Hops
 
@@ -79,15 +79,17 @@ settings stay as they are.
 
 ```lua
 Side      = { fruit = false, factory = false, elite = false, prehistoric = false },
-SideOrder = { "fruit", "factory", "elite", "prehistoric" },
 ```
+
+The order is a constant in the script (`SIDE_ORDER`), not a setting.
 
 Saved with the rest; carried over a hop.
 
 ## Panel
 
-Modes page, a section **ALONGSIDE · in your order** (replaces the Volcano-only
-"alongside any mode"): four rows — name, one line, On / Off, ↑ ↓. A row whose
+Modes page, a section **ALONGSIDE** (replaces the Volcano-only
+"alongside any mode"): four rows in the fixed order — name, one line,
+On / Off. A row whose
 pack is locked on this key shows locked. Home's status line names a running
 secondary: "Fruit (secondary) — then back to Circuit farm".
 
@@ -98,16 +100,17 @@ elite = raid, prehistoric = prehistoric (`PACK_OF`).
 
 ## Tests
 
-- `sideNext`: order respected, off skipped, primary's kind skipped, nothing
-  ready = nil, a higher one wins.
-- `breakIf`: true only for a higher ready one.
-- Panel: the section's rows, the arrows reorder `SideOrder`, locked rows.
+- `sideNext`: fixed order respected, off skipped, primary's kind skipped,
+  nothing ready = nil.
+- Panel: the section's four rows switch `Side.*`, locked rows.
 - Load: `Volcano = true` → `Side.prehistoric = true`.
 - In game (user): circuit + fruit secondary → a spawned fruit is stored, the
   circuit's quest kept; factory secondary → the console's core line, the Core
   broken, back to the circuit.
 
 ## Not in this version
+
+- Reordering secondaries, and one cutting into another (user: not needed).
 
 Sea events, Mirage, berries, swords, Halloween as secondaries; secondaries
 hopping to find their event.
