@@ -330,3 +330,9 @@ function P.pvpSet(on)
     CFG.Pvp = on and true or false
     if on and P.running then P.stop() end
 end
+function P.factorySet(on)
+    call("factorySet " .. tostring(on))
+    CFG.Factory = on and true or false
+    if on and P.running then P.stop() end
+end
+P.factory = { on = false, note = "off" }

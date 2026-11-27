@@ -684,6 +684,13 @@ local CFG = {
     -- the GAME'S OWN Observation view on (yours is V2: the clean one), your
     -- screen clean, and aims what you fire. On = the farm stops.
     Pvp                = false,
+    -- FACTORY (user, 2026-11-27: the factory raid, Second Sea - "stay in one
+    -- place, swing faster; where I start it, it keeps swinging"). Its own
+    -- mode, over yours like PvP: never moves you; your M1 on every enemy
+    -- within FactoryReach studs (the Core first), every FactoryEvery s.
+    Factory            = false,
+    FactoryReach       = 30,
+    FactoryEvery       = 0.06,
     PvpVision          = true,   -- the game's Ken view is never turned off
     PvpClean           = true,   -- other players' screen effects off (Ghoul / Angel V4, Dark)
     -- (user, 2026-10-23: the Pale Scarf gives "10x vision"; in PvP see that
@@ -783,6 +790,7 @@ PACK_OF = {
     dealer = "sea", mchest = "sea", gear = "sea",          -- the Mirage jobs (CFG.HuntKind)
     prehistoric = "prehistoric", volcano = "prehistoric",
     pvp = "pvp",
+    factory = "raid",                                     -- the factory raid: stay and swing
     fruit = "fruits",                                     -- sold later (R3); owner + friend flag today
 }
 OWNER_ONLY = { berry = true, recipe = true, flower = true, ember = true, halloween = true }
@@ -5425,6 +5433,7 @@ do
         end
         return true
     end
+    P.m1Remote = m1Remote          -- FACTORY swings with it, at what is in reach of you
 
     local function m1Click(tool, list)
         local rem = tool and tool:FindFirstChild("LeftClickRemote")
@@ -6551,6 +6560,136 @@ local function keepHaki()
     say("observation off - pressing E")
     P.kenNote = "OFF - pressed E, checking"
     if on ~= nil then kenVerifyAt = now + 2.5 end
+end
+
+-- =========================================================
+-- FACTORY: STAY AND SWING (user, 2026-11-27)
+-- =========================================================
+-- "The factory raid (Second Sea): you climb the factory, stand at its core
+-- and swing. I need a mode: stay in one place, swing faster. Where I start
+-- it, it keeps swinging; I move myself if I need to." So: never a move,
+-- never a flight - your character is yours. Every FactoryEvery s the M1 of
+-- the sword / fighting style in your hand (none in hand: the first sword
+-- you carry, else your fighting style) lands on every enemy within
+-- FactoryReach of you, the Core first (it is one: workspace.Enemies "Core").
+-- The hit is the farm's remote hit, its three shapes in turn - the game's
+-- own sender, the new, the old: the one that takes HP off is kept, one that
+-- takes none for 2 s (4 s once it landed) hands on to the next. Buso kept
+-- on. Like PvP it sits over your mode: the farm stops, off gives it back.
+do
+    local F = { on = false, epoch = 0, note = "off", swings = 0, variant = 1,
+        judgeAt = nil, judgeHp = nil, landed = false }
+    P.factory = F
+    local VARIANTS = { "game", "new", "old" }
+
+    -- every enemy within reach of you: the Core first, then the nearest
+    function F.inReach(r)
+        local out = {}
+        local folder = workspace:FindFirstChild("Enemies")
+        if not folder then return out end
+        local reach = tonumber(CFG.FactoryReach) or 30
+        for _, m in ipairs(folder:GetChildren()) do
+            local hum = m:FindFirstChildOfClass("Humanoid")
+            local root = m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+            if hum and root and hum.Health > 0 then
+                local d = (root.Position - r.Position).Magnitude
+                if d <= reach then table.insert(out, { model = m, hum = hum, root = root, d = d }) end
+            end
+        end
+        table.sort(out, function(a, b)
+            local ca, cb = a.model.Name == "Core", b.model.Name == "Core"
+            if ca ~= cb then return ca end
+            return a.d < b.d
+        end)
+        return out
+    end
+
+    -- the sword / fighting style in your hand, else the first sword you
+    -- carry, else your fighting style
+    function F.weapon()
+        local t = heldTool()
+        local k = t and toolType(t)
+        if k == "Sword" or k == "Melee" then return t end
+        local pick
+        for _, x in ipairs(toolNames()) do
+            local kx = toolType(x)
+            if kx == "Sword" then pick = x break end
+            if kx == "Melee" and not pick then pick = x end
+        end
+        if pick and equip(pick.Name) then return heldTool() end
+        return nil
+    end
+
+    function F.step()
+        local _, r, hum = parts()
+        if not r or not hum or hum.Health <= 0 then F.note = "waiting for your character" return end
+        local list = F.inReach(r)
+        if #list == 0 then
+            F.judgeAt = nil
+            F.note = string.format("nothing within %d studs - stand by the Core", math.floor(tonumber(CFG.FactoryReach) or 30))
+            return
+        end
+        local tool = F.weapon()
+        if not tool then F.note = "no sword or fighting style to swing" return end
+        -- Does the hit in use take HP off? (another player's damage counts
+        -- too - it only keeps a shape a little longer)
+        local now, hp = os.clock(), 0
+        for _, e in ipairs(list) do hp += e.hum.Health end
+        if not F.judgeAt then
+            F.judgeAt, F.judgeHp = now, hp
+        elseif hp < F.judgeHp - 0.01 then
+            if not F.landed then print("[BFF] factory: the " .. VARIANTS[F.variant] .. " hit lands") end
+            F.landed, F.judgeAt, F.judgeHp = true, now, hp
+        elseif hp > F.judgeHp then
+            F.judgeHp = hp                       -- healed, or a new one in reach
+        elseif now - F.judgeAt > (F.landed and 4 or 2) then
+            F.landed = false
+            F.variant = F.variant % #VARIANTS + 1
+            F.judgeAt, F.judgeHp = now, hp
+            print("[BFF] factory: no damage - the " .. VARIANTS[F.variant] .. " hit next")
+        end
+        -- the game's own sender missing here: the next shape at once
+        if P.m1Remote(VARIANTS[F.variant], list) == false then
+            F.variant = F.variant % #VARIANTS + 1
+            F.judgeAt = nil
+        end
+        F.swings += 1
+        F.note = string.format("%s  ·  %d in reach%s  ·  %s hit%s  ·  %d swings", tool.Name, #list,
+            list[1].model.Name == "Core" and " (the Core)" or "", VARIANTS[F.variant],
+            F.landed and ", landing" or "", F.swings)
+    end
+
+    local function loop(my)
+        local hakiAt = 0
+        while F.on and F.epoch == my and _G.BFF == P do
+            pcall(F.step)
+            if os.clock() - hakiAt > 1 then
+                hakiAt = os.clock()
+                pcall(keepHaki)
+            end
+            task.wait(math.max(tonumber(CFG.FactoryEvery) or 0.06, 0.03))
+        end
+    end
+
+    function P.factorySet(on)
+        on = on and true or false
+        CFG.Factory = on
+        if on == F.on then return end
+        F.on = on
+        F.epoch += 1
+        if on then
+            if P.running then P.stop() end
+            if P.pvp and P.pvp.on then pcall(P.pvpSet, false) end
+            F.swings, F.judgeAt, F.landed = 0, nil, false
+            task.spawn(loop, F.epoch)
+            say("Factory on - you stay, it swings; the farm is stopped")
+            print("[BFF] factory: on - swinging at what is within " .. tostring(CFG.FactoryReach) .. " studs")
+        else
+            F.note = "off"
+            say("Factory off")
+            print("[BFF] factory: off")
+        end
+    end
 end
 
 
@@ -10467,6 +10606,7 @@ do
             if CFG.RandomMode then check("random", function() CFG.RandomMode = false end) end
             if CFG.RaidMode then check("raid", function() CFG.RaidMode = false end) end
             if CFG.Pvp then check("pvp", function() CFG.Pvp = false end) end
+            if CFG.Factory then check("factory", function() P.factorySet(false) end) end
             if CFG.LeviFight then check("levi", function() CFG.LeviFight = false end) end
             if CFG.Volcano then check("volcano", function() CFG.Volcano = false end) end
             if CFG.Circuit then check("circuit", function() CFG.Circuit = false end) end
@@ -19027,7 +19167,7 @@ local function buildUI()
         elite = "Elite pirates", fruit = "Fruits", fruitlog = "Fruit history", berry = "Haki berries",
         recipe = "Aura recipe", sword = "Legendary swords", flower = "Fire Flower",
         ember = "Blaze Ember", halloween = "Halloween", sail = "Sea travel", seaevents = "Sea events",
-        prehistoric = "Prehistoric", mirage = "Mirage", levi = "Leviathan", pvp = "PvP",
+        prehistoric = "Prehistoric", mirage = "Mirage", levi = "Leviathan", pvp = "PvP", factory = "Factory",
         volcano = "Volcano event", seafight = "Sea fight",
         attack = "Attack", weapon = "Weapon", magnet = "Magnet", position = "Position",
         safety = "Safety & haki", travel = "Travel & boat", servers = "Servers & team",
@@ -19959,6 +20099,7 @@ local function buildUI()
     end
     local function modeNow()
         if CFG.Pvp then return "pvp" end
+        if CFG.Factory then return "factory" end
         if CFG.LeviFight then return "levi" end
         return modeUnder()
     end
@@ -20000,6 +20141,7 @@ local function buildUI()
             -- too, since 2026-10-12).
             if modeNow() ~= id then return end
             if id == "pvp" then P.pvpSet(false)
+            elseif id == "factory" then P.factorySet(false)
             elseif id == "levi" then leviSet(false)
             elseif id == "raid" then raidSet(false)
             elseif id == "random" then randomSet(false)
@@ -20012,9 +20154,11 @@ local function buildUI()
         -- On: what sits on top goes first; a mode underneath replaces the
         -- circuit (one at a time - its off is no mode, not the circuit).
         if id ~= "pvp" and CFG.Pvp then P.pvpSet(false) end
+        if id ~= "factory" and CFG.Factory then P.factorySet(false) end
         if id ~= "levi" and CFG.LeviFight then leviSet(false) end
-        if id ~= "pvp" and id ~= "levi" then CFG.Circuit = (id == "circuit") end
+        if id ~= "pvp" and id ~= "levi" and id ~= "factory" then CFG.Circuit = (id == "circuit") end
         if id == "pvp" then P.pvpSet(true)
+        elseif id == "factory" then P.factorySet(true)
         elseif id == "levi" then leviSet(true)
         elseif id == "raid" then raidSet(true)
         elseif id == "random" then randomSet(true)
@@ -20198,7 +20342,7 @@ local function buildUI()
                     paint(on and "Turn off" or "Turn on", on and "ghost" or "ivory")
                 elseif on then
                     line.Text = "Your mode"
-                    if id == "pvp" then
+                    if id == "pvp" or id == "factory" then
                         -- Off does not restart anything: the mode under PvP
                         -- is yours again, and Start on Home runs it.
                         local under = modeUnder()
@@ -20222,6 +20366,9 @@ local function buildUI()
                     end
                     if id == "pvp" and now ~= "none" then
                         sub.Text = modeName(now) .. " is your mode now. On stops it while you fight."
+                    end
+                    if id == "factory" then
+                        sub.Text = "Stand where you hit, then On: it swings, you are never moved"
                     end
                     paint("Use this", "ivory")
                 end
@@ -21360,10 +21507,11 @@ local function buildUI()
                 inside = { { "circuit", "Circuit farm", "your targets, by level" },
                     { "random", "Random", "anything near you" } } },
             raid = { words = { "ELITE PIRATES.", "THE SWORD DEALER.", "RAIDS.", "NEXT SERVER." },
-                sub = "3 modes · hunts that come to you · every kill counted",
+                sub = "4 modes · hunts that come to you · every kill counted",
                 inside = { { "raid", "Raid", "the raid's island" },
                     { "elite", "Elite pirates", "Diablo · Deandre · Urban" },
-                    { "sword", "Legendary swords", "Shizu · Saishi · Oroshi" } } },
+                    { "sword", "Legendary swords", "Shizu · Saishi · Oroshi" },
+                    { "factory", "Factory", "stay and swing at the Core" } } },
             sea = { words = { "SEA BEASTS.", "LEVIATHAN.", "MIRAGE.", "FROM YOUR BOAT." },
                 sub = "4 modes · from your boat · every kill counted",
                 inside = { { "sail", "Sea travel", "your boat, you steer" },
@@ -21900,6 +22048,9 @@ local function buildUI()
             if CFG.Pvp then
                 P.pvpSet(false)
                 pcall(P.hopCancel)
+            elseif CFG.Factory then
+                P.factorySet(false)
+                pcall(P.hopCancel)
             elseif P.running then P.stop()
             elseif P.hopPending and P.hopPending() then P.hopCancel()
             else P.start() end
@@ -22402,6 +22553,7 @@ local function buildUI()
             { "Mirage", "onto it · dealer · chests · gear", "mirage" },
             { "Leviathan", "Frozen Dimension, a group", "levi" },
             { "PvP", "aim, Ken, speed - farm stops", "pvp" },
+            { "Factory", "stay and swing - the Core, you stand", "factory" },
             { "Fruits", "on the ground, stored", "fruit" },
         })
         if not any then caption(v, "No mode on this key yet  -  pick a pack below") end
@@ -23728,6 +23880,39 @@ local function buildUI()
                 function() return CFG.RandomRadius end,
                 function(x) CFG.RandomRadius = x end, " studs")
         end, 1)
+    end
+
+    -- =====================================================
+    -- FACTORY (user, 2026-11-27): stay and swing. The mode strip turns it on
+    -- (the farm stops, you are never moved); what it is hitting live; the
+    -- reach and the swing pace in Fine-tune.
+    -- =====================================================
+    do
+        local v = makeView("factory")
+        gap(v, 6)
+        P.kit.pageTop(v, "raid")
+        P.kit.modeStrip(v, "factory")
+        P.kit.truthCard(v, function()
+            local F = P.factory
+            if not (F and F.on) then return "Stand at the Core, then turn it on" end
+            return tostring(F.note)
+        end, function()
+            return string.format("Your M1 on everything within %d studs of you, the Core first. You move yourself; it only swings.",
+                math.floor(tonumber(CFG.FactoryReach) or 30))
+        end, "raid")
+        gap(v, 2)
+        hairline(v)
+        gap(v, 10)
+        caption(v, "The sword or fighting style in your hand swings; none in hand, the first sword you carry.")
+        P.kit.fineTune(v, function(v)
+            readout(v, function() return tostring(P.factory and P.factory.note or "-") end)
+            sliderRow(v, "Reach", 10, 80, 1,
+                function() return CFG.FactoryReach end,
+                function(x) CFG.FactoryReach = x end, " studs")
+            sliderRow(v, "Swing every", 0.03, 0.3, 0.01,
+                function() return CFG.FactoryEvery end,
+                function(x) CFG.FactoryEvery = x end, " s")
+        end, 2)
     end
 
     -- =====================================================
@@ -30093,6 +30278,7 @@ function P.start()
     if P.running then P.stop() end
     -- PvP and the farm both drive your character and the aim: one at a time.
     if P.pvp and P.pvp.on then pcall(P.pvpSet, false) end
+    if CFG.Factory then pcall(P.factorySet, false) end
     for k in pairs(stats) do stats[k] = 0 end
     stats.startedAt = os.clock()
     activeName, countedDead, circuitIdx = nil, {}, 1
@@ -32440,6 +32626,7 @@ do
             if on == S.on then return end
             if on then
                 if P.running then P.stop() end
+                if CFG.Factory then pcall(P.factorySet, false) end
                 S.on = true
                 S.epoch += 1
                 S.faceUntil, S.lastAttack = 0, -1e9
@@ -33698,6 +33885,8 @@ do
     say(resumed and ("elite hunt carried over (" .. tostring(P.elite.carried) .. ")")
         or "loaded - pick targets, then press Start")
     P.panel()
+    -- FACTORY is this server's: a new server starts with it off.
+    CFG.Factory = false
     if resumed then task.defer(P.start)
     elseif CFG.Pvp then CFG.Pvp = false task.defer(P.pvpSet, true) end
 end

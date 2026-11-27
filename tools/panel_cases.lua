@@ -146,15 +146,16 @@ local function called(s)
 end
 
 if RUN == "full" then
-    -- ---------- 41 pages (2026-11-08: Trades; 2026-11-22: six locked covers, Key & packs; R3: the trial recap) ----------
+    -- ---------- 42 pages (2026-11-08: Trades; 2026-11-22: six locked covers, Key & packs; R3: the trial recap;
+    -- 2026-11-27: Factory, stay and swing) ----------
     local EXPECT = { "home", "modes", "circuit", "random", "raid", "elite", "fruit", "fruitlog", "berry",
         "recipe", "sword", "flower", "ember", "halloween", "sail", "seaevents", "prehistoric", "mirage", "levi",
-        "pvp", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
+        "pvp", "factory", "volcano", "seafight", "attack", "weapon", "magnet", "position", "safety", "travel",
         "servers", "stats", "news", "fruitmenu", "trades",
         "cover_farm", "cover_raid", "cover_sea", "cover_prehistoric", "cover_pvp", "cover_fruits", "key", "recap" }
     local n = 0
     for _ in pairs(VIEWS) do n += 1 end
-    check(n == #EXPECT, "41 pages, got " .. n)
+    check(n == #EXPECT, "42 pages, got " .. n)
     for _, name in ipairs(EXPECT) do check(VIEWS[name] ~= nil, "page " .. name .. " exists") end
     check(current() == "home", "Home on screen at the start, got " .. current())
 
@@ -661,6 +662,7 @@ local NEW_OK = { MirageJob = true,
     PvpFar = true, PvpFarTo = true,           -- 2026-10-23: see far, past the Pale Scarf
     PvpDashAnim = true, PvpLegs = true,       -- 2026-10-23: the dash animation sped, legs at a normal pace
     PvpJump = true, PvpJumpX = true, PvpJumpAnim = true, PvpJumpExtra = true,  -- 2026-11-27: the air jump boosted
+    Factory = true, FactoryReach = true, FactoryEvery = true,  -- 2026-11-27: the factory raid, stay and swing
     PvpHopBusy = true,                        -- 2026-10-23: PvP hops go to the busiest servers
     PvpPingMax = true,                        -- 2026-10-24: ...in regions fast for you
     PvpLeadAuto = true,                       -- 2026-10-24: the lead learned per move
@@ -714,7 +716,7 @@ end
 -- ... and from ONE page. The modes are the exception: each mode page's switch
 -- turns the others off (that is the one-at-a-time rule), the bone pair keeps
 -- min <= max.
-local MANY = { Hunt = true, HuntKind = true, RaidMode = true, RandomMode = true, Pvp = true,
+local MANY = { Hunt = true, HuntKind = true, RaidMode = true, RandomMode = true, Pvp = true, Factory = true,
     LeviFight = true, MirageJob = true, BoneMin = true, BoneMax = true, Circuit = true,
     -- 2026-11-22: a weapon's moves are lit on its Attack card AND on its own page.
     ["Weapons.*.M1"] = true, ["Weapons.*.Z"] = true, ["Weapons.*.X"] = true, ["Weapons.*.C"] = true,
