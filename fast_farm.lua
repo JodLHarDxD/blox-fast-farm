@@ -770,7 +770,7 @@ local CFG = {
 
 -- THE BUILD (user, 2026-10-07: "did you really push it?"): printed at load,
 -- on the panel's title, and in the hop carry - bumped with every change.
-local P = { running = false, config = CFG, handsOff = false, build = "2026-11-27.1" }
+local P = { running = false, config = CFG, handsOff = false, build = "2026-11-27.2" }
 _G.BFF = P
 -- PACKS (2026-11-22): what a key opens. The gate sets _G.BFF_ENT (feature ->
 -- expiry, 0 = for ever) and _G.BFF_KIND before this runs. No key (the raw
