@@ -1142,8 +1142,12 @@ end
 -- NEWS STRIP (R3 Task S, pure: tools/livecard_test.py). The board shows the
 -- strip on Home only, and only while something is up: the first headline
 -- with tone "up" -> { key, text, item } ("MIRAGE ISLAND IS UP"); nothing up
--- -> nil, and there is no strip at all.
+-- -> nil, and there is no strip at all. .line (user, 2026-11-27: "rolling
+-- like TV news, so I can see what is next") = every thing up, in order,
+-- NEWS_SEP between: the strip's crawl.
+NEWS_SEP = "   •   "
 function newsStripOf(items)
+    local first, all = nil, {}
     for _, it in ipairs(items or {}) do
         if type(it) == "table" and it.tone == "up" and type(it.title) == "string" then
             local boss = type(it.key) == "string" and string.match(it.key, "^boss:(.+)$")
@@ -1156,10 +1160,12 @@ function newsStripOf(items)
                     t = t .. ": " .. string.upper(it.body)
                 end
             end
-            return { key = it.key, text = t, item = it }
+            table.insert(all, t)
+            first = first or { key = it.key, text = t, item = it }
         end
     end
-    return nil
+    if first then first.line = table.concat(all, NEWS_SEP) end
+    return first
 end
 -- BOARD PX (R3 Task S). Roblox draws Montserrat at TextSize N with an em of
 -- N / 1.21 (its line box: ascent + descent = 1.219 em); the boards' CSS px is
@@ -18716,12 +18722,25 @@ local function buildUI()
             BackgroundTransparency = 1, Font = LOOK.black, TextSize = LOOK.size.strip,
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.stop, Text = "BREAKING", Parent = strip,
         })
-        local caption = mk("TextLabel", {
+        -- THE CRAWL (user, 2026-11-27: "rolling like TV news, so I can see
+        -- what is next"): the caption is a window after BREAKING; in it two
+        -- copies of the line (every thing up, NEWS_SEP between), one after
+        -- the other, moving left - it loops with no gap. New news starts it
+        -- over from the right.
+        local caption = mk("Frame", {
             Size = UDim2.fromOffset(200, H), Position = UDim2.fromOffset(84, 0),
-            BackgroundTransparency = 1, Font = LOOK.bold, TextSize = LOOK.size.strip,
-            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            TextColor3 = C.text, Text = "", Parent = strip,
+            BackgroundTransparency = 1, ClipsDescendants = true, Parent = strip,
         })
+        local function crawlLine()
+            return mk("TextLabel", {
+                Size = UDim2.fromOffset(0, H), AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1, Font = LOOK.bold, TextSize = LOOK.size.strip,
+                TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = caption,
+            })
+        end
+        local lineA, lineB = crawlLine(), crawlLine()
+        local CRAWL = 42                -- px a second (the old crawl's pace)
+        local crawlX = 0
         -- The pack chip: 9 px ExtraBold, 1 px outline, radius 5, a 9 px lock.
         local packChip = mk("Frame", {
             Size = UDim2.fromOffset(0, 18), AutomaticSize = Enum.AutomaticSize.X,
@@ -18743,13 +18762,6 @@ local function buildUI()
             TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.text, Text = "", Parent = packChip,
         })
         local packNow, shownKey = nil, nil
-        -- Shrink first (down to min); what still does not fit truncates.
-        local function fitText(lab, room, size, min)
-            lab.TextSize = size
-            while lab.TextBounds.X > room and lab.TextSize > min do
-                lab.TextSize = lab.TextSize - 1
-            end
-        end
 
         local myGui = gui
         N.shown = myGui                 -- Cake Prince is asked only while this is on screen
@@ -18767,7 +18779,6 @@ local function buildUI()
                 shownKey = nil
                 return
             end
-            caption.Text = st.text
             -- the pack chip: a pack this key does not hold runs it
             local pk = P.newsPack and P.newsPack(st.item) or nil
             if pk ~= packNow then
@@ -18793,9 +18804,11 @@ local function buildUI()
             local room = W - x0 - 8 - (pk and (packChip.AbsoluteSize.X + 8) or 0)
             caption.Position = UDim2.fromOffset(x0, 0)
             caption.Size = UDim2.fromOffset(math.max(20, room), H)
-            if shownKey ~= st.text then
-                shownKey = st.text
-                fitText(caption, room, LOOK.size.strip, LOOK.size.strip - 3)
+            local line = st.line or st.text
+            if shownKey ~= line then
+                shownKey = line
+                lineA.Text, lineB.Text = line .. NEWS_SEP, line .. NEWS_SEP
+                crawlX = math.max(20, room)           -- new news: in from the right
             end
         end
         P.newsStripNow = function() pcall(look) end
@@ -18804,6 +18817,20 @@ local function buildUI()
                 pcall(look)
                 task.wait(0.5)
             end
+        end)
+        local crawlConn
+        crawlConn = RunService.RenderStepped:Connect(function(dt)
+            if not (myGui and myGui.Parent) then
+                crawlConn:Disconnect()
+                return
+            end
+            if not strip.Visible then return end
+            local w = lineA.TextBounds.X
+            if w <= 0 then return end
+            crawlX -= CRAWL * dt
+            if crawlX < -w then crawlX += w end
+            lineA.Position = UDim2.fromOffset(math.floor(crawlX), 0)
+            lineB.Position = UDim2.fromOffset(math.floor(crawlX + w), 0)
         end)
     end
 

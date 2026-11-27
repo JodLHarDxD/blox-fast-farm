@@ -126,6 +126,15 @@ st = newsStripOf({ { key = "boss:Diablo", tone = "up", title = "ELITE UP", body 
 check("strip: a boss by name", st and st.text == "DIABLO IS UP", st and st.text)
 st = newsStripOf({ { key = "fruit", tone = "up", title = "FRUIT ON THE MAP", body = "Dragon · Ice" } })
 check("strip: a fruit with its names", st and st.text == "FRUIT ON THE MAP: DRAGON · ICE", st and st.text)
+-- the crawl (user, 2026-11-27: "rolling like TV news - so I can see what is next"):
+-- every thing up, in order, on one line; the first stays the strip's own
+st = newsStripOf({ { key = "mirage", tone = "up", title = "MIRAGE ISLAND UP" },
+    { key = "moon", tone = "full", title = "FULL MOON" },
+    { key = "boss:Diablo", tone = "up", title = "ELITE UP" } })
+check("strip: the crawl carries every thing up, in order", st and st.key == "mirage"
+    and st.line == "MIRAGE ISLAND IS UP" .. NEWS_SEP .. "DIABLO IS UP", st and st.line)
+st = newsStripOf({ { key = "castle", tone = "up", title = "PIRATES IN THE CASTLE" } })
+check("strip: one thing up = its line alone", st and st.line == "PIRATES IN THE CASTLE", st and st.line)
 
 -- board px -> TextSize (Montserrat's em is TextSize / 1.21 in Roblox)
 check("px: 15 -> 18", lookPx(15) == 18, tostring(lookPx(15)))
