@@ -5083,16 +5083,11 @@ do
             -- The fight's own weapon (the volcano's golems: CFG.GolemWeapon),
             -- then your pick; whichever you carry first.
             local own = pileCur and pileCur.m1Weapon and pileCur.m1Weapon() or nil
-            -- FIGHT WITH: the mode's one weapon (the fight's own first, as above);
-            -- no M1 pick or mastery pick below can change it.
+            -- FIGHT WITH: the mode's one weapon. THE WHEEL IS SUPREME (user,
+            -- 2026-11-28): no fight's own weapon (the golems'), M1 pick or
+            -- mastery pick can change it.
             local fw = (P :: any).weaponsFor()
-            if fw ~= "MIX" then
-                if type(own) == "string" and own ~= "" then
-                    local ot = findTool(own)
-                    if ot then return { name = own, cfg = wcfg(own), tool = ot } end
-                end
-                return fw[1]
-            end
+            if fw ~= "MIX" then return fw[1] end
             -- The mastery weapon before your pick: another weapon's swing
             -- would share its kills.
             for _, want in ipairs({ own or "", CFG.MasteryWeapon or "", CFG.M1Weapon or "" }) do
@@ -5873,8 +5868,11 @@ local function attackTick()
         local mode = mn and mn() or nil
         mastery = mode ~= nil and CFG.FightGoal[mode] == true
     end
+    -- THE WHEEL IS SUPREME (user, 2026-11-28: the Soul Reaper fight swung the
+    -- fighting style with a sword on the wheel): its weapon is never handed on.
     if m1u and not race and not mastery and not m1Lands(m1u)
-        and not (pileCur and pileCur.m1Weapon and pileCur.m1Weapon()) then
+        and not (pileCur and pileCur.m1Weapon and pileCur.m1Weapon())
+        and not (P :: any).fightWeapon(nil, true) then
         local stand = nil
         for _, u in ipairs(used) do
             if u ~= m1u and u.cfg.M1 and m1Lands(u) then
@@ -6636,6 +6634,12 @@ do
     -- the sword / fighting style in your hand, else the first sword you
     -- carry, else your fighting style
     function F.weapon()
+        -- THE WHEEL IS SUPREME: Factory's own pick on the Attack page first.
+        local fw = P.fightWeapon and P.fightWeapon("factory", true)
+        if fw then
+            if equip(fw) then return heldTool() end
+            return nil
+        end
         local t = heldTool()
         local k = t and toolType(t)
         if k == "Sword" or k == "Melee" then return t end
@@ -28035,10 +28039,12 @@ local function buildUI()
         -- Sea events if the key owns it - three at most, in the Modes order.
         -- A mode that fights with no weapon (PvP aims by itself, Sea travel
         -- only sails) has no tab.
-        local FIGHTABLE = { circuit = true, random = true, raid = true, elite = true, fruit = true,
+        -- boss + factory (user, 2026-11-28): the Soul Reaper fight had no tab -
+        -- the wheel changed another mode's pick.
+        local FIGHTABLE = { boss = true, factory = true, circuit = true, random = true, raid = true, elite = true, fruit = true,
             berry = true, recipe = true, sword = true, flower = true, ember = true, halloween = true,
             seaevents = true, prehistoric = true, mirage = true, levi = true }
-        local TAB_ORDER = { "circuit", "random", "raid", "elite", "fruit", "berry", "recipe", "sword",
+        local TAB_ORDER = { "boss", "factory", "circuit", "random", "raid", "elite", "fruit", "berry", "recipe", "sword",
             "flower", "ember", "halloween", "seaevents", "prehistoric", "mirage", "levi" }
         local ctxSel, ctxFrom = nil, nil
         local function ctxList()

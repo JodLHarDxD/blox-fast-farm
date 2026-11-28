@@ -228,6 +228,10 @@ check("another mode's pick does not reach this one", usedWeapons()[1].name == "D
 CFG.FightWith.random = "Soul Cane"
 check("wheel on a weapon not carried: the mix, today's rule again",
     P.m1Of(P.autoWeapons()).name == "Kabucha" and #usedWeapons() == 3)
+CFG.FightWith.random = "Dragon Talon"
+pileCur = { m1Weapon = function() return "Hallow Scythe" end }
+check("the wheel beats a fight's own weapon (the golems'): the wheel is supreme", P.m1Of(P.autoWeapons()).name == "Dragon Talon")
+pileCur = nil
 CFG.FightWith = {}
 check("wheel back to MIX: today's rule again", P.m1Of(P.autoWeapons()).name == "Kabucha")
 CFG.M1Weapon, CFG.MasteryWeapon, CFG.AutoAttack = "", nil, false

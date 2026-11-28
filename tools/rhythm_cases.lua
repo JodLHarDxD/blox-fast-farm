@@ -91,6 +91,22 @@ all = run("...the fighting style lands nothing either: no M1, the skills carry i
     cfg({}, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} }), 2,
     "swap Kitsune | cast Kitsune Z") and all
 m1Plan["Sanguine Art"] = nil
+-- THE WHEEL IS SUPREME (user, 2026-11-28: the Soul Reaper fight swung the fighting
+-- style with a sword on the wheel). Its weapon's M1 landing nothing is never handed on.
+do
+    local realMode, realOf, realUsedW = P.modeNow, P.m1Of, usedWeapons
+    -- what the real usedWeapons returns with Sword on the wheel: it alone, M1 on
+    usedWeapons = function() return { { name = "Sword", cfg = { use = true, M1 = true, hold = {} }, tool = TOOLS.Sword } } end
+    P.m1Of = nil
+    P.modeNow = function() return "boss" end
+    m1Plan.Sword = false
+    local c = cfg({}, { Kitsune = W{ M1 = true }, ["Sanguine Art"] = W{ M1 = true }, Sword = W{} })
+    c.FightWith = { boss = "Sword" }
+    all = run("the wheel on Sword, its M1 landing nothing: the fighting style never takes it", c, 2,
+        "swap Sword") and all
+    m1Plan.Sword = nil
+    P.modeNow, P.m1Of, usedWeapons = realMode, realOf, realUsedW
+end
 all = run("THE MASTERY FARM keeps its weapon: no other weapon's swing shares its kills",
     (function()
         local c = cfg({}, { Kitsune = W{ M1 = true, Z = true }, ["Sanguine Art"] = W{}, Sword = W{} })
